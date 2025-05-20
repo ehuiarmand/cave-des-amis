@@ -1,0 +1,16 @@
+{
+    "Guinness": {
+        "stock": 30,
+        "paiement": true,
+        "par_lot": true,
+        "prix_unitaire": 500,
+        "prix_par_3": 1400
+    },
+    "L'eau": {
+        "stock": 50,
+        "paiement": false,
+        "par_lot": false,
+        "prix_unitaire": 200,
+        "prix_par_3": 0
+    }
+}
