@@ -1389,7 +1389,11 @@ class AppHandler(BaseHTTPRequestHandler):
 
         body = target.read_bytes()
         cache_control = "no-store, no-cache, must-revalidate"
-        if target.suffix.lower() in (".js", ".css", ".svg", ".json"):
+        suffix = target.suffix.lower()
+        if suffix in (".js", ".css"):
+            # Toujours revalider avec le serveur (déploiements + ?v= dans index.html).
+            cache_control = "no-cache"
+        elif suffix in (".svg", ".json"):
             cache_control = "public, max-age=3600"
 
         accept_encoding = self.headers.get("Accept-Encoding", "")
