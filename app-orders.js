@@ -154,8 +154,113 @@ function fmt(value) {
   return new Intl.NumberFormat("fr-FR").format(Math.round(Number(value) || 0));
 }
 
+/** Extrait les chiffres d'une saisie montant (espaces / séparateurs retirés). */
+function digitsOnlyFcfaString(str) {
+  return String(str || "")
+    .replace(/\u202f/g, "")
+    .replace(/\s/g, "")
+    .replace(/\D/g, "");
+}
+
+/**
+ * Applique la séparation des milliers (fr-FR) sur un champ montant.
+ * @param {HTMLInputElement | null} el
+ */
+function formatFcfaThousandsField(el) {
+  if (!el || el.tagName !== "INPUT") return;
+  if (!el.dataset.fcfaAttrs) {
+    el.setAttribute("inputmode", "numeric");
+    el.setAttribute("autocomplete", "off");
+    el.setAttribute("spellcheck", "false");
+    el.dataset.fcfaAttrs = "1";
+  }
+  const raw = el.value;
+  const care = el.selectionStart ?? raw.length;
+  const digitsLeft = digitsOnlyFcfaString(raw.slice(0, care)).length;
+  const all = digitsOnlyFcfaString(raw);
+  if (!all) {
+    el.value = "";
+    return;
+  }
+  let n = Math.round(Number(all));
+  if (!Number.isFinite(n) || n < 0) n = 0;
+  n = Math.min(n, 1e15);
+  const formatted = new Intl.NumberFormat("fr-FR").format(n);
+  el.value = formatted;
+  let newPos = formatted.length;
+  if (digitsLeft <= 0) {
+    newPos = 0;
+  } else {
+    let digitCount = 0;
+    for (let i = 0; i < formatted.length; i++) {
+      if (/\d/.test(formatted[i])) {
+        digitCount++;
+        if (digitCount >= digitsLeft) {
+          newPos = i + 1;
+          break;
+        }
+      }
+    }
+  }
+  requestAnimationFrame(() => {
+    try {
+      el.setSelectionRange(newPos, newPos);
+    } catch (_) {
+      /* ignore */
+    }
+  });
+}
+
+function isFcfaThousandsInput(el) {
+  return el instanceof HTMLInputElement && (el.classList.contains("input-fcfa") || el.id === "pdj-opening-cash");
+}
+
+/** Une seule fois : écoute les champs injectés dynamiquement (évite une vieille JS en cache sans bind). */
+function installFcfaThousandsDelegation() {
+  if (window.__fcfaThousandsDelegation) return;
+  window.__fcfaThousandsDelegation = true;
+  document.body.addEventListener("input", (e) => {
+    const t = e.target;
+    if (isFcfaThousandsInput(t)) formatFcfaThousandsField(t);
+  });
+  document.body.addEventListener("blur", (e) => {
+    const t = e.target;
+    if (isFcfaThousandsInput(t)) formatFcfaThousandsField(t);
+  }, true);
+}
+
 function today() {
   return new Date().toISOString().slice(0, 10);
+}
+
+function pad2(n) {
+  return String(n).padStart(2, "0");
+}
+
+/** yyyy-mm-dd → dd-mm-yyyy (affichage uniquement ; les données restent ISO). */
+function isoDateToDdMmYyyy(iso) {
+  const s = String(iso ?? "").trim().slice(0, 10);
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : (s || "—");
+}
+
+/** Affiche jj-mm-aaaa (Date, chaîne ISO datetime, ou yyyy-mm-dd). */
+function formatDateDdMmYyyy(input) {
+  if (input == null || input === "") return "—";
+  const str = String(input).trim();
+  const dOnly = str.slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dOnly)) return isoDateToDdMmYyyy(dOnly);
+  const d = input instanceof Date ? input : new Date(input);
+  if (Number.isNaN(d.getTime())) return str || "—";
+  return `${pad2(d.getDate())}-${pad2(d.getMonth() + 1)}-${d.getFullYear()}`;
+}
+
+/** jj-mm-aaaa HH:mm (fuseau local). */
+function formatDateTimeDdMmYyyy(input) {
+  if (input == null || input === "") return "—";
+  const d = input instanceof Date ? input : new Date(input);
+  if (Number.isNaN(d.getTime())) return String(input);
+  return `${pad2(d.getDate())}-${pad2(d.getMonth() + 1)}-${d.getFullYear()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
 
 /** Valeur pour input[type=datetime-local] (fuseau local). */
@@ -171,14 +276,14 @@ function formatCreditPaidAt(p) {
     try {
       const d = new Date(raw);
       if (!Number.isNaN(d.getTime())) {
-        return d.toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" });
+        return formatDateTimeDdMmYyyy(d);
       }
     } catch (_) {
       /* ignore */
     }
   }
   const day = String(p?.date || "").trim();
-  return day ? `${day} (heure non renseignée)` : "—";
+  return day ? `${isoDateToDdMmYyyy(day)} (heure non renseignée)` : "—";
 }
 
 /** Versements déjà enregistrés par débiteur (clé majuscules), tri récent → ancien. */
@@ -487,7 +592,7 @@ function renderStaffAuditLog() {
         </tr></thead>
         <tbody>
           ${log.map((row) => `<tr>
-            <td>${escapeHtml(String(row.at || "").replace("T", " ").slice(0, 19))}</td>
+            <td>${escapeHtml(formatDateTimeDdMmYyyy(row.at))}</td>
             <td>${escapeHtml(row.siteNom || row.siteId || "")}</td>
             <td>${escapeHtml(row.actor || "")}</td>
             <td>${escapeHtml(row.role || "")}</td>
@@ -556,7 +661,7 @@ function applyRoleVisibility() {
 
 function renderTopbar() {
   document.getElementById("top-bar-name").textContent = currentSite()?.nom || "Mon Bar";
-  document.getElementById("top-date").textContent = new Date().toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short", year: "numeric" });
+  document.getElementById("top-date").textContent = formatDateDdMmYyyy(new Date());
   document.getElementById("session-user").textContent = sessionUser || "utilisateur";
   document.getElementById("role-badge").textContent = currentRole === "admin" ? "administrateur" : currentRole === "manager" ? "gerant" : (currentRole || "utilisateur");
 }
@@ -976,9 +1081,7 @@ function renderPointDuJour() {
   const caEncaisse = Object.entries(totalsJour).reduce((sum, [method, amount]) => String(method).includes("dit client") ? sum : sum + amount, 0);
   const remisesJour = ventesJour.reduce((sum, v) => sum + (Number(v.remise) || 0), 0);
 
-  document.getElementById("pdj-date").textContent = new Date().toLocaleDateString("fr-FR", {
-    weekday: "long", day: "numeric", month: "long", year: "numeric",
-  });
+  document.getElementById("pdj-date").textContent = formatDateDdMmYyyy(new Date());
   renderCashOpeningPanel();
   document.getElementById("pdj-ca").textContent = `${fmt(caEncaisse)} FCFA`;
   document.getElementById("pdj-creances").textContent = `${fmt(caCreances)} FCFA`;
@@ -1016,7 +1119,7 @@ function renderPointDuJour() {
           <div class="list-side">
             <div>
               <p class="list-item-amount" style="${isCreance(v) ? "color:#ff8e82" : ""}">${fmt(calcNet(v))} FCFA</p>
-              <p class="list-item-date">${v.factureNumber ? escapeHtml(v.factureNumber) : todayStr}</p>
+              <p class="list-item-date">${v.factureNumber ? escapeHtml(v.factureNumber) : escapeHtml(formatDateDdMmYyyy(todayStr))}</p>
             </div>
           </div>
         </article>
@@ -1050,7 +1153,7 @@ async function recordCashOpening() {
     showToast("Indiquez le montant en caisse à l'ouverture (fonds de caisse).");
     return;
   }
-  const amount = Number(raw);
+  const amount = Number(digitsOnlyFcfaString(raw));
   if (Number.isNaN(amount) || amount < 0) {
     showToast("Montant d'ouverture invalide.");
     return;
@@ -1084,7 +1187,7 @@ async function recordCashOpening() {
     if (!book.openedAt) book.openedAt = ts;
   }
   state.dayBooks = [book, ...state.dayBooks.filter((b) => !(b.siteId === siteId && b.date === dateStr))];
-  recordStaffAudit("update", "caisse_ouverture", `Ouverture caisse ${dateStr}`, `${fmt(amount)} FCFA · snapshot stock`);
+  recordStaffAudit("update", "caisse_ouverture", `Ouverture caisse ${formatDateDdMmYyyy(dateStr)}`, `${fmt(amount)} FCFA · snapshot stock`);
   await persistState({ dayBooks: state.dayBooks });
   renderPointDuJour();
   showToast("Ouverture de caisse enregistrée. Le point du jour est disponible.");
@@ -1103,7 +1206,7 @@ function renderCashOpeningPanel() {
         <p class="eyebrow" style="margin-bottom:4px">Caisse ouverte</p>
         <strong>Fonds en caisse : ${fmt(book.openingCashFcfa)} FCFA</strong>
         <p class="muted" style="margin-top:8px;font-size:0.88rem">
-          Enregistré ${escapeHtml(new Date(book.openingRecordedAt || book.openedAt).toLocaleString("fr-FR"))}
+          Enregistré ${escapeHtml(formatDateTimeDdMmYyyy(book.openingRecordedAt || book.openedAt))}
           ${book.openingRecordedBy ? ` · ${escapeHtml(book.openingRecordedBy)}` : ""}
         </p>
       </div>`;
@@ -1120,7 +1223,7 @@ function renderCashOpeningPanel() {
       <div class="pdj-opening-form">
         <div class="form-group">
           <label for="pdj-opening-cash">Montant en caisse à l'ouverture (FCFA)</label>
-          <input id="pdj-opening-cash" type="number" min="0" step="1" placeholder="ex: 50000">
+          <input id="pdj-opening-cash" class="input-fcfa" type="text" inputmode="numeric" placeholder="ex: 50 000" value="">
         </div>
         <button type="button" class="btn btn-primary" id="pdj-opening-submit" style="width:auto;min-height:44px">Valider l'ouverture</button>
       </div>
@@ -1243,7 +1346,7 @@ function renderDailyStockCheck() {
       ${cashBlock}
       <div class="inline-card" style="margin-bottom:12px">
         <span class="muted">Journee cloturee le</span>
-        <strong>${escapeHtml(new Date(closed.createdAt).toLocaleString("fr-FR"))}</strong>
+        <strong>${escapeHtml(formatDateTimeDdMmYyyy(closed.createdAt))}</strong>
       </div>
       <div class="stock-table-wrap"><table class="stock-table">
         <thead><tr>
@@ -1286,7 +1389,7 @@ function renderDailyStockCheck() {
     container.innerHTML = `
       <div class="inline-card" style="margin-bottom:12px">
         <span class="muted">Référence ouverture</span>
-        <strong>${escapeHtml(new Date(dayBook.openedAt).toLocaleString("fr-FR"))}</strong>
+        <strong>${escapeHtml(formatDateTimeDdMmYyyy(dayBook.openedAt))}</strong>
       </div>
       <div class="pdj-closing-cash-panel">
         <strong>Fermeture caisse (espèces)</strong>
@@ -1523,7 +1626,7 @@ function renderSalesHistory() {
         <div class="section-head">
           <div>
             <h3>${escapeHtml(invoice.factureNumber)}</h3>
-            <p class="list-item-sub">${escapeHtml(invoice.client)} · ${escapeHtml(invoice.date)} · ${escapeHtml(invoice.paiement)}</p>
+            <p class="list-item-sub">${escapeHtml(invoice.client)} · ${escapeHtml(formatDateDdMmYyyy(invoice.date))} · ${escapeHtml(invoice.paiement)}</p>
           </div>
           <div class="order-total">${fmt(total)} FCFA</div>
         </div>
@@ -1571,9 +1674,29 @@ function orderTotal(order) {
 }
 
 function orderTime(order) {
-  const raw = String(order?.createdAt || order?.date || "");
-  if (raw.includes("T")) return new Date(raw).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
-  return raw.slice(11, 16) || "--:--";
+  const timeFromDate = (d) => `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  if (order?._isPaid && Array.isArray(order.lignes) && order.lignes.length) {
+    const v = order.lignes[0];
+    const fromVente = String(v?.soldAt || v?.createdAt || "").trim();
+    if (fromVente.includes("T")) {
+      try {
+        const d = new Date(fromVente);
+        if (!Number.isNaN(d.getTime())) return timeFromDate(d);
+      } catch (_) {
+        /* ignore */
+      }
+    }
+  }
+  const raw = String(order?.createdAt || order?.updatedAt || order?.date || "");
+  if (raw.includes("T")) {
+    try {
+      const d = new Date(raw);
+      if (!Number.isNaN(d.getTime())) return timeFromDate(d);
+    } catch (_) {
+      /* ignore */
+    }
+  }
+  return "--:--";
 }
 
 function renderOrdersManagement() {
@@ -1598,9 +1721,12 @@ function renderOrdersManagement() {
         lignes: [],
         status: "Paye",
         _isPaid: true,
+        createdAt: v.soldAt || v.createdAt,
       };
     }
     paidByFacture[key].lignes.push(v);
+    const ts = v.soldAt || v.createdAt;
+    if (ts && !paidByFacture[key].createdAt) paidByFacture[key].createdAt = ts;
   });
   const paidOrders = Object.values(paidByFacture);
 
@@ -1656,7 +1782,7 @@ function renderOrders() {
         <div class="section-head">
           <div>
             <h3>${escapeHtml(order.client || "Client sans nom")}</h3>
-            <p class="list-item-sub">${escapeHtml(order.date)}${order.note ? ` · ${escapeHtml(order.note)}` : ""}</p>
+            <p class="list-item-sub">${escapeHtml(formatDateDdMmYyyy(order.date))}${order.note ? ` · ${escapeHtml(order.note)}` : ""}</p>
           </div>
           <div class="order-total">${fmt(total)} FCFA</div>
         </div>
@@ -1965,7 +2091,7 @@ function renderCharges() {
   document.getElementById("charges-total").textContent = `${fmt(total)} FCFA`;
   const charges = chargesForSite.slice().sort((a, b) => b.date.localeCompare(a.date));
   document.getElementById("charges-list").innerHTML = charges.length
-    ? charges.map((charge) => `<article class="list-item"><div><p class="list-item-title">${escapeHtml(charge.lib)}</p><p class="list-item-sub">${escapeHtml(charge.cat)} · ${escapeHtml(charge.paiement)}</p></div><div class="list-side"><div><p class="list-item-amount" style="color:#ff8e82">${fmt(charge.montant)} FCFA</p><p class="list-item-date">${escapeHtml(charge.date)}</p></div><button class="del-btn" type="button" data-delete-type="charge" data-id="${charge.id}">Suppr.</button></div></article>`).join("")
+    ? charges.map((charge) => `<article class="list-item"><div><p class="list-item-title">${escapeHtml(charge.lib)}</p><p class="list-item-sub">${escapeHtml(charge.cat)} · ${escapeHtml(charge.paiement)}</p></div><div class="list-side"><div><p class="list-item-amount" style="color:#ff8e82">${fmt(charge.montant)} FCFA</p><p class="list-item-date">${escapeHtml(formatDateDdMmYyyy(charge.date))}</p></div><button class="del-btn" type="button" data-delete-type="charge" data-id="${charge.id}">Suppr.</button></div></article>`).join("")
     : emptyState("Aucune charge", "Ajoutez une depense pour suivre les sorties du mois.");
   refreshCreanciersIfVisible();
 }
@@ -2001,7 +2127,7 @@ function renderCreanciers() {
       <article class="list-item">
         <div>
           <p class="list-item-title">${escapeHtml(po.supplier || "Fournisseur")}</p>
-          <p class="list-item-sub">${escapeHtml(po.date || "")} · ${escapeHtml(po.payment || "")}</p>
+          <p class="list-item-sub">${escapeHtml(po.date ? formatDateDdMmYyyy(po.date) : "")} · ${escapeHtml(po.payment || "")}</p>
         </div>
         <div class="list-side">
           <p class="list-item-amount">${fmt(po.total || 0)} FCFA</p>
@@ -2022,7 +2148,7 @@ function renderCreanciers() {
       <article class="list-item">
         <div>
           <p class="list-item-title">${escapeHtml(charge.lib)}</p>
-          <p class="list-item-sub">${escapeHtml(charge.cat)} · ${escapeHtml(charge.date || "")}</p>
+          <p class="list-item-sub">${escapeHtml(charge.cat)} · ${escapeHtml(charge.date ? formatDateDdMmYyyy(charge.date) : "")}</p>
         </div>
         <div class="list-side">
           <p class="list-item-amount" style="color:#ff8e82">${fmt(charge.montant)} FCFA</p>
@@ -3039,7 +3165,7 @@ function renderPurchaseOrders() {
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap">
         <div>
           <p class="list-item-title">${escapeHtml(po.supplier || "Fournisseur")}</p>
-          <p class="list-item-sub">${escapeHtml(po.date || "")} · ${fmt(po.lines?.length || 0)} ligne(s) · ${fmt(po.total || 0)} FCFA · ${escapeHtml(po.payment || "")}</p>
+          <p class="list-item-sub">${escapeHtml(po.date ? formatDateDdMmYyyy(po.date) : "")} · ${fmt(po.lines?.length || 0)} ligne(s) · ${fmt(po.total || 0)} FCFA · ${escapeHtml(po.payment || "")}</p>
           ${po.status === "Reçue" && Array.isArray(po.linesOrderedSnapshot) && po.linesOrderedSnapshot.length ? `<p class="muted" style="font-size:0.78rem;margin:4px 0 0">Reception avec ecart par rapport a la commande initiale.</p>` : ""}
         </div>
         <div class="line-actions" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
@@ -3187,6 +3313,7 @@ async function finalizeOrder(orderId = activeOrderId) {
   const paymentMethod = paymentMix.details.length > 1 ? "Mixte" : paymentMix.details[0].method;
   const site = currentSite();
   const factureNumber = `${site?.prefixeFacture || "FAC"}-${String(state.nextId.invoice++).padStart(4, "0")}`;
+  const encaisseAt = new Date().toISOString();
   const creditIssuedBy = paymentMix.details.some((d) => isCreditClientMethod(d.method))
     ? String(sessionUser || "").trim()
     : "";
@@ -3195,6 +3322,7 @@ async function finalizeOrder(orderId = activeOrderId) {
     siteId: order.siteId || currentSiteId(),
     factureNumber,
     date: line.date || order.date || today(),
+    soldAt: encaisseAt,
     client: order.client,
     table: order.table || order.client,
     article: line.article,
@@ -3501,7 +3629,7 @@ function renderStockMovements() {
   `;
   document.getElementById("stock-movement-list").innerHTML = movements.length
     ? movements.map((item) => `<tr>
-      <td>${escapeHtml(stockMovementDateValue(item))}</td>
+      <td>${escapeHtml(formatDateDdMmYyyy(item.date || item.createdAt))}</td>
       <td>${escapeHtml(item.article)}</td>
       <td>${item.type === "entree" ? "Entree" : "Sortie"}</td>
       <td style="text-align:right">${fmt(item.qty)}</td>
@@ -3626,7 +3754,7 @@ async function closeAccountingDay() {
   recordStaffAudit(
     "update",
     "cloture_jour",
-    `Cloture journee ${todayStr}`,
+    `Cloture journee ${formatDateDdMmYyyy(todayStr)}`,
     `CA encaisse ${fmt(caEncaisse)} · stock conforme · caisse esp. ecart ${fmt(cashEcartEspeces)}`,
   );
   await persistState({ stock: state.stock, stockChecks: state.stockChecks });
@@ -3895,7 +4023,7 @@ function printOrderTicket(orderId = activeOrderId) {
     showToast("Impossible d'ouvrir la fenetre d'impression.");
     return;
   }
-  ticketWindow.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>Ticket ${escapeHtml(order.client)}</title><style>body{font-family:Arial,sans-serif;padding:24px;color:#111}h1,h2,p{margin:0 0 8px}table{width:100%;border-collapse:collapse;margin-top:16px}td,th{padding:8px 0;border-bottom:1px solid #ddd;text-align:left}th:last-child,td:last-child{text-align:right}.total{margin-top:16px;font-size:20px;font-weight:700}.muted{color:#666;font-size:12px}</style></head><body><h1>${escapeHtml(site?.nom || "Maquis")}</h1><p>${escapeHtml(site?.ville || "")} ${escapeHtml(site?.pays || "")}</p><p class="muted">Client: ${escapeHtml(order.client || "Comptoir")} · Date: ${escapeHtml(order.date)}</p><table><thead><tr><th>Article</th><th>Qté</th><th>Montant</th></tr></thead><tbody>${order.lignes.map((line) => `<tr><td>${escapeHtml(line.article)}</td><td>${fmt(line.qty)}</td><td>${fmt(calcNet(line))} FCFA</td></tr>`).join("")}</tbody></table><p class="total">Total: ${fmt(total)} FCFA</p><p class="muted">${escapeHtml(order.note || "")}</p><script>window.onload=function(){window.print();}</script></body></html>`);
+  ticketWindow.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>Ticket ${escapeHtml(order.client)}</title><style>body{font-family:Arial,sans-serif;padding:24px;color:#111}h1,h2,p{margin:0 0 8px}table{width:100%;border-collapse:collapse;margin-top:16px}td,th{padding:8px 0;border-bottom:1px solid #ddd;text-align:left}th:last-child,td:last-child{text-align:right}.total{margin-top:16px;font-size:20px;font-weight:700}.muted{color:#666;font-size:12px}</style></head><body><h1>${escapeHtml(site?.nom || "Maquis")}</h1><p>${escapeHtml(site?.ville || "")} ${escapeHtml(site?.pays || "")}</p><p class="muted">Client: ${escapeHtml(order.client || "Comptoir")} · Date: ${escapeHtml(formatDateDdMmYyyy(order.date))}</p><table><thead><tr><th>Article</th><th>Qté</th><th>Montant</th></tr></thead><tbody>${order.lignes.map((line) => `<tr><td>${escapeHtml(line.article)}</td><td>${fmt(line.qty)}</td><td>${fmt(calcNet(line))} FCFA</td></tr>`).join("")}</tbody></table><p class="total">Total: ${fmt(total)} FCFA</p><p class="muted">${escapeHtml(order.note || "")}</p><script>window.onload=function(){window.print();}</script></body></html>`);
   ticketWindow.document.close();
 }
 
@@ -3924,7 +4052,7 @@ function printInvoice(factureNumber) {
   const creditSection = debiteur
     ? `<p style="color:#c54f41"><span>Débiteur</span><span>${escapeHtml(debiteur)}</span></p>${creditIssuerPrint ? `<p class="meta"><span>Crédit accordé par</span><span>${escapeHtml(creditIssuerPrint)}</span></p>` : ""}`
     : "";
-  ticketWindow.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>Facture ${escapeHtml(factureNumber)}</title><style>body{font-family:Arial,sans-serif;padding:32px;color:#111;background:#fff}header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #222;padding-bottom:16px;margin-bottom:18px}h1,h2,p{margin:0 0 8px}table{width:100%;border-collapse:collapse;margin-top:14px}th,td{padding:10px 8px;border-bottom:1px solid #ddd;text-align:left}th:last-child,td:last-child{text-align:right}.meta{color:#555}.totals{margin-top:18px;display:flex;justify-content:flex-end}.totals-box{min-width:300px;border:1px solid #111;padding:16px}.totals-box p{display:flex;justify-content:space-between;margin-bottom:6px}.grand{font-size:20px;font-weight:700;border-top:1px solid #111;padding-top:8px;margin-top:8px}.footer{margin-top:26px;color:#666;font-size:12px}.pay-label{font-size:12px;color:#555;font-weight:700;text-transform:uppercase;margin-bottom:4px}</style></head><body><header><div><h1>${escapeHtml(site?.nom || "Maquis")}</h1><p>${escapeHtml(site?.ville || "")} - ${escapeHtml(site?.pays || "")}</p><p>Gerant: ${escapeHtml(site?.gerant || "-")}</p></div><div><h2>Facture</h2><p class="meta">Numero: ${escapeHtml(factureNumber)}</p><p class="meta">Date: ${escapeHtml(lignes[0].date)}</p><p class="meta">Client: ${escapeHtml(client)}</p></div></header><table><thead><tr><th>Article</th><th>Qte</th><th>Prix unit.</th><th>Remise</th><th>Total</th></tr></thead><tbody>${lignes.map((line) => `<tr><td>${escapeHtml(line.article)}</td><td>${fmt(line.qty)}</td><td>${fmt(line.prix)} FCFA</td><td>${fmt(line.remise || 0)} FCFA</td><td>${fmt(calcNet(line))} FCFA</td></tr>`).join("")}</tbody></table><div class="totals"><div class="totals-box">${isMixed ? `<p class="pay-label" style="display:block">Paiement mixte</p>` : ""}${paymentSection}${creditSection}<p class="grand"><span>Total facture</span><span>${fmt(total)} FCFA</span></p></div></div><p class="footer">Merci pour votre visite.</p><script>window.onload=function(){window.print();}</script></body></html>`);
+  ticketWindow.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>Facture ${escapeHtml(factureNumber)}</title><style>body{font-family:Arial,sans-serif;padding:32px;color:#111;background:#fff}header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #222;padding-bottom:16px;margin-bottom:18px}h1,h2,p{margin:0 0 8px}table{width:100%;border-collapse:collapse;margin-top:14px}th,td{padding:10px 8px;border-bottom:1px solid #ddd;text-align:left}th:last-child,td:last-child{text-align:right}.meta{color:#555}.totals{margin-top:18px;display:flex;justify-content:flex-end}.totals-box{min-width:300px;border:1px solid #111;padding:16px}.totals-box p{display:flex;justify-content:space-between;margin-bottom:6px}.grand{font-size:20px;font-weight:700;border-top:1px solid #111;padding-top:8px;margin-top:8px}.footer{margin-top:26px;color:#666;font-size:12px}.pay-label{font-size:12px;color:#555;font-weight:700;text-transform:uppercase;margin-bottom:4px}</style></head><body><header><div><h1>${escapeHtml(site?.nom || "Maquis")}</h1><p>${escapeHtml(site?.ville || "")} - ${escapeHtml(site?.pays || "")}</p><p>Gerant: ${escapeHtml(site?.gerant || "-")}</p></div><div><h2>Facture</h2><p class="meta">Numero: ${escapeHtml(factureNumber)}</p><p class="meta">Date: ${escapeHtml(formatDateDdMmYyyy(lignes[0].date))}</p><p class="meta">Client: ${escapeHtml(client)}</p></div></header><table><thead><tr><th>Article</th><th>Qte</th><th>Prix unit.</th><th>Remise</th><th>Total</th></tr></thead><tbody>${lignes.map((line) => `<tr><td>${escapeHtml(line.article)}</td><td>${fmt(line.qty)}</td><td>${fmt(line.prix)} FCFA</td><td>${fmt(line.remise || 0)} FCFA</td><td>${fmt(calcNet(line))} FCFA</td></tr>`).join("")}</tbody></table><div class="totals"><div class="totals-box">${isMixed ? `<p class="pay-label" style="display:block">Paiement mixte</p>` : ""}${paymentSection}${creditSection}<p class="grand"><span>Total facture</span><span>${fmt(total)} FCFA</span></p></div></div><p class="footer">Merci pour votre visite.</p><script>window.onload=function(){window.print();}</script></body></html>`);
   ticketWindow.document.close();
 }
 
@@ -4036,11 +4164,11 @@ function printDayClosure() {
     </tr>`;
   }).join("");
 
-  const dateLabel = new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
-  const generatedAt = new Date(closed.createdAt).toLocaleString("fr-FR");
+  const dateLabel = formatDateDdMmYyyy(new Date());
+  const generatedAt = formatDateTimeDdMmYyyy(closed.createdAt);
 
   const html = `<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8">
-  <title>Fiche de cloture ${todayStr}</title>
+  <title>Fiche de cloture ${formatDateDdMmYyyy(todayStr)}</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: Arial, sans-serif; font-size: 11px; padding: 16px; color: #111; }
@@ -4135,7 +4263,7 @@ function printDayClosure() {
     </div>
   </div>
 
-  <div class="footer">${escapeHtml(site?.nom || "TDB Bar")} &mdash; Fiche de cloture generee automatiquement &mdash; ${todayStr}</div>
+  <div class="footer">${escapeHtml(site?.nom || "TDB Bar")} &mdash; Fiche de cloture generee automatiquement &mdash; ${escapeHtml(formatDateDdMmYyyy(todayStr))}</div>
   <script>window.onload = () => window.print();<\/script>
   </body></html>`;
 
@@ -4153,7 +4281,9 @@ function printSalesHistory() {
   }
   const site = currentSite();
   const { start, end } = salesPeriod();
-  const periodLabel = start || end ? `Periode : ${start || "..."} au ${end || "..."}` : "Periode : toutes les dates";
+  const periodLabel = start || end
+    ? `Periode : ${start ? formatDateDdMmYyyy(start) : "..."} au ${end ? formatDateDdMmYyyy(end) : "..."}`
+    : "Periode : toutes les dates";
   const total = ventes.reduce((sum, vente) => sum + calcNet(vente), 0);
   const remises = ventes.reduce((sum, vente) => sum + (Number(vente.remise) || 0), 0);
   const payRows = Object.entries(paymentTotals(ventes))
@@ -4161,7 +4291,7 @@ function printSalesHistory() {
     .join("");
   const rows = ventes.map((vente) => `
     <tr>
-      <td>${escapeHtml(saleDateValue(vente))}</td>
+      <td>${escapeHtml(formatDateDdMmYyyy(saleDateValue(vente)))}</td>
       <td>${escapeHtml(vente.factureNumber || `VENTE-${vente.id}`)}</td>
       <td>${escapeHtml(vente.client || "Client comptoir")}</td>
       <td>${escapeHtml(vente.article)}</td>
@@ -4178,7 +4308,7 @@ function printSalesHistory() {
     showToast("Impossible d'ouvrir l'impression.");
     return;
   }
-  ticketWindow.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>Historique des ventes</title><style>body{font-family:Arial,sans-serif;color:#111;padding:28px}header{display:flex;justify-content:space-between;gap:18px;border-bottom:2px solid #111;padding-bottom:14px;margin-bottom:18px}h1,h2,p{margin:0 0 8px}.meta{color:#555}.summary{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:16px 0}.box{border:1px solid #111;padding:12px}.box strong{display:block;font-size:18px;margin-top:4px}table{width:100%;border-collapse:collapse;margin-top:12px;font-size:12px}th,td{border-bottom:1px solid #ddd;padding:7px 6px;text-align:left}th{background:#f2f2f2}td:nth-child(6),td:nth-child(7),td:nth-child(8),td:nth-child(10),.pay td:last-child{text-align:right}.pay{max-width:420px;margin-top:10px}@media print{body{padding:0}table{font-size:11px}}</style></head><body><header><div><h1>${escapeHtml(site?.nom || "Maquis")}</h1><p>${escapeHtml(site?.ville || "")} ${escapeHtml(site?.pays || "")}</p><p class="meta">${escapeHtml(periodLabel)}${currentFilter !== "all" ? ` - Categorie : ${escapeHtml(currentFilter)}` : ""}</p></div><div><h2>Historique des ventes</h2><p class="meta">Imprime le ${new Date().toLocaleString("fr-FR")}</p></div></header><div class="summary"><div class="box">Total ventes<strong>${fmt(total)} FCFA</strong></div><div class="box">Transactions<strong>${fmt(ventes.length)}</strong></div><div class="box">Remises<strong>${fmt(remises)} FCFA</strong></div></div><h2>Encaissements</h2><table class="pay"><tbody>${payRows}</tbody></table><h2>Detail</h2><table><thead><tr><th>Date</th><th>Facture</th><th>Client</th><th>Article</th><th>Categorie</th><th>Qte</th><th>Prix</th><th>Remise</th><th>Paiement</th><th>Total</th></tr></thead><tbody>${rows}</tbody></table><script>window.onload=function(){window.print();}</script></body></html>`);
+  ticketWindow.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>Historique des ventes</title><style>body{font-family:Arial,sans-serif;color:#111;padding:28px}header{display:flex;justify-content:space-between;gap:18px;border-bottom:2px solid #111;padding-bottom:14px;margin-bottom:18px}h1,h2,p{margin:0 0 8px}.meta{color:#555}.summary{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:16px 0}.box{border:1px solid #111;padding:12px}.box strong{display:block;font-size:18px;margin-top:4px}table{width:100%;border-collapse:collapse;margin-top:12px;font-size:12px}th,td{border-bottom:1px solid #ddd;padding:7px 6px;text-align:left}th{background:#f2f2f2}td:nth-child(6),td:nth-child(7),td:nth-child(8),td:nth-child(10),.pay td:last-child{text-align:right}.pay{max-width:420px;margin-top:10px}@media print{body{padding:0}table{font-size:11px}}</style></head><body><header><div><h1>${escapeHtml(site?.nom || "Maquis")}</h1><p>${escapeHtml(site?.ville || "")} ${escapeHtml(site?.pays || "")}</p><p class="meta">${escapeHtml(periodLabel)}${currentFilter !== "all" ? ` - Categorie : ${escapeHtml(currentFilter)}` : ""}</p></div><div><h2>Historique des ventes</h2><p class="meta">Imprime le ${escapeHtml(formatDateTimeDdMmYyyy(new Date()))}</p></div></header><div class="summary"><div class="box">Total ventes<strong>${fmt(total)} FCFA</strong></div><div class="box">Transactions<strong>${fmt(ventes.length)}</strong></div><div class="box">Remises<strong>${fmt(remises)} FCFA</strong></div></div><h2>Encaissements</h2><table class="pay"><tbody>${payRows}</tbody></table><h2>Detail</h2><table><thead><tr><th>Date</th><th>Facture</th><th>Client</th><th>Article</th><th>Categorie</th><th>Qte</th><th>Prix</th><th>Remise</th><th>Paiement</th><th>Total</th></tr></thead><tbody>${rows}</tbody></table><script>window.onload=function(){window.print();}</script></body></html>`);
   ticketWindow.document.close();
 }
 
@@ -4222,7 +4352,7 @@ function printStockReport() {
     showToast("Impossible d'ouvrir l'impression.");
     return;
   }
-  ticketWindow.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>Point du stock</title><style>body{font-family:Arial,sans-serif;color:#111;padding:28px}header{display:flex;justify-content:space-between;gap:18px;border-bottom:2px solid #111;padding-bottom:14px;margin-bottom:18px}h1,h2,p{margin:0 0 8px}.meta{color:#555}.summary{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:16px 0}.box{border:1px solid #111;padding:12px}.box strong{display:block;font-size:18px;margin-top:4px}table{width:100%;border-collapse:collapse;margin-top:12px;font-size:12px}th,td{border-bottom:1px solid #ddd;padding:7px 6px;text-align:left}th{background:#f2f2f2}td:nth-child(n+3){text-align:right}td:last-child{text-align:left}@media print{body{padding:0}table{font-size:10px}}</style></head><body><header><div><h1>${escapeHtml(site?.nom || "Maquis")}</h1><p>${escapeHtml(site?.ville || "")} ${escapeHtml(site?.pays || "")}</p></div><div><h2>Point du stock</h2><p class="meta">Imprime le ${new Date().toLocaleString("fr-FR")}</p></div></header><div class="summary"><div class="box">Articles<strong>${fmt(items.length)}</strong></div><div class="box">Valeur stock<strong>${fmt(totalValue)} FCFA</strong></div><div class="box">Articles en alerte<strong>${fmt(alertCount)}</strong></div></div><table><thead><tr><th>Article</th><th>Categorie</th><th>Btl/kit</th><th>Btl/casier</th><th>Frigo</th><th>Reserve</th><th>Initial cas.</th><th>Entrees cas.</th><th>Sorties btl</th><th>Stock btl</th><th>Seuil</th><th>Achat/cas.</th><th>Vente int.</th><th>Vente ext.</th><th>Valeur</th><th>Statut</th></tr></thead><tbody>${rows}</tbody></table><script>window.onload=function(){window.print();}</script></body></html>`);
+  ticketWindow.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>Point du stock</title><style>body{font-family:Arial,sans-serif;color:#111;padding:28px}header{display:flex;justify-content:space-between;gap:18px;border-bottom:2px solid #111;padding-bottom:14px;margin-bottom:18px}h1,h2,p{margin:0 0 8px}.meta{color:#555}.summary{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:16px 0}.box{border:1px solid #111;padding:12px}.box strong{display:block;font-size:18px;margin-top:4px}table{width:100%;border-collapse:collapse;margin-top:12px;font-size:12px}th,td{border-bottom:1px solid #ddd;padding:7px 6px;text-align:left}th{background:#f2f2f2}td:nth-child(n+3){text-align:right}td:last-child{text-align:left}@media print{body{padding:0}table{font-size:10px}}</style></head><body><header><div><h1>${escapeHtml(site?.nom || "Maquis")}</h1><p>${escapeHtml(site?.ville || "")} ${escapeHtml(site?.pays || "")}</p></div><div><h2>Point du stock</h2><p class="meta">Imprime le ${escapeHtml(formatDateTimeDdMmYyyy(new Date()))}</p></div></header><div class="summary"><div class="box">Articles<strong>${fmt(items.length)}</strong></div><div class="box">Valeur stock<strong>${fmt(totalValue)} FCFA</strong></div><div class="box">Articles en alerte<strong>${fmt(alertCount)}</strong></div></div><table><thead><tr><th>Article</th><th>Categorie</th><th>Btl/kit</th><th>Btl/casier</th><th>Frigo</th><th>Reserve</th><th>Initial cas.</th><th>Entrees cas.</th><th>Sorties btl</th><th>Stock btl</th><th>Seuil</th><th>Achat/cas.</th><th>Vente int.</th><th>Vente ext.</th><th>Valeur</th><th>Statut</th></tr></thead><tbody>${rows}</tbody></table><script>window.onload=function(){window.print();}</script></body></html>`);
   ticketWindow.document.close();
 }
 
@@ -4292,7 +4422,7 @@ async function deleteStockItem(id) {
 
 async function deleteCharge(id) {
   const ch = (state.charges || []).find((item) => item.id === id);
-  recordStaffAudit("delete", "charge", ch ? `${ch.lib} · ${fmt(ch.montant)} FCFA` : `Depense #${id}`, ch ? `${ch.cat} · ${ch.date} · ${ch.paiement}` : "");
+  recordStaffAudit("delete", "charge", ch ? `${ch.lib} · ${fmt(ch.montant)} FCFA` : `Depense #${id}`, ch ? `${ch.cat} · ${formatDateDdMmYyyy(ch.date)} · ${ch.paiement}` : "");
   state.charges = state.charges.filter((item) => item.id !== id);
   await persistState();
   renderDashboard();
@@ -4675,6 +4805,7 @@ function takeOverOrder(orderId) {
 }
 
 function attachEvents() {
+  installFcfaThousandsDelegation();
   document.getElementById("login-form").addEventListener("submit", handleLoginSubmit);
   document.getElementById("logout-btn").addEventListener("click", () => logout());
   document.getElementById("site-switcher").addEventListener("change", () => {

@@ -146,6 +146,26 @@ function today() {
   return new Date().toISOString().slice(0, 10);
 }
 
+function pad2(n) {
+  return String(n).padStart(2, "0");
+}
+
+function isoDateToDdMmYyyy(iso) {
+  const s = String(iso ?? "").trim().slice(0, 10);
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : (s || "—");
+}
+
+function formatDateDdMmYyyy(input) {
+  if (input == null || input === "") return "—";
+  const str = String(input).trim();
+  const dOnly = str.slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dOnly)) return isoDateToDdMmYyyy(dOnly);
+  const d = input instanceof Date ? input : new Date(input);
+  if (Number.isNaN(d.getTime())) return str || "—";
+  return `${pad2(d.getDate())}-${pad2(d.getMonth() + 1)}-${d.getFullYear()}`;
+}
+
 function calcNet(vente) {
   return (vente.prix * vente.qty) - vente.remise;
 }
@@ -197,12 +217,7 @@ function renderAuthState() {
 
 function renderTopbar() {
   document.getElementById("top-bar-name").textContent = state.params.nom || "Mon Bar";
-  document.getElementById("top-date").textContent = new Date().toLocaleDateString("fr-FR", {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
+  document.getElementById("top-date").textContent = formatDateDdMmYyyy(new Date());
 }
 
 function renderHero() {

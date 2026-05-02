@@ -70,6 +70,26 @@ function today() {
   return new Date().toISOString().slice(0, 10);
 }
 
+function pad2(n) {
+  return String(n).padStart(2, "0");
+}
+
+function isoDateToDdMmYyyy(iso) {
+  const s = String(iso ?? "").trim().slice(0, 10);
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : (s || "—");
+}
+
+function formatDateDdMmYyyy(input) {
+  if (input == null || input === "") return "—";
+  const str = String(input).trim();
+  const dOnly = str.slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dOnly)) return isoDateToDdMmYyyy(dOnly);
+  const d = input instanceof Date ? input : new Date(input);
+  if (Number.isNaN(d.getTime())) return str || "—";
+  return `${pad2(d.getDate())}-${pad2(d.getMonth() + 1)}-${d.getFullYear()}`;
+}
+
 function calcNet(vente) {
   return (vente.prix * vente.qty) - vente.remise;
 }
@@ -134,12 +154,7 @@ function setAuthVisible(isAuthenticated) {
 
 function renderTopbar() {
   document.getElementById("top-bar-name").textContent = state?.params?.nom || "Mon Bar";
-  document.getElementById("top-date").textContent = new Date().toLocaleDateString("fr-FR", {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
+  document.getElementById("top-date").textContent = formatDateDdMmYyyy(new Date());
   document.getElementById("session-user").textContent = sessionUser || state?.auth?.username || "admin";
 }
 
@@ -219,12 +234,7 @@ function renderPointDuJour() {
   const creancesJour = ventesCreances.reduce((sum, v) => sum + calcNet(v), 0);
   const remisesJour = ventesJour.reduce((sum, v) => sum + (v.remise || 0), 0);
 
-  document.getElementById("pdj-date").textContent = new Date().toLocaleDateString("fr-FR", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  });
+  document.getElementById("pdj-date").textContent = formatDateDdMmYyyy(new Date());
   document.getElementById("pdj-ca").textContent = `${fmt(caJour)} FCFA`;
   document.getElementById("pdj-creances").textContent = `${fmt(creancesJour)} FCFA`;
   document.getElementById("pdj-nb").textContent = String(ventesJour.length);
@@ -260,7 +270,7 @@ function renderPointDuJour() {
           <div class="list-side">
             <div>
               <p class="list-item-amount">${fmt(calcNet(v))} FCFA</p>
-              <p class="list-item-date">${v.factureNumber ? escapeHtml(v.factureNumber) : todayStr}</p>
+              <p class="list-item-date">${v.factureNumber ? escapeHtml(v.factureNumber) : escapeHtml(formatDateDdMmYyyy(todayStr))}</p>
             </div>
           </div>
         </article>
@@ -344,7 +354,7 @@ function renderVentes(filter = "all") {
           <div class="list-side">
             <div>
               <p class="list-item-amount">${fmt(calcNet(vente))} FCFA</p>
-              <p class="list-item-date">${escapeHtml(vente.date)}</p>
+              <p class="list-item-date">${escapeHtml(formatDateDdMmYyyy(vente.date))}</p>
             </div>
             <button class="del-btn" type="button" data-delete-type="vente" data-id="${vente.id}">Suppr.</button>
           </div>

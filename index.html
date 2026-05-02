@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Flex:wght@500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./styles.css?v=25">
+  <link rel="stylesheet" href="./styles.css?v=27">
 </head>
 <body>
   <div class="app-bg"></div>
@@ -963,9 +963,15 @@
           </button>
         </nav>
         <footer class="mobile-more-footer">
-          <button type="button" class="mobile-more-footer-link" data-more-nav="guide">Voir le guide</button>
-          <button type="button" class="mobile-more-footer-secondary" data-more-sheet-close>Fermer</button>
-          <button type="button" class="mobile-more-footer-primary" data-more-nav="qr">QR codes</button>
+          <button type="button" class="mobile-more-footer-link" data-more-nav="guide">
+            <span>En savoir plus</span>
+            <svg class="mm-footer-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6v6M10 14L21 3"/></svg>
+          </button>
+          <button type="button" class="mobile-more-footer-secondary" data-more-sheet-close>Plus tard</button>
+          <button type="button" class="mobile-more-footer-primary" data-more-nav="qr">
+            <span>QR codes</span>
+            <svg class="mm-footer-icon mm-footer-icon-on-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6v6M10 14L21 3"/></svg>
+          </button>
         </footer>
       </div>
     </div>
@@ -1386,6 +1392,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=42"></script>
+  <script src="./app-orders.js?v=46"></script>
 </body>
 </html>

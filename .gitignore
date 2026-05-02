@@ -35,3 +35,4 @@ ngrok.exe
 # Secrets locaux
 settings.local.json
 .env
+deploy.local.env
