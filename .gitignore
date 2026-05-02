@@ -1,0 +1,37 @@
+# Dépendances / env
+node_modules/
+.venv/
+venv/
+.env
+.env.*
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Outils / extraits locaux
+_apk_extract/
+.cursor/
+.claude/
+
+# Données runtime (ne pas versionner)
+data.json
+app.sqlite3
+*.sqlite3
+audit.log.jsonl
+backups/
+
+# Binaires / archives locales
+*.apk
+*.exe
+*.zip
+ngrok.exe
+
+# Fichiers bureautiques / exports
+*.xlsx
+*.pdf
+
+# Secrets locaux
+settings.local.json
+.env

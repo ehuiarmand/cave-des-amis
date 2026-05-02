@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Commande client</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@500;700;800&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="app-bg"></div>
+  <main class="order-shell">
+    <section class="order-hero">
+      <p class="eyebrow">Commande client</p>
+      <h1 id="order-site-name">Votre maquis</h1>
+      <p id="order-site-copy" class="hero-copy">Choisissez vos boissons puis envoyez la commande.</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
+        <div class="hero-badge">
+          <span class="hero-badge-label">Table</span>
+          <strong id="order-table-label">Comptoir</strong>
+        </div>
+        <div class="hero-badge" id="order-location-badge" style="display:none">
+          <span class="hero-badge-label">Lieu</span>
+          <strong id="order-location-label">Intérieur</strong>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="form-grid two-cols">
+        <div class="form-group">
+          <label for="customer-name">Votre nom</label>
+          <input id="customer-name" type="text" placeholder="ex: M. Koffi">
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+            <button id="change-saved-name-btn" class="mini-btn hidden" type="button">Changer de nom</button>
+            <span id="saved-name-hint" class="muted hidden" style="font-size:0.82rem">Nom mémorisé sur ce téléphone.</span>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="customer-table">Table</label>
+          <input id="customer-table" type="text" placeholder="ex: Table 4">
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="customer-note">Note (sans glacons, allergie...)</label>
+        <input id="customer-note" type="text" placeholder="ex: sans glacons">
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="section-head">
+        <h3>Menu</h3>
+        <span id="menu-location-tag" class="section-meta"></span>
+      </div>
+      <div id="customer-menu" class="customer-menu"></div>
+    </section>
+
+    <section class="card">
+      <div class="section-head">
+        <h3>Votre commande</h3>
+        <span class="section-meta">Avant validation</span>
+      </div>
+      <div id="customer-cart"></div>
+      <div class="inline-card" style="margin-top:10px">
+        <span class="muted">Total estimé</span>
+        <strong id="customer-total">0 FCFA</strong>
+      </div>
+      <div class="button-stack">
+        <button id="send-order-btn" class="btn btn-primary" type="button">Envoyer la commande au serveur</button>
+        <button id="new-customer-order-btn" class="btn btn-outline hidden" type="button">Ajouter une autre commande</button>
+      </div>
+      <p id="customer-feedback" class="auth-error" aria-live="polite"></p>
+      <div id="customer-sent-orders" class="stack-list"></div>
+    </section>
+  </main>
+
+  <script src="./order.js?v=20260429-2"></script>
+</body>
+</html>

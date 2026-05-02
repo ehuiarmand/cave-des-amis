@@ -1,0 +1,1336 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Maquis Manager</title>
+  <meta name="theme-color" content="#2196f3">
+  <link rel="manifest" href="./manifest.json">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Flex:wght@500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./styles.css?v=20">
+</head>
+<body>
+  <div class="app-bg"></div>
+  <noscript>
+    <div class="noscript-warning">
+      Cette application a besoin de JavaScript pour fonctionner. Activez JavaScript puis rechargez la page.
+    </div>
+  </noscript>
+
+  <section id="auth-screen" class="auth-screen mm-auth-screen">
+    <div class="mm-auth-stack">
+      <div class="mm-auth-heading">
+        <div class="auth-logo mm-auth-logo" aria-hidden="true">MM</div>
+        <h1 class="mm-auth-app-title">Maquis Manager</h1>
+        <p class="mm-auth-subtitle">Connexion</p>
+      </div>
+
+      <form id="login-form" class="auth-form mm-login-card">
+        <label for="login-username">Nom d'utilisateur</label>
+        <input id="login-username" name="username" type="text" placeholder="Nom d'utilisateur" autocomplete="username" required>
+
+        <label for="login-password">Mot de passe</label>
+        <input id="login-password" name="password" type="password" placeholder="Mot de passe" autocomplete="current-password" required>
+
+        <div id="totp-section" class="hidden">
+          <label for="login-totp">Code d'authentification (6 chiffres)</label>
+          <input id="login-totp" name="totp" type="text" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="one-time-code">
+        </div>
+
+        <button type="submit" class="btn btn-primary mm-login-submit">SE CONNECTER</button>
+
+        <p id="login-error" class="auth-error" aria-live="polite"></p>
+      </form>
+    </div>
+  </section>
+
+  <div id="app-shell" class="app-shell hidden">
+
+    <!-- Sidebar desktop -->
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <p class="eyebrow">Pilotage</p>
+        <h2 class="sidebar-logo">Maquis Manager</h2>
+        <p class="bar-name" id="top-bar-name"></p>
+      </div>
+
+      <nav class="sidebar-nav" aria-label="Navigation principale">
+        <button class="nav-btn active" data-page="home" type="button">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1 1h6v6H1V1zm8 0h6v6H9V1zM1 9h6v6H1V9zm8 0h6v6H9V9z"/></svg>
+          <span>Tableau de bord</span>
+        </button>
+        <button class="nav-btn" data-page="pdj" type="button">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M3.5 0a.5.5 0 0 1 .5.5V1h8V.5a.5.5 0 0 1 1 0V1h1a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2h1V.5a.5.5 0 0 1 .5-.5zM2 2a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1H2zm0 4h12v1H2V6z"/></svg>
+          <span>Point du jour</span>
+        </button>
+        <button class="nav-btn" data-page="ventes" type="button">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M2 0a2 2 0 0 0-2 2v13.5a.5.5 0 0 0 .74.439L4 14.71l3.26 1.229a.5.5 0 0 0 .48 0L11 14.71l3.26 1.229A.5.5 0 0 0 15 15.5V2a2 2 0 0 0-2-2H2zM4 5.5a.5.5 0 0 1 0-1h8a.5.5 0 0 1 0 1H4zm0 3a.5.5 0 0 1 0-1h6a.5.5 0 0 1 0 1H4z"/></svg>
+          <span>Ventes</span>
+        </button>
+        <button class="nav-btn" data-page="guide" type="button">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5 1a2 2 0 0 0-2 2v11h10a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2H5zm1 3h6v1H6V4zm0 2h6v1H6V6zm0 2h4v1H6V8z"/></svg>
+          <span>Guide</span>
+        </button>
+        <button class="nav-btn" data-page="stock" type="button">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8.186 1.113a.5.5 0 0 0-.372 0L1.846 3.5 4.25 4.461 10.404 2l-2.218-.887zm3.564 1.426L5.596 5 8 5.961 14.154 3.5l-2.404-.961zm3.25 1.7-6.5 2.6v7.922l6.5-2.6V4.24zM7.5 14.762V6.838L1 4.239v7.923l6.5 2.6zM7.443.184a1.5 1.5 0 0 1 1.114 0l7.129 2.852A.5.5 0 0 1 16 3.5v8.35a1.5 1.5 0 0 1-.914 1.387l-6.857 2.743a.5.5 0 0 1-.372 0L1.914 13.237A1.5 1.5 0 0 1 1 11.85V3.5a.5.5 0 0 1 .314-.464L7.443.184z"/></svg>
+          <span>Stock</span>
+        </button>
+        <button class="nav-btn" data-page="charges" type="button">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M0 4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V4zm2-1a1 1 0 0 0-1 1v1h14V4a1 1 0 0 0-1-1H2zm13 4H1v5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V7zM2 10h2v2H2v-2zm4 0h2v2H6v-2z"/></svg>
+          <span>Charges</span>
+        </button>
+        <button class="nav-btn" data-page="params" type="button">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 4.754a3.246 3.246 0 1 0 0 6.492 3.246 3.246 0 0 0 0-6.492zM5.754 8a2.246 2.246 0 1 1 4.492 0 2.246 2.246 0 0 1-4.492 0z"/><path d="M9.796 1.343c-.527-1.79-3.065-1.79-3.592 0l-.094.319a.873.873 0 0 1-1.255.52l-.292-.16c-1.64-.892-3.433.902-2.54 2.541l.159.292a.873.873 0 0 1-.52 1.255l-.319.094c-1.79.527-1.79 3.065 0 3.592l.319.094a.873.873 0 0 1 .52 1.255l-.16.292c-.892 1.64.901 3.434 2.541 2.54l.292-.159a.873.873 0 0 1 1.255.52l.094.319c.527 1.79 3.065 1.79 3.592 0l.094-.319a.873.873 0 0 1 1.255-.52l.292.16c1.64.892 3.433-.902 2.54-2.541l-.159-.292a.873.873 0 0 1 .52-1.255l.319-.094c1.79-.527 1.79-3.065 0-3.592l-.319-.094a.873.873 0 0 1-.52-1.255l.16-.292c.892-1.64-.901-3.433-2.541-2.54l-.292.159a.873.873 0 0 1-1.255-.52l-.094-.319z"/></svg>
+          <span>Parametres</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-session">
+        <span id="role-badge" class="badge badge-amber">gerant</span>
+        <strong id="session-user" class="sidebar-username"></strong>
+        <button id="logout-btn" class="sidebar-logout" type="button">Deconnexion</button>
+      </div>
+    </aside>
+
+    <!-- Main wrapper -->
+    <div class="main-wrapper">
+      <header class="topbar">
+        <div class="topbar-context">
+          <p class="eyebrow">Vue generale</p>
+          <h3 id="hero-title">Le coeur de votre bar, en temps reel.</h3>
+          <p id="hero-copy" class="hero-copy">Suivez les ventes, le stock et les charges.</p>
+        </div>
+        <div class="topbar-actions">
+          <button type="button" id="topbar-more-btn" class="topbar-more-btn" aria-label="Menu rapide">⋯</button>
+          <select id="site-switcher" class="site-switcher"></select>
+          <div id="top-date" class="top-date"></div>
+        </div>
+      </header>
+
+      <main class="main-shell">
+
+      <section id="page-pdj" class="page">
+        <article class="card pdj-card">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Rapport journalier</p>
+              <h3>Point des ventes du jour</h3>
+            </div>
+            <span id="pdj-date" class="section-meta"></span>
+          </div>
+          <div id="pdj-cash-opening" class="pdj-cash-opening"></div>
+          <div id="pdj-main-wrap" class="pdj-main-wrap">
+          <div class="pdj-kpis">
+            <div class="pdj-kpi">
+              <span class="kpi-label">CA encaisse</span>
+              <strong id="pdj-ca" class="pdj-val amber">0 FCFA</strong>
+            </div>
+            <div class="pdj-kpi">
+              <span class="kpi-label">A regler</span>
+              <strong id="pdj-creances" class="pdj-val red">0 FCFA</strong>
+            </div>
+            <div class="pdj-kpi">
+              <span class="kpi-label">Transactions</span>
+              <strong id="pdj-nb" class="pdj-val amber">0</strong>
+            </div>
+            <div class="pdj-kpi">
+              <span class="kpi-label">Remises accordees</span>
+              <strong id="pdj-remises" class="pdj-val red">0 FCFA</strong>
+            </div>
+          </div>
+          <div id="pdj-pay-chart"></div>
+          <div class="section-head pdj-detail-head">
+            <h3 class="pdj-detail-title">Boissons vendues (par jour)</h3>
+            <span id="pdj-sales-count" class="section-meta">0 article(s)</span>
+          </div>
+          <div id="pdj-sales-by-product"></div>
+          <div class="section-head pdj-detail-head">
+            <h3 class="pdj-detail-title">Verification stock fermeture</h3>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <button id="close-day-btn" class="mini-btn" type="button">Verifier et cloturer</button>
+              <button id="print-closure-btn" class="btn btn-outline hidden" type="button">Imprimer le rapport de cloture</button>
+            </div>
+          </div>
+          <div id="pdj-stock-check"></div>
+          <div class="section-head pdj-detail-head">
+            <h3 class="pdj-detail-title">Detail des ventes</h3>
+            <span id="pdj-ventes-count" class="section-meta">0 vente(s)</span>
+          </div>
+          <div id="pdj-ventes-list"></div>
+          </div>
+        </article>
+      </section>
+
+      <section id="page-home" class="page active">
+        <div class="kpi-grid">
+          <article class="kpi">
+            <p class="kpi-label">CA net total</p>
+            <h3 id="kpi-ca" class="kpi-value amber">0</h3>
+            <p class="kpi-foot">FCFA</p>
+          </article>
+          <article class="kpi">
+            <p class="kpi-label">Charges</p>
+            <h3 id="kpi-charges" class="kpi-value red">0</h3>
+            <p class="kpi-foot">FCFA</p>
+          </article>
+          <article class="kpi">
+            <p class="kpi-label">Benefice</p>
+            <h3 id="kpi-benefice" class="kpi-value">0</h3>
+            <p class="kpi-foot">FCFA</p>
+          </article>
+          <article class="kpi">
+            <p class="kpi-label">Transactions total</p>
+            <h3 id="kpi-nb" class="kpi-value amber">0</h3>
+            <p class="kpi-foot">ventes</p>
+          </article>
+        </div>
+
+        <div class="dashboard-grid">
+          <article class="card spotlight-card">
+            <div class="card-head">
+              <div>
+                <p class="eyebrow">Objectif mensuel</p>
+                <h3 id="obj-pct">0%</h3>
+              </div>
+              <p id="obj-val" class="muted">/ 500 000 FCFA</p>
+            </div>
+            <div class="progress-bar">
+              <div id="obj-bar" class="progress-fill"></div>
+            </div>
+          </article>
+
+          <article class="card">
+            <div class="section-head">
+              <h3>Ventes par categorie</h3>
+              <span class="section-meta">Repartition</span>
+            </div>
+            <div id="cat-chart"></div>
+          </article>
+
+          <article class="card">
+            <div class="section-head">
+              <h3>Alertes stock</h3>
+              <span class="section-meta">Priorités</span>
+            </div>
+            <div id="stock-alerts"></div>
+          </article>
+
+          <article class="card">
+            <div class="section-head">
+              <h3>Modes de paiement</h3>
+              <span class="section-meta">Encaissements</span>
+            </div>
+            <div id="pay-chart"></div>
+          </article>
+        </div>
+      </section>
+
+      <section id="page-ventes" class="page">
+        <div class="tabs page-subtabs">
+          <button class="tab active" data-subtab-ventes="commandes">Commandes</button>
+          <button class="tab" data-subtab-ventes="caisse">Caisse &amp; Paiement</button>
+          <button class="tab" data-subtab-ventes="qr">QR Codes</button>
+        </div>
+        <article class="card" id="ventes-card-gestion">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Suivi operationnel</p>
+              <h3>Gestion des commandes</h3>
+            </div>
+            <button id="new-order-top-btn" class="btn btn-primary" type="button" style="width:auto">Nouvelle commande</button>
+          </div>
+          <div class="pdj-kpis">
+            <div class="pdj-kpi">
+              <span class="kpi-label">Commandes aujourd'hui</span>
+              <strong id="orders-today-kpi" class="pdj-val amber">0</strong>
+            </div>
+            <div class="pdj-kpi">
+              <span class="kpi-label">En attente</span>
+              <strong id="orders-pending-kpi" class="pdj-val amber">0</strong>
+            </div>
+            <div class="pdj-kpi">
+              <span class="kpi-label">Chiffre d'affaires</span>
+              <strong id="orders-ca-kpi" class="pdj-val amber">0 FCFA</strong>
+            </div>
+          </div>
+          <div class="form-grid four-cols">
+            <div class="form-group">
+              <label for="orders-filter-date">Date</label>
+              <input id="orders-filter-date" type="date">
+            </div>
+            <div class="form-group">
+              <label for="orders-filter-status">Statut</label>
+              <select id="orders-filter-status">
+                <option value="all">Tous</option>
+                <option value="En attente">En attente</option>
+                <option value="Servi">Servi</option>
+                <option value="Paye">Paye</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="orders-filter-type">Type</label>
+              <select id="orders-filter-type">
+                <option value="all">Tous</option>
+                <option value="sur-place">Sur place</option>
+                <option value="a-emporter">A emporter</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>&nbsp;</label>
+              <button id="orders-filter-btn" class="btn btn-primary" type="button">Filtrer</button>
+            </div>
+          </div>
+          <div class="stock-table-wrap" style="margin-top:18px">
+            <table class="stock-table">
+              <thead>
+                <tr>
+                  <th>Numero</th>
+                  <th>Table</th>
+                  <th>Serveur</th>
+                  <th>Statut</th>
+                  <th>Type</th>
+                  <th style="text-align:right">Articles</th>
+                  <th style="text-align:right">Montant</th>
+                  <th>Heure</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="orders-management-table"></tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="card hidden" id="ventes-card-qr">
+          <div class="section-head">
+            <h3>Commande par QR code</h3>
+            <span class="section-meta">Client autonome</span>
+          </div>
+          <div class="form-grid two-cols">
+            <div class="form-group">
+              <label for="qr-table">Table specifique</label>
+              <input id="qr-table" type="text" placeholder="ex: Table VIP">
+            </div>
+            <div class="form-group">
+              <label for="qr-alias">Nom affiche</label>
+              <input id="qr-alias" type="text" placeholder="ex: Salon terrasse">
+            </div>
+          </div>
+          <div class="form-grid two-cols">
+            <div class="form-group">
+              <label for="qr-count">Nombre de tables</label>
+              <input id="qr-count" type="number" min="1" max="200" value="1" placeholder="ex: 20">
+            </div>
+            <div class="form-group">
+              <label for="qr-prefix">Prefixe</label>
+              <input id="qr-prefix" type="text" value="Table" placeholder="ex: Table">
+            </div>
+          </div>
+          <div class="button-stack">
+            <button id="generate-qr-btn" class="btn btn-primary" type="button">Generer les QR codes par table</button>
+            <button id="print-all-qr-btn" class="btn btn-outline" type="button">Imprimer tous les QR codes</button>
+          </div>
+          <div id="qr-card-preview" class="qr-card-preview hidden">
+            <div id="qr-table-list" class="qr-table-list"></div>
+            <div class="qr-two-cols">
+              <div class="qr-location-card">
+                <div class="qr-location-header">Intérieur (cave)</div>
+                <div class="qr-card-box">
+                  <img id="qr-preview-image-int" alt="QR Interieur">
+                  <div>
+                    <p id="qr-preview-title-int" class="list-item-title">Commande Intérieur</p>
+                    <a id="qr-preview-link-int" class="qr-link" href="#" target="_blank" rel="noopener noreferrer">Ouvrir</a>
+                  </div>
+                </div>
+                <button type="button" class="btn btn-outline" id="print-qr-int-btn">Imprimer QR Intérieur</button>
+              </div>
+              <div class="qr-location-card">
+                <div class="qr-location-header">Extérieur (terrasse)</div>
+                <div class="qr-card-box">
+                  <img id="qr-preview-image-ext" alt="QR Exterieur">
+                  <div>
+                    <p id="qr-preview-title-ext" class="list-item-title">Commande Extérieur</p>
+                    <a id="qr-preview-link-ext" class="qr-link" href="#" target="_blank" rel="noopener noreferrer">Ouvrir</a>
+                  </div>
+                </div>
+                <button type="button" class="btn btn-outline" id="print-qr-ext-btn">Imprimer QR Extérieur</button>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="card" id="ventes-card-board">
+          <div class="section-head">
+            <div>
+              <h3>Commandes en cours</h3>
+              <p id="qr-alert-badge" class="qr-alert-badge hidden">Nouvelle commande QR</p>
+            </div>
+            <button id="new-order-btn" class="icon-btn" type="button">Nouveau client</button>
+          </div>
+          <div id="order-board"></div>
+        </article>
+
+        <article class="card hidden caisse-card" id="ventes-card-historique">
+          <div class="caisse-shell">
+            <div class="caisse-shell-intro">
+              <p class="eyebrow">Caisse</p>
+              <h3 class="caisse-shell-title">Historique &amp; recouvrement</h3>
+              <p class="muted caisse-shell-copy">Consultez les ventes closes ou suivez les crédits clients.</p>
+            </div>
+            <nav class="caisse-inner-tabs" role="tablist" aria-label="Sections caisse">
+              <button type="button" class="tab caisse-inner-tab active" role="tab" aria-selected="true" data-caisse-inner="historique">Historique ventes</button>
+              <button type="button" class="tab caisse-inner-tab" role="tab" aria-selected="false" data-caisse-inner="recouvrement">Recouvrement crédits</button>
+            </nav>
+
+            <div id="ventes-caisse-panel-historique" class="caisse-inner-panel" role="tabpanel" data-caisse-panel="historique" aria-hidden="false">
+              <div class="section-head">
+                <h3>Historique des ventes finalisees</h3>
+                <span class="section-meta">Factures cloturees</span>
+              </div>
+              <div class="form-grid three-cols">
+                <div class="form-group">
+                  <label for="sales-period-start">Du</label>
+                  <input id="sales-period-start" type="date">
+                </div>
+                <div class="form-group">
+                  <label for="sales-period-end">Au</label>
+                  <input id="sales-period-end" type="date">
+                </div>
+                <div class="form-group">
+                  <label>&nbsp;</label>
+                  <button id="print-sales-history-btn" class="btn btn-outline" type="button">Imprimer la periode</button>
+                </div>
+              </div>
+              <div id="ventes-tabs" class="tabs"></div>
+              <div id="ventes-list"></div>
+            </div>
+
+            <div id="ventes-caisse-panel-recouvrement" class="caisse-inner-panel hidden credit-recovery-panel" role="tabpanel" data-caisse-panel="recouvrement" aria-hidden="true">
+              <div class="section-head credit-recovery-head">
+                <div>
+                  <p class="eyebrow" style="margin-bottom:4px">Recouvrement</p>
+                  <h3>Crédits clients</h3>
+                  <p class="muted" style="margin-top:6px">Enregistrez les versements pour actualiser le reste à payer.</p>
+                </div>
+                <div class="credit-recovery-kpis">
+                  <div class="credit-recovery-kpi">
+                    <span class="muted" style="font-size:0.82rem">Total dû</span>
+                    <strong id="credit-total-due">0 FCFA</strong>
+                  </div>
+                  <div class="credit-recovery-kpi">
+                    <span class="muted" style="font-size:0.82rem">Total recouvré</span>
+                    <strong id="credit-total-paid" style="color:#72d7a9">0 FCFA</strong>
+                  </div>
+                </div>
+              </div>
+
+              <div class="form-grid three-cols" style="margin-top:14px">
+                <div class="form-group">
+                  <label for="credit-name">Client (débiteur)</label>
+                  <input id="credit-name" type="text" placeholder="ex: M. Koffi" list="credit-names-list">
+                  <datalist id="credit-names-list"></datalist>
+                </div>
+                <div class="form-group">
+                  <label for="credit-amount">Montant versé (FCFA)</label>
+                  <input id="credit-amount" type="number" min="0" step="1" placeholder="ex: 5000">
+                </div>
+                <div class="form-group">
+                  <label for="credit-method">Mode de paiement</label>
+                  <select id="credit-method">
+                    <option value="Espèces">Espèces</option>
+                    <option value="Orange Money">Orange Money</option>
+                    <option value="MTN MoMo">MTN MoMo</option>
+                    <option value="Wave">Wave</option>
+                    <option value="Carte">Carte</option>
+                  </select>
+                </div>
+              </div>
+              <div class="form-grid two-cols" style="margin-top:0">
+                <div class="form-group">
+                  <label for="credit-date">Date</label>
+                  <input id="credit-date" type="date">
+                </div>
+                <div class="form-group">
+                  <label for="credit-note">Note</label>
+                  <input id="credit-note" type="text" placeholder="ex: acompte / versement">
+                </div>
+              </div>
+              <div class="credit-versement-actions">
+                <button id="credit-save-btn" class="btn btn-primary credit-save-btn" type="button">Enregistrer le versement</button>
+              </div>
+
+              <div id="credit-list" class="credit-list-below"></div>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section id="page-stock" class="page">
+        <div class="tabs page-subtabs">
+          <button class="tab active" data-subtab-stock="catalogue">Catalogue</button>
+          <button class="tab" data-subtab-stock="mouvements">Mouvements</button>
+          <button class="tab" data-subtab-stock="achats">Achats fournisseurs</button>
+          <button class="tab" data-subtab-stock="creanciers">Creanciers</button>
+        </div>
+        <article class="card" id="stock-card-catalogue" style="margin-bottom:14px">
+          <div class="section-head" style="margin-bottom:14px">
+            <div>
+              <p class="eyebrow">Gestion des stocks</p>
+              <h3>Stock &amp; Approvisionnement</h3>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+              <button id="toggle-stock-detail-btn" class="mini-btn" type="button">Vue complete</button>
+              <button id="nouvelle-perte-btn" class="mini-btn btn-danger" type="button">Perte</button>
+              <button id="export-stock-excel-btn" class="mini-btn" type="button">Exporter Excel</button>
+              <button id="import-stock-excel-btn" class="mini-btn" type="button">Importer Excel</button>
+              <input id="import-stock-file" type="file" accept=".xlsx,.xls,.csv" style="display:none">
+              <button id="print-stock-report-btn" class="mini-btn" type="button">Imprimer</button>
+            </div>
+          </div>
+          <div class="stock-kpi-bar">
+            <div class="stock-kpi">
+              <span class="stock-kpi-label">Nb. articles</span>
+              <strong id="stock-nb" class="stock-kpi-val">0</strong>
+            </div>
+            <div class="stock-kpi">
+              <span class="stock-kpi-label">Valeur du stock</span>
+              <strong id="stock-val" class="stock-kpi-val amber">0 FCFA</strong>
+            </div>
+            <div class="stock-kpi red-kpi">
+              <span class="stock-kpi-label">En alerte</span>
+              <strong id="stock-alerte" class="stock-kpi-val red">0</strong>
+            </div>
+            <div class="stock-kpi green-kpi">
+              <span class="stock-kpi-label">Conformes</span>
+              <strong id="stock-ok" class="stock-kpi-val green">0</strong>
+            </div>
+            <div class="stock-kpi orange-kpi">
+              <span class="stock-kpi-label">Seuil d'alerte</span>
+              <strong id="stock-seuil" class="stock-kpi-val amber">-</strong>
+            </div>
+          </div>
+          <div class="form-grid two-cols" style="margin-top:14px">
+            <div class="form-group">
+              <label for="stock-search">Recherche rapide</label>
+              <input id="stock-search" type="text" placeholder="Tapez un article (ex: Castel, Beaufort, Coca...)">
+            </div>
+            <div class="form-group">
+              <label>&nbsp;</label>
+              <button id="stock-search-clear" class="btn btn-outline" type="button">Effacer le filtre</button>
+            </div>
+          </div>
+        </article>
+        <article class="card hidden" id="stock-card-mouvements" style="margin-bottom:14px">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Traçabilite</p>
+              <h3>Historique des mouvements de stock</h3>
+            </div>
+            <span id="stock-movement-count" class="section-meta">0 mouvement</span>
+          </div>
+          <div class="form-grid three-cols">
+            <div class="form-group">
+              <label for="stock-move-start">Date debut</label>
+              <input id="stock-move-start" type="date">
+            </div>
+            <div class="form-group">
+              <label for="stock-move-end">Date fin</label>
+              <input id="stock-move-end" type="date">
+            </div>
+            <div class="form-group">
+              <label for="stock-move-type">Type</label>
+              <select id="stock-move-type">
+                <option value="all">Tous</option>
+                <option value="entree">Entrees</option>
+                <option value="sortie">Sorties</option>
+              </select>
+            </div>
+          </div>
+          <div id="stock-movement-summary" class="pdj-kpis" style="margin-top:14px"></div>
+          <div class="stock-table-wrap" style="margin-top:14px">
+            <table class="stock-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Produit</th>
+                  <th>Type</th>
+                  <th style="text-align:right">Quantite</th>
+                  <th>Unite</th>
+                  <th>Motif</th>
+                  <th>Utilisateur</th>
+                </tr>
+              </thead>
+              <tbody id="stock-movement-list"></tbody>
+            </table>
+          </div>
+        </article>
+        <article class="card hidden" id="stock-card-achats" style="margin-bottom:14px">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Achats / Approvisionnement</p>
+              <h3>Commandes fournisseurs</h3>
+            </div>
+            <button id="purchase-new-btn" class="btn btn-primary" type="button" style="width:auto">Nouvelle commande</button>
+          </div>
+          <div id="purchase-form" class="hidden">
+            <div class="form-grid three-cols" style="margin-top:0">
+              <div class="form-group">
+                <label for="purchase-supplier">Fournisseur</label>
+                <input id="purchase-supplier" type="text" placeholder="ex: Brasserie / Grossiste">
+              </div>
+              <div class="form-group">
+                <label for="purchase-date">Date</label>
+                <input id="purchase-date" type="date">
+              </div>
+              <div class="form-group">
+                <label for="purchase-pay">Paiement</label>
+                <select id="purchase-pay">
+                  <option value="Especes">Especes</option>
+                  <option value="Wave">Wave</option>
+                  <option value="Orange Money">Orange Money</option>
+                  <option value="MTN Money">MTN Money</option>
+                  <option value="Virement">Virement</option>
+                  <option value="Credit fournisseur">Credit fournisseur</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-grid four-cols">
+              <div class="form-group">
+                <label for="purchase-article">Article</label>
+                <input id="purchase-article" type="text" list="articles-list" placeholder="ex: Guinness 33">
+              </div>
+              <div class="form-group">
+                <label for="purchase-cases">Casiers</label>
+                <input id="purchase-cases" type="number" min="0" step="1" placeholder="Depuis stock">
+                <p class="muted" style="margin-top:6px;font-size:0.82rem">Rempli automatiquement selon le stock reel et le seuil de l&apos;article (vous pouvez ajuster).</p>
+              </div>
+              <div class="form-group">
+                <label for="purchase-case-size">Btl / casier</label>
+                <input id="purchase-case-size" type="number" min="1" step="1" value="24" readonly aria-readonly="true">
+                <p class="muted" style="margin-top:6px;font-size:0.82rem">Valeur du catalogue stock (non modifiable ici).</p>
+              </div>
+              <div class="form-group">
+                <label for="purchase-price">Prix achat / casier (catalogue)</label>
+                <input id="purchase-price" type="number" min="0" step="1" placeholder="Automatique depuis stock" readonly>
+                <p class="muted" style="margin-top:6px;font-size:0.82rem">Ce prix est celui du catalogue stock et ne peut pas etre modifie ici.</p>
+              </div>
+            </div>
+            <div class="button-stack" style="grid-template-columns:1fr 1fr;display:grid">
+              <button id="purchase-add-line-btn" class="btn btn-outline" type="button">Ajouter la ligne</button>
+              <button id="purchase-save-btn" class="btn btn-primary" type="button">Enregistrer la commande</button>
+            </div>
+            <p id="purchase-feedback" class="auth-error" aria-live="polite"></p>
+            <div id="purchase-lines"></div>
+          </div>
+          <div class="section-head" style="margin-top:18px">
+            <h3>Historique des commandes</h3>
+            <span id="purchase-count" class="section-meta">0</span>
+          </div>
+          <div id="purchase-list"></div>
+        </article>
+        <article class="card hidden" id="stock-card-creanciers" style="margin-bottom:14px">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Dettes fournisseurs</p>
+              <h3>Creanciers (vous devez)</h3>
+            </div>
+          </div>
+          <p class="muted" style="margin-bottom:14px">
+            Ce sont les montants que vous devez encore aux fournisseurs (commandes ou receptions a credit).
+            Les clients qui vous doivent de l&apos;argent sont sous <strong>Ventes</strong> → <strong>Caisse</strong> → Crédits clients.
+          </p>
+          <p class="muted" style="margin-bottom:14px;font-size:0.85rem">
+            Le bouton <strong>+</strong> en bas a droite ouvre une <strong>nouvelle depense</strong> avec paiement Credit fournisseur (pour saisir une dette sans passer par Achats fournisseurs).
+          </p>
+          <div style="margin-bottom:14px">
+            <button type="button" class="btn btn-primary" id="goto-client-debtors-btn">Voir les credits clients (clients qui vous doivent)</button>
+            <p class="muted" style="margin-top:8px;font-size:0.82rem">Les creances clients ne sont pas sur cet ecran : ce bouton ouvre <strong>Ventes</strong> → <strong>Caisse &amp; Paiement</strong>.</p>
+          </div>
+          <div class="stock-kpi-bar" style="margin-bottom:14px">
+            <div class="stock-kpi">
+              <span class="stock-kpi-label">Commandes credit non receptionnees</span>
+              <strong id="creanciers-kpi-pending" class="stock-kpi-val">0 FCFA</strong>
+            </div>
+            <div class="stock-kpi">
+              <span class="stock-kpi-label">Charges credit fournisseur (historique)</span>
+              <strong id="creanciers-kpi-charges" class="stock-kpi-val">0 FCFA</strong>
+            </div>
+          </div>
+          <div class="section-head" style="margin-top:8px"><h4 style="margin:0;font-size:1rem">Commandes en attente</h4></div>
+          <div id="creanciers-pending-list"></div>
+          <div class="section-head" style="margin-top:18px"><h4 style="margin:0;font-size:1rem">Dettes enregistrees en charges</h4></div>
+          <p class="muted" style="font-size:0.82rem;margin-bottom:8px">Apres reception d&apos;une commande au credit, une charge est creee avec ce mode de paiement.</p>
+          <div id="creanciers-charges-list"></div>
+        </article>
+        <div id="stock-list"></div>
+      </section>
+
+      <section id="page-charges" class="page">
+        <article class="card spotlight-card">
+          <p class="eyebrow">Total charges du mois</p>
+          <h3 id="charges-total" class="spotlight-value">0 FCFA</h3>
+        </article>
+        <div id="charges-list"></div>
+      </section>
+
+      <section id="page-guide" class="page">
+        <article class="card">
+          <div class="section-head">
+            <h3>Guide d'utilisation</h3>
+            <span class="section-meta">Tous les rôles</span>
+          </div>
+          <p class="muted" style="margin-bottom:14px">Sommaire : ouvrez une section dans le guide détaillé. Pour un <strong>PDF</strong>, utilisez le bouton ci-dessous puis <strong>Ctrl+P</strong> (ou Partager → Imprimer sur mobile) et « Enregistrer au format PDF ».</p>
+          <ol style="margin:0 0 18px;padding-left:1.35rem;line-height:1.75">
+            <li><a href="./guide.html#connexion" target="_blank" rel="noopener noreferrer">Première connexion</a></li>
+            <li><a href="./guide.html#navigation" target="_blank" rel="noopener noreferrer">Navigation générale</a></li>
+            <li><a href="./guide.html#tableau-de-bord" target="_blank" rel="noopener noreferrer">Tableau de bord</a></li>
+            <li><a href="./guide.html#point-du-jour" target="_blank" rel="noopener noreferrer">Point du jour</a></li>
+            <li><a href="./guide.html#ventes" target="_blank" rel="noopener noreferrer">Ventes</a></li>
+            <li><a href="./guide.html#stock" target="_blank" rel="noopener noreferrer">Stock</a></li>
+            <li><a href="./guide.html#charges" target="_blank" rel="noopener noreferrer">Charges</a></li>
+            <li><a href="./guide.html#parametres" target="_blank" rel="noopener noreferrer">Paramètres</a></li>
+            <li><a href="./guide.html#telephone" target="_blank" rel="noopener noreferrer">Téléphone</a></li>
+            <li><a href="./guide.html#bonnes-pratiques" target="_blank" rel="noopener noreferrer">Bonnes pratiques</a></li>
+            <li><a href="./guide.html#probleme" target="_blank" rel="noopener noreferrer">En cas de problème</a></li>
+          </ol>
+          <div class="button-stack" style="margin-top:8px">
+            <a class="btn btn-primary" href="./guide.html" target="_blank" rel="noopener noreferrer" style="text-align:center;text-decoration:none;display:inline-flex;justify-content:center;align-items:center">Ouvrir le guide complet</a>
+            <a class="btn btn-outline" href="./guide.html?print=1" target="_blank" rel="noopener noreferrer" style="text-align:center;text-decoration:none;display:inline-flex;justify-content:center;align-items:center">Ouvrir et proposer l'impression (PDF)</a>
+          </div>
+          <p class="muted" style="margin-top:14px;font-size:0.86rem">Documentation source : <code>GUIDE_UTILISATION.md</code> dans le dossier du projet.</p>
+        </article>
+      </section>
+
+      <section id="page-params" class="page">
+        <div class="tabs page-subtabs params-subtabs" role="tablist" aria-label="Sous menus parametres">
+          <button type="button" class="tab active" data-subtab-params="profil" role="tab" aria-selected="true">Profil</button>
+          <button type="button" class="tab manager-only" data-subtab-params="catalogue" role="tab">Categories</button>
+          <button type="button" class="tab manager-only" data-subtab-params="acces" role="tab">Acces</button>
+          <button type="button" class="tab admin-only" data-subtab-params="admin" role="tab">Administration</button>
+        </div>
+
+        <div data-params-panel="profil" class="params-panel">
+          <article class="card">
+            <div class="section-head">
+              <h3>Informations du bar</h3>
+              <span class="section-meta">Maquis courant</span>
+            </div>
+            <div class="form-grid">
+              <div class="form-group">
+                <label for="p-nom">Nom du bar</label>
+                <input id="p-nom" type="text" placeholder="Mon Bar">
+              </div>
+              <div class="form-group">
+                <label for="p-gerant">Gerant</label>
+                <input id="p-gerant" type="text" placeholder="Nom du gerant">
+              </div>
+              <div class="form-group">
+                <label for="p-ville">Ville</label>
+                <input id="p-ville" type="text" placeholder="Douala">
+              </div>
+              <div class="form-group">
+                <label for="p-pays">Pays</label>
+                <input id="p-pays" type="text" placeholder="Cameroun">
+              </div>
+            </div>
+          </article>
+
+          <article class="card">
+            <div class="section-head">
+              <h3>Objectifs &amp; facturation</h3>
+              <span class="section-meta">Configuration</span>
+            </div>
+            <div class="form-grid">
+              <div class="form-group">
+                <label for="p-obj">Objectif CA mensuel</label>
+                <input id="p-obj" type="number" placeholder="500000">
+              </div>
+              <div class="form-group">
+                <label for="p-seuil">Seuil alerte stock</label>
+                <input id="p-seuil" type="number" placeholder="5">
+              </div>
+              <div class="form-group">
+                <label for="p-prefixe">Prefixe facture</label>
+                <input id="p-prefixe" type="text" placeholder="MBCM">
+              </div>
+            </div>
+            <div class="button-stack">
+              <button id="save-params-btn" class="btn btn-primary" type="button">Enregistrer les parametres</button>
+              <button id="export-btn" class="btn btn-outline" type="button">Exporter les donnees JSON</button>
+            </div>
+          </article>
+        </div>
+
+        <div data-params-panel="catalogue" class="params-panel hidden">
+          <article class="card">
+            <div class="section-head">
+              <h3>Categories boissons</h3>
+              <span class="section-meta">Une categorie par ligne</span>
+            </div>
+            <div class="form-group">
+              <label for="p-categories">Liste des categories</label>
+              <textarea id="p-categories" rows="10" placeholder="Bieres&#10;Sodas & Jus&#10;Eaux"></textarea>
+            </div>
+            <div class="button-stack">
+              <button id="save-categories-btn" class="btn btn-primary" type="button">Enregistrer les categories</button>
+            </div>
+          </article>
+        </div>
+
+        <div data-params-panel="acces" class="params-panel hidden">
+          <article class="card">
+            <div class="section-head">
+              <h3>Gestion des utilisateurs</h3>
+              <span class="section-meta">Comptes</span>
+            </div>
+            <input id="edit-user-username" type="hidden">
+            <div id="users-list" class="stack-list"></div>
+            <div class="form-grid" style="margin-top:16px">
+              <div class="form-group">
+                <label for="new-user-username">Nom d'utilisateur</label>
+                <input id="new-user-username" type="text" placeholder="ex: marie">
+              </div>
+              <div class="form-group">
+                <label for="new-user-role">Role</label>
+                <select id="new-user-role">
+                  <option value="serveuse">Serveuse</option>
+                  <option value="manager" class="admin-only">Gerant</option>
+                  <option value="admin" class="admin-only">Administrateur</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="new-user-password">Mot de passe</label>
+                <input id="new-user-password" type="password" placeholder="Obligatoire a la creation">
+              </div>
+            </div>
+            <div id="new-user-sites-section" class="form-group" style="margin-top:10px">
+              <label>Maquis geres / autorises</label>
+              <div id="new-user-sites" class="checkbox-list" style="margin-top:8px"></div>
+            </div>
+            <div class="button-stack">
+              <button id="add-user-btn" class="btn btn-primary" type="button">Ajouter l'utilisateur</button>
+              <button id="cancel-edit-user-btn" class="btn btn-outline hidden" type="button">Annuler la modification</button>
+            </div>
+          </article>
+        </div>
+
+        <div data-params-panel="admin" class="params-panel hidden">
+          <article class="card admin-only">
+            <div class="section-head">
+              <h3>Historique gerant &amp; serveuses</h3>
+              <span class="section-meta">Audit</span>
+            </div>
+            <p class="muted" style="margin-bottom:12px">Journal des actions (creations, modifications, suppressions) faites par les comptes <strong>gerant</strong> et <strong>serveuse</strong>.</p>
+            <div id="staff-audit-list"></div>
+          </article>
+
+          <article class="card admin-only">
+            <div class="section-head">
+              <h3>Multi-maquis</h3>
+              <span class="section-meta">Sites</span>
+            </div>
+            <div class="button-stack" style="margin-top:12px">
+              <button id="restore-json-btn" class="btn btn-danger" type="button">Restaurer depuis data.json (secours)</button>
+            </div>
+            <div id="sites-list" class="stack-list"></div>
+            <div class="form-grid" style="margin-top:16px">
+              <div class="form-group">
+                <label for="new-site-nom">Nom du maquis</label>
+                <input id="new-site-nom" type="text" placeholder="ex: Cave des Amis">
+              </div>
+              <div class="form-group">
+                <label for="new-site-id">Identifiant unique</label>
+                <input id="new-site-id" type="text" placeholder="ex: cave-amis">
+              </div>
+              <div class="form-group">
+                <label for="new-site-ville">Ville</label>
+                <input id="new-site-ville" type="text" placeholder="ex: Abidjan">
+              </div>
+              <div class="form-group">
+                <label for="new-site-pays">Pays</label>
+                <input id="new-site-pays" type="text" placeholder="ex: Cote d'Ivoire">
+              </div>
+            </div>
+            <div class="button-stack">
+              <button id="add-site-btn" class="btn btn-primary" type="button">Creer le maquis</button>
+            </div>
+          </article>
+
+          <article class="card admin-only">
+            <div class="section-head">
+              <h3>Zone sensible</h3>
+              <span class="section-meta">Danger</span>
+            </div>
+            <p class="muted" style="margin-bottom:12px">Efface toutes les donnees locales serveur et repart sur une base vide.</p>
+            <button id="reset-btn" class="btn btn-danger" type="button">Reinitialiser l'application</button>
+          </article>
+        </div>
+
+      </section>
+      </main>
+    </div><!-- end main-wrapper -->
+
+    <!-- Navigation mobile (type APK Maquis Manager : peu d’entrées + menu Plus) -->
+    <nav id="bottom-nav" class="bottom-nav" aria-label="Navigation principale">
+      <button type="button" class="nav-btn bottom-nav-item" data-page="stock" aria-current="false">
+        <svg class="nav-icon bottom-nav-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8.186 1.113a.5.5 0 0 0-.372 0L1.846 3.5 4.25 4.461 10.404 2l-2.218-.887zm3.564 1.426L5.596 5 8 5.961 14.154 3.5l-2.404-.961zm3.25 1.7-6.5 2.6v7.922l6.5-2.6V4.24zM7.5 14.762V6.838L1 4.239v7.923l6.5 2.6zM7.443.184a1.5 1.5 0 0 1 1.114 0l7.129 2.852A.5.5 0 0 1 16 3.5v8.35a1.5 1.5 0 0 1-.914 1.387l-6.857 2.743a.5.5 0 0 1-.372 0L1.914 13.237A1.5 1.5 0 0 1 1 11.85V3.5a.5.5 0 0 1 .314-.464L7.443.184z"/></svg>
+        <span>Stock</span>
+      </button>
+      <button type="button" class="nav-btn bottom-nav-item" data-page="ventes" data-ventes-subtab="commandes" aria-current="false">
+        <svg class="nav-icon bottom-nav-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5 1a2 2 0 0 0-2 2v1h-.5a.5.5 0 0 0 0 1H.5a.5.5 0 0 0 0 1h2a.5.5 0 0 0 0 1h-1a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-1V4a2 2 0 0 0-2-2H5zm8 8v3H3V9h10zm-3-7v5H6V2h4z"/></svg>
+        <span>Commandes</span>
+      </button>
+      <button type="button" class="nav-btn bottom-nav-item" data-page="ventes" data-ventes-subtab="caisse" data-caisse-inner="historique" aria-current="false">
+        <svg class="nav-icon bottom-nav-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1.5 2A1.5 1.5 0 0 0 0 3.5v2h15v-2A1.5 1.5 0 0 0 13.5 2h-12zM15 7H1v5.5a1.5 1.5 0 0 0 1.5 1.5h11a1.5 1.5 0 0 0 1.5-1.5V7z"/></svg>
+        <span>Caisse</span>
+      </button>
+      <button type="button" class="nav-btn bottom-nav-item" data-page="pdj" aria-current="false">
+        <svg class="nav-icon bottom-nav-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M3.5 0a.5.5 0 0 1 .5.5V1h8V.5a.5.5 0 0 1 1 0V1h1a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2h1V.5a.5.5 0 0 1 .5-.5zM2 2a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1H2zm0 4h12v1H2V6z"/></svg>
+        <span>Jour</span>
+      </button>
+      <button type="button" class="nav-btn bottom-nav-item active" data-page="home" aria-current="true">
+        <svg class="nav-icon bottom-nav-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1 1h6v6H1V1zm8 0h6v6H9V1zM1 9h6v6H1V9zm8 0h6v6H9V9z"/></svg>
+        <span>Accueil</span>
+      </button>
+      <button type="button" class="bottom-nav-more-btn" id="mobile-more-btn" aria-label="Plus d&apos;options" aria-haspopup="dialog">
+        <svg class="bottom-nav-more-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 4a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zm0 5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zm0 5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z"/></svg>
+        <span>Plus</span>
+      </button>
+    </nav>
+
+    <div id="mobile-more-sheet" class="mobile-more-sheet hidden" aria-hidden="true">
+      <button type="button" class="mobile-more-backdrop" tabindex="-1" aria-label="Fermer le menu"></button>
+      <div class="mobile-more-panel" role="dialog" aria-modal="true" aria-labelledby="mobile-more-title">
+        <div class="mobile-more-handle" aria-hidden="true"></div>
+        <p id="mobile-more-title" class="mobile-more-title">Plus</p>
+        <p class="muted mobile-more-sub">QR, guide, charges… comme dans l&apos;app mobile.</p>
+        <nav class="mobile-more-links" aria-label="Sections supplementaires">
+          <button type="button" class="mobile-more-link" data-more-nav="qr">QR codes tables</button>
+          <button type="button" class="mobile-more-link" data-more-nav="guide">Guide</button>
+          <button type="button" class="mobile-more-link manager-more-item" data-more-nav="charges">Charges</button>
+          <button type="button" class="mobile-more-link manager-more-item" data-more-nav="params">Parametres</button>
+          <button type="button" class="mobile-more-link mobile-more-link-danger" data-more-nav="logout">Deconnexion</button>
+        </nav>
+      </div>
+    </div>
+
+    <button id="fab-btn" class="fab hidden" type="button" aria-label="Ajouter">+</button>
+  </div>
+
+  <div id="modal-vente" class="modal-overlay" aria-hidden="true">
+    <div class="modal">
+      <div class="modal-handle"></div>
+      <div class="section-head">
+        <h3>Nouvelle vente</h3>
+        <button class="icon-btn close-modal" data-close="modal-vente" type="button">Fermer</button>
+      </div>
+      <div class="form-group">
+        <label for="v-date">Date</label>
+        <input id="v-date" type="date">
+      </div>
+      <div class="form-grid two-cols">
+        <div class="form-group">
+          <label for="v-client">Client / table</label>
+          <input id="v-client" type="text" placeholder="ex: Table 4 - M. Niamke">
+        </div>
+        <div class="form-group">
+          <label for="v-order-select">Commande en cours</label>
+          <select id="v-order-select"></select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="v-article">Article / boisson</label>
+        <input id="v-article" type="text" placeholder="ex: Castel Beer 65cl" list="articles-list">
+        <datalist id="articles-list"></datalist>
+        <p id="v-kit-info" class="form-hint hidden"></p>
+        <div id="v-stock-info" class="form-hint hidden"></div>
+      </div>
+      <div class="form-group">
+        <label for="v-location">Lieu de consommation</label>
+        <select id="v-location">
+          <option value="Intérieur">Intérieur (cave)</option>
+          <option value="Extérieur">Extérieur (terrasse)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="v-format">Format de vente</label>
+        <select id="v-format"></select>
+      </div>
+      <div class="form-grid two-cols">
+        <div class="form-group">
+          <label for="v-prix">Prix unitaire (FCFA)</label>
+          <input id="v-prix" type="number" placeholder="Prix catalogue" readonly>
+        </div>
+        <div class="form-group">
+          <label for="v-qty">Quantite</label>
+          <input id="v-qty" type="number" value="1" placeholder="1">
+        </div>
+      </div>
+      <div class="inline-card">
+        <span class="muted">Facture</span>
+        <strong id="v-preview">0 FCFA</strong>
+      </div>
+      <details class="form-collapse">
+        <summary>Options (remise, note)</summary>
+        <div class="form-group">
+          <label for="v-remise">Remise</label>
+          <input id="v-remise" type="number" value="0" placeholder="0">
+        </div>
+        <div class="form-group">
+          <label for="v-note">Note serveur</label>
+          <input id="v-note" type="text" placeholder="ex: sans glacons, client presse">
+        </div>
+      </details>
+      <div class="button-stack">
+        <button id="save-vente-btn" class="btn btn-primary" type="button">Ajouter un article</button>
+        <button id="finalize-order-btn" class="btn btn-outline hidden" type="button">Encaisser</button>
+        <button class="btn btn-outline close-modal" data-close="modal-vente" type="button">Annuler</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-finalize" class="modal-overlay" aria-hidden="true">
+    <div class="modal">
+      <div class="modal-handle"></div>
+      <div class="section-head">
+        <h3>Validation de la commande</h3>
+        <button class="icon-btn close-modal" data-close="modal-finalize" type="button">Fermer</button>
+      </div>
+      <div class="inline-card" style="margin-bottom:14px">
+        <span class="muted">Total commande</span>
+        <strong id="finalize-order-total" style="color:var(--mm-primary-dark);font-size:1.1rem">0 FCFA</strong>
+      </div>
+      <p class="muted" style="margin-bottom:10px">Repartissez le paiement entre les differents modes. Le total doit etre egal a la commande.</p>
+      <div class="form-grid two-cols">
+        <div class="form-group">
+          <label for="pay-cash">Especes</label>
+          <input id="pay-cash" class="finalize-pay-input" type="number" min="0" placeholder="0">
+        </div>
+        <div class="form-group">
+          <label for="pay-wave">Wave</label>
+          <input id="pay-wave" class="finalize-pay-input" type="number" min="0" placeholder="0">
+        </div>
+        <div class="form-group">
+          <label for="pay-orange">Orange Money</label>
+          <input id="pay-orange" class="finalize-pay-input" type="number" min="0" placeholder="0">
+        </div>
+        <div class="form-group">
+          <label for="pay-mtn">MTN MoMo</label>
+          <input id="pay-mtn" class="finalize-pay-input" type="number" min="0" placeholder="0">
+        </div>
+        <div class="form-group">
+          <label for="pay-card">Carte</label>
+          <input id="pay-card" class="finalize-pay-input" type="number" min="0" placeholder="0">
+        </div>
+        <div class="form-group">
+          <label for="pay-credit">Credit client</label>
+          <input id="pay-credit" class="finalize-pay-input" type="number" min="0" placeholder="0">
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="pay-credit-name">Nom de celui qui doit</label>
+        <input id="pay-credit-name" type="text" placeholder="Obligatoire si credit">
+      </div>
+      <div class="inline-card" style="flex-direction:column;align-items:stretch;gap:6px">
+        <div style="display:flex;justify-content:space-between">
+          <span class="muted">Total saisi</span>
+          <strong id="pay-mix-preview">0 FCFA</strong>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-weight:700">
+          <span id="pay-reste-preview" style="color:#ff8e82">Reste à payer : 0 FCFA</span>
+        </div>
+      </div>
+      <div class="button-stack">
+        <button id="confirm-finalize-btn" class="btn btn-primary" type="button">Valider et creer la facture</button>
+        <button class="btn btn-outline close-modal" data-close="modal-finalize" type="button">Retour</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-charge" class="modal-overlay" aria-hidden="true">
+    <div class="modal">
+      <div class="modal-handle"></div>
+      <div class="section-head">
+        <h3>Nouvelle depense</h3>
+        <button class="icon-btn close-modal" data-close="modal-charge" type="button">Fermer</button>
+      </div>
+      <div class="form-group">
+        <label for="c-date">Date</label>
+        <input id="c-date" type="date">
+      </div>
+      <div class="form-group">
+        <label for="c-lib">Libelle</label>
+        <input id="c-lib" type="text" placeholder="ex: Loyer mensuel">
+      </div>
+      <div class="form-group">
+        <label for="c-cat">Categorie</label>
+        <select id="c-cat"></select>
+      </div>
+      <div class="form-group">
+        <label for="c-montant">Montant</label>
+        <input id="c-montant" type="number" placeholder="10000">
+      </div>
+      <div class="form-group">
+        <label for="c-pay">Paiement</label>
+        <select id="c-pay"></select>
+      </div>
+      <div class="button-stack">
+        <button id="save-charge-btn" class="btn btn-primary" type="button">Enregistrer la depense</button>
+        <button class="btn btn-outline close-modal" data-close="modal-charge" type="button">Annuler</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-purchase-receive" class="modal-overlay" aria-hidden="true">
+    <div class="modal" style="max-width:560px">
+      <div class="modal-handle"></div>
+      <div class="section-head">
+        <h3>Reception commande fournisseur</h3>
+        <button class="icon-btn close-modal" data-close="modal-purchase-receive" type="button">Fermer</button>
+      </div>
+      <p class="muted" style="margin-top:0;font-size:0.88rem">
+        Fournisseur : <strong id="purchase-receive-supplier"></strong> · Paiement : <span id="purchase-receive-payment"></span>
+      </p>
+      <p class="muted" style="margin-bottom:12px;font-size:0.82rem">
+        Ajustez les casiers reellement livres si la livraison differe de la commande. Les lignes a 0 ne sont pas ajoutees au stock.
+      </p>
+      <div id="purchase-receive-lines" style="max-height:min(52vh,420px);overflow:auto;padding-right:4px"></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.08)">
+        <span class="muted">Total reception</span>
+        <strong id="purchase-receive-total-preview">0 FCFA</strong>
+      </div>
+      <div class="button-stack" style="margin-top:18px">
+        <button id="purchase-receive-confirm-btn" class="btn btn-primary" type="button">Valider la reception</button>
+        <button class="btn btn-outline close-modal" data-close="modal-purchase-receive" type="button">Annuler</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-stock" class="modal-overlay" aria-hidden="true">
+    <div class="modal">
+      <div class="modal-handle"></div>
+      <div class="section-head">
+        <h3 id="stock-modal-title">Nouvel article en stock</h3>
+        <button class="icon-btn close-modal" data-close="modal-stock" type="button">Fermer</button>
+      </div>
+      <input type="hidden" id="s-edit-id">
+      <div class="form-group">
+        <label for="s-article">Article</label>
+        <input id="s-article" type="text" placeholder="ex: Castel Beer 65cl">
+      </div>
+      <div class="form-group">
+        <label for="s-cat">Categorie</label>
+        <select id="s-cat"></select>
+      </div>
+      <div class="form-grid two-cols">
+        <div class="form-group">
+          <label for="s-init">Stock initial (casiers)</label>
+          <input id="s-init" type="number" value="0" min="0" step="1" placeholder="ex: 10">
+        </div>
+        <div class="form-group">
+          <label for="s-case-size">Bouteilles par casier</label>
+          <select id="s-case-size">
+            <option value="6">6 bouteilles</option>
+            <option value="9">9 bouteilles</option>
+            <option value="12">12 bouteilles</option>
+            <option value="16">16 bouteilles</option>
+            <option value="20">20 bouteilles</option>
+            <option value="24" selected>24 bouteilles</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-grid two-cols">
+        <div class="form-group">
+          <label for="s-seuil">Seuil minimum (bouteilles)</label>
+          <input id="s-seuil" type="number" value="5" placeholder="5">
+        </div>
+        <div class="form-group">
+          <label for="s-prix">Prix achat / casier (FCFA)</label>
+          <input id="s-prix" type="number" placeholder="ex: 12000">
+        </div>
+      </div>
+      <div class="form-grid two-cols">
+        <div class="form-group">
+          <label for="s-frigo">Stock dans le frigo (bouteilles)</label>
+          <input id="s-frigo" type="number" min="0" value="0" placeholder="ex: 24">
+        </div>
+        <div class="form-group">
+          <label for="s-reserve">Stock dehors / reserve (bouteilles)</label>
+          <input id="s-reserve" type="number" min="0" placeholder="Automatique si vide">
+        </div>
+      </div>
+      <div class="form-group">
+        <div class="section-head compact-head">
+          <div>
+            <label>Formats de vente</label>
+            <p class="form-hint">Un format = quantite de bouteilles vendues ensemble avec son prix interieur/exterieur.</p>
+          </div>
+          <button id="add-sale-format-btn" class="mini-btn" type="button">+ Format</button>
+        </div>
+        <div id="sale-formats-list" class="sale-formats-list"></div>
+      </div>
+      <div class="form-grid two-cols hidden" id="legacy-stock-price-fields">
+        <div class="form-group">
+          <label for="s-pack">Ancien format</label>
+          <input id="s-pack" type="number" value="1" min="1" placeholder="ex: 3">
+        </div>
+        <div class="form-group">
+          <label for="s-price-location">Ancien lieu du prix</label>
+          <select id="s-price-location">
+            <option value="int">Interieur</option>
+            <option value="ext">Exterieur</option>
+          </select>
+          <input id="s-price-location-value" type="number" placeholder="ex: 700">
+        </div>
+        <div class="form-group">
+          <label for="s-prix-kit-int">Prix vente — Interieur (FCFA)</label>
+          <input id="s-prix-kit-int" type="number" placeholder="ex: 700">
+        </div>
+        <div class="form-group">
+          <label for="s-prix-kit-ext">Prix vente — Exterieur (FCFA)</label>
+          <input id="s-prix-kit-ext" type="number" placeholder="ex: 800">
+        </div>
+      </div>
+      <div class="button-stack">
+        <button id="save-stock-btn" class="btn btn-primary" type="button">Enregistrer l'article</button>
+        <button class="btn btn-outline close-modal" data-close="modal-stock" type="button">Annuler</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-reappro" class="modal-overlay" aria-hidden="true">
+    <div class="modal">
+      <div class="modal-handle"></div>
+      <div class="section-head">
+        <h3>Reapprovisionnement</h3>
+        <button class="icon-btn close-modal" data-close="modal-reappro" type="button">Fermer</button>
+      </div>
+      <input type="hidden" id="reappro-item-id">
+      <input type="hidden" id="reappro-mode" value="achat">
+      <div class="form-group">
+        <label>Article</label>
+        <p id="reappro-article-name" style="padding:14px 15px;border-radius:14px;background:var(--mm-bg);border:1px solid var(--line);color:var(--mm-text);margin-top:4px"></p>
+      </div>
+      <div class="form-group">
+        <label>Stock actuel</label>
+        <p id="reappro-stock-actuel" style="padding:14px 15px;border-radius:14px;background:var(--mm-bg);border:1px solid var(--line);color:var(--mm-primary-dark);font-weight:700;font-family:Roboto,system-ui,sans-serif;margin-top:4px"></p>
+      </div>
+      <div class="form-group">
+        <label id="reappro-qty-label" for="reappro-qty">Casiers a ajouter</label>
+        <input id="reappro-qty" type="number" min="0" step="1" placeholder="ex: 2">
+        <p id="reappro-case-info" class="form-hint"></p>
+      </div>
+      <div id="reappro-achat-fields">
+        <div class="form-group">
+          <label for="reappro-case-size-select">Btl par casier</label>
+          <select id="reappro-case-size-select">
+            <option value="6">6 bouteilles</option>
+            <option value="9">9 bouteilles</option>
+            <option value="12">12 bouteilles</option>
+            <option value="16">16 bouteilles</option>
+            <option value="20">20 bouteilles</option>
+            <option value="24" selected>24 bouteilles</option>
+          </select>
+        </div>
+        <div class="form-grid two-cols">
+          <div class="form-group">
+            <label for="reappro-prix">Prix achat / casier (FCFA)</label>
+            <input id="reappro-prix" type="number" min="0" step="1" placeholder="ex: 15000">
+          </div>
+          <div class="form-group">
+            <label for="reappro-paiement">Mode de paiement</label>
+            <select id="reappro-paiement">
+              <option value="Especes">Especes</option>
+              <option value="Wave">Wave</option>
+              <option value="Orange Money">Orange Money</option>
+              <option value="MTN Money">MTN Money</option>
+              <option value="Virement">Virement</option>
+              <option value="Credit fournisseur">Credit fournisseur</option>
+            </select>
+          </div>
+        </div>
+        <p class="form-hint" id="reappro-montant-info"></p>
+      </div>
+      <div class="button-stack">
+        <button id="save-reappro-btn" class="btn btn-primary" type="button">Valider le reapprovisionnement</button>
+        <button class="btn btn-outline close-modal" data-close="modal-reappro" type="button">Annuler</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-perte" class="modal-overlay" aria-hidden="true">
+    <div class="modal">
+      <div class="modal-handle"></div>
+      <div class="section-head">
+        <h3>Enregistrer une perte</h3>
+        <button class="icon-btn close-modal" data-close="modal-perte" type="button">Fermer</button>
+      </div>
+      <div class="form-group">
+        <label for="perte-article">Article</label>
+        <select id="perte-article"></select>
+      </div>
+      <div class="form-group">
+        <label>Stock actuel</label>
+        <p id="perte-stock-actuel" style="padding:14px 15px;border-radius:14px;background:var(--mm-bg);border:1px solid var(--line);color:var(--mm-primary-dark);font-weight:700;font-family:Roboto,system-ui,sans-serif;margin-top:4px">-</p>
+      </div>
+      <div class="form-grid two-cols">
+        <div class="form-group">
+          <label for="perte-qty">Bouteilles perdues</label>
+          <input id="perte-qty" type="number" min="1" step="1" placeholder="ex: 3">
+        </div>
+        <div class="form-group">
+          <label for="perte-motif">Motif</label>
+          <select id="perte-motif">
+            <option value="Casse">Casse</option>
+            <option value="Vol">Vol</option>
+            <option value="Peremption">Peremption</option>
+            <option value="Degustation">Degustation / Offert</option>
+            <option value="Autre">Autre</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="perte-notes">Notes (optionnel)</label>
+        <input id="perte-notes" type="text" placeholder="Precisions...">
+      </div>
+      <div class="button-stack">
+        <button id="save-perte-btn" class="btn btn-danger" type="button">Enregistrer la perte</button>
+        <button class="btn btn-outline close-modal" data-close="modal-perte" type="button">Annuler</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-2fa" class="modal-overlay" aria-hidden="true">
+    <div class="modal">
+      <div class="modal-handle"></div>
+      <div class="section-head">
+        <h3 id="modal-2fa-label">Configurer la 2FA</h3>
+        <button class="icon-btn close-modal" data-close="modal-2fa" type="button">Fermer</button>
+      </div>
+      <input type="hidden" id="totp-setup-username">
+      <p class="muted" style="margin-bottom:12px">Scannez ce QR code avec Google Authenticator ou Authy, puis entrez le code a 6 chiffres pour confirmer l'activation.</p>
+      <div style="text-align:center;margin:14px 0">
+        <img id="totp-qr-img" alt="QR code 2FA" style="width:200px;height:200px;border-radius:16px;background:#fff;padding:8px;display:inline-block">
+      </div>
+      <div class="form-group">
+        <label>Code secret (saisie manuelle dans l'appli)</label>
+        <code id="totp-secret-display" style="display:block;padding:12px;border-radius:10px;background:var(--mm-bg);border:1px solid var(--line);font-size:0.82rem;word-break:break-all;letter-spacing:0.08em;margin-top:6px;color:var(--mm-text)"></code>
+      </div>
+      <div class="form-group" style="margin-top:12px">
+        <label for="totp-confirm-code">Code de confirmation</label>
+        <input id="totp-confirm-code" type="text" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="one-time-code">
+      </div>
+      <div class="button-stack">
+        <button id="enable-2fa-btn" class="btn btn-primary" type="button">Activer la 2FA</button>
+        <button class="btn btn-outline close-modal" data-close="modal-2fa" type="button">Annuler</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" aria-live="polite"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="./app-orders.js?v=36"></script>
+</body>
+</html>

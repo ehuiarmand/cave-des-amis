@@ -1,0 +1,40 @@
+# Déploiement automatique vers Hostinger (FTP) à chaque push sur main/master.
+#
+# À configurer sur GitHub : Settings → Secrets and variables → Actions
+#   FTP_HOST      → hôte FTP (ex. ftp.cavedesamis.fr ou l’IP indiquée dans hPanel)
+#   FTP_USER      → utilisateur FTP
+#   FTP_PASSWORD  → mot de passe FTP
+# Si les fichiers ne vont pas au bon dossier sur le serveur, modifie server-dir ci-dessous
+# (souvent "./" quand la connexion FTP ouvre déjà public_html sur Hostinger).
+
+name: Deploy Hostinger (FTP)
+
+on:
+  push:
+    branches: [main, master]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy FTP
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_HOST }}
+          username: ${{ secrets.FTP_USER }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          server-dir: ./
+          exclude: |
+            **/.git*
+            **/.github/**
+            **/node_modules/**
+            **/_apk_extract/**
+            **/.cursor/**
+            **/__pycache__/**
+            **/.venv/**
+            **/*.pyc
+            **/.env
+            **/agent-transcripts/**
