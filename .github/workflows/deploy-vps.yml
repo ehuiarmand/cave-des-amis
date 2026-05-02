@@ -1,0 +1,35 @@
+# Déploiement vers un VPS Hostinger (SSH + rsync), adapté à root@IP
+#
+# Secrets GitHub → Settings du dépôt → Secrets and variables → Actions :
+#   REMOTE_HOST        → ex. 72.62.21.25
+#   REMOTE_USER        → root (ou autre utilisateur SSH)
+#   REMOTE_PATH        → dossier ABSOLU sur le VPS où sera copié le site, ex. /var/www/cave-des-amis
+#   REMOTE_PRIVATE_KEY → clé SSH PRIVÉE complète (voir étapes ci-dessous)
+#
+# Préparation sur le VPS (une fois, en SSH) :
+#   sudo mkdir -p /var/www/cave-des-amis
+#   sudo chown -R $USER:$USER /var/www/cave-des-amis
+# Puis configure nginx ou autre pour servir ce dossier (et éventuellement ton backend Python).
+
+name: Deploy VPS (SSH rsync)
+
+on:
+  push:
+    branches: [main, master]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Rsync vers le VPS
+        uses: burnett01/rsync-deployments@v8
+        with:
+          switches: -avzr --exclude=.git --exclude=.github --exclude=node_modules
+          path: ./
+          remote_path: ${{ secrets.REMOTE_PATH }}
+          remote_host: ${{ secrets.REMOTE_HOST }}
+          remote_user: ${{ secrets.REMOTE_USER }}
+          remote_key: ${{ secrets.REMOTE_PRIVATE_KEY }}

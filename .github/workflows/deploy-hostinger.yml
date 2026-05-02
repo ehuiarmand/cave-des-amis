@@ -9,9 +9,11 @@
 
 name: Deploy Hostinger (FTP)
 
+# Déclenché uniquement à la main : pour hébergement mutualisé FTP.
+# Sur VPS (SSH), utilise le workflow « Deploy VPS (SSH rsync) ».
+
 on:
-  push:
-    branches: [main, master]
+  workflow_dispatch:
 
 jobs:
   deploy:
