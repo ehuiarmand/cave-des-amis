@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Flex:wght@500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./styles.css?v=23">
+  <link rel="stylesheet" href="./styles.css?v=25">
 </head>
 <body>
   <div class="app-bg"></div>
@@ -428,7 +428,7 @@
               <div class="form-grid three-cols" style="margin-top:14px">
                 <div class="form-group">
                   <label for="credit-name">Client (débiteur)</label>
-                  <input id="credit-name" type="text" placeholder="ex: M. Koffi" list="credit-names-list">
+                  <input id="credit-name" type="text" placeholder="ex: M. KOFFI (affiché en majuscules)" list="credit-names-list" autocomplete="name">
                   <datalist id="credit-names-list"></datalist>
                 </div>
                 <div class="form-group">
@@ -448,8 +448,8 @@
               </div>
               <div class="form-grid two-cols" style="margin-top:0">
                 <div class="form-group">
-                  <label for="credit-date">Date</label>
-                  <input id="credit-date" type="date">
+                  <label for="credit-datetime">Date et heure du versement</label>
+                  <input id="credit-datetime" type="datetime-local" step="60">
                 </div>
                 <div class="form-group">
                   <label for="credit-note">Note</label>
@@ -915,17 +915,58 @@
 
     <div id="mobile-more-sheet" class="mobile-more-sheet hidden" aria-hidden="true">
       <button type="button" class="mobile-more-backdrop" tabindex="-1" aria-label="Fermer le menu"></button>
-      <div class="mobile-more-panel" role="dialog" aria-modal="true" aria-labelledby="mobile-more-title">
-        <div class="mobile-more-handle" aria-hidden="true"></div>
-        <p id="mobile-more-title" class="mobile-more-title">Plus</p>
-        <p class="muted mobile-more-sub">QR, guide, charges… comme dans l&apos;app mobile.</p>
-        <nav class="mobile-more-links" aria-label="Sections supplementaires">
-          <button type="button" class="mobile-more-link" data-more-nav="qr">QR codes tables</button>
-          <button type="button" class="mobile-more-link" data-more-nav="guide">Guide</button>
-          <button type="button" class="mobile-more-link manager-more-item" data-more-nav="charges">Charges</button>
-          <button type="button" class="mobile-more-link manager-more-item" data-more-nav="params">Parametres</button>
-          <button type="button" class="mobile-more-link mobile-more-link-danger" data-more-nav="logout">Deconnexion</button>
+      <div class="mobile-more-panel mm-sheet-dark" role="dialog" aria-modal="true" aria-labelledby="mobile-more-title">
+        <div class="mobile-more-handle mm-sheet-handle" aria-hidden="true"></div>
+        <header class="mobile-more-header">
+          <div class="mobile-more-header-text">
+            <p class="mobile-more-eyebrow">Maquis Manager</p>
+            <h2 id="mobile-more-title" class="mobile-more-title">Plus</h2>
+          </div>
+          <button type="button" class="mobile-more-close" data-more-sheet-close aria-label="Fermer">&times;</button>
+        </header>
+        <p class="mobile-more-sub">Accès rapide aux outils hors barre du bas.</p>
+        <nav class="mobile-more-features" aria-label="Sections supplementaires">
+          <button type="button" class="mobile-more-feature" data-more-nav="qr">
+            <span class="mobile-more-feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2"/><path d="M8 12h8M12 8v8"/></svg></span>
+            <span class="mobile-more-feature-copy">
+              <strong>QR codes tables</strong>
+              <span class="mobile-more-feature-desc">Commandes clients et impression des QR.</span>
+            </span>
+          </button>
+          <button type="button" class="mobile-more-feature" data-more-nav="guide">
+            <span class="mobile-more-feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg></span>
+            <span class="mobile-more-feature-copy">
+              <strong>Guide</strong>
+              <span class="mobile-more-feature-desc">Mode d&apos;emploi et bonnes pratiques.</span>
+            </span>
+          </button>
+          <button type="button" class="mobile-more-feature manager-more-item" data-more-nav="charges">
+            <span class="mobile-more-feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg></span>
+            <span class="mobile-more-feature-copy">
+              <strong>Charges</strong>
+              <span class="mobile-more-feature-desc">Dépenses, loyer et achats hors stock.</span>
+            </span>
+          </button>
+          <button type="button" class="mobile-more-feature manager-more-item" data-more-nav="params">
+            <span class="mobile-more-feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg></span>
+            <span class="mobile-more-feature-copy">
+              <strong>Paramètres</strong>
+              <span class="mobile-more-feature-desc">Maquis, utilisateurs et catalogue.</span>
+            </span>
+          </button>
+          <button type="button" class="mobile-more-feature mobile-more-feature-danger" data-more-nav="logout">
+            <span class="mobile-more-feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg></span>
+            <span class="mobile-more-feature-copy">
+              <strong>Déconnexion</strong>
+              <span class="mobile-more-feature-desc">Fermer la session sur cet appareil.</span>
+            </span>
+          </button>
         </nav>
+        <footer class="mobile-more-footer">
+          <button type="button" class="mobile-more-footer-link" data-more-nav="guide">Voir le guide</button>
+          <button type="button" class="mobile-more-footer-secondary" data-more-sheet-close>Fermer</button>
+          <button type="button" class="mobile-more-footer-primary" data-more-nav="qr">QR codes</button>
+        </footer>
       </div>
     </div>
 
@@ -1345,6 +1386,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=39"></script>
+  <script src="./app-orders.js?v=42"></script>
 </body>
 </html>

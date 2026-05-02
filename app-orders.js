@@ -79,13 +79,19 @@ function isAReglerPaiement(paiement) {
   return n === "aregler" || paiement === "A regler";
 }
 
+/** Clé affichage recouvrement : même débiteur quel que soit la casse → tout en majuscules. */
+function debtorDisplayKey(name) {
+  const raw = String(name || "").trim();
+  return raw ? raw.toUpperCase() : "CLIENT INCONNU";
+}
+
 function creditOutstandingMap(sourceState = state) {
   const ventes = recordsForSite(sourceState?.ventes || []);
   const map = {};
   ventes.forEach((v) => {
     const net = calcNet(v);
     const details = v.paiementDetails?.length ? v.paiementDetails : [{ method: v.paiement || "", amount: net }];
-    const debtorName = String(v.debiteur || v.client || "").trim() || "Client inconnu";
+    const debtorName = debtorDisplayKey(v.debiteur || v.client || "Client inconnu");
     let creditAmount = 0;
     details.forEach((d) => {
       if (isCreditClientMethod(d.method)) creditAmount += Number(d.amount) || 0;
@@ -94,7 +100,7 @@ function creditOutstandingMap(sourceState = state) {
     if (creditAmount > 0) map[debtorName] = (map[debtorName] || 0) + creditAmount;
   });
   creditRecoveriesForSite(sourceState).forEach((p) => {
-    const debtorName = String(p.debiteur || "").trim() || "Client inconnu";
+    const debtorName = debtorDisplayKey(p.debiteur || "Client inconnu");
     map[debtorName] = (map[debtorName] || 0) - (Number(p.montant) || 0);
   });
   Object.keys(map).forEach((k) => {
@@ -110,7 +116,7 @@ function creditIssuerLabelsByDebtor(sourceState = state) {
   ventes.forEach((v) => {
     const net = calcNet(v);
     const details = v.paiementDetails?.length ? v.paiementDetails : [{ method: v.paiement || "", amount: net }];
-    const debtorName = String(v.debiteur || v.client || "").trim() || "Client inconnu";
+    const debtorName = debtorDisplayKey(v.debiteur || v.client || "Client inconnu");
     let creditAmount = 0;
     details.forEach((d) => {
       if (isCreditClientMethod(d.method)) creditAmount += Number(d.amount) || 0;
@@ -150,6 +156,47 @@ function fmt(value) {
 
 function today() {
   return new Date().toISOString().slice(0, 10);
+}
+
+/** Valeur pour input[type=datetime-local] (fuseau local). */
+function datetimeLocalNow() {
+  const d = new Date();
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+  return d.toISOString().slice(0, 16);
+}
+
+function formatCreditPaidAt(p) {
+  const raw = String(p?.paidAt || p?.createdAt || "").trim();
+  if (raw) {
+    try {
+      const d = new Date(raw);
+      if (!Number.isNaN(d.getTime())) {
+        return d.toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" });
+      }
+    } catch (_) {
+      /* ignore */
+    }
+  }
+  const day = String(p?.date || "").trim();
+  return day ? `${day} (heure non renseignée)` : "—";
+}
+
+/** Versements déjà enregistrés par débiteur (clé majuscules), tri récent → ancien. */
+function creditRecoveriesGroupedByDebtor(sourceState = state) {
+  const map = {};
+  creditRecoveriesForSite(sourceState).forEach((p) => {
+    const k = debtorDisplayKey(p.debiteur);
+    if (!map[k]) map[k] = [];
+    map[k].push(p);
+  });
+  Object.keys(map).forEach((k) => {
+    map[k].sort((a, b) => {
+      const ta = String(a.paidAt || a.createdAt || `${a.date}T00:00:00`).slice(0, 24);
+      const tb = String(b.paidAt || b.createdAt || `${b.date}T00:00:00`).slice(0, 24);
+      return tb.localeCompare(ta);
+    });
+  });
+  return map;
 }
 
 function calcNet(item) {
@@ -732,6 +779,10 @@ function bindMobileMoreSheet() {
   document.getElementById("topbar-more-btn")?.addEventListener("click", () => openMobileMoreSheet());
   sheet.addEventListener("click", (event) => {
     if (event.target.closest(".mobile-more-backdrop")) closeMobileMoreSheet();
+    if (event.target.closest("[data-more-sheet-close]")) {
+      closeMobileMoreSheet();
+      return;
+    }
     const link = event.target.closest("[data-more-nav]");
     if (!link) return;
     const nav = link.dataset.moreNav;
@@ -2463,6 +2514,7 @@ function renderCreditRecovery() {
   const issuerByDebtor = creditIssuerLabelsByDebtor();
   const entries = Object.entries(dueMap).sort((a, b) => b[1] - a[1]);
   const totalDue = entries.reduce((sum, [, v]) => sum + (Number(v) || 0), 0);
+  const byDebtor = creditRecoveriesGroupedByDebtor();
 
   const totalDueNode = document.getElementById("credit-total-due");
   const totalPaidNode = document.getElementById("credit-total-paid");
@@ -2473,7 +2525,7 @@ function renderCreditRecovery() {
   if (datalist) {
     const names = [...new Set([
       ...entries.map(([n]) => n),
-      ...creditRecoveriesForSite().map((p) => String(p.debiteur || "").trim()).filter(Boolean),
+      ...creditRecoveriesForSite().map((p) => debtorDisplayKey(p.debiteur)).filter(Boolean),
     ])].sort((a, b) => a.localeCompare(b, "fr"));
     datalist.innerHTML = names.map((n) => `<option value="${escapeHtml(n)}"></option>`).join("");
   }
@@ -2482,6 +2534,33 @@ function renderCreditRecovery() {
     list.innerHTML = emptyState("Aucun crédit en cours", "Les crédits clients apparaîtront ici (paiement : Crédit client).");
     return;
   }
+
+  const rowsHtml = entries.map(([name, amount]) => {
+    const installments = byDebtor[name] || [];
+    const headRow = `
+            <tr class="credit-debtor-summary">
+              <td><strong>${escapeHtml(name)}</strong></td>
+              <td class="muted" style="font-size:0.9rem">${escapeHtml(issuerByDebtor[name] || "—")}</td>
+              <td style="text-align:right"><strong style="color:#ff8e82">${fmt(amount)} FCFA</strong></td>
+              <td><button type="button" class="mini-btn" data-credit-fill="${escapeHtml(name)}">Encaisser</button></td>
+            </tr>`;
+    const instRows = installments.length
+      ? [`<tr class="credit-installment-row"><td colspan="4" class="credit-installment-label">Échéances enregistrées (${installments.length})</td></tr>`,
+        ...installments.map((p) => `
+            <tr class="credit-installment-row">
+              <td colspan="2" style="padding-left:1.1rem;font-size:0.88rem">
+                <span class="muted">↳</span>
+                ${escapeHtml(formatCreditPaidAt(p))}
+                · ${escapeHtml(p.paiement || "—")}
+                ${p.note ? ` · <span class="muted">${escapeHtml(p.note)}</span>` : ""}
+              </td>
+              <td style="text-align:right;font-size:0.88rem;color:#72d7a9;font-weight:600">${fmt(p.montant)} FCFA</td>
+              <td></td>
+            </tr>`)
+      ].join("")
+      : "";
+    return headRow + instRows;
+  }).join("");
 
   list.innerHTML = `
     <div class="stock-table-wrap" style="margin-top:10px">
@@ -2492,16 +2571,7 @@ function renderCreditRecovery() {
           <th style="text-align:right">Reste à payer</th>
           <th>Action</th>
         </tr></thead>
-        <tbody>
-          ${entries.map(([name, amount]) => `
-            <tr>
-              <td>${escapeHtml(name)}</td>
-              <td class="muted" style="font-size:0.9rem">${escapeHtml(issuerByDebtor[name] || "—")}</td>
-              <td style="text-align:right"><strong style="color:#ff8e82">${fmt(amount)} FCFA</strong></td>
-              <td><button type="button" class="mini-btn" data-credit-fill="${escapeHtml(name)}">Encaisser</button></td>
-            </tr>
-          `).join("")}
-        </tbody>
+        <tbody>${rowsHtml}</tbody>
       </table>
     </div>
   `;
@@ -2509,33 +2579,48 @@ function renderCreditRecovery() {
 
 async function saveCreditRecovery() {
   const name = (document.getElementById("credit-name")?.value || "").trim();
+  const nameNorm = debtorDisplayKey(name);
   const montant = Math.round(Number(document.getElementById("credit-amount")?.value) || 0);
   const method = document.getElementById("credit-method")?.value || "Espèces";
-  const date = document.getElementById("credit-date")?.value || today();
+  const dtInput = document.getElementById("credit-datetime")?.value?.trim() || "";
   const note = (document.getElementById("credit-note")?.value || "").trim();
   if (!name) { showToast("Le nom du client débiteur est obligatoire."); return; }
   if (montant <= 0) { showToast("Entrez un montant valide."); return; }
 
+  let paidAtIso = new Date().toISOString();
+  let dateCalendar = today();
+  if (dtInput) {
+    const parsed = new Date(dtInput);
+    if (!Number.isNaN(parsed.getTime())) {
+      paidAtIso = parsed.toISOString();
+      dateCalendar = dtInput.slice(0, 10);
+    }
+  }
+
   const dueMap = creditOutstandingMap();
-  const remaining = Number(dueMap[name]) || 0;
+  const remaining = Number(dueMap[nameNorm]) || 0;
   const applied = remaining > 0 ? Math.min(montant, Math.round(remaining)) : montant;
   if (remaining > 0 && applied <= 0) { showToast("Ce client n'a plus de crédit en cours."); return; }
 
   const row = {
     id: state.nextId.creditRecovery++,
     siteId: currentSiteId(),
-    date,
-    debiteur: name,
+    date: dateCalendar,
+    paidAt: paidAtIso,
+    debiteur: nameNorm,
     montant: applied,
     paiement: method,
     note,
     createdAt: new Date().toISOString(),
   };
   state.creditRecoveries = [row, ...(state.creditRecoveries || [])];
-  recordStaffAudit("create", "credit_recovery", `Encaissement credit · ${name}`, `${fmt(applied)} FCFA · ${method}${note ? ` · ${note}` : ""}`);
+  recordStaffAudit("create", "credit_recovery", `Encaissement credit · ${nameNorm}`, `${fmt(applied)} FCFA · ${method}${note ? ` · ${note}` : ""}`);
   await persistState({ creditRecoveries: state.creditRecoveries, nextId: state.nextId });
+  document.getElementById("credit-name").value = nameNorm;
   document.getElementById("credit-amount").value = "";
   document.getElementById("credit-note").value = "";
+  const creditDt = document.getElementById("credit-datetime");
+  if (creditDt) creditDt.value = datetimeLocalNow();
   showToast("Versement enregistré.");
   renderCreditRecovery();
   renderDashboard();
@@ -4522,8 +4607,8 @@ async function bootstrapAuthenticatedApp() {
   populateSelect("c-pay", CHARGE_PAYMENT_METHODS);
   document.getElementById("v-date").value = today();
   document.getElementById("c-date").value = today();
-  const creditDate = document.getElementById("credit-date");
-  if (creditDate) creditDate.value = today();
+  const creditDt = document.getElementById("credit-datetime");
+  if (creditDt) creditDt.value = datetimeLocalNow();
   document.getElementById("orders-filter-date").value = today();
   document.getElementById("stock-move-start").value = today().slice(0, 8) + "01";
   document.getElementById("stock-move-end").value = today();
@@ -5042,13 +5127,14 @@ document.getElementById("fab-btn").addEventListener("click", () => {
       if (!fill) return;
       const name = fill.getAttribute("data-credit-fill") || "";
       const nameField = document.getElementById("credit-name");
-      if (nameField) nameField.value = name;
+      if (nameField) nameField.value = debtorDisplayKey(name);
       const dueMap = creditOutstandingMap();
-      const remaining = Number(dueMap[name]) || 0;
+      const key = debtorDisplayKey(name);
+      const remaining = Number(dueMap[key]) || 0;
       const amountField = document.getElementById("credit-amount");
       if (amountField && remaining > 0) amountField.value = String(Math.round(remaining));
-      const dateField = document.getElementById("credit-date");
-      if (dateField && !dateField.value) dateField.value = today();
+      const creditDt = document.getElementById("credit-datetime");
+      if (creditDt) creditDt.value = datetimeLocalNow();
       showToast("Client sélectionné pour encaissement.");
     });
   }
