@@ -668,6 +668,7 @@ function syncNavActiveState() {
       } else active = true;
     }
     btn.classList.toggle("active", active);
+    btn.setAttribute("aria-current", active ? "page" : "false");
   });
 }
 
@@ -1313,6 +1314,7 @@ function renderDashboard() {
       </article>`).join("")}`
     : emptyState("Tout va bien", "Aucune alerte stock critique pour le moment.");
   renderBreakdown("pay-chart", paymentTotals(ventes), caTotal, "Aucun paiement disponible.");
+  syncMobileBottomBadges();
 }
 
 function suggestPurchaseCases(stockItem) {
@@ -1328,6 +1330,25 @@ function suggestPurchaseCases(stockItem) {
 function stockAlertItemsForDashboard() {
   const stock = recordsForSite(state.stock);
   return stock.filter((item) => stockActuel(item) <= Number(item.seuilMin));
+}
+
+/** Badges verts type WhatsApp sur la barre du bas (commandes QR, alertes stock). */
+function syncMobileBottomBadges() {
+  const cmd = document.getElementById("bottom-nav-badge-commandes");
+  if (cmd) {
+    if (qrAlertCount <= 0) {
+      cmd.classList.add("hidden");
+      cmd.textContent = "";
+    } else {
+      cmd.classList.remove("hidden");
+      cmd.textContent = qrAlertCount > 99 ? "99+" : String(qrAlertCount);
+    }
+  }
+  const stockDot = document.getElementById("bottom-nav-dot-stock");
+  if (stockDot && state) {
+    const n = stockAlertItemsForDashboard().length;
+    stockDot.classList.toggle("hidden", n === 0);
+  }
 }
 
 /** Ajoute ou fusionne une ligne au brouillon achat depuis une ligne stock. Retourne false si prix catalogue absent. */
@@ -2306,14 +2327,16 @@ function qrOrdersForCurrentSite(sourceState = state) {
 
 function renderQrAlertBadge() {
   const badge = document.getElementById("qr-alert-badge");
-  if (!badge) return;
-  if (qrAlertCount <= 0) {
-    badge.classList.add("hidden");
-    badge.textContent = "Nouvelle commande QR";
-    return;
+  if (badge) {
+    if (qrAlertCount <= 0) {
+      badge.classList.add("hidden");
+      badge.textContent = "Nouvelle commande QR";
+    } else {
+      badge.classList.remove("hidden");
+      badge.textContent = qrAlertCount === 1 ? "1 nouvelle commande QR" : `${qrAlertCount} nouvelles commandes QR`;
+    }
   }
-  badge.classList.remove("hidden");
-  badge.textContent = qrAlertCount === 1 ? "1 nouvelle commande QR" : `${qrAlertCount} nouvelles commandes QR`;
+  syncMobileBottomBadges();
 }
 
 function clearQrAlert() {

@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Flex:wght@500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./styles.css?v=22">
+  <link rel="stylesheet" href="./styles.css?v=23">
 </head>
 <body>
   <div class="app-bg"></div>
@@ -871,31 +871,45 @@
       </main>
     </div><!-- end main-wrapper -->
 
-    <!-- Navigation mobile (type APK Maquis Manager : peu d’entrées + menu Plus) -->
+    <!-- Navigation mobile : style barre du bas type WhatsApp / Material You (pilule active, badges verts) -->
     <nav id="bottom-nav" class="bottom-nav" aria-label="Navigation principale">
-      <button type="button" class="nav-btn bottom-nav-item" data-page="stock" aria-current="false">
-        <svg class="nav-icon bottom-nav-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8.186 1.113a.5.5 0 0 0-.372 0L1.846 3.5 4.25 4.461 10.404 2l-2.218-.887zm3.564 1.426L5.596 5 8 5.961 14.154 3.5l-2.404-.961zm3.25 1.7-6.5 2.6v7.922l6.5-2.6V4.24zM7.5 14.762V6.838L1 4.239v7.923l6.5 2.6zM7.443.184a1.5 1.5 0 0 1 1.114 0l7.129 2.852A.5.5 0 0 1 16 3.5v8.35a1.5 1.5 0 0 1-.914 1.387l-6.857 2.743a.5.5 0 0 1-.372 0L1.914 13.237A1.5 1.5 0 0 1 1 11.85V3.5a.5.5 0 0 1 .314-.464L7.443.184z"/></svg>
-        <span>Stock</span>
+      <button type="button" class="nav-btn bottom-nav-item active" data-page="home" aria-current="true">
+        <span class="bottom-nav-icon-wrap">
+          <svg class="nav-icon bottom-nav-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1 1h6v6H1V1zm8 0h6v6H9V1zM1 9h6v6H1V9zm8 0h6v6H9V9z"/></svg>
+        </span>
+        <span class="bottom-nav-label">Accueil</span>
       </button>
       <button type="button" class="nav-btn bottom-nav-item" data-page="ventes" data-ventes-subtab="commandes" aria-current="false">
-        <svg class="nav-icon bottom-nav-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5 1a2 2 0 0 0-2 2v1h-.5a.5.5 0 0 0 0 1H.5a.5.5 0 0 0 0 1h2a.5.5 0 0 0 0 1h-1a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-1V4a2 2 0 0 0-2-2H5zm8 8v3H3V9h10zm-3-7v5H6V2h4z"/></svg>
-        <span>Commandes</span>
+        <span class="bottom-nav-icon-wrap">
+          <svg class="nav-icon bottom-nav-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5 1a2 2 0 0 0-2 2v1h-.5a.5.5 0 0 0 0 1H.5a.5.5 0 0 0 0 1h2a.5.5 0 0 0 0 1h-1a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-1V4a2 2 0 0 0-2-2H5zm8 8v3H3V9h10zm-3-7v5H6V2h4z"/></svg>
+          <span id="bottom-nav-badge-commandes" class="bottom-nav-badge-num hidden" aria-live="polite"></span>
+        </span>
+        <span class="bottom-nav-label">Commandes</span>
       </button>
       <button type="button" class="nav-btn bottom-nav-item" data-page="ventes" data-ventes-subtab="caisse" data-caisse-inner="historique" aria-current="false">
-        <svg class="nav-icon bottom-nav-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1.5 2A1.5 1.5 0 0 0 0 3.5v2h15v-2A1.5 1.5 0 0 0 13.5 2h-12zM15 7H1v5.5a1.5 1.5 0 0 0 1.5 1.5h11a1.5 1.5 0 0 0 1.5-1.5V7z"/></svg>
-        <span>Caisse</span>
+        <span class="bottom-nav-icon-wrap">
+          <svg class="nav-icon bottom-nav-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1.5 2A1.5 1.5 0 0 0 0 3.5v2h15v-2A1.5 1.5 0 0 0 13.5 2h-12zM15 7H1v5.5a1.5 1.5 0 0 0 1.5 1.5h11a1.5 1.5 0 0 0 1.5-1.5V7z"/></svg>
+        </span>
+        <span class="bottom-nav-label">Caisse</span>
+      </button>
+      <button type="button" class="nav-btn bottom-nav-item" data-page="stock" aria-current="false">
+        <span class="bottom-nav-icon-wrap">
+          <svg class="nav-icon bottom-nav-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8.186 1.113a.5.5 0 0 0-.372 0L1.846 3.5 4.25 4.461 10.404 2l-2.218-.887zm3.564 1.426L5.596 5 8 5.961 14.154 3.5l-2.404-.961zm3.25 1.7-6.5 2.6v7.922l6.5-2.6V4.24zM7.5 14.762V6.838L1 4.239v7.923l6.5 2.6zM7.443.184a1.5 1.5 0 0 1 1.114 0l7.129 2.852A.5.5 0 0 1 16 3.5v8.35a1.5 1.5 0 0 1-.914 1.387l-6.857 2.743a.5.5 0 0 1-.372 0L1.914 13.237A1.5 1.5 0 0 1 1 11.85V3.5a.5.5 0 0 1 .314-.464L7.443.184z"/></svg>
+          <span id="bottom-nav-dot-stock" class="bottom-nav-badge-dot hidden" aria-hidden="true"></span>
+        </span>
+        <span class="bottom-nav-label">Stock</span>
       </button>
       <button type="button" class="nav-btn bottom-nav-item" data-page="pdj" aria-current="false">
-        <svg class="nav-icon bottom-nav-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M3.5 0a.5.5 0 0 1 .5.5V1h8V.5a.5.5 0 0 1 1 0V1h1a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2h1V.5a.5.5 0 0 1 .5-.5zM2 2a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1H2zm0 4h12v1H2V6z"/></svg>
-        <span>Jour</span>
-      </button>
-      <button type="button" class="nav-btn bottom-nav-item active" data-page="home" aria-current="true">
-        <svg class="nav-icon bottom-nav-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1 1h6v6H1V1zm8 0h6v6H9V1zM1 9h6v6H1V9zm8 0h6v6H9V9z"/></svg>
-        <span>Accueil</span>
+        <span class="bottom-nav-icon-wrap">
+          <svg class="nav-icon bottom-nav-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M3.5 0a.5.5 0 0 1 .5.5V1h8V.5a.5.5 0 0 1 1 0V1h1a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2h1V.5a.5.5 0 0 1 .5-.5zM2 2a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1H2zm0 4h12v1H2V6z"/></svg>
+        </span>
+        <span class="bottom-nav-label">Jour</span>
       </button>
       <button type="button" class="bottom-nav-more-btn" id="mobile-more-btn" aria-label="Plus d&apos;options" aria-haspopup="dialog">
-        <svg class="bottom-nav-more-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 4a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zm0 5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zm0 5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z"/></svg>
-        <span>Plus</span>
+        <span class="bottom-nav-icon-wrap">
+          <svg class="bottom-nav-more-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 4a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zm0 5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zm0 5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z"/></svg>
+        </span>
+        <span class="bottom-nav-label">Plus</span>
       </button>
     </nav>
 
@@ -1331,6 +1345,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=38"></script>
+  <script src="./app-orders.js?v=39"></script>
 </body>
 </html>
