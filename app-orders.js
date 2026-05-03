@@ -3222,11 +3222,17 @@ async function saveOrderLine() {
     showToast("Choisissez un article du stock avec un prix catalogue.");
     return;
   }
+  const selectedOrderId = Number(document.getElementById("v-order-select").value) || activeOrderId;
+  const creatingNewOrder = !selectedOrderId;
   const date = document.getElementById("v-date").value || today();
   const order = ensureOrder(document.getElementById("v-client").value, date, document.getElementById("v-note").value);
   const requestedBottles = (Number(document.getElementById("v-qty").value) || 1) * Math.max(1, Number(format?.quantite) || Number(product?.packSize) || 1);
   const availability = stockAvailabilityForLine(product.article, requestedBottles, order.id, editingLineId);
   if (!availability.stockItem || availability.available < requestedBottles) {
+    if (creatingNewOrder && !(order.lignes && order.lignes.length)) {
+      state.commandes = (state.commandes || []).filter((o) => o.id !== order.id);
+      if (activeOrderId === order.id) activeOrderId = null;
+    }
     showToast(`Stock insuffisant pour ${product.article}. Disponible: ${fmt(availability.available)} bouteille(s).`);
     return;
   }
@@ -4762,7 +4768,15 @@ function handleApiError(error) {
     logout();
     return;
   }
-  showToast(error?.message || "Une erreur est survenue.");
+  let msg = error?.message || "Une erreur est survenue.";
+  const net =
+    !navigator.onLine
+    || (typeof error?.message === "string" && error.message.includes("Failed to fetch"))
+    || error?.name === "TypeError";
+  if (net) {
+    msg = "Serveur injoignable : vos dernieres modifications peuvent ne pas etre enregistrees. Verifiez la connexion ou l URL du site, puis reessayez.";
+  }
+  showToast(msg);
 }
 
 
