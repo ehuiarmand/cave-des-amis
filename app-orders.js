@@ -528,10 +528,10 @@ function canAnyAdmin() {
   return canSuperAdmin() || canSiteAdmin();
 }
 
-/** Date traitee sur le Point du jour : le superadmin peut choisir une journee (p. ex. apres reouverture pour corriger les ecarts). */
+/** Date traitee sur le Point du jour : admin et superadmin peuvent choisir une journee anterieure pour corriger les ecarts. */
 function pdjCalendarDate() {
   const t = today();
-  if (!canSuperAdmin()) return t;
+  if (!canAnyAdmin()) return t;
   const el = document.getElementById("pdj-work-date");
   const v = el?.value?.trim();
   if (v && /^\d{4}-\d{2}-\d{2}$/.test(v)) return v > t ? t : v;
@@ -540,7 +540,7 @@ function pdjCalendarDate() {
 
 function syncPdjWorkDateInput() {
   const el = document.getElementById("pdj-work-date");
-  if (!el || !canSuperAdmin()) return;
+  if (!el || !canAnyAdmin()) return;
   const t = today();
   el.max = t;
   if (!el.value || el.value > t) el.value = t;
@@ -1401,9 +1401,15 @@ async function reopenAccountingDay(siteId, dateStr) {
   revertStockCheckLedgerEffects(check);
   state.stockChecks = (state.stockChecks || []).filter((sc) => !(sc.siteId === siteId && sc.date === dateStr));
   await persistState({ stock: state.stock, stockChecks: state.stockChecks });
+  // Auto-positionner la date de travail sur la date recouverte
+  const workDateEl = document.getElementById("pdj-work-date");
+  if (workDateEl && canAnyAdmin()) {
+    workDateEl.value = dateStr;
+    syncPdjWorkDateInput();
+  }
   renderStock();
   renderPointDuJour();
-  showToast(`Journee du ${formatDateDdMmYyyy(dateStr)} reouverte. Vous pouvez verifier a nouveau puis recloturer.`);
+  showToast(`Journee du ${formatDateDdMmYyyy(dateStr)} reouverte. Corrigez le stock puis recloturez.`);
 }
 
 function dayBookFor(dateStr = today(), siteId = currentSiteId()) {
@@ -1584,7 +1590,7 @@ function renderDailyStockCheck() {
   const button = document.getElementById("close-day-btn");
   const printBtn = document.getElementById("print-closure-btn");
   if (!container || !button) return;
-  const superadminCorrection = Boolean(closed && canSuperAdmin());
+  const superadminCorrection = Boolean(closed && canAnyAdmin());
   button.textContent = superadminCorrection
     ? "Mettre a jour la cloture"
     : closed
@@ -1598,7 +1604,8 @@ function renderDailyStockCheck() {
   }
 
   const openingBlocked = dayBookNeedsCashOpening(dayBook);
-  if (openingBlocked) {
+  const isPastDate = dStr !== today();
+  if (openingBlocked && !(isPastDate && canAnyAdmin())) {
     container.innerHTML = emptyState(
       "Ouverture de caisse requise",
       "Validez le montant en caisse en haut de cette page avant la verification stock et la cloture.",
@@ -1608,7 +1615,7 @@ function renderDailyStockCheck() {
   }
   button.disabled = false;
 
-  if (closed && !canSuperAdmin()) {
+  if (closed && !canAnyAdmin()) {
     const checkItems = closed.items || [];
     const rows = checkItems.map((ci) => {
       const ecartColor = ci.ecart === 0 ? "#72d7a9" : "#ff8e82";
@@ -1656,7 +1663,7 @@ function renderDailyStockCheck() {
         <tbody>${rows}</tbody>
       </table></div>`;
   } else {
-    const seedFromClose = closed && canSuperAdmin() ? closed : null;
+    const seedFromClose = closed && canAnyAdmin() ? closed : null;
     const ventesJour = recordsForSite(state.ventes).filter((v) => v.date.slice(0, 10) === dStr);
     const totauxJourOpen = paymentTotals(ventesJour);
     const especesVentes = Number(totauxJourOpen["Espèces"]) || 0;
@@ -1664,7 +1671,7 @@ function renderDailyStockCheck() {
     const especesCharges = chargesJour.reduce((sum, c) => (
       normalizePaymentMethodKey(c.paiement) === normalizePaymentMethodKey("Espèces") ? sum + (Number(c.montant) || 0) : sum
     ), 0);
-    const openingCash = Number(dayBook.openingCashFcfa) || 0;
+    const openingCash = Number(dayBook?.openingCashFcfa) || 0;
     const expectedEspeces = openingCash + especesVentes - especesCharges;
     const closingSeed = seedFromClose && typeof seedFromClose.closingCashFcfa === "number"
       ? Math.round(Number(seedFromClose.closingCashFcfa))
@@ -4017,23 +4024,24 @@ async function closeAccountingDay() {
     return;
   }
   const dStr = pdjCalendarDate();
-  if (!canSuperAdmin() && dStr !== today()) {
-    showToast("Seul le super administrateur peut cloturer une autre date.");
+  if (!canAnyAdmin() && dStr !== today()) {
+    showToast("Seul un administrateur peut cloturer une autre date.");
     return;
   }
   const dayBook = dayBookFor(dStr, currentSiteId());
-  if (!dayBook || dayBookNeedsCashOpening(dayBook)) {
+  const isPastDateCorrection = dStr !== today() && canAnyAdmin();
+  if (!isPastDateCorrection && (!dayBook || dayBookNeedsCashOpening(dayBook))) {
     showToast(dStr === today()
       ? "Enregistrez d'abord l'ouverture de caisse pour aujourd'hui."
       : "Enregistrez d'abord l'ouverture de caisse pour cette journee.");
     return;
   }
   const closingRaw = document.getElementById("pdj-closing-cash")?.value;
-  if (closingRaw === undefined || closingRaw === null || String(closingRaw).trim() === "") {
+  if (!isPastDateCorrection && (closingRaw === undefined || closingRaw === null || String(closingRaw).trim() === "")) {
     showToast("Saisissez le montant espèces dénombrées à la fermeture.");
     return;
   }
-  const closingCashFcfa = Math.max(0, Number(closingRaw));
+  const closingCashFcfa = Math.max(0, Number(closingRaw) || 0);
   if (Number.isNaN(closingCashFcfa)) {
     showToast("Montant de fermeture invalide.");
     return;
