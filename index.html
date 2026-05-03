@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Flex:wght@500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./styles.css?v=29">
+  <link rel="stylesheet" href="./styles.css?v=31">
 </head>
 <body>
   <div class="app-bg"></div>
@@ -707,7 +707,7 @@
           <button type="button" class="tab active" data-subtab-params="profil" role="tab" aria-selected="true">Profil</button>
           <button type="button" class="tab manager-only" data-subtab-params="catalogue" role="tab">Categories</button>
           <button type="button" class="tab manager-only" data-subtab-params="acces" role="tab">Acces</button>
-          <button type="button" class="tab admin-only" data-subtab-params="admin" role="tab">Administration</button>
+          <button type="button" class="tab any-admin" data-subtab-params="admin" role="tab">Administration</button>
         </div>
 
         <div data-params-panel="profil" class="params-panel">
@@ -795,8 +795,9 @@
                 <label for="new-user-role">Role</label>
                 <select id="new-user-role">
                   <option value="serveuse">Serveuse</option>
-                  <option value="manager" class="admin-only">Gerant</option>
-                  <option value="admin" class="admin-only">Administrateur</option>
+                  <option value="manager" class="any-admin">Gerant</option>
+                  <option value="admin" class="admin-only">Administrateur de maquis</option>
+                  <option value="superadmin" class="admin-only">Super administrateur</option>
                 </select>
               </div>
               <div class="form-group">
@@ -816,7 +817,7 @@
         </div>
 
         <div data-params-panel="admin" class="params-panel hidden">
-          <article class="card admin-only">
+          <article class="card any-admin">
             <div class="section-head">
               <h3>Historique gerant &amp; serveuses</h3>
               <span class="section-meta">Audit</span>
@@ -825,7 +826,7 @@
             <div id="staff-audit-list"></div>
           </article>
 
-          <article class="card admin-only">
+          <article class="card superadmin-only">
             <div class="section-head">
               <h3>Multi-maquis</h3>
               <span class="section-meta">Sites</span>
@@ -1055,60 +1056,67 @@
     </div>
   </div>
 
-  <div id="modal-finalize" class="modal-overlay" aria-hidden="true">
-    <div class="modal">
-      <div class="modal-handle"></div>
-      <div class="section-head">
-        <h3>Validation de la commande</h3>
+  <div id="modal-finalize" class="modal-overlay modal-finalize-overlay" aria-hidden="true">
+    <div class="modal modal-finalize">
+      <div class="modal-handle modal-handle--thin"></div>
+      <div class="section-head section-head--tight">
+        <h3>Encaissement</h3>
         <button class="icon-btn close-modal" data-close="modal-finalize" type="button">Fermer</button>
       </div>
-      <div class="inline-card" style="margin-bottom:14px">
-        <span class="muted">Total commande</span>
-        <strong id="finalize-order-total" style="color:var(--mm-primary-dark);font-size:1.1rem">0 FCFA</strong>
+      <div id="modal-finalize-flow">
+        <div class="inline-card inline-card--tight finalize-total-row">
+          <span class="muted">Total</span>
+          <strong id="finalize-order-total" class="finalize-total-val">0 FCFA</strong>
+        </div>
+        <p class="muted finalize-hint">Repartir le paiement — le total saisi doit egaler la commande.</p>
+        <div class="form-grid finalize-pay-grid">
+          <div class="form-group form-group--zero">
+            <label for="pay-cash">Especes</label>
+            <input id="pay-cash" class="finalize-pay-input" type="number" min="0" placeholder="0" inputmode="numeric">
+          </div>
+          <div class="form-group form-group--zero">
+            <label for="pay-wave">Wave</label>
+            <input id="pay-wave" class="finalize-pay-input" type="number" min="0" placeholder="0" inputmode="numeric">
+          </div>
+          <div class="form-group form-group--zero">
+            <label for="pay-orange">Orange</label>
+            <input id="pay-orange" class="finalize-pay-input" type="number" min="0" placeholder="0" inputmode="numeric">
+          </div>
+          <div class="form-group form-group--zero">
+            <label for="pay-mtn">MTN</label>
+            <input id="pay-mtn" class="finalize-pay-input" type="number" min="0" placeholder="0" inputmode="numeric">
+          </div>
+          <div class="form-group form-group--zero">
+            <label for="pay-card">Carte</label>
+            <input id="pay-card" class="finalize-pay-input" type="number" min="0" placeholder="0" inputmode="numeric">
+          </div>
+          <div class="form-group form-group--zero">
+            <label for="pay-credit">Credit</label>
+            <input id="pay-credit" class="finalize-pay-input" type="number" min="0" placeholder="0" inputmode="numeric">
+          </div>
+        </div>
+        <div class="form-group form-group--zero form-group--credit">
+          <label for="pay-credit-name">Debiteur (si credit)</label>
+          <input id="pay-credit-name" type="text" placeholder="Obligatoire si credit" autocomplete="name">
+        </div>
+        <div class="inline-card inline-card--tight finalize-preview-block">
+          <div class="finalize-preview-line">
+            <span class="muted">Saisi</span>
+            <strong id="pay-mix-preview">0 FCFA</strong>
+          </div>
+          <div id="pay-reste-preview" class="finalize-reste">Reste : 0 FCFA</div>
+        </div>
+        <div class="button-stack button-stack--row finalize-flow-actions">
+          <button id="confirm-finalize-btn" class="btn btn-primary" type="button">Valider la facture</button>
+          <button type="button" class="btn btn-outline close-modal" data-close="modal-finalize">Retour</button>
+        </div>
       </div>
-      <p class="muted" style="margin-bottom:10px">Repartissez le paiement entre les differents modes. Le total doit etre egal a la commande.</p>
-      <div class="form-grid two-cols">
-        <div class="form-group">
-          <label for="pay-cash">Especes</label>
-          <input id="pay-cash" class="finalize-pay-input" type="number" min="0" placeholder="0">
+      <div id="modal-finalize-done" class="finalize-done hidden">
+        <p class="finalize-done-msg">Facture <strong id="finalize-done-num"></strong> enregistree.</p>
+        <div class="button-stack button-stack--row finalize-done-actions">
+          <button type="button" id="print-finalize-btn" class="btn btn-outline">Imprimer</button>
+          <button type="button" id="finalize-done-close" class="btn btn-primary">Terminer</button>
         </div>
-        <div class="form-group">
-          <label for="pay-wave">Wave</label>
-          <input id="pay-wave" class="finalize-pay-input" type="number" min="0" placeholder="0">
-        </div>
-        <div class="form-group">
-          <label for="pay-orange">Orange Money</label>
-          <input id="pay-orange" class="finalize-pay-input" type="number" min="0" placeholder="0">
-        </div>
-        <div class="form-group">
-          <label for="pay-mtn">MTN MoMo</label>
-          <input id="pay-mtn" class="finalize-pay-input" type="number" min="0" placeholder="0">
-        </div>
-        <div class="form-group">
-          <label for="pay-card">Carte</label>
-          <input id="pay-card" class="finalize-pay-input" type="number" min="0" placeholder="0">
-        </div>
-        <div class="form-group">
-          <label for="pay-credit">Credit client</label>
-          <input id="pay-credit" class="finalize-pay-input" type="number" min="0" placeholder="0">
-        </div>
-      </div>
-      <div class="form-group">
-        <label for="pay-credit-name">Nom de celui qui doit</label>
-        <input id="pay-credit-name" type="text" placeholder="Obligatoire si credit">
-      </div>
-      <div class="inline-card" style="flex-direction:column;align-items:stretch;gap:6px">
-        <div style="display:flex;justify-content:space-between">
-          <span class="muted">Total saisi</span>
-          <strong id="pay-mix-preview">0 FCFA</strong>
-        </div>
-        <div style="display:flex;justify-content:space-between;font-weight:700">
-          <span id="pay-reste-preview" style="color:#ff8e82">Reste à payer : 0 FCFA</span>
-        </div>
-      </div>
-      <div class="button-stack">
-        <button id="confirm-finalize-btn" class="btn btn-primary" type="button">Valider et creer la facture</button>
-        <button class="btn btn-outline close-modal" data-close="modal-finalize" type="button">Retour</button>
       </div>
     </div>
   </div>
@@ -1429,6 +1437,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=49"></script>
+  <script src="./app-orders.js?v=53"></script>
 </body>
 </html>

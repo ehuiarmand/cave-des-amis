@@ -193,6 +193,8 @@ DEFAULT_STATE: dict[str, Any] = {
         "ligneCommande": 1000,
         "charge": 100,
         "creditRecovery": 100,
+        "stockEntree": 100,
+        "stockLoss": 100,
         "auditEntry": 0,
     },
 }
@@ -249,6 +251,7 @@ def build_default_state() -> dict[str, Any]:
     return {
         "auth": {
             "users": [
+                {"username": "admin", "passwordHash": hash_password("admin123"), "role": "superadmin", "allowedSiteIds": ["maquis-1", "maquis-2"]},
                 {"username": "manager", "passwordHash": hash_password("manager123"), "role": "manager", "allowedSiteIds": ["maquis-1", "maquis-2"]},
                 {"username": "serveuse", "passwordHash": hash_password("serveuse123"), "role": "serveuse", "allowedSiteIds": ["maquis-1"]},
             ],
@@ -274,10 +277,15 @@ def build_default_state() -> dict[str, Any]:
             {**item, "siteId": item.get("siteId", "maquis-1")} for item in legacy["charges"]
         ],
         "staffAuditLog": [],
+        "stockEntrees": [],
+        "stockLosses": [],
         "nextId": {
             **legacy["nextId"],
             "site": 3,
             "invoice": 1,
+            "purchaseOrder": legacy.get("nextId", {}).get("purchaseOrder", 100),
+            "stockEntree": legacy.get("nextId", {}).get("stockEntree", 100),
+            "stockLoss": legacy.get("nextId", {}).get("stockLoss", 100),
             "auditEntry": legacy.get("nextId", {}).get("auditEntry", 0),
         },
     }
@@ -285,6 +293,21 @@ def build_default_state() -> dict[str, Any]:
 
 def migrate_state(payload: dict[str, Any]) -> dict[str, Any]:
     default = build_default_state()
+    meta = payload.setdefault("_meta", {})
+    schema_version = int(meta.get("schemaVersion") or 1)
+    if schema_version < 2:
+        for user in payload.get("auth", {}).get("users", []):
+            if str(user.get("role", "")) == "admin":
+                user["role"] = "superadmin"
+        if not any(str(u.get("role", "")) == "superadmin" for u in payload.get("auth", {}).get("users", [])):
+            all_ids = [s["id"] for s in payload.get("sites", []) if s.get("id")]
+            for user in payload.get("auth", {}).get("users", []):
+                if str(user.get("role", "")) == "manager":
+                    user["role"] = "superadmin"
+                    if all_ids:
+                        user["allowedSiteIds"] = list(all_ids)
+                    break
+        meta["schemaVersion"] = 2
 
     # Step 1 — migrate old single-site format to multi-site
     if "sites" not in payload or "activeSiteId" not in payload:
@@ -306,7 +329,11 @@ def migrate_state(payload: dict[str, Any]) -> dict[str, Any]:
             "creditRecoveries": [{**item, "siteId": item.get("siteId", site_id)} for item in payload.get("creditRecoveries", [])],
             "categories": payload.get("categories", default["categories"]),
             "charges": [{**item, "siteId": item.get("siteId", site_id)} for item in payload.get("charges", default["charges"])],
+            "dayBooks": [{**item, "siteId": item.get("siteId", site_id)} for item in payload.get("dayBooks", [])],
+            "purchaseOrders": [{**item, "siteId": item.get("siteId", site_id)} for item in payload.get("purchaseOrders", [])],
             "staffAuditLog": payload.get("staffAuditLog", []),
+            "stockEntrees": [{**item, "siteId": item.get("siteId", site_id)} for item in payload.get("stockEntrees", [])],
+            "stockLosses": [{**item, "siteId": item.get("siteId", site_id)} for item in payload.get("stockLosses", [])],
             "nextId": {**default["nextId"], **payload.get("nextId", {})},
         }
 
@@ -324,15 +351,238 @@ def migrate_state(payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+VALID_USER_ROLES = ("superadmin", "admin", "manager", "serveuse")
+
+
+def session_is_superadmin(session: dict[str, Any] | None) -> bool:
+    if session is None:
+        return True
+    if str(session.get("role", "")) == "superadmin":
+        return True
+    if str(session.get("username", "")).strip().lower() == "admin":
+        return True
+    return False
+
+
+def session_allowed_sites(session: dict[str, Any], site_ids: list[str]) -> set[str]:
+    sid_set = set(site_ids)
+    return {str(s) for s in (session.get("allowedSiteIds") or []) if str(s) in sid_set}
+
+
+def row_effective_site_id(row: dict[str, Any], site_ids: list[str], allowed: set[str]) -> str | None:
+    site_set = {str(x) for x in site_ids}
+    raw = row.get("siteId")
+    sid_s = str(raw) if raw is not None and raw != "" else ""
+    if sid_s in site_set:
+        return sid_s
+    if (raw is None or raw == "") and len(allowed) == 1:
+        return next(iter(allowed))
+    return None
+
+
+def merge_scoped_rows(
+    current: list[dict[str, Any]],
+    incoming: list[Any],
+    allowed: set[str],
+    site_ids: list[str],
+) -> list[dict[str, Any]]:
+    current_list = [r for r in (current or []) if isinstance(r, dict) and r.get("id") is not None]
+    incoming_list = [r for r in (incoming or []) if isinstance(r, dict) and r.get("id") is not None]
+
+    def row_id_norm(row: dict[str, Any]) -> str:
+        return str(row.get("id"))
+
+    def in_allowed_scope(row: dict[str, Any]) -> bool:
+        es = row_effective_site_id(row, site_ids, allowed)
+        return es is not None and es in allowed
+
+    incoming_for_scope = [r for r in incoming_list if in_allowed_scope(r)]
+    incoming_ids = {row_id_norm(r) for r in incoming_for_scope}
+    kept: list[dict[str, Any]] = []
+    for r in current_list:
+        if not in_allowed_scope(r):
+            kept.append(r)
+            continue
+        if row_id_norm(r) in incoming_ids:
+            continue
+    kept.extend(incoming_for_scope)
+    return kept
+
+
+def merge_next_id_dict(current: dict[str, Any], incoming: dict[str, Any] | None) -> dict[str, Any]:
+    out = dict(current or {})
+    for key, raw in (incoming or {}).items():
+        try:
+            out[key] = max(int(out.get(key) or 0), int(raw or 0))
+        except (TypeError, ValueError):
+            if raw is not None:
+                out[key] = raw
+    return out
+
+
+def user_visible_in_public_state(u: dict[str, Any], session: dict[str, Any]) -> bool:
+    if session_is_superadmin(session):
+        return True
+    if str(u.get("username", "")) == str(session.get("username", "")):
+        return True
+    if str(u.get("role", "")) == "superadmin":
+        return False
+    user_sites = {str(s) for s in (u.get("allowedSiteIds") or [])}
+    sess_sites = {str(s) for s in (session.get("allowedSiteIds") or [])}
+    return bool(user_sites & sess_sites)
+
+
+def merge_auth_users_scoped(
+    session: dict[str, Any],
+    current_users: list[dict[str, Any]],
+    payload_users: list[Any],
+    site_ids: list[str],
+) -> list[dict[str, Any]]:
+    site_set = set(site_ids)
+    allowed = session_allowed_sites(session, site_ids)
+    if not allowed:
+        raise ValueError("Aucun maquis autorise pour cette session.")
+    s_user = str(session.get("username", ""))
+    s_role = str(session.get("role", ""))
+
+    payload_by: dict[str, dict[str, Any]] = {}
+    for raw in payload_users or []:
+        if not isinstance(raw, dict):
+            continue
+        un = str(raw.get("username", "")).strip()
+        if un:
+            payload_by[un] = raw
+
+    merged: dict[str, dict[str, Any]] = {u["username"]: json.loads(json.dumps(u)) for u in current_users}
+
+    def clamp_sites(raw: Any) -> list[str]:
+        xs = [str(x) for x in (raw or []) if str(x) in site_set]
+        return xs if xs else sorted(allowed)[:1]
+
+    def may_manage_target(exist: dict[str, Any]) -> bool:
+        if str(exist.get("username", "")) == s_user:
+            return True
+        t_role = str(exist.get("role", ""))
+        t_sites = {str(x) for x in (exist.get("allowedSiteIds") or []) if str(x) in site_set}
+        if s_role == "admin":
+            if t_role in ("superadmin", "admin"):
+                return False
+            return bool(t_sites) and t_sites <= allowed
+        if s_role == "manager":
+            return t_role == "serveuse" and bool(t_sites & allowed)
+        return False
+
+    for un, pu in payload_by.items():
+        exist = merged.get(un)
+        new_role = str(pu.get("role", exist.get("role", "serveuse") if exist else "serveuse"))
+        if un.strip().lower() == "admin":
+            new_role = "superadmin"
+        if new_role not in VALID_USER_ROLES:
+            continue
+
+        if exist is None:
+            if s_role == "admin":
+                if new_role not in ("manager", "serveuse"):
+                    continue
+            elif s_role == "manager":
+                if new_role != "serveuse":
+                    continue
+            else:
+                continue
+            nu_allowed = clamp_sites(pu.get("allowedSiteIds"))
+            if set(nu_allowed) - allowed:
+                continue
+            pwd = str(pu.get("password", "")).strip()
+            nhash = hash_password(pwd) if pwd else hash_password("serveuse123")
+            merged[un] = {
+                "username": un,
+                "passwordHash": nhash,
+                "role": new_role,
+                "allowedSiteIds": nu_allowed,
+                "twoFactorEnabled": False,
+            }
+            continue
+
+        if not may_manage_target(exist):
+            continue
+
+        if str(exist.get("username", "")) == s_user:
+            if new_role == "superadmin" and str(exist.get("role", "")) != "superadmin":
+                new_role = str(exist.get("role", ""))
+            if s_role != "superadmin" and new_role == "superadmin":
+                new_role = str(exist.get("role", ""))
+            if s_role == "admin" and new_role not in ("admin", "manager", "serveuse"):
+                new_role = str(exist.get("role", ""))
+            if s_role == "manager" and new_role not in ("manager", "serveuse"):
+                new_role = str(exist.get("role", ""))
+
+        if s_role == "admin" and str(exist.get("username", "")) != s_user:
+            if new_role in ("superadmin", "admin"):
+                new_role = str(exist.get("role", ""))
+            if new_role not in ("manager", "serveuse"):
+                new_role = str(exist.get("role", ""))
+
+        nu_allowed = clamp_sites(pu.get("allowedSiteIds", exist.get("allowedSiteIds")))
+        nu_allowed = [x for x in nu_allowed if str(x) in allowed] or sorted(allowed)[:1]
+
+        pwd = str(pu.get("password", "")).strip()
+        password_hash = hash_password(pwd) if pwd else exist["passwordHash"]
+        entry: dict[str, Any] = {
+            "username": un,
+            "passwordHash": password_hash,
+            "role": new_role,
+            "allowedSiteIds": nu_allowed,
+            "twoFactorEnabled": bool(exist.get("twoFactorEnabled", False)),
+        }
+        if exist.get("twoFactorSecret"):
+            entry["twoFactorSecret"] = exist["twoFactorSecret"]
+        if exist.get("twoFactorSecretPending"):
+            entry["twoFactorSecretPending"] = exist["twoFactorSecretPending"]
+        merged[un] = entry
+
+    result = list(merged.values())
+    if not any(str(u.get("role", "")) in ("superadmin", "admin", "manager") for u in result):
+        raise ValueError("Au moins un super administrateur, administrateur de maquis ou gerant est obligatoire.")
+    return result
+
+
+def session_state_etag(base_etag: str, session: dict[str, Any]) -> str:
+    if session_is_superadmin(session):
+        return base_etag
+    raw = f"{session.get('username', '')}|{session.get('role', '')}|{','.join(sorted(str(x) for x in (session.get('allowedSiteIds') or [])))}"
+    return f"{base_etag}:{hashlib.sha256(raw.encode('utf-8')).hexdigest()[:14]}"
+
+
+def session_may_configure_2fa_for_other(session: dict[str, Any], target_username: str, auth_users: list[dict[str, Any]]) -> bool:
+    if session_is_superadmin(session):
+        return True
+    if str(session.get("username", "")) == str(target_username):
+        return True
+    if session.get("role") == "manager":
+        return True
+    if session.get("role") != "admin":
+        return False
+    tu = next((u for u in auth_users if u.get("username") == target_username), None)
+    if not tu:
+        return False
+    if str(tu.get("role", "")) in ("superadmin", "admin"):
+        return False
+    ts = {str(x) for x in (tu.get("allowedSiteIds") or [])}
+    ss = {str(x) for x in (session.get("allowedSiteIds") or [])}
+    if not ts or not ss:
+        return False
+    return ts <= ss
+
+
 def normalize_auth_users(payload: dict[str, Any]) -> None:
     sites = payload.get("sites", [])
     site_ids = [site.get("id") for site in sites if site.get("id")]
     users = payload.get("auth", {}).get("users", [])
     for user in users:
-        if str(user.get("username", "")).strip() == "admin":
-            user["role"] = "admin"
+        if str(user.get("username", "")).strip().lower() == "admin":
+            user["role"] = "superadmin"
             if site_ids:
-                user["allowedSiteIds"] = site_ids
+                user["allowedSiteIds"] = list(site_ids)
 
 
 def sale_formats(item: dict[str, Any]) -> list[dict[str, int]]:
@@ -551,6 +801,12 @@ class DataStore:
             merged["stockChecks"] = payload.get("stockChecks", merged.get("stockChecks", []))
             merged["categories"] = payload.get("categories", merged.get("categories", DEFAULT_STATE["categories"]))
             merged["charges"] = payload.get("charges", merged["charges"])
+            merged["dayBooks"] = payload.get("dayBooks", merged.get("dayBooks", []))
+            merged["purchaseOrders"] = payload.get("purchaseOrders", merged.get("purchaseOrders", []))
+            merged["creditRecoveries"] = payload.get("creditRecoveries", merged.get("creditRecoveries", []))
+            merged["staffAuditLog"] = payload.get("staffAuditLog", merged.get("staffAuditLog", []))
+            merged["stockEntrees"] = payload.get("stockEntrees", merged.get("stockEntrees", []))
+            merged["stockLosses"] = payload.get("stockLosses", merged.get("stockLosses", []))
             for index, site in enumerate(merged["sites"], start=1):
                 site.setdefault("prefixeFacture", f"SITE{index}")
             normalize_auth_users(merged)
@@ -583,6 +839,12 @@ class DataStore:
         merged["stockChecks"] = payload.get("stockChecks", merged.get("stockChecks", []))
         merged["categories"] = payload.get("categories", merged.get("categories", DEFAULT_STATE["categories"]))
         merged["charges"] = payload.get("charges", merged["charges"])
+        merged["dayBooks"] = payload.get("dayBooks", merged.get("dayBooks", []))
+        merged["purchaseOrders"] = payload.get("purchaseOrders", merged.get("purchaseOrders", []))
+        merged["creditRecoveries"] = payload.get("creditRecoveries", merged.get("creditRecoveries", []))
+        merged["staffAuditLog"] = payload.get("staffAuditLog", merged.get("staffAuditLog", []))
+        merged["stockEntrees"] = payload.get("stockEntrees", merged.get("stockEntrees", []))
+        merged["stockLosses"] = payload.get("stockLosses", merged.get("stockLosses", []))
         for index, site in enumerate(merged["sites"], start=1):
             site.setdefault("prefixeFacture", f"SITE{index}")
         normalize_auth_users(merged)
@@ -666,6 +928,8 @@ class DataStore:
                 "stock": json.loads(json.dumps(self._state["stock"])),
                 "commandes": json.loads(json.dumps(self._state.get("commandes", []))),
                 "stockChecks": json.loads(json.dumps(self._state.get("stockChecks", []))),
+                "stockEntrees": json.loads(json.dumps(self._state.get("stockEntrees", []))),
+                "stockLosses": json.loads(json.dumps(self._state.get("stockLosses", []))),
                 "dayBooks": json.loads(json.dumps(self._state.get("dayBooks", []))),
                 "purchaseOrders": json.loads(json.dumps(self._state.get("purchaseOrders", []))),
                 "creditRecoveries": json.loads(json.dumps(self._state.get("creditRecoveries", []))),
@@ -684,6 +948,60 @@ class DataStore:
                         for u in self._state["auth"]["users"]
                     ],
                 },
+            }
+
+    def public_state_for_session(self, session: dict[str, Any]) -> dict[str, Any]:
+        with self._lock:
+            full = self.public_state()
+            if session_is_superadmin(session):
+                return full
+            site_ids = [str(s["id"]) for s in self._state["sites"] if s.get("id")]
+            allowed = session_allowed_sites(session, site_ids)
+            if not allowed and site_ids:
+                allowed = {site_ids[0]}
+            sites = [s for s in self._state["sites"] if str(s.get("id", "")) in allowed]
+
+            def filter_site_rows(rows: list[Any]) -> list[Any]:
+                out = []
+                for r in rows or []:
+                    if not isinstance(r, dict):
+                        continue
+                    es = row_effective_site_id(r, site_ids, allowed)
+                    if es is not None and es in allowed:
+                        out.append(r)
+                return json.loads(json.dumps(out))
+
+            aid = str(self._state.get("activeSiteId") or "")
+            if aid not in allowed and sites:
+                aid = str(sites[0].get("id", ""))
+            users_out = [
+                {
+                    "username": u["username"],
+                    "role": u["role"],
+                    "allowedSiteIds": u.get("allowedSiteIds", []),
+                    "twoFactorEnabled": bool(u.get("twoFactorEnabled", False)),
+                }
+                for u in self._state["auth"]["users"]
+                if user_visible_in_public_state(u, session)
+            ]
+            return {
+                "meta": full["meta"],
+                "sites": json.loads(json.dumps(sites)),
+                "activeSiteId": aid,
+                "ventes": filter_site_rows(self._state.get("ventes", [])),
+                "stock": filter_site_rows(self._state.get("stock", [])),
+                "commandes": filter_site_rows(self._state.get("commandes", [])),
+                "stockChecks": filter_site_rows(self._state.get("stockChecks", [])),
+                "stockEntrees": filter_site_rows(self._state.get("stockEntrees", [])),
+                "stockLosses": filter_site_rows(self._state.get("stockLosses", [])),
+                "dayBooks": filter_site_rows(self._state.get("dayBooks", [])),
+                "purchaseOrders": filter_site_rows(self._state.get("purchaseOrders", [])),
+                "creditRecoveries": filter_site_rows(self._state.get("creditRecoveries", [])),
+                "categories": full["categories"],
+                "charges": filter_site_rows(self._state.get("charges", [])),
+                "nextId": full["nextId"],
+                "staffAuditLog": filter_site_rows(self._state.get("staffAuditLog", [])),
+                "auth": {"users": users_out},
             }
 
     def changes(self, *, since: str, site_id: str | None = None) -> dict[str, Any]:
@@ -730,6 +1048,11 @@ class DataStore:
             merged["commandes"] = payload.get("commandes", merged.get("commandes", []))
             merged["stockChecks"] = payload.get("stockChecks", merged.get("stockChecks", []))
             merged["dayBooks"] = payload.get("dayBooks", merged.get("dayBooks", []))
+            merged["purchaseOrders"] = payload.get("purchaseOrders", merged.get("purchaseOrders", []))
+            merged["creditRecoveries"] = payload.get("creditRecoveries", merged.get("creditRecoveries", []))
+            merged["staffAuditLog"] = payload.get("staffAuditLog", merged.get("staffAuditLog", []))
+            merged["stockEntrees"] = payload.get("stockEntrees", merged.get("stockEntrees", []))
+            merged["stockLosses"] = payload.get("stockLosses", merged.get("stockLosses", []))
             merged["categories"] = payload.get("categories", merged.get("categories", DEFAULT_STATE["categories"]))
             merged["charges"] = payload.get("charges", merged["charges"])
             for index, site in enumerate(merged["sites"], start=1):
@@ -999,77 +1322,120 @@ class DataStore:
                         user["passwordHash"] = hash_password(password)
                         self._write(self._state)
                     allowed = [sid for sid in user.get("allowedSiteIds", all_site_ids) if sid in all_site_ids] or all_site_ids[:1]
+                    if str(user.get("role", "")) == "superadmin" or str(user.get("username", "")).strip().lower() == "admin":
+                        allowed = list(all_site_ids)
                     return {"username": user["username"], "role": user["role"], "allowedSiteIds": allowed}
         return None
 
-    def update_state(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def update_state(self, payload: dict[str, Any], session: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
             current = self._state
-            current["sites"] = payload.get("sites", current["sites"])
-            current["activeSiteId"] = payload.get("activeSiteId", current["activeSiteId"])
-            current["ventes"] = payload.get("ventes", current["ventes"])
-            current["stock"] = payload.get("stock", current["stock"])
-            current["commandes"] = payload.get("commandes", current.get("commandes", []))
-            current["stockChecks"] = payload.get("stockChecks", current.get("stockChecks", []))
-            current["dayBooks"] = payload.get("dayBooks", current.get("dayBooks", []))
-            current["purchaseOrders"] = payload.get("purchaseOrders", current.get("purchaseOrders", []))
-            current["creditRecoveries"] = payload.get("creditRecoveries", current.get("creditRecoveries", []))
-            current["categories"] = payload.get("categories", current.get("categories", DEFAULT_STATE["categories"]))
-            current["charges"] = payload.get("charges", current["charges"])
-            current["nextId"] = payload.get("nextId", current["nextId"])
-            current["staffAuditLog"] = payload.get("staffAuditLog", current.get("staffAuditLog", []))
-
             site_ids = [site.get("id") for site in current["sites"] if site.get("id")]
+            sid_list = [str(s) for s in site_ids]
+            is_super = session_is_superadmin(session)
 
-            auth_payload = payload.get("auth", {})
-            users_payload = auth_payload.get("users")
+            if is_super:
+                current["sites"] = payload.get("sites", current["sites"])
+                current["activeSiteId"] = payload.get("activeSiteId", current["activeSiteId"])
+                current["ventes"] = payload.get("ventes", current["ventes"])
+                current["stock"] = payload.get("stock", current["stock"])
+                current["commandes"] = payload.get("commandes", current.get("commandes", []))
+                current["stockChecks"] = payload.get("stockChecks", current.get("stockChecks", []))
+                current["dayBooks"] = payload.get("dayBooks", current.get("dayBooks", []))
+                current["purchaseOrders"] = payload.get("purchaseOrders", current.get("purchaseOrders", []))
+                current["creditRecoveries"] = payload.get("creditRecoveries", current.get("creditRecoveries", []))
+                current["categories"] = payload.get("categories", current.get("categories", DEFAULT_STATE["categories"]))
+                current["charges"] = payload.get("charges", current["charges"])
+                current["nextId"] = payload.get("nextId", current["nextId"])
+                current["staffAuditLog"] = payload.get("staffAuditLog", current.get("staffAuditLog", []))
+                current["stockEntrees"] = payload.get("stockEntrees", current.get("stockEntrees", []))
+                current["stockLosses"] = payload.get("stockLosses", current.get("stockLosses", []))
+
+                site_ids = [site.get("id") for site in current["sites"] if site.get("id")]
+
+                auth_payload = payload.get("auth", {})
+                users_payload = auth_payload.get("users")
+                if isinstance(users_payload, list):
+                    existing_by_name = {u["username"]: u for u in current["auth"]["users"]}
+                    new_users = []
+                    for user_data in users_payload:
+                        username = str(user_data.get("username", "")).strip()
+                        role = str(user_data.get("role", "serveuse"))
+                        if username.strip().lower() == "admin":
+                            role = "superadmin"
+                        if not username or role not in VALID_USER_ROLES:
+                            continue
+                        password = str(user_data.get("password", "")).strip()
+                        if password:
+                            password_hash = hash_password(password)
+                        elif username in existing_by_name:
+                            password_hash = existing_by_name[username]["passwordHash"]
+                        else:
+                            password_hash = hash_password("serveuse123")
+                        raw = user_data.get("allowedSiteIds")
+                        if raw is not None:
+                            allowed = [sid for sid in raw if sid in site_ids] or site_ids[:1]
+                        elif username in existing_by_name:
+                            allowed = [sid for sid in existing_by_name[username].get("allowedSiteIds", []) if sid in site_ids] or site_ids[:1]
+                        else:
+                            allowed = site_ids[:1]
+                        if username.strip().lower() == "admin" or role == "superadmin":
+                            allowed = list(site_ids)
+                        existing = existing_by_name.get(username, {})
+                        user_entry: dict[str, Any] = {
+                            "username": username,
+                            "passwordHash": password_hash,
+                            "role": role,
+                            "allowedSiteIds": allowed,
+                            "twoFactorEnabled": existing.get("twoFactorEnabled", False),
+                        }
+                        if existing.get("twoFactorSecret"):
+                            user_entry["twoFactorSecret"] = existing["twoFactorSecret"]
+                        new_users.append(user_entry)
+                    if not new_users:
+                        raise ValueError("Aucun utilisateur valide.")
+                    if not any(u["role"] in ("superadmin", "admin", "manager") for u in new_users):
+                        raise ValueError("Au moins un super administrateur, administrateur de maquis ou gerant est obligatoire.")
+                    current["auth"]["users"] = new_users
+                if current["activeSiteId"] not in site_ids and site_ids:
+                    current["activeSiteId"] = site_ids[0]
+
+                self._write(current)
+                return self.public_state()
+
+            allowed = session_allowed_sites(session, sid_list)
+            if not allowed:
+                raise ValueError("Session sans maquis autorise.")
+
+            current["ventes"] = merge_scoped_rows(current.get("ventes", []), payload.get("ventes", []), allowed, sid_list)
+            current["stock"] = merge_scoped_rows(current.get("stock", []), payload.get("stock", []), allowed, sid_list)
+            current["commandes"] = merge_scoped_rows(current.get("commandes", []), payload.get("commandes", []), allowed, sid_list)
+            current["stockChecks"] = merge_scoped_rows(current.get("stockChecks", []), payload.get("stockChecks", []), allowed, sid_list)
+            current["dayBooks"] = merge_scoped_rows(current.get("dayBooks", []), payload.get("dayBooks", []), allowed, sid_list)
+            current["purchaseOrders"] = merge_scoped_rows(current.get("purchaseOrders", []), payload.get("purchaseOrders", []), allowed, sid_list)
+            current["creditRecoveries"] = merge_scoped_rows(current.get("creditRecoveries", []), payload.get("creditRecoveries", []), allowed, sid_list)
+            current["charges"] = merge_scoped_rows(current.get("charges", []), payload.get("charges", []), allowed, sid_list)
+            current["staffAuditLog"] = merge_scoped_rows(current.get("staffAuditLog", []), payload.get("staffAuditLog", []), allowed, sid_list)
+            current["stockEntrees"] = merge_scoped_rows(current.get("stockEntrees", []), payload.get("stockEntrees", []), allowed, sid_list)
+            current["stockLosses"] = merge_scoped_rows(current.get("stockLosses", []), payload.get("stockLosses", []), allowed, sid_list)
+
+            aid = payload.get("activeSiteId", current.get("activeSiteId"))
+            if aid in site_ids and str(aid) in allowed:
+                current["activeSiteId"] = aid
+            elif str(current.get("activeSiteId", "")) not in allowed:
+                current["activeSiteId"] = sorted(allowed)[0]
+
+            current["nextId"] = merge_next_id_dict(current.get("nextId", {}), payload.get("nextId"))
+
+            users_payload = payload.get("auth", {}).get("users")
             if isinstance(users_payload, list):
-                existing_by_name = {u["username"]: u for u in current["auth"]["users"]}
-                new_users = []
-                for user_data in users_payload:
-                    username = str(user_data.get("username", "")).strip()
-                    role = str(user_data.get("role", "serveuse"))
-                    if username == "admin":
-                        role = "admin"
-                    if not username or role not in ("admin", "manager", "serveuse"):
-                        continue
-                    password = str(user_data.get("password", "")).strip()
-                    if password:
-                        password_hash = hash_password(password)
-                    elif username in existing_by_name:
-                        password_hash = existing_by_name[username]["passwordHash"]
-                    else:
-                        password_hash = hash_password("serveuse123")
-                    raw = user_data.get("allowedSiteIds")
-                    if raw is not None:
-                        allowed = [sid for sid in raw if sid in site_ids] or site_ids[:1]
-                    elif username in existing_by_name:
-                        allowed = [sid for sid in existing_by_name[username].get("allowedSiteIds", []) if sid in site_ids] or site_ids[:1]
-                    else:
-                        allowed = site_ids[:1]
-                    if username == "admin":
-                        allowed = site_ids
-                    existing = existing_by_name.get(username, {})
-                    user_entry: dict[str, Any] = {
-                        "username": username,
-                        "passwordHash": password_hash,
-                        "role": role,
-                        "allowedSiteIds": allowed,
-                        "twoFactorEnabled": existing.get("twoFactorEnabled", False),
-                    }
-                    if existing.get("twoFactorSecret"):
-                        user_entry["twoFactorSecret"] = existing["twoFactorSecret"]
-                    new_users.append(user_entry)
-                if not new_users:
-                    raise ValueError("Aucun utilisateur valide.")
-                if not any(u["role"] in ("admin", "manager") for u in new_users):
-                    raise ValueError("Au moins un administrateur ou gerant est obligatoire.")
-                current["auth"]["users"] = new_users
+                current["auth"]["users"] = merge_auth_users_scoped(session, current["auth"]["users"], users_payload, sid_list)
+
             if current["activeSiteId"] not in site_ids and site_ids:
                 current["activeSiteId"] = site_ids[0]
 
             self._write(current)
-            return self.public_state()
+            return self.public_state_for_session(session)
 
     def reset(self) -> dict[str, Any]:
         with self._lock:
@@ -1131,20 +1497,25 @@ class AppHandler(BaseHTTPRequestHandler):
             )
             return
         if parsed.path == "/api/changes":
-            if self.require_session() is None:
+            session = self.require_session()
+            if session is None:
                 return
             since = str((query.get("since") or [""])[0]).strip()
             site_id = str((query.get("siteId") or [""])[0]).strip() or None
+            if site_id and not session_is_superadmin(session) and site_id not in (session.get("allowedSiteIds") or []):
+                self.send_json(HTTPStatus.FORBIDDEN, {"error": "Maquis non autorise pour cette session."})
+                return
             self.send_json(HTTPStatus.OK, store.changes(since=since, site_id=site_id), cache_control="no-store")
             return
         if parsed.path == "/api/state":
-            if self.require_session() is None:
+            session = self.require_session()
+            if session is None:
                 return
-            etag = store.etag()
+            etag = session_state_etag(store.etag(), session)
             if self.headers.get("If-None-Match") == etag:
                 self.send_not_modified(etag)
                 return
-            self.send_json(HTTPStatus.OK, store.public_state(), etag=etag, cache_control="no-cache")
+            self.send_json(HTTPStatus.OK, store.public_state_for_session(session), etag=etag, cache_control="no-cache")
             return
         if parsed.path == "/api/public/order":
             self.send_error(HTTPStatus.METHOD_NOT_ALLOWED)
@@ -1157,7 +1528,7 @@ class AppHandler(BaseHTTPRequestHandler):
             session = self.require_session()
             if session is None:
                 return
-            if session.get("role") != "admin":
+            if not session_is_superadmin(session):
                 self.send_json(HTTPStatus.FORBIDDEN, {"error": "Acces refuse."})
                 return
             try:
@@ -1241,6 +1612,8 @@ class AppHandler(BaseHTTPRequestHandler):
                 all_site_ids = [s["id"] for s in store._state["sites"]]
                 allowed = [sid for sid in user_data.get("allowedSiteIds", all_site_ids) if sid in all_site_ids] or all_site_ids[:1]
                 role = user_data["role"]
+                if str(role) == "superadmin" or str(username).strip().lower() == "admin":
+                    allowed = list(all_site_ids)
             token = sessions.create(username, role, allowed)
             self.send_json(HTTPStatus.OK, {"authenticated": True, "username": username, "role": role, "allowedSiteIds": allowed}, cookie=token)
             return
@@ -1251,7 +1624,9 @@ class AppHandler(BaseHTTPRequestHandler):
                 return
             payload = self.read_json()
             target = str(payload.get("username", session["username"])).strip()
-            if target != session["username"] and session["role"] != "manager":
+            with store._lock:
+                auth_users = list(store._state["auth"]["users"])
+            if target != session["username"] and not session_may_configure_2fa_for_other(session, target, auth_users):
                 self.send_json(HTTPStatus.FORBIDDEN, {"error": "Acces refuse."})
                 return
             secret = generate_totp_secret()
@@ -1275,7 +1650,9 @@ class AppHandler(BaseHTTPRequestHandler):
             payload = self.read_json()
             target = str(payload.get("username", session["username"])).strip()
             code = str(payload.get("code", "")).strip()
-            if target != session["username"] and session["role"] != "manager":
+            with store._lock:
+                auth_users = list(store._state["auth"]["users"])
+            if target != session["username"] and not session_may_configure_2fa_for_other(session, target, auth_users):
                 self.send_json(HTTPStatus.FORBIDDEN, {"error": "Acces refuse."})
                 return
             with store._lock:
@@ -1303,7 +1680,9 @@ class AppHandler(BaseHTTPRequestHandler):
                 return
             payload = self.read_json()
             target = str(payload.get("username", session["username"])).strip()
-            if target != session["username"] and session["role"] != "manager":
+            with store._lock:
+                auth_users = list(store._state["auth"]["users"])
+            if target != session["username"] and not session_may_configure_2fa_for_other(session, target, auth_users):
                 self.send_json(HTTPStatus.FORBIDDEN, {"error": "Acces refuse."})
                 return
             with store._lock:
@@ -1325,7 +1704,11 @@ class AppHandler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/api/reset":
-            if self.require_session() is None:
+            session = self.require_session()
+            if session is None:
+                return
+            if not session_is_superadmin(session):
+                self.send_json(HTTPStatus.FORBIDDEN, {"error": "Seul le super administrateur peut reinitialiser l'application."})
                 return
             payload = store.reset()
             self.send_json(HTTPStatus.OK, payload)
@@ -1346,11 +1729,12 @@ class AppHandler(BaseHTTPRequestHandler):
     def do_PUT(self) -> None:
         parsed = urlparse(self.path)
         if parsed.path == "/api/state":
-            if self.require_session() is None:
+            session = self.require_session()
+            if session is None:
                 return
             payload = self.read_json()
             try:
-                updated = store.update_state(payload)
+                updated = store.update_state(payload, session)
             except ValueError as error:
                 self.send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
                 return

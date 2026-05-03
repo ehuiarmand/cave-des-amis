@@ -504,15 +504,25 @@ function recordsForSite(list) {
   return (list || []).filter((item) => rowMatchesSite(item, siteId, multiSite));
 }
 
-function canAdmin() {
-  return currentRole === "admin" || sessionUser === "admin";
+function canSuperAdmin() {
+  return currentRole === "superadmin" || String(sessionUser || "").trim().toLowerCase() === "admin";
+}
+
+function canSiteAdmin() {
+  return currentRole === "admin";
+}
+
+/** Super-admin (tous maquis) ou administrateur rattache a un ou plusieurs maquis. */
+function canAnyAdmin() {
+  return canSuperAdmin() || canSiteAdmin();
 }
 
 const STAFF_AUDIT_MAX = 800;
 
 function shouldRecordStaffAudit() {
   if (!sessionUser) return false;
-  if (currentRole === "admin" || sessionUser === "admin") return false;
+  if (currentRole === "superadmin" || String(sessionUser || "").trim().toLowerCase() === "admin") return false;
+  if (currentRole === "admin") return false;
   return currentRole === "manager" || currentRole === "serveuse";
 }
 
@@ -596,7 +606,7 @@ function openStaffAuditDetailModal(entryId) {
 function renderStaffAuditLog() {
   const container = document.getElementById("staff-audit-list");
   if (!container) return;
-  if (!canAdmin()) {
+  if (!canAnyAdmin()) {
     container.innerHTML = "";
     return;
   }
@@ -639,7 +649,7 @@ function renderStaffAuditLog() {
 }
 
 function canManage() {
-  return canAdmin() || currentRole === "manager";
+  return canAnyAdmin() || currentRole === "manager";
 }
 
 function canAccessSite(siteId) {
@@ -647,7 +657,7 @@ function canAccessSite(siteId) {
 }
 
 function renderSiteSwitcher() {
-  const availableSites = canAdmin()
+  const availableSites = canSuperAdmin()
     ? (state?.sites || [])
     : (state?.sites || []).filter((site) => canAccessSite(site.id));
   const select = document.getElementById("site-switcher");
@@ -675,18 +685,26 @@ function applyRoleVisibility() {
   document.querySelectorAll(".manager-only").forEach((node) => {
     node.classList.toggle("hidden-by-role", !canManage());
   });
-  document.querySelectorAll(".admin-only").forEach((node) => {
-    node.classList.toggle("hidden-by-role", !canAdmin());
+  document.querySelectorAll(".superadmin-only").forEach((node) => {
+    node.classList.toggle("hidden-by-role", !canSuperAdmin());
   });
-  // Masquer les options admin/manager du select de rôle pour les non-admins
+  document.querySelectorAll(".any-admin").forEach((node) => {
+    node.classList.toggle("hidden-by-role", !canAnyAdmin());
+  });
+  document.querySelectorAll(".admin-only").forEach((node) => {
+    node.classList.toggle("hidden-by-role", !canSuperAdmin());
+  });
   const roleSelect = document.getElementById("new-user-role");
   if (roleSelect) {
     [...roleSelect.options].forEach((opt) => {
-      if (opt.value === "admin" || opt.value === "manager") {
-        opt.hidden = !canAdmin();
-      }
+      if (opt.classList.contains("admin-only")) opt.hidden = !canSuperAdmin();
+      else if (opt.classList.contains("any-admin")) opt.hidden = !canAnyAdmin();
+      else opt.hidden = false;
     });
-    if (!canAdmin() && roleSelect.value !== "serveuse") roleSelect.value = "serveuse";
+    if (!canAnyAdmin() && roleSelect.value !== "serveuse") roleSelect.value = "serveuse";
+    if (!canSuperAdmin() && (roleSelect.value === "superadmin" || roleSelect.value === "admin")) {
+      roleSelect.value = "serveuse";
+    }
   }
   maybeAdjustParamsSubTab();
 }
@@ -695,7 +713,13 @@ function renderTopbar() {
   document.getElementById("top-bar-name").textContent = currentSite()?.nom || "Mon Bar";
   document.getElementById("top-date").textContent = formatDateDdMmYyyy(new Date());
   document.getElementById("session-user").textContent = sessionUser || "utilisateur";
-  document.getElementById("role-badge").textContent = currentRole === "admin" ? "administrateur" : currentRole === "manager" ? "gerant" : (currentRole || "utilisateur");
+  document.getElementById("role-badge").textContent = currentRole === "superadmin"
+    ? "super administrateur"
+    : currentRole === "admin"
+      ? "admin. maquis"
+      : currentRole === "manager"
+        ? "gerant"
+        : (currentRole || "utilisateur");
 }
 
 function renderHero() {
@@ -1730,13 +1754,13 @@ function nextOrderStatus(status) {
 
 function canDeleteOrder(order) {
   const status = orderStatus(order);
-  if (status === "Paye" || status === "PayÃ©" || status === "Payé") return canAdmin();
+  if (status === "Paye" || status === "PayÃ©" || status === "Payé") return canAnyAdmin();
   if (status === "Servi") return canManage();
   return canManage() || order?.server === sessionUser || order?.serveur === sessionUser;
 }
 
 function canDeletePaidSale() {
-  return canAdmin();
+  return canAnyAdmin();
 }
 
 function orderType(order) {
@@ -2114,7 +2138,7 @@ function renderStock() {
       <td class="stock-actions-cell">
         ${isFrigoLow && reserve > 0 ? `<button type="button" class="mini-btn" data-auto-fill-fridge="${item.id}">Remplir frigo</button>` : ""}
         <button type="button" class="stock-del-btn" style="background:rgba(197,79,65,0.18);color:#ff8e82" data-perte-id="${item.id}">Perte</button>
-        ${canAdmin() ? `<button type="button" class="mini-btn" data-edit-stock="${item.id}">Modifier</button>
+        ${canAnyAdmin() ? `<button type="button" class="mini-btn" data-edit-stock="${item.id}">Modifier</button>
         <button class="stock-del-btn" type="button" data-delete-type="stock" data-id="${item.id}">Suppr.</button>` : ""}
       </td>
     </tr>`;
@@ -2241,7 +2265,7 @@ function renderUserSiteCheckboxes() {
     [...container.querySelectorAll("[data-site-id]:checked")].map((input) => input.dataset.siteId),
   );
   // Manager ne peut rattacher que ses propres maquis ; admin voit tout
-  const visibleSites = canAdmin()
+  const visibleSites = canSuperAdmin()
     ? (state.sites || [])
     : (state.sites || []).filter((site) => allowedSiteIds.includes(site.id));
   container.innerHTML = visibleSites.map((site) => `
@@ -2257,7 +2281,7 @@ function renderUserSiteCheckboxes() {
 
 function renderEditableUserSites(user) {
   const container = document.getElementById("new-user-sites");
-  const visibleSites = canAdmin()
+  const visibleSites = canSuperAdmin()
     ? (state.sites || [])
     : (state.sites || []).filter((site) => allowedSiteIds.includes(site.id));
   container.innerHTML = visibleSites.map((site) => `
@@ -2298,7 +2322,10 @@ function editUser(username) {
 }
 
 function roleLabel(role) {
-  return role === "admin" ? "Administrateur" : role === "manager" ? "Gerant" : "Serveuse";
+  if (role === "superadmin") return "Super administrateur";
+  if (role === "admin") return "Administrateur de maquis";
+  if (role === "manager") return "Gerant";
+  return "Serveuse";
 }
 
 function renderUsersList() {
@@ -2306,7 +2333,7 @@ function renderUsersList() {
   if (!container) return;
   const allUsers = state.auth.users || [];
   // Manager ne voit que les serveuses de ses propres maquis
-  const users = canAdmin()
+  const users = canSuperAdmin() || canSiteAdmin()
     ? allUsers
     : allUsers.filter((u) => u.role === "serveuse" && (u.allowedSiteIds || []).some((sid) => allowedSiteIds.includes(sid)));
   if (!users.length) {
@@ -2321,8 +2348,8 @@ function renderUsersList() {
     const twoFaBadge = user.twoFactorEnabled
       ? `<span class="badge badge-green" style="margin-left:6px">2FA</span>`
       : `<span class="badge badge-red" style="margin-left:6px">Sans 2FA</span>`;
-    const canEdit = canAdmin() || user.role === "serveuse";
-    const canDelete = user.username !== sessionUser && (canAdmin() || user.role === "serveuse");
+    const canEdit = canAnyAdmin() || user.role === "serveuse";
+    const canDelete = user.username !== sessionUser && (canAnyAdmin() || user.role === "serveuse");
     return `
       <div class="site-row">
         <div>
@@ -2353,9 +2380,12 @@ async function addUser() {
     return;
   }
   const users = state.auth.users || [];
-  // Manager ne peut créer/modifier que des serveuses
-  if (!canAdmin() && role !== "serveuse") {
+  if (currentRole === "manager" && role !== "serveuse") {
     showToast("Les gerants peuvent uniquement creer des comptes serveuse.");
+    return;
+  }
+  if (canSiteAdmin() && (role === "superadmin" || role === "admin")) {
+    showToast("Seul le super administrateur peut creer ce type de compte.");
     return;
   }
   if (editUsername && editUsername === sessionUser && role !== currentRole) {
@@ -2372,7 +2402,7 @@ async function addUser() {
     return;
   }
   let allowedSiteIds = selectedSiteIds;
-  if (editUsername && !canAdmin()) {
+  if (editUsername && !canSuperAdmin()) {
     const targetUser = users.find((user) => user.username === editUsername);
     const hiddenSiteIds = (targetUser?.allowedSiteIds || []).filter((siteId) => !canAccessSite(siteId));
     allowedSiteIds = [...new Set([...selectedSiteIds, ...hiddenSiteIds])];
@@ -2396,12 +2426,12 @@ async function addUser() {
 async function deleteUser(username) {
   const users = state.auth.users || [];
   const target = users.find((u) => u.username === username);
-  if (!canAdmin() && target?.role !== "serveuse") {
+  if (currentRole === "manager" && target?.role !== "serveuse") {
     showToast("Seul un administrateur peut supprimer un gerant.");
     return;
   }
   const remaining = users.filter((u) => u.username !== username);
-  if (!remaining.some((u) => u.role === "admin" || u.role === "manager")) {
+  if (!remaining.some((u) => ["superadmin", "admin", "manager"].includes(u.role))) {
     showToast("Impossible de supprimer le dernier compte de gestion.");
     return;
   }
@@ -2413,7 +2443,7 @@ async function deleteUser(username) {
 function renderSitesList() {
   const container = document.getElementById("sites-list");
   if (!container) return;
-  if (!canAdmin()) {
+  if (!canSuperAdmin()) {
     container.innerHTML = "";
     return;
   }
@@ -2433,8 +2463,8 @@ function renderSitesList() {
 }
 
 async function addSite() {
-  if (!canAdmin()) {
-    showToast("Seul l'administrateur peut creer un maquis.");
+  if (!canSuperAdmin()) {
+    showToast("Seul le super administrateur peut creer un maquis.");
     return;
   }
   const nom = document.getElementById("new-site-nom").value.trim();
@@ -2451,13 +2481,13 @@ async function addSite() {
   const newSites = [...(state.sites || []), newSite];
   const newUsers = (state.auth?.users || []).map((user) => {
     const currentAllowed = new Set(user.allowedSiteIds || []);
-    if (user.username === sessionUser || user.role === "admin" || (canAdmin() && user.role === "manager")) {
+    if (user.username === sessionUser || user.role === "superadmin" || user.role === "admin" || (canSuperAdmin() && user.role === "manager")) {
       currentAllowed.add(siteId);
     }
     return { ...user, allowedSiteIds: [...currentAllowed] };
   });
   await persistState({ sites: newSites, auth: { users: newUsers } });
-  allowedSiteIds = canAdmin()
+  allowedSiteIds = canSuperAdmin()
     ? (state.sites || []).map((s) => s.id)
     : [...new Set([...allowedSiteIds, siteId])];
   document.getElementById("new-site-nom").value = "";
@@ -2473,8 +2503,8 @@ async function addSite() {
 }
 
 async function deleteSite(siteId) {
-  if (!canAdmin()) {
-    showToast("Seul l'administrateur peut supprimer un maquis.");
+  if (!canSuperAdmin()) {
+    showToast("Seul le super administrateur peut supprimer un maquis.");
     return;
   }
   const site = (state.sites || []).find((s) => s.id === siteId);
@@ -2485,7 +2515,7 @@ async function deleteSite(siteId) {
   }
   const newSites = (state.sites || []).filter((s) => s.id !== siteId);
   await persistState({ sites: newSites });
-  if (canAdmin()) allowedSiteIds = (state.sites || []).map((s) => s.id);
+  if (canSuperAdmin()) allowedSiteIds = (state.sites || []).map((s) => s.id);
   if (state.activeSiteId === siteId) {
     await persistState({ activeSiteId: newSites[0]?.id || null });
   }
@@ -2699,10 +2729,10 @@ async function persistState(overrides = {}) {
       stock: overrides.stock || state.stock,
       commandes: overrides.commandes || state.commandes,
       stockChecks: overrides.stockChecks || state.stockChecks || [],
-      stockLosses: overrides.stockLosses || state.stockLosses || [],
-      stockEntrees: overrides.stockEntrees || state.stockEntrees || [],
+      stockLosses: overrides.stockLosses ?? state.stockLosses ?? [],
+      stockEntrees: overrides.stockEntrees ?? state.stockEntrees ?? [],
       dayBooks: overrides.dayBooks !== undefined ? overrides.dayBooks : (state.dayBooks || []),
-      purchaseOrders: overrides.purchaseOrders || state.purchaseOrders || [],
+      purchaseOrders: overrides.purchaseOrders ?? state.purchaseOrders ?? [],
       creditRecoveries: overrides.creditRecoveries || state.creditRecoveries || [],
       categories: overrides.categories || state.categories || CATEGORIES,
       charges: overrides.charges || state.charges,
@@ -2837,7 +2867,8 @@ async function saveCreditRecovery() {
 
 function purchaseOrdersForSite() {
   const siteId = currentSiteId();
-  return (state.purchaseOrders || []).filter((p) => p.siteId === siteId);
+  const multiSite = multiSiteActive();
+  return (state.purchaseOrders || []).filter((p) => rowMatchesSite(p, siteId, multiSite));
 }
 
 function purchasePricePerCaseFromStock(articleName) {
@@ -2972,13 +3003,24 @@ async function savePurchaseOrder() {
     if (feedback) feedback.textContent = "Cochez au moins une ligne (ou ajoutez une ligne).";
     return;
   }
+  const siteIdSave = currentSiteId();
+  if (!siteIdSave) {
+    if (feedback) feedback.textContent = "Selectionnez un maquis (aucun site actif).";
+    showToast("Impossible d'enregistrer : aucun maquis actif.");
+    return;
+  }
   const supplier = document.getElementById("purchase-supplier").value.trim() || "Fournisseur";
   const date = document.getElementById("purchase-date").value || today();
   const pay = document.getElementById("purchase-pay").value || "Especes";
   const total = selectedLines.reduce((sum, l) => sum + (Number(l.amount) || 0), 0);
+  if (!state.nextId) state.nextId = {};
+  if (state.nextId.purchaseOrder == null || Number.isNaN(Number(state.nextId.purchaseOrder))) {
+    const maxExisting = (state.purchaseOrders || []).reduce((m, p) => Math.max(m, Number(p.id) || 0), 0);
+    state.nextId.purchaseOrder = Math.max(100, maxExisting + 1);
+  }
   const po = {
-    id: Date.now(),
-    siteId: currentSiteId(),
+    id: state.nextId.purchaseOrder++,
+    siteId: siteIdSave,
     supplier,
     date,
     payment: pay,
@@ -3051,6 +3093,11 @@ async function applyPurchaseReceipt(po, linesReceived) {
   const siteId = currentSiteId();
   const stockItems = state.stock || [];
   const stockEntrees = state.stockEntrees || [];
+  if (!state.nextId) state.nextId = {};
+  if (state.nextId.stockEntree == null || Number.isNaN(Number(state.nextId.stockEntree))) {
+    const maxE = stockEntrees.reduce((m, e) => Math.max(m, Number(e.id) || 0), 0);
+    state.nextId.stockEntree = Math.max(100, maxE + 1);
+  }
   linesReceived.forEach((line) => {
     const cases = Number(line.cases) || 0;
     if (cases <= 0) return;
@@ -3062,7 +3109,7 @@ async function applyPurchaseReceipt(po, linesReceived) {
     item.lastReapproAt = new Date().toISOString();
     item.lastReapproBy = sessionUser || "system";
     stockEntrees.unshift({
-      id: Date.now() + Math.random(),
+      id: state.nextId.stockEntree++,
       siteId,
       date: po.date,
       article: item.article,
@@ -3442,13 +3489,26 @@ async function finalizeOrder(orderId = activeOrderId) {
   pendingFinalizeOrderId = null;
   recordStaffAudit("create", "encaissement", `Facture ${factureNumber} · ${order.client || "Client"}`, `Total ${fmt(orderTotal)} FCFA · ${paymentMethod}${paymentMix.creditName ? ` · debiteur ${paymentMix.creditName}` : ""}`);
   await persistState();
-  closeModal("modal-finalize");
   closeModal("modal-vente");
   resetOrderForm();
   if (currentPage === "home") renderDashboard();
   renderVentesPage();
-  showToast(`Facture finalisee pour ${order.client}.`);
-  printInvoice(factureNumber);
+  showToast(`Facture ${factureNumber} enregistree pour ${order.client}.`);
+  showFinalizeSuccess(factureNumber);
+}
+
+function resetFinalizeModalUi() {
+  document.getElementById("modal-finalize-flow")?.classList.remove("hidden");
+  document.getElementById("modal-finalize-done")?.classList.add("hidden");
+}
+
+function showFinalizeSuccess(factureNumber) {
+  const numEl = document.getElementById("finalize-done-num");
+  const printBtn = document.getElementById("print-finalize-btn");
+  if (numEl) numEl.textContent = factureNumber;
+  if (printBtn) printBtn.dataset.facture = factureNumber;
+  document.getElementById("modal-finalize-flow")?.classList.add("hidden");
+  document.getElementById("modal-finalize-done")?.classList.remove("hidden");
 }
 
 function openFinalizeDialog(orderId = activeOrderId) {
@@ -3458,13 +3518,14 @@ function openFinalizeDialog(orderId = activeOrderId) {
     return;
   }
   pendingFinalizeOrderId = orderId;
+  resetFinalizeModalUi();
   document.querySelectorAll(".finalize-pay-input").forEach((input) => { input.value = ""; });
   document.getElementById("pay-credit-name").value = "";
   const orderTotal = order.lignes.reduce((sum, line) => sum + calcNet(line), 0);
   document.getElementById("finalize-order-total").textContent = `${fmt(orderTotal)} FCFA`;
-  document.getElementById("pay-mix-preview").textContent = "0 FCFA saisis";
+  document.getElementById("pay-mix-preview").textContent = "0 FCFA";
   const resteEl = document.getElementById("pay-reste-preview");
-  if (resteEl) { resteEl.textContent = `Reste à payer : ${fmt(orderTotal)} FCFA`; resteEl.style.color = "#ff8e82"; }
+  if (resteEl) { resteEl.textContent = `Reste ${fmt(orderTotal)} FCFA`; resteEl.style.color = "#ff8e82"; }
   openModal("modal-finalize");
 }
 
@@ -3570,8 +3631,8 @@ function resetStockForm() {
 }
 
 function openEditStock(itemId) {
-  if (!canAdmin()) {
-    showToast("Modification du catalogue reservee a l'administrateur.");
+  if (!canAnyAdmin()) {
+    showToast("Modification du catalogue reservee a un administrateur.");
     return;
   }
   const item = state.stock.find((i) => i.id === itemId);
@@ -3598,11 +3659,11 @@ function openEditStock(itemId) {
 
 async function saveStock() {
   commitStockPriceInput();
-  const editId = document.getElementById("s-edit-id").value;
-  if (editId && !canAdmin()) {
-    showToast("Modification du catalogue reservee a l'administrateur.");
+  if (!canAnyAdmin()) {
+    showToast("Modification du catalogue reservee a un administrateur.");
     return;
   }
+  const editId = document.getElementById("s-edit-id").value;
   const articleName = document.getElementById("s-article").value.trim();
   if (!articleName) {
     showToast("Nom de l'article obligatoire.");
@@ -3656,13 +3717,14 @@ function stockMovementDateValue(item) {
 
 function stockMovements() {
   const siteId = currentSiteId();
+  const multiSite = multiSiteActive();
   const movements = [];
   recordsForSite(state.stock).forEach((item) => {
     const created = item.createdAt || today();
     if (Number(item.init) > 0) {
       movements.push({ date: created, article: item.article, type: "entree", qty: Number(item.init) || 0, unit: "Bouteille", reason: "Stock initial", user: item.createdBy || "-" });
     }
-    const itemEntrees = (state.stockEntrees || []).filter((e) => e.siteId === siteId && e.article === item.article);
+    const itemEntrees = (state.stockEntrees || []).filter((e) => rowMatchesSite(e, siteId, multiSite) && e.article === item.article);
     if (itemEntrees.length > 0) {
       itemEntrees.forEach((e) => {
         movements.push({ date: e.date, article: e.article, type: "entree", qty: e.qty, unit: "Bouteille", reason: `Achat (${fmt(e.cases)} casier(s) x ${fmt(e.caseSize)} btl)`, user: e.user });
@@ -3672,7 +3734,7 @@ function stockMovements() {
     }
     // item.sorties is a cumulative accounting counter — individual ventes are already listed below
   });
-  (state.stockLosses || []).filter((l) => l.siteId === siteId).forEach((loss) => {
+  (state.stockLosses || []).filter((l) => rowMatchesSite(l, siteId, multiSite)).forEach((loss) => {
     movements.push({
       date: loss.date || loss.createdAt || today(),
       article: loss.article,
@@ -3905,6 +3967,10 @@ async function saveParams() {
 }
 
 async function restoreFromJson() {
+  if (!canSuperAdmin()) {
+    showToast("Seul le super administrateur peut restaurer depuis data.json.");
+    return;
+  }
   if (!window.confirm("Restaurer depuis data.json ?\n\nCela remplacera l'etat actuel (SQLite/JSON) par le contenu de data.json.")) {
     return;
   }
@@ -4451,6 +4517,7 @@ function openModal(id) {
 function closeModal(id) {
   document.getElementById(id).classList.remove("open");
   if (id === "modal-purchase-receive") pendingReceivePurchaseId = null;
+  if (id === "modal-finalize") resetFinalizeModalUi();
 }
 
 async function removeOrderLine(orderId, lineId) {
@@ -4497,8 +4564,8 @@ async function deleteFinalSale(id) {
 }
 
 async function deleteStockItem(id) {
-  if (!canAdmin()) {
-    showToast("Suppression du catalogue reservee a l'administrateur.");
+  if (!canAnyAdmin()) {
+    showToast("Suppression du catalogue reservee a un administrateur.");
     return;
   }
   state.stock = state.stock.filter((item) => item.id !== id);
@@ -4614,8 +4681,13 @@ async function saveReappro() {
   item.lastReapproAt = new Date().toISOString();
   item.lastReapproBy = sessionUser || "-";
   state.stockEntrees = state.stockEntrees || [];
+  if (!state.nextId) state.nextId = {};
+  if (state.nextId.stockEntree == null || Number.isNaN(Number(state.nextId.stockEntree))) {
+    const maxE = state.stockEntrees.reduce((m, e) => Math.max(m, Number(e.id) || 0), 0);
+    state.nextId.stockEntree = Math.max(100, maxE + 1);
+  }
   state.stockEntrees.unshift({
-    id: Date.now(),
+    id: state.nextId.stockEntree++,
     siteId: currentSiteId(),
     date: today(),
     article: item.article,
@@ -4677,8 +4749,13 @@ async function savePerte() {
   item.lastSortieAt = new Date().toISOString();
   item.lastSortieBy = sessionUser || "-";
   state.stockLosses = state.stockLosses || [];
+  if (!state.nextId) state.nextId = {};
+  if (state.nextId.stockLoss == null || Number.isNaN(Number(state.nextId.stockLoss))) {
+    const maxL = state.stockLosses.reduce((m, l) => Math.max(m, Number(l.id) || 0), 0);
+    state.nextId.stockLoss = Math.max(100, maxL + 1);
+  }
   state.stockLosses.push({
-    id: Date.now(),
+    id: state.nextId.stockLoss++,
     siteId: currentSiteId(),
     article: item.article,
     qty,
@@ -4813,7 +4890,13 @@ async function logout() {
 async function bootstrapAuthenticatedApp() {
   state = await apiRequest(API.state);
   if (!Array.isArray(state.creditRecoveries)) state.creditRecoveries = [];
+  if (!Array.isArray(state.purchaseOrders)) state.purchaseOrders = [];
+  if (!Array.isArray(state.dayBooks)) state.dayBooks = [];
+  if (!Array.isArray(state.stockEntrees)) state.stockEntrees = [];
+  if (!Array.isArray(state.stockLosses)) state.stockLosses = [];
   if (!Array.isArray(state.staffAuditLog)) state.staffAuditLog = [];
+  if (!state.nextId.stockEntree || Number.isNaN(Number(state.nextId.stockEntree))) state.nextId.stockEntree = 100;
+  if (!state.nextId.stockLoss || Number.isNaN(Number(state.nextId.stockLoss))) state.nextId.stockLoss = 100;
   if (!state.nextId) state.nextId = {};
   if (!state.nextId.creditRecovery) state.nextId.creditRecovery = 100;
   if (state.nextId.auditEntry === undefined || state.nextId.auditEntry === null) state.nextId.auditEntry = 0;
@@ -4877,17 +4960,17 @@ function updatePaymentMixPreview() {
   const reste = total - paid;
   const target = document.getElementById("pay-mix-preview");
   if (!target) return;
-  target.textContent = `${fmt(paid)} FCFA saisis`;
+  target.textContent = `${fmt(paid)} FCFA`;
   const resteEl = document.getElementById("pay-reste-preview");
   if (resteEl) {
     if (reste > 0) {
-      resteEl.textContent = `Reste à payer : ${fmt(reste)} FCFA`;
+      resteEl.textContent = `Reste ${fmt(reste)} FCFA`;
       resteEl.style.color = "#ff8e82";
     } else if (reste < 0) {
-      resteEl.textContent = `Surplus : ${fmt(-reste)} FCFA`;
+      resteEl.textContent = `Surplus ${fmt(-reste)} FCFA`;
       resteEl.style.color = "#ff8e82";
     } else {
-      resteEl.textContent = "Montant complet ✓";
+      resteEl.textContent = "OK ✓";
       resteEl.style.color = "#72d7a9";
     }
   }
@@ -4962,6 +5045,11 @@ document.getElementById("fab-btn").addEventListener("click", () => {
   document.getElementById("save-vente-btn").addEventListener("click", () => saveOrderLine().catch(handleApiError));
   document.getElementById("finalize-order-btn").addEventListener("click", () => openFinalizeDialog());
   document.getElementById("confirm-finalize-btn").addEventListener("click", () => finalizeOrder(pendingFinalizeOrderId || activeOrderId).catch(handleApiError));
+  document.getElementById("print-finalize-btn")?.addEventListener("click", () => {
+    const n = document.getElementById("print-finalize-btn")?.dataset.facture;
+    if (n) printInvoice(n);
+  });
+  document.getElementById("finalize-done-close")?.addEventListener("click", () => closeModal("modal-finalize"));
   document.getElementById("save-stock-btn").addEventListener("click", () => saveStock().catch(handleApiError));
   document.getElementById("add-sale-format-btn").addEventListener("click", addStockSaleFormat);
   document.getElementById("s-price-location").addEventListener("change", () => {
@@ -5018,6 +5106,10 @@ document.getElementById("fab-btn").addEventListener("click", () => {
   document.getElementById("enable-2fa-btn").addEventListener("click", () => enable2FA().catch(handleApiError));
   document.getElementById("export-btn").addEventListener("click", exportData);
   document.getElementById("reset-btn").addEventListener("click", async () => {
+    if (!canSuperAdmin()) {
+      showToast("Seul le super administrateur peut reinitialiser l'application.");
+      return;
+    }
     if (!window.confirm("Reinitialiser toutes les donnees de l'application ?")) return;
     try {
       state = await apiRequest(API.reset, { method: "POST", body: JSON.stringify({}) });

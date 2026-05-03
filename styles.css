@@ -1008,7 +1008,9 @@ textarea { font: inherit; }
 }
 
 .manager-only.hidden-by-role,
-.admin-only.hidden-by-role {
+.admin-only.hidden-by-role,
+.any-admin.hidden-by-role,
+.superadmin-only.hidden-by-role {
   display: none !important;
 }
 
@@ -1736,6 +1738,120 @@ textarea { font: inherit; }
 
 .qr-menu-search {
   width: 100%;
+}
+
+/* Modale encaissement : compacte, sans scroll interne si possible */
+.modal-finalize-overlay {
+  align-items: flex-start;
+  padding: 10px 12px max(10px, env(safe-area-inset-bottom));
+  overflow-y: auto;
+}
+.modal.modal-finalize {
+  width: min(400px, 100%);
+  padding: 10px 12px 14px;
+  max-height: none;
+  overflow: visible;
+  margin-top: max(0px, env(safe-area-inset-top));
+}
+.modal-finalize .modal-handle--thin {
+  margin-bottom: 8px;
+}
+.section-head--tight {
+  margin-bottom: 6px;
+}
+.section-head--tight h3 {
+  font-size: 1.05rem;
+}
+.modal-finalize .inline-card--tight {
+  padding: 8px 10px;
+  margin-top: 0;
+}
+.finalize-total-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.finalize-total-val {
+  color: var(--mm-primary-dark);
+  font-size: 1rem;
+}
+.finalize-hint {
+  font-size: 0.76rem;
+  line-height: 1.25;
+  margin: 6px 0 8px;
+}
+.finalize-pay-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px 8px;
+}
+.finalize-pay-grid .form-group--zero {
+  margin-top: 0 !important;
+}
+.finalize-pay-grid label {
+  font-size: 0.7rem;
+  margin-bottom: 2px;
+  color: var(--muted);
+}
+.finalize-pay-grid input {
+  padding: 6px 8px;
+  font-size: 0.9rem;
+  min-height: 38px;
+}
+.modal-finalize .form-group--credit {
+  margin-top: 8px !important;
+}
+.modal-finalize .form-group--credit label {
+  font-size: 0.78rem;
+}
+.modal-finalize .form-group--credit input {
+  padding: 7px 10px;
+  min-height: 40px;
+}
+.finalize-preview-block {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  padding: 8px 10px;
+  margin-top: 8px;
+}
+.finalize-preview-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+.finalize-reste {
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+.finalize-flow-actions,
+.finalize-done-actions {
+  margin-top: 10px !important;
+}
+.button-stack--row {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.button-stack--row .btn {
+  flex: 1;
+  min-width: 0;
+}
+.finalize-done {
+  margin-top: 8px;
+}
+.finalize-done-msg {
+  font-size: 0.92rem;
+  text-align: center;
+  margin: 8px 0 10px;
+  line-height: 1.35;
+}
+@media (max-width: 360px) {
+  .finalize-pay-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 
 .order-shell {
