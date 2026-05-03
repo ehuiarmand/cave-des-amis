@@ -1413,7 +1413,10 @@ function dayBookFor(dateStr = today(), siteId = currentSiteId()) {
 function dayBookNeedsCashOpening(book) {
   if (!book) return true;
   if (book.openingCashRecorded === true) return false;
-  return typeof book.openingCashFcfa !== "number" || Number.isNaN(book.openingCashFcfa);
+  const n = Number(book.openingCashFcfa);
+  if (typeof book.openingCashFcfa === "number" && !Number.isNaN(n)) return false;
+  if (book.openingCashFcfa != null && book.openingCashFcfa !== "" && !Number.isNaN(n)) return false;
+  return true;
 }
 
 function captureOpeningStockSnapshot() {
@@ -1477,7 +1480,8 @@ async function recordCashOpening() {
 
 function renderCashOpeningPanel() {
   const container = document.getElementById("pdj-cash-opening");
-  const wrap = document.getElementById("pdj-main-wrap");
+  const lockBlock = document.getElementById("pdj-locked-block");
+  const wrap = lockBlock || document.getElementById("pdj-main-wrap");
   if (!container || !wrap) return;
   const book = dayBookFor(pdjCalendarDate(), currentSiteId());
   const needs = dayBookNeedsCashOpening(book);

@@ -791,11 +791,19 @@ textarea { font: inherit; }
   letter-spacing: 0.02em;
 }
 
-.pdj-main-wrap.pdj-main--locked {
+/* Verrouillage seulement du bandeau KPI / graphiques (pas la verification stock : pointer-events bloquait les saisies). */
+.pdj-locked-block.pdj-main--locked {
   opacity: 0.42;
   pointer-events: none;
   filter: grayscale(0.12);
   user-select: none;
+}
+
+.pdj-main-wrap.pdj-main--locked {
+  opacity: 1;
+  pointer-events: auto;
+  filter: none;
+  user-select: auto;
 }
 
 .pdj-closing-cash-panel {
