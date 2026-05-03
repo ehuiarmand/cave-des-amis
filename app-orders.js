@@ -4083,9 +4083,11 @@ async function closeAccountingDay() {
     };
   });
   const stockGaps = checkedItems.filter((item) => item.ecart !== 0);
+  // Les ecarts sont acceptes et enregistres dans le stock (entrees/sorties)
+  // Avertissement informatif uniquement pour les non-admins
   if (stockGaps.length && !canAnyAdmin()) {
-    showToast(`Stock non conforme : ${stockGaps.length} article(s) avec écart. Ajustez frigo et réserve jusqu'à OK sur chaque ligne.`);
-    return;
+    const confirm = window.confirm(`${stockGaps.length} article(s) ont des ecarts entre le stock physique et le theorique. Ces ecarts seront enregistres. Confirmer quand meme ?`);
+    if (!confirm) return;
   }
 
   // Find previous close for today to reverse its effects before re-applying
