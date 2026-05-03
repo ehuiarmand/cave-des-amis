@@ -1723,7 +1723,8 @@ function renderDailyStockCheck() {
         </div>
       </div>
       <p class="muted" style="margin-bottom:10px;font-size:0.88rem">
-        La cloture n'est possible que si chaque ligne affiche <strong>OK</strong> (frigo + réserve = stock théorique restant).
+        Saisissez le stock physique reel (frigo + reserve). L'ecart s'affiche en direct.
+        ${canAnyAdmin() ? `Les ecarts sont autorises et seront enregistres dans le stock.` : `La cloture n'est possible que si chaque ligne affiche <strong>OK</strong>.`}
       </p>
       <div class="stock-table-wrap"><table class="stock-table">
         <thead><tr>
@@ -4056,7 +4057,7 @@ async function closeAccountingDay() {
   const especesCharges = chargesJour.reduce((sum, c) => (
     normalizePaymentMethodKey(c.paiement) === normalizePaymentMethodKey("Espèces") ? sum + (Number(c.montant) || 0) : sum
   ), 0);
-  const openingCash = Number(dayBook.openingCashFcfa) || 0;
+  const openingCash = Number(dayBook?.openingCashFcfa) || 0;
   const expectedEspecesCash = openingCash + especesVentes - especesCharges;
   const cashEcartEspeces = closingCashFcfa - expectedEspecesCash;
 
@@ -4082,7 +4083,7 @@ async function closeAccountingDay() {
     };
   });
   const stockGaps = checkedItems.filter((item) => item.ecart !== 0);
-  if (stockGaps.length) {
+  if (stockGaps.length && !canAnyAdmin()) {
     showToast(`Stock non conforme : ${stockGaps.length} article(s) avec écart. Ajustez frigo et réserve jusqu'à OK sur chaque ligne.`);
     return;
   }
@@ -5381,6 +5382,25 @@ document.getElementById("fab-btn").addEventListener("click", () => {
   bindMobileMoreSheet();
   document.getElementById("page-pdj")?.addEventListener("click", (event) => {
     if (event.target.closest("#pdj-opening-submit")) recordCashOpening().catch(handleApiError);
+  });
+  document.getElementById("pdj-stock-check")?.addEventListener("input", (event) => {
+    const input = event.target.closest("[data-check-frigo],[data-check-reserve]");
+    if (!input) return;
+    const itemId = input.dataset.checkFrigo || input.dataset.checkReserve;
+    const frigoEl = document.querySelector(`[data-check-frigo="${itemId}"]`);
+    const reserveEl = document.querySelector(`[data-check-reserve="${itemId}"]`);
+    if (!frigoEl || !reserveEl) return;
+    const frigo = Math.max(0, Number(frigoEl.value) || 0);
+    const reserve = Math.max(0, Number(reserveEl.value) || 0);
+    const row = input.closest("tr");
+    if (!row) return;
+    const theorique = Number(row.cells[3]?.textContent?.replace(/\s/g, "").replace(",", ".")) || 0;
+    const ecart = (frigo + reserve) - theorique;
+    const ecartCell = row.cells[row.cells.length - 1];
+    if (ecartCell) {
+      ecartCell.textContent = ecart === 0 ? "OK" : (ecart > 0 ? `+${ecart}` : String(ecart));
+      ecartCell.style.color = ecart === 0 ? "#72d7a9" : "#ff8e82";
+    }
   });
   document.getElementById("page-ventes").addEventListener("click", (event) => {
     const innerBtn = event.target.closest("[data-caisse-inner]");
