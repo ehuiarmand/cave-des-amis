@@ -1577,7 +1577,12 @@ function renderDailyStockCheck() {
   const button = document.getElementById("close-day-btn");
   const printBtn = document.getElementById("print-closure-btn");
   if (!container || !button) return;
-  button.textContent = closed ? "Reverifier la journee" : "Verifier et cloturer";
+  const superadminCorrection = Boolean(closed && canSuperAdmin());
+  button.textContent = superadminCorrection
+    ? "Mettre a jour la cloture"
+    : closed
+      ? "Reverifier la journee"
+      : "Verifier et cloturer";
   if (printBtn) printBtn.classList.toggle("hidden", !closed);
   if (!items.length) {
     container.innerHTML = emptyState("Aucun stock", "Ajoutez des articles avant de faire le point de fermeture.");
@@ -1596,7 +1601,7 @@ function renderDailyStockCheck() {
   }
   button.disabled = false;
 
-  if (closed) {
+  if (closed && !canSuperAdmin()) {
     const checkItems = closed.items || [];
     const rows = checkItems.map((ci) => {
       const ecartColor = ci.ecart === 0 ? "#72d7a9" : "#ff8e82";
@@ -1644,6 +1649,7 @@ function renderDailyStockCheck() {
         <tbody>${rows}</tbody>
       </table></div>`;
   } else {
+    const seedFromClose = closed && canSuperAdmin() ? closed : null;
     const ventesJour = recordsForSite(state.ventes).filter((v) => v.date.slice(0, 10) === dStr);
     const totauxJourOpen = paymentTotals(ventesJour);
     const especesVentes = Number(totauxJourOpen["Espèces"]) || 0;
@@ -1653,22 +1659,38 @@ function renderDailyStockCheck() {
     ), 0);
     const openingCash = Number(dayBook.openingCashFcfa) || 0;
     const expectedEspeces = openingCash + especesVentes - especesCharges;
+    const closingSeed = seedFromClose && typeof seedFromClose.closingCashFcfa === "number"
+      ? Math.round(Number(seedFromClose.closingCashFcfa))
+      : null;
     const rows = items.map((item) => {
       const stockAtOpen = Number(dayBook?.openingStockById?.[String(item.id)]) || stockActuel(item); // ouverture figée
       const sortiesToday = todaySortiesBottlesForArticle(item.article, dStr);
       const remaining = Math.max(0, stockAtOpen - sortiesToday); // restant théorique
-      const gap = (stockFrigo(item) + stockReserve(item)) - remaining;
+      const seedCi = seedFromClose ? (seedFromClose.items || []).find((ci) => Number(ci.id) === Number(item.id)) : null;
+      const frigoVal = seedCi != null ? Math.max(0, Number(seedCi.frigo) || 0) : stockFrigo(item);
+      const reserveVal = seedCi != null ? Math.max(0, Number(seedCi.reserve) || 0) : stockReserve(item);
+      const gap = (frigoVal + reserveVal) - remaining;
       return `<tr>
         <td>${escapeHtml(item.article)}</td>
         <td style="text-align:right;color:#1976d2">${fmt(stockAtOpen)}</td>
         <td style="text-align:right;color:#ff8e82">${fmt(sortiesToday)}</td>
         <td style="text-align:right">${fmt(remaining)}</td>
-        <td><input class="stock-check-input" type="number" min="0" data-check-frigo="${item.id}" value="${stockFrigo(item)}"></td>
-        <td><input class="stock-check-input" type="number" min="0" data-check-reserve="${item.id}" value="${stockReserve(item)}"></td>
+        <td><input class="stock-check-input" type="number" min="0" data-check-frigo="${item.id}" value="${frigoVal}"></td>
+        <td><input class="stock-check-input" type="number" min="0" data-check-reserve="${item.id}" value="${reserveVal}"></td>
         <td style="text-align:right;color:${gap === 0 ? "#72d7a9" : "#ff8e82"}">${gap === 0 ? "OK" : fmt(gap)}</td>
       </tr>`;
     }).join("");
+    const correctionBanner = seedFromClose
+      ? `<div class="inline-card" style="margin-bottom:12px;border-left:3px solid var(--mm-primary, #2196f3)">
+        <strong>Correction de cloture (super administrateur)</strong>
+        <p class="muted" style="margin-top:6px;font-size:0.86rem;line-height:1.45">
+          Champs pre-remplis avec la derniere cloture du <strong>${escapeHtml(formatDateDdMmYyyy(dStr))}</strong>.
+          Ajustez frigo, reserve et caisse puis validez pour remplacer la fiche (les ecritures de stock seront recalculees).
+        </p>
+      </div>`
+      : "";
     container.innerHTML = `
+      ${correctionBanner}
       <div class="inline-card" style="margin-bottom:12px">
         <span class="muted">Référence ouverture</span>
         <strong>${escapeHtml(formatDateTimeDdMmYyyy(dayBook.openedAt))}</strong>
@@ -1682,7 +1704,7 @@ function renderDailyStockCheck() {
         <div class="form-grid two-cols" style="margin-top:10px">
           <div class="form-group">
             <label for="pdj-closing-cash">Montant espèces dénombrées à la fermeture (FCFA)</label>
-            <input id="pdj-closing-cash" type="number" min="0" step="1" placeholder="Comptage réel en caisse">
+            <input id="pdj-closing-cash" type="number" min="0" step="1" placeholder="Comptage réel en caisse" value="${closingSeed != null ? String(closingSeed) : ""}">
           </div>
         </div>
       </div>
