@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Flex:wght@500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./styles.css?v=28">
+  <link rel="stylesheet" href="./styles.css?v=29">
 </head>
 <body>
   <div class="app-bg"></div>
@@ -1001,9 +1001,13 @@
         </div>
       </div>
       <div class="form-group">
-        <label for="v-article">Article / boisson</label>
+        <label for="v-article-search">Rechercher un produit</label>
+        <input id="v-article-search" type="search" placeholder="Nom, categorie, mot-cle…" autocomplete="off" enterkeyhint="search">
+        <div id="v-article-picker" class="vente-article-picker" role="listbox" aria-label="Resultats du catalogue"></div>
+        <label for="v-article" style="margin-top:10px;display:block">Article / boisson</label>
         <input id="v-article" type="text" placeholder="ex: Castel Beer 65cl" list="articles-list">
         <datalist id="articles-list"></datalist>
+        <p class="muted" style="font-size:0.8rem;margin-top:4px">Choisissez une ligne ci-dessus ou saisissez le nom (catalogue stock).</p>
         <p id="v-kit-info" class="form-hint hidden"></p>
         <div id="v-stock-info" class="form-hint hidden"></div>
       </div>
@@ -1425,6 +1429,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=48"></script>
+  <script src="./app-orders.js?v=49"></script>
 </body>
 </html>

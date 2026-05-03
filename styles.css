@@ -1734,6 +1734,10 @@ textarea { font: inherit; }
   gap: 10px;
 }
 
+.qr-menu-search {
+  width: 100%;
+}
+
 .order-shell {
   width: min(780px, 100%);
   margin: 0 auto;
@@ -2326,4 +2330,55 @@ textarea { font: inherit; }
   outline: 2px solid var(--mm-primary);
   outline-offset: 2px;
   border-radius: 4px;
+}
+
+/* Modale vente — recherche produit + liste rapide */
+.vente-article-picker {
+  margin-top: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--mm-surface);
+}
+.vente-picker-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: var(--mm-text);
+}
+.vente-picker-row:last-child {
+  border-bottom: none;
+}
+.vente-picker-row:hover,
+.vente-picker-row:focus {
+  background: var(--mm-bg);
+  outline: none;
+}
+.vente-picker-row:focus-visible {
+  outline: 2px solid var(--mm-primary);
+  outline-offset: -2px;
+}
+.vente-picker-name {
+  font-weight: 600;
+  font-size: 0.92rem;
+}
+.vente-picker-meta {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.vente-picker-hint {
+  padding: 8px 12px;
+  font-size: 0.78rem;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
 }

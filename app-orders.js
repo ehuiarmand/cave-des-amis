@@ -1061,6 +1061,48 @@ function syncKnownProduct() {
   updateVentePreview();
 }
 
+/** Liste filtrée pour la modale commande (hors QR). */
+function productsForVentePicker(query) {
+  const items = knownProducts().slice().sort((a, b) => a.article.localeCompare(b.article, "fr"));
+  const q = query.trim().toLowerCase();
+  if (!q) return items.slice(0, 55);
+  const terms = q.split(/\s+/).filter(Boolean);
+  return items.filter((p) => {
+    const a = p.article.toLowerCase();
+    const c = String(p.cat || "").toLowerCase();
+    return terms.every((t) => a.includes(t) || c.includes(t));
+  }).slice(0, 80);
+}
+
+function renderVenteArticlePicker() {
+  const wrap = document.getElementById("v-article-picker");
+  const search = document.getElementById("v-article-search");
+  if (!wrap) return;
+  const q = search ? String(search.value || "") : "";
+  const allCount = knownProducts().length;
+  const list = productsForVentePicker(q);
+  let hint = "";
+  if (!q.trim() && allCount > list.length) {
+    hint = `<div class="vente-picker-hint">${list.length} premiers articles (tri A-Z). Saisissez un mot-cle pour affiner.</div>`;
+  } else if (q.trim() && list.length >= 80) {
+    hint = `<div class="vente-picker-hint">Limite a 80 resultats : precisez la recherche.</div>`;
+  }
+  if (!list.length) {
+    wrap.innerHTML = `${hint}<p class="muted" style="padding:12px;font-size:0.88rem">Aucun produit ne correspond.</p>`;
+    return;
+  }
+  wrap.innerHTML = hint + list.map((p) => {
+    const stockItem = stockItemForArticle(p.article);
+    const avail = stockItem ? availableStock(stockItem) : null;
+    const avLabel = avail == null ? "—" : `${fmt(avail)} btl`;
+    const enc = encodeURIComponent(p.article);
+    return `<button type="button" class="vente-picker-row" data-vente-pick="${enc}">
+      <span class="vente-picker-name">${escapeHtml(p.article)}</span>
+      <span class="vente-picker-meta">${escapeHtml(p.cat || "—")} · Stock ${avLabel}</span>
+    </button>`;
+  }).join("");
+}
+
 function productPrice(product, location) {
   if (!product) return 0;
   const format = selectedSaleFormat(product);
@@ -1836,6 +1878,7 @@ function renderOrders() {
 
 function renderVentesPage() {
   document.getElementById("articles-list").innerHTML = knownProducts().map((item) => `<option value="${escapeHtml(item.article)}">`).join("");
+  if (document.getElementById("modal-vente")?.classList.contains("open")) renderVenteArticlePicker();
   renderOrdersManagement();
   renderQrAlertBadge();
   renderOrders();
@@ -2504,7 +2547,11 @@ function openOrderEditor(orderId = null, lineId = null) {
   document.getElementById("finalize-order-btn").disabled = !order;
   updateKitInfo();
   updateVentePreview();
+  const vSearch = document.getElementById("v-article-search");
+  if (vSearch) vSearch.value = "";
+  renderVenteArticlePicker();
   openModal("modal-vente");
+  window.requestAnimationFrame(() => document.getElementById("v-article-search")?.focus());
 }
 
 function resetOrderForm() {
@@ -2521,6 +2568,9 @@ function resetOrderForm() {
   document.getElementById("v-note").value = "";
   document.getElementById("save-vente-btn").textContent = "Ajouter un article";
   document.getElementById("finalize-order-btn").disabled = !activeOrderId;
+  const vSearchReset = document.getElementById("v-article-search");
+  if (vSearchReset) vSearchReset.value = "";
+  renderVenteArticlePicker();
   updateKitInfo(null);
   updateVentePreview();
 }
@@ -5112,6 +5162,23 @@ document.getElementById("fab-btn").addEventListener("click", () => {
       if (raw != null && raw !== "" && !Number.isNaN(id)) openStaffAuditDetailModal(id);
       return;
     }
+    const ventePick = event.target.closest("[data-vente-pick]");
+    if (ventePick) {
+      let name = "";
+      try {
+        name = decodeURIComponent(ventePick.getAttribute("data-vente-pick") || "");
+      } catch (_) {
+        name = "";
+      }
+      const art = document.getElementById("v-article");
+      if (art) art.value = name;
+      const vSearch = document.getElementById("v-article-search");
+      if (vSearch) vSearch.value = "";
+      renderVenteArticlePicker();
+      syncKnownProduct();
+      art?.focus();
+      return;
+    }
     const removeFormatBtn = event.target.closest("[data-remove-sale-format]");
     if (removeFormatBtn) {
       const index = Number(removeFormatBtn.dataset.removeSaleFormat);
@@ -5292,6 +5359,12 @@ document.getElementById("fab-btn").addEventListener("click", () => {
   document.querySelectorAll(".finalize-pay-input").forEach((input) => input.addEventListener("input", updatePaymentMixPreview));
   document.getElementById("v-article").addEventListener("change", syncKnownProduct);
   document.getElementById("v-article").addEventListener("blur", syncKnownProduct);
+  const vArticleSearch = document.getElementById("v-article-search");
+  if (vArticleSearch) {
+    vArticleSearch.addEventListener("input", () => {
+      if (document.getElementById("modal-vente")?.classList.contains("open")) renderVenteArticlePicker();
+    });
+  }
   document.getElementById("v-location").addEventListener("change", () => {
     document.getElementById("v-prix").value = "";
     syncKnownProduct();

@@ -146,6 +146,20 @@ function cartQty(key) {
   return (customerState.cart.find((c) => c.key === key) || {}).qty || 0;
 }
 
+/** Filtre menu QR (nom + categorie, plusieurs mots). */
+function menuItemsFilteredForSearch() {
+  const searchEl = document.getElementById("qr-menu-search");
+  const q = searchEl ? String(searchEl.value || "").trim().toLowerCase() : "";
+  const items = customerState.menu || [];
+  if (!q) return items;
+  const terms = q.split(/\s+/).filter(Boolean);
+  return items.filter((item) => {
+    const a = String(item.article || "").toLowerCase();
+    const c = String(item.cat || "").toLowerCase();
+    return terms.every((t) => a.includes(t) || c.includes(t));
+  });
+}
+
 function renderMenu() {
   const container = document.getElementById("customer-menu");
   if (!customerState.menu.length) {
@@ -153,8 +167,14 @@ function renderMenu() {
     return;
   }
 
+  const filtered = menuItemsFilteredForSearch();
+  if (!filtered.length) {
+    container.innerHTML = `<div class="empty-state"><strong>Aucun resultat</strong><p class="empty-copy">Modifiez votre recherche ou effacez le champ pour afficher tout le menu.</p></div>`;
+    return;
+  }
+
   const byCategory = {};
-  customerState.menu.forEach((item) => {
+  filtered.forEach((item) => {
     if (!byCategory[item.cat]) byCategory[item.cat] = [];
     byCategory[item.cat].push(item);
   });
@@ -263,6 +283,8 @@ function resetForNextOrder() {
   document.getElementById("customer-feedback").textContent = "";
   document.getElementById("send-order-btn").disabled = false;
   document.getElementById("new-customer-order-btn").classList.add("hidden");
+  const qs = document.getElementById("qr-menu-search");
+  if (qs) qs.value = "";
   renderMenu();
   renderCart();
   document.getElementById("customer-menu").scrollIntoView({ behavior: "smooth", block: "start" });
@@ -366,8 +388,14 @@ async function initCustomer() {
     renderMenu();
     renderCart();
     await loadCustomerOrders();
+    window.requestAnimationFrame(() => document.getElementById("qr-menu-search")?.focus());
   } catch (error) {
     document.getElementById("customer-feedback").textContent = error.message;
+  }
+
+  const qrMenuSearch = document.getElementById("qr-menu-search");
+  if (qrMenuSearch) {
+    qrMenuSearch.addEventListener("input", () => renderMenu());
   }
 
   document.getElementById("customer-menu").addEventListener("click", (event) => {
