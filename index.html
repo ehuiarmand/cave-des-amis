@@ -118,14 +118,17 @@
               <p class="eyebrow">Rapport journalier</p>
               <h3>Point des ventes du jour</h3>
             </div>
-            <span id="pdj-date" class="section-meta"></span>
-          </div>
-          <div class="superadmin-only" id="pdj-work-date-row" style="margin-top:10px;padding-top:12px;border-top:1px solid var(--line)">
-            <label for="pdj-work-date" style="display:block;font-size:0.82rem;color:var(--muted);margin-bottom:6px">Journee a traiter (ouverture caisse, verification stock, recloture)</label>
-            <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">
-              <input id="pdj-work-date" type="date" style="min-height:40px">
-              <button type="button" class="mini-btn" id="pdj-apply-work-date">Appliquer</button>
-              <span class="muted" style="font-size:0.8rem;max-width:420px;line-height:1.35">Les indicateurs et la cloture portent sur cette date. Choisissez une journee passee apres reouverture pour corriger les ecarts.</span>
+            <div class="pdj-head-meta">
+              <span id="pdj-date" class="section-meta"></span>
+              <div class="superadmin-only pdj-superadmin-date-banner" id="pdj-work-date-row">
+                <strong style="display:block;font-size:0.82rem;margin-bottom:6px;color:var(--mm-primary-dark)">Super administrateur — journee a traiter</strong>
+                <label for="pdj-work-date" style="display:block;font-size:0.8rem;color:var(--muted);margin-bottom:6px">Date (ouverture caisse, verification stock, recloture)</label>
+                <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">
+                  <input id="pdj-work-date" type="date" style="min-height:40px">
+                  <button type="button" class="mini-btn" id="pdj-apply-work-date">Appliquer</button>
+                </div>
+                <p class="muted" style="font-size:0.78rem;margin:8px 0 0;line-height:1.35">Apres une reouverture, choisissez la meme date pour corriger les ecarts puis recloturer.</p>
+              </div>
             </div>
           </div>
           <div id="pdj-cash-opening" class="pdj-cash-opening"></div>
@@ -1446,6 +1449,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=58"></script>
+  <script src="./app-orders.js?v=59"></script>
 </body>
 </html>

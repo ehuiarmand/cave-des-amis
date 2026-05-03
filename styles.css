@@ -1878,6 +1878,25 @@ textarea { font: inherit; }
     var(--mm-surface);
 }
 
+.pdj-head-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  text-align: right;
+  min-width: min(100%, 300px);
+}
+
+.pdj-superadmin-date-banner {
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(33, 150, 243, 0.5);
+  background: rgba(33, 150, 243, 0.12);
+  text-align: left;
+  width: 100%;
+  max-width: 440px;
+}
+
 .pdj-kpis {
   display: grid;
   grid-template-columns: repeat(4, 1fr);

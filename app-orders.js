@@ -505,7 +505,12 @@ function recordsForSite(list) {
 }
 
 function canSuperAdmin() {
-  return currentRole === "superadmin" || String(sessionUser || "").trim().toLowerCase() === "admin";
+  if (currentRole === "superadmin") return true;
+  const sn = String(sessionUser || "").trim();
+  if (sn.toLowerCase() === "admin") return true;
+  const u = (state?.auth?.users || []).find((x) => String(x.username || "").trim().toLowerCase() === sn.toLowerCase());
+  if (u && String(u.role || "") === "superadmin") return true;
+  return false;
 }
 
 /** Le login reserve admin est toujours superadmin cote UI et controles locaux. */
@@ -545,8 +550,7 @@ const STAFF_AUDIT_MAX = 800;
 
 function shouldRecordStaffAudit() {
   if (!sessionUser) return false;
-  if (currentRole === "superadmin" || String(sessionUser || "").trim().toLowerCase() === "admin") return false;
-  if (currentRole === "admin") return false;
+  if (canSuperAdmin() || canSiteAdmin()) return false;
   return currentRole === "manager" || currentRole === "serveuse";
 }
 
@@ -972,6 +976,7 @@ function navigate(page, opts = {}) {
     maybeAdjustParamsSubTab();
   }
   syncFabLabelForStockPage();
+  applyRoleVisibility();
 }
 
 function handleNavButtonClick(button) {
