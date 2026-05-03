@@ -120,6 +120,14 @@
             </div>
             <span id="pdj-date" class="section-meta"></span>
           </div>
+          <div class="superadmin-only" id="pdj-work-date-row" style="margin-top:10px;padding-top:12px;border-top:1px solid var(--line)">
+            <label for="pdj-work-date" style="display:block;font-size:0.82rem;color:var(--muted);margin-bottom:6px">Journee a traiter (ouverture caisse, verification stock, recloture)</label>
+            <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">
+              <input id="pdj-work-date" type="date" style="min-height:40px">
+              <button type="button" class="mini-btn" id="pdj-apply-work-date">Appliquer</button>
+              <span class="muted" style="font-size:0.8rem;max-width:420px;line-height:1.35">Les indicateurs et la cloture portent sur cette date. Choisissez une journee passee apres reouverture pour corriger les ecarts.</span>
+            </div>
+          </div>
           <div id="pdj-cash-opening" class="pdj-cash-opening"></div>
           <div id="pdj-main-wrap" class="pdj-main-wrap">
           <div class="pdj-kpis">
@@ -1438,6 +1446,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=57"></script>
+  <script src="./app-orders.js?v=58"></script>
 </body>
 </html>

@@ -523,6 +523,24 @@ function canAnyAdmin() {
   return canSuperAdmin() || canSiteAdmin();
 }
 
+/** Date traitee sur le Point du jour : le superadmin peut choisir une journee (p. ex. apres reouverture pour corriger les ecarts). */
+function pdjCalendarDate() {
+  const t = today();
+  if (!canSuperAdmin()) return t;
+  const el = document.getElementById("pdj-work-date");
+  const v = el?.value?.trim();
+  if (v && /^\d{4}-\d{2}-\d{2}$/.test(v)) return v > t ? t : v;
+  return t;
+}
+
+function syncPdjWorkDateInput() {
+  const el = document.getElementById("pdj-work-date");
+  if (!el || !canSuperAdmin()) return;
+  const t = today();
+  el.max = t;
+  if (!el.value || el.value > t) el.value = t;
+}
+
 const STAFF_AUDIT_MAX = 800;
 
 function shouldRecordStaffAudit() {
@@ -1220,14 +1238,20 @@ function isCreditSale(v) {
 }
 
 function renderPointDuJour() {
-  const todayStr = today();
-  const ventesJour = recordsForSite(state.ventes).filter((v) => v.date.slice(0, 10) === todayStr);
+  syncPdjWorkDateInput();
+  const dStr = pdjCalendarDate();
+  const ventesJour = recordsForSite(state.ventes).filter((v) => v.date.slice(0, 10) === dStr);
   const totalsJour = paymentTotals(ventesJour);
   const caCreances = Object.entries(totalsJour).reduce((sum, [method, amount]) => String(method).includes("dit client") ? sum + amount : sum, 0);
   const caEncaisse = Object.entries(totalsJour).reduce((sum, [method, amount]) => String(method).includes("dit client") ? sum : sum + amount, 0);
   const remisesJour = ventesJour.reduce((sum, v) => sum + (Number(v.remise) || 0), 0);
 
-  document.getElementById("pdj-date").textContent = formatDateDdMmYyyy(new Date());
+  const pdjDateEl = document.getElementById("pdj-date");
+  if (pdjDateEl) {
+    pdjDateEl.textContent = canSuperAdmin() && dStr !== today()
+      ? `Journee du ${formatDateDdMmYyyy(dStr)} · aujourd'hui ${formatDateDdMmYyyy(new Date())}`
+      : formatDateDdMmYyyy(new Date());
+  }
   renderCashOpeningPanel();
   document.getElementById("pdj-ca").textContent = `${fmt(caEncaisse)} FCFA`;
   document.getElementById("pdj-creances").textContent = `${fmt(caCreances)} FCFA`;
@@ -1251,7 +1275,7 @@ function renderPointDuJour() {
     }, {}),
     */
     caEncaisse,
-    "Aucun encaissement enregistre aujourd'hui.",
+    dStr === today() ? "Aucun encaissement enregistre aujourd'hui." : `Aucun encaissement pour le ${formatDateDdMmYyyy(dStr)}.`,
   );
 
   const sorted = ventesJour.slice().sort((a, b) => b.date.localeCompare(a.date));
@@ -1265,12 +1289,17 @@ function renderPointDuJour() {
           <div class="list-side">
             <div>
               <p class="list-item-amount" style="${isCreance(v) ? "color:#ff8e82" : ""}">${fmt(calcNet(v))} FCFA</p>
-              <p class="list-item-date">${v.factureNumber ? escapeHtml(v.factureNumber) : escapeHtml(formatDateDdMmYyyy(todayStr))}</p>
+              <p class="list-item-date">${v.factureNumber ? escapeHtml(v.factureNumber) : escapeHtml(formatDateDdMmYyyy(dStr))}</p>
             </div>
           </div>
         </article>
       `).join("")
-    : emptyState("Aucune vente aujourd'hui", "Les ventes du jour apparaissent ici des qu'elles sont enregistrees.");
+    : emptyState(
+      dStr === today() ? "Aucune vente aujourd'hui" : `Aucune vente le ${formatDateDdMmYyyy(dStr)}`,
+      dStr === today()
+        ? "Les ventes du jour apparaissent ici des qu'elles sont enregistrees."
+        : "Les ventes de cette date apparaitront ici.",
+    );
   renderDailyStockCheck();
   renderPastClosuresForReopen();
 }
@@ -1404,7 +1433,11 @@ async function recordCashOpening() {
   }
   state.dayBooks = state.dayBooks || [];
   const siteId = currentSiteId();
-  const dateStr = today();
+  const dateStr = pdjCalendarDate();
+  if (!canSuperAdmin() && dateStr !== today()) {
+    showToast("Seul le super administrateur peut enregistrer l'ouverture pour une autre date.");
+    return;
+  }
   let book = dayBookFor(dateStr, siteId);
   const snapshot = captureOpeningStockSnapshot();
   const ts = new Date().toISOString();
@@ -1441,7 +1474,7 @@ function renderCashOpeningPanel() {
   const container = document.getElementById("pdj-cash-opening");
   const wrap = document.getElementById("pdj-main-wrap");
   if (!container || !wrap) return;
-  const book = dayBookFor(today(), currentSiteId());
+  const book = dayBookFor(pdjCalendarDate(), currentSiteId());
   const needs = dayBookNeedsCashOpening(book);
   wrap.classList.toggle("pdj-main--locked", needs);
   if (!needs && book) {
@@ -1517,24 +1550,24 @@ function renderSalesByProduct(ventesJour) {
   `;
 }
 
-function stockCheckForToday() {
-  const siteId = currentSiteId();
-  return (state.stockChecks || []).find((item) => item.siteId === siteId && item.date === today()) || null;
+function stockCheckForSiteDate(dateStr, siteId = currentSiteId()) {
+  if (!dateStr || !siteId) return null;
+  return (state.stockChecks || []).find((item) => item.siteId === siteId && item.date === dateStr) || null;
 }
 
-function todaySortiesBottlesForArticle(article) {
-  const todayStr = today();
+function todaySortiesBottlesForArticle(article, saleDateStr = pdjCalendarDate()) {
   const stockItem = recordsForSite(state.stock).find((s) => s.article === article);
   const packSize = Math.max(1, Number(stockItem?.packSize) || 1);
   return recordsForSite(state.ventes)
-    .filter((v) => v.date.slice(0, 10) === todayStr && v.article === article)
+    .filter((v) => v.date.slice(0, 10) === saleDateStr && v.article === article)
     .reduce((sum, v) => sum + (Number(v.qty) || 0) * packSize, 0);
 }
 
 function renderDailyStockCheck() {
   const items = recordsForSite(state.stock).slice().sort((a, b) => a.article.localeCompare(b.article, "fr"));
-  const closed = stockCheckForToday();
-  const dayBook = dayBookFor(today(), currentSiteId());
+  const dStr = pdjCalendarDate();
+  const closed = stockCheckForSiteDate(dStr, currentSiteId());
+  const dayBook = dayBookFor(dStr, currentSiteId());
   const container = document.getElementById("pdj-stock-check");
   const button = document.getElementById("close-day-btn");
   const printBtn = document.getElementById("print-closure-btn");
@@ -1606,10 +1639,10 @@ function renderDailyStockCheck() {
         <tbody>${rows}</tbody>
       </table></div>`;
   } else {
-    const ventesJour = recordsForSite(state.ventes).filter((v) => v.date.slice(0, 10) === today());
+    const ventesJour = recordsForSite(state.ventes).filter((v) => v.date.slice(0, 10) === dStr);
     const totauxJourOpen = paymentTotals(ventesJour);
     const especesVentes = Number(totauxJourOpen["Espèces"]) || 0;
-    const chargesJour = recordsForSite(state.charges).filter((c) => (c.date || "").slice(0, 10) === today());
+    const chargesJour = recordsForSite(state.charges).filter((c) => (c.date || "").slice(0, 10) === dStr);
     const especesCharges = chargesJour.reduce((sum, c) => (
       normalizePaymentMethodKey(c.paiement) === normalizePaymentMethodKey("Espèces") ? sum + (Number(c.montant) || 0) : sum
     ), 0);
@@ -1617,7 +1650,7 @@ function renderDailyStockCheck() {
     const expectedEspeces = openingCash + especesVentes - especesCharges;
     const rows = items.map((item) => {
       const stockAtOpen = Number(dayBook?.openingStockById?.[String(item.id)]) || stockActuel(item); // ouverture figée
-      const sortiesToday = todaySortiesBottlesForArticle(item.article);
+      const sortiesToday = todaySortiesBottlesForArticle(item.article, dStr);
       const remaining = Math.max(0, stockAtOpen - sortiesToday); // restant théorique
       const gap = (stockFrigo(item) + stockReserve(item)) - remaining;
       return `<tr>
@@ -3949,10 +3982,16 @@ async function closeAccountingDay() {
     showToast("Aucun stock a verifier.");
     return;
   }
-  const todayStr = today();
-  const dayBook = dayBookFor(todayStr, currentSiteId());
+  const dStr = pdjCalendarDate();
+  if (!canSuperAdmin() && dStr !== today()) {
+    showToast("Seul le super administrateur peut cloturer une autre date.");
+    return;
+  }
+  const dayBook = dayBookFor(dStr, currentSiteId());
   if (!dayBook || dayBookNeedsCashOpening(dayBook)) {
-    showToast("Enregistrez d'abord l'ouverture de caisse pour aujourd'hui.");
+    showToast(dStr === today()
+      ? "Enregistrez d'abord l'ouverture de caisse pour aujourd'hui."
+      : "Enregistrez d'abord l'ouverture de caisse pour cette journee.");
     return;
   }
   const closingRaw = document.getElementById("pdj-closing-cash")?.value;
@@ -3966,12 +4005,12 @@ async function closeAccountingDay() {
     return;
   }
 
-  const ventesJour = recordsForSite(state.ventes).filter((v) => v.date.slice(0, 10) === todayStr);
+  const ventesJour = recordsForSite(state.ventes).filter((v) => v.date.slice(0, 10) === dStr);
   const totauxJour = paymentTotals(ventesJour);
   const caEncaisse = Object.entries(totauxJour).reduce((sum, [m, a]) => String(m).includes("dit client") ? sum : sum + a, 0);
   const caCreances = Object.entries(totauxJour).reduce((sum, [m, a]) => String(m).includes("dit client") ? sum + a : sum, 0);
   const especesVentes = Number(totauxJour["Espèces"]) || 0;
-  const chargesJour = recordsForSite(state.charges).filter((c) => (c.date || "").slice(0, 10) === todayStr);
+  const chargesJour = recordsForSite(state.charges).filter((c) => (c.date || "").slice(0, 10) === dStr);
   const especesCharges = chargesJour.reduce((sum, c) => (
     normalizePaymentMethodKey(c.paiement) === normalizePaymentMethodKey("Espèces") ? sum + (Number(c.montant) || 0) : sum
   ), 0);
@@ -3983,7 +4022,7 @@ async function closeAccountingDay() {
     const frigo = Math.max(0, Number(document.querySelector(`[data-check-frigo="${item.id}"]`)?.value) || 0);
     const reserve = Math.max(0, Number(document.querySelector(`[data-check-reserve="${item.id}"]`)?.value) || 0);
     const stockAtOpen = Number(dayBook?.openingStockById?.[String(item.id)]) || stockActuel(item); // ouverture figée
-    const sortiesToday = todaySortiesBottlesForArticle(item.article);
+    const sortiesToday = todaySortiesBottlesForArticle(item.article, dStr);
     const expectedRemaining = Math.max(0, stockAtOpen - sortiesToday); // restant théorique après ventes
     const counted = frigo + reserve;
     return {
@@ -4008,7 +4047,7 @@ async function closeAccountingDay() {
 
   // Find previous close for today to reverse its effects before re-applying
   const prevClose = (state.stockChecks || []).find(
-    (sc) => sc.siteId === currentSiteId() && sc.date === todayStr
+    (sc) => sc.siteId === currentSiteId() && sc.date === dStr,
   );
   checkedItems.forEach((checked) => {
     const item = state.stock.find((stockItem) => stockItem.id === checked.id);
@@ -4037,7 +4076,7 @@ async function closeAccountingDay() {
   const check = {
     id: Date.now(),
     siteId: currentSiteId(),
-    date: todayStr,
+    date: dStr,
     createdAt: new Date().toISOString(),
     openedAt: dayBook?.openedAt || "",
     openingCashFcfa: openingCash,
@@ -4057,7 +4096,7 @@ async function closeAccountingDay() {
   recordStaffAudit(
     "update",
     "cloture_jour",
-    `Cloture journee ${formatDateDdMmYyyy(todayStr)}`,
+    `Cloture journee ${formatDateDdMmYyyy(dStr)}`,
     `CA encaisse ${fmt(caEncaisse)} · stock conforme · caisse esp. ecart ${fmt(cashEcartEspeces)}`,
   );
   await persistState({ stock: state.stock, stockChecks: state.stockChecks });
@@ -4364,12 +4403,12 @@ function printInvoice(factureNumber) {
 }
 
 function printDayClosure() {
-  const closed = stockCheckForToday();
-  if (!closed) { showToast("Cloturez d'abord la journee."); return; }
+  const reportDateStr = pdjCalendarDate();
+  const closed = stockCheckForSiteDate(reportDateStr, currentSiteId());
+  if (!closed) { showToast("Aucune cloture enregistree pour la journee affichee."); return; }
   const site = currentSite();
-  const todayStr = today();
-  const ventesJour = recordsForSite(state.ventes).filter((v) => v.date.slice(0, 10) === todayStr);
-  const chargesJour = recordsForSite(state.charges).filter((c) => (c.date || "").slice(0, 10) === todayStr);
+  const ventesJour = recordsForSite(state.ventes).filter((v) => v.date.slice(0, 10) === reportDateStr);
+  const chargesJour = recordsForSite(state.charges).filter((c) => (c.date || "").slice(0, 10) === reportDateStr);
 
   // Grouper les ventes par article : qty totale + montant total + par mode de paiement
   const byArticle = {};
@@ -4471,11 +4510,11 @@ function printDayClosure() {
     </tr>`;
   }).join("");
 
-  const dateLabel = formatDateDdMmYyyy(new Date());
+  const dateLabel = formatDateDdMmYyyy(closed.date || reportDateStr);
   const generatedAt = formatDateTimeDdMmYyyy(closed.createdAt);
 
   const html = `<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8">
-  <title>Fiche de cloture ${formatDateDdMmYyyy(todayStr)}</title>
+  <title>Fiche de cloture ${formatDateDdMmYyyy(reportDateStr)}</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: Arial, sans-serif; font-size: 11px; padding: 16px; color: #111; }
@@ -4570,7 +4609,7 @@ function printDayClosure() {
     </div>
   </div>
 
-  <div class="footer">${escapeHtml(site?.nom || "TDB Bar")} &mdash; Fiche de cloture generee automatiquement &mdash; ${escapeHtml(formatDateDdMmYyyy(todayStr))}</div>
+  <div class="footer">${escapeHtml(site?.nom || "TDB Bar")} &mdash; Fiche de cloture generee automatiquement &mdash; ${escapeHtml(formatDateDdMmYyyy(reportDateStr))}</div>
   <script>window.onload = () => window.print();<\/script>
   </body></html>`;
 
@@ -5220,14 +5259,22 @@ document.getElementById("fab-btn").addEventListener("click", () => {
     if (file) { importStockExcel(file).catch(handleApiError); e.target.value = ""; }
   });
   document.getElementById("print-closure-btn").addEventListener("click", printDayClosure);
+  document.getElementById("pdj-work-date")?.addEventListener("change", () => {
+    if (currentPage === "pdj") renderPointDuJour();
+  });
+  document.getElementById("pdj-apply-work-date")?.addEventListener("click", () => {
+    syncPdjWorkDateInput();
+    if (currentPage === "pdj") renderPointDuJour();
+  });
   document.getElementById("close-day-btn").addEventListener("click", () => {
+    const dWork = pdjCalendarDate();
     const items = recordsForSite(state.stock);
     const hasInputs = items.length && !!document.querySelector(`[data-check-frigo="${items[0].id}"]`);
-    if (!hasInputs && stockCheckForToday()) {
+    if (!hasInputs && stockCheckForSiteDate(dWork, currentSiteId())) {
       // Journee deja cloturee mais en mode lecture : repasser en mode saisie
-      const closed = stockCheckForToday();
-      // Retirer temporairement la cloture du jour pour forcer le mode edition
-      state.stockChecks = (state.stockChecks || []).filter((sc) => !(sc.siteId === currentSiteId() && sc.date === today()));
+      const closed = stockCheckForSiteDate(dWork, currentSiteId());
+      // Retirer temporairement la cloture pour forcer le mode edition
+      state.stockChecks = (state.stockChecks || []).filter((sc) => !(sc.siteId === currentSiteId() && sc.date === dWork));
       renderDailyStockCheck();
       // Re-remettre la cloture en memoire (sans persistState) pour que le reverse fonctionne
       state.stockChecks = [...(state.stockChecks || []), closed];
