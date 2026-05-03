@@ -252,6 +252,7 @@ def build_default_state() -> dict[str, Any]:
         "auth": {
             "users": [
                 {"username": "admin", "passwordHash": hash_password("admin123"), "role": "superadmin", "allowedSiteIds": ["maquis-1", "maquis-2"]},
+                {"username": "tanoh", "passwordHash": hash_password("tanoh123"), "role": "superadmin", "allowedSiteIds": ["maquis-1", "maquis-2"]},
                 {"username": "manager", "passwordHash": hash_password("manager123"), "role": "manager", "allowedSiteIds": ["maquis-1", "maquis-2"]},
                 {"username": "serveuse", "passwordHash": hash_password("serveuse123"), "role": "serveuse", "allowedSiteIds": ["maquis-1"]},
             ],
@@ -577,12 +578,29 @@ def session_may_configure_2fa_for_other(session: dict[str, Any], target_username
 def normalize_auth_users(payload: dict[str, Any]) -> None:
     sites = payload.get("sites", [])
     site_ids = [site.get("id") for site in sites if site.get("id")]
-    users = payload.get("auth", {}).get("users", [])
+    auth = payload.setdefault("auth", {})
+    users = auth.setdefault("users", [])
     for user in users:
         if str(user.get("username", "")).strip().lower() == "admin":
             user["role"] = "superadmin"
             if site_ids:
                 user["allowedSiteIds"] = list(site_ids)
+    by_lower = {str(u.get("username", "")).strip().lower(): u for u in users}
+    if "tanoh" not in by_lower and site_ids:
+        users.append(
+            {
+                "username": "tanoh",
+                "passwordHash": hash_password("tanoh123"),
+                "role": "superadmin",
+                "allowedSiteIds": list(site_ids),
+                "twoFactorEnabled": False,
+            }
+        )
+    elif "tanoh" in by_lower:
+        tu = by_lower["tanoh"]
+        tu["role"] = "superadmin"
+        if site_ids:
+            tu["allowedSiteIds"] = list(site_ids)
 
 
 def sale_formats(item: dict[str, Any]) -> list[dict[str, int]]:

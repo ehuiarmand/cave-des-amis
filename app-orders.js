@@ -508,6 +508,12 @@ function canSuperAdmin() {
   return currentRole === "superadmin" || String(sessionUser || "").trim().toLowerCase() === "admin";
 }
 
+/** Le login reserve admin est toujours superadmin cote UI et controles locaux. */
+function normalizeRoleForUsername(username, role) {
+  if (String(username || "").trim().toLowerCase() === "admin") return "superadmin";
+  return role;
+}
+
 function canSiteAdmin() {
   return currentRole === "admin";
 }
@@ -1266,6 +1272,104 @@ function renderPointDuJour() {
       `).join("")
     : emptyState("Aucune vente aujourd'hui", "Les ventes du jour apparaissent ici des qu'elles sont enregistrees.");
   renderDailyStockCheck();
+  renderPastClosuresForReopen();
+}
+
+/** Annule les ecritures comptables (sorties / entrees) appliquees par une cloture — meme logique que prevClose dans closeAccountingDay. */
+function revertStockCheckLedgerEffects(check) {
+  if (!check || !Array.isArray(check.items)) return;
+  for (const prev of check.items) {
+    const id = Number(prev.id);
+    const item = state.stock.find((s) => Number(s.id) === id);
+    if (!item) continue;
+    const st = Number(prev.sortiesToday) || 0;
+    const ec = Number(prev.ecart) || 0;
+    if (st > 0) item.sorties = Math.max(0, (Number(item.sorties) || 0) - st);
+    if (ec > 0) item.entrees = Math.max(0, (Number(item.entrees) || 0) - ec);
+    if (ec < 0) item.sorties = Math.max(0, (Number(item.sorties) || 0) - Math.abs(ec));
+  }
+}
+
+function renderPastClosuresForReopen() {
+  const host = document.getElementById("pdj-reopen-closures");
+  if (!host) return;
+  if (!canAnyAdmin()) {
+    host.innerHTML = "";
+    return;
+  }
+  const siteId = currentSiteId();
+  if (!siteId) {
+    host.innerHTML = "";
+    return;
+  }
+  const checks = (state.stockChecks || [])
+    .filter((sc) => sc && sc.siteId === siteId && sc.date && Array.isArray(sc.items) && sc.items.length)
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  if (!checks.length) {
+    host.innerHTML = `<p class="muted" style="font-size:0.88rem;margin:8px 0 0">Aucune journee cloturee enregistree pour ce maquis.</p>`;
+    return;
+  }
+  host.innerHTML = `
+    <div class="section-head pdj-detail-head" style="margin-top:16px">
+      <h3 class="pdj-detail-title">Journees cloturees (reouverture)</h3>
+    </div>
+    <p class="muted" style="font-size:0.85rem;margin:0 0 12px;line-height:1.45">
+      Reserve aux administrateurs : supprime la fiche de cloture et annule les ecritures de stock associees (sorties journalieres et ecarts comptables enregistres a la cloture).
+      Les quantites frigo / reserve actuelles ne sont pas modifiees automatiquement ; verifiez le stock physique si necessaire.
+    </p>
+    <ul style="list-style:none;padding:0;margin:0;display:grid;gap:10px">
+      ${checks.map((sc) => {
+        const dLabel = formatDateDdMmYyyy(sc.date);
+        const when = sc.createdAt ? formatDateTimeDdMmYyyy(sc.createdAt) : "";
+        const cashOpen = typeof sc.openingCashFcfa === "number" ? `${fmt(sc.openingCashFcfa)} FCFA a l'ouverture` : "";
+        return `<li class="list-item" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+          <div>
+            <strong>${escapeHtml(dLabel)}</strong>
+            ${when ? `<span class="muted" style="font-size:0.85rem"> · cloturee ${escapeHtml(when)}</span>` : ""}
+            ${cashOpen ? `<p class="muted" style="margin:4px 0 0;font-size:0.82rem">${escapeHtml(cashOpen)}</p>` : ""}
+          </div>
+          <button type="button" class="mini-btn" style="border-color:#c54f41;color:#983428" data-reopen-close="${escapeHtml(String(sc.date))}">Reouvrir cette journee</button>
+        </li>`;
+      }).join("")}
+    </ul>`;
+}
+
+async function reopenAccountingDayConfirm(siteId, dateStr) {
+  if (!canAnyAdmin()) {
+    showToast("Reserve aux administrateurs.");
+    return;
+  }
+  if (!canSuperAdmin() && !canAccessSite(siteId)) {
+    showToast("Maquis non autorise.");
+    return;
+  }
+  const label = formatDateDdMmYyyy(dateStr);
+  if (!window.confirm(
+    `Reouvrir la journee du ${label} ? La fiche de cloture sera supprimee et les ecritures de stock generees par cette cloture seront annulees (frigo / reserve non ajustes automatiquement).`,
+  )) return;
+  await reopenAccountingDay(siteId, dateStr);
+}
+
+async function reopenAccountingDay(siteId, dateStr) {
+  if (!canAnyAdmin()) {
+    showToast("Reserve aux administrateurs.");
+    return;
+  }
+  if (!canSuperAdmin() && !canAccessSite(siteId)) {
+    showToast("Maquis non autorise.");
+    return;
+  }
+  const check = (state.stockChecks || []).find((sc) => sc.siteId === siteId && sc.date === dateStr);
+  if (!check) {
+    showToast("Cloture introuvable pour cette date.");
+    return;
+  }
+  revertStockCheckLedgerEffects(check);
+  state.stockChecks = (state.stockChecks || []).filter((sc) => !(sc.siteId === siteId && sc.date === dateStr));
+  await persistState({ stock: state.stock, stockChecks: state.stockChecks });
+  renderStock();
+  renderPointDuJour();
+  showToast(`Journee du ${formatDateDdMmYyyy(dateStr)} reouverte. Vous pouvez verifier a nouveau puis recloturer.`);
 }
 
 function dayBookFor(dateStr = today(), siteId = currentSiteId()) {
@@ -2431,11 +2535,13 @@ async function addUser() {
     showToast("Les gerants peuvent uniquement creer des comptes serveuse.");
     return;
   }
-  if (canSiteAdmin() && (role === "superadmin" || role === "admin")) {
+  if (!canSuperAdmin() && canSiteAdmin() && (role === "superadmin" || role === "admin")) {
     showToast("Seul le super administrateur peut creer ce type de compte.");
     return;
   }
-  if (editUsername && editUsername === sessionUser && role !== currentRole) {
+  const effectiveSessionRole =
+    String(sessionUser || "").trim().toLowerCase() === "admin" ? "superadmin" : currentRole;
+  if (editUsername && editUsername === sessionUser && role !== effectiveSessionRole) {
     showToast("Vous ne pouvez pas modifier votre propre role.");
     return;
   }
@@ -4879,7 +4985,7 @@ async function handleLoginSubmit(event) {
       document.getElementById("login-totp").value = "";
       document.querySelector("#login-form button[type=submit]").textContent = "Ouvrir le tableau de bord";
       sessionUser = session.username;
-      currentRole = session.role;
+      currentRole = normalizeRoleForUsername(session.username, session.role);
       allowedSiteIds = session.allowedSiteIds || [];
       errorEl.textContent = "";
       setAuthVisible(true);
@@ -4897,7 +5003,7 @@ async function handleLoginSubmit(event) {
         errorEl.textContent = "";
       } else {
         sessionUser = result.username;
-        currentRole = result.role;
+        currentRole = normalizeRoleForUsername(result.username, result.role);
         allowedSiteIds = result.allowedSiteIds || [];
         errorEl.textContent = "";
         setAuthVisible(true);
@@ -5377,6 +5483,13 @@ document.getElementById("fab-btn").addEventListener("click", () => {
       advanceOrder(Number(advanceOrderBtn.dataset.advanceOrder)).catch(handleApiError);
       return;
     }
+    const reopenCloseBtn = event.target.closest("[data-reopen-close]");
+    if (reopenCloseBtn) {
+      const dateStr = reopenCloseBtn.getAttribute("data-reopen-close") || "";
+      const sid = currentSiteId();
+      if (dateStr && sid) reopenAccountingDayConfirm(sid, dateStr).catch(handleApiError);
+      return;
+    }
     const deleteUserBtn = event.target.closest("[data-delete-user]");
     if (deleteUserBtn && window.confirm(`Supprimer l'utilisateur "${deleteUserBtn.dataset.deleteUser}" ?`)) {
       deleteUser(deleteUserBtn.dataset.deleteUser).catch(handleApiError);
@@ -5551,7 +5664,7 @@ async function init() {
   try {
     const session = await apiRequest(API.session);
     sessionUser = session.username;
-    currentRole = session.role;
+    currentRole = normalizeRoleForUsername(session.username, session.role);
     allowedSiteIds = session.allowedSiteIds || [];
     setAuthVisible(true);
     await bootstrapAuthenticatedApp();
