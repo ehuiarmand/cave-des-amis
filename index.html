@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Flex:wght@500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./styles.css?v=27">
+  <link rel="stylesheet" href="./styles.css?v=28">
 </head>
 <body>
   <div class="app-bg"></div>
@@ -1389,9 +1389,42 @@
     </div>
   </div>
 
+  <div id="modal-staff-audit-detail" class="modal-overlay" aria-hidden="true">
+    <div class="modal" style="max-width:560px">
+      <div class="modal-handle"></div>
+      <div class="section-head">
+        <h3>Detail de l&apos;action</h3>
+        <button class="icon-btn close-modal" data-close="modal-staff-audit-detail" type="button">Fermer</button>
+      </div>
+      <p class="muted" style="margin-bottom:12px;font-size:0.88rem">Entree n° <strong id="audit-detail-id">—</strong> — resume et detail en texte integral (defilement si necessaire).</p>
+      <dl class="audit-detail-dl">
+        <div><dt>Date</dt><dd id="audit-detail-date">—</dd></div>
+        <div><dt>Maquis</dt><dd id="audit-detail-site">—</dd></div>
+        <div><dt>ID site</dt><dd id="audit-detail-siteid" class="muted">—</dd></div>
+        <div><dt>Utilisateur</dt><dd id="audit-detail-actor">—</dd></div>
+        <div><dt>Role</dt><dd id="audit-detail-role">—</dd></div>
+        <div><dt>Action</dt><dd id="audit-detail-verb">—</dd></div>
+        <div><dt>Type</dt><dd id="audit-detail-entity">—</dd></div>
+        <div><dt>Code action</dt><dd id="audit-detail-verbraw" class="muted" style="font-size:0.82rem">—</dd></div>
+        <div><dt>Code type</dt><dd id="audit-detail-entityraw" class="muted" style="font-size:0.82rem">—</dd></div>
+      </dl>
+      <div class="form-group" style="margin-top:14px">
+        <label>Resume</label>
+        <div id="audit-detail-summary" class="audit-detail-block">—</div>
+      </div>
+      <div class="form-group">
+        <label>Detail</label>
+        <pre id="audit-detail-detail" class="audit-detail-pre" tabindex="0">—</pre>
+      </div>
+      <div class="button-stack">
+        <button type="button" class="btn btn-outline close-modal" data-close="modal-staff-audit-detail">Fermer</button>
+      </div>
+    </div>
+  </div>
+
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=47"></script>
+  <script src="./app-orders.js?v=48"></script>
 </body>
 </html>

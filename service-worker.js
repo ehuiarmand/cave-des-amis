@@ -1,4 +1,4 @@
-const CACHE_NAME = "tdb-bar-static-v7";
+const CACHE_NAME = "tdb-bar-static-v8";
 const STATIC_ASSETS = ["./manifest.json", "./icon.svg"];
 
 self.addEventListener("install", (event) => {

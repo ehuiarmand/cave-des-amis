@@ -565,6 +565,34 @@ function staffAuditEntityLabel(entity) {
   return map[entity] || entity;
 }
 
+function openStaffAuditDetailModal(entryId) {
+  const log = Array.isArray(state?.staffAuditLog) ? state.staffAuditLog : [];
+  const row = log.find((r) => Number(r.id) === Number(entryId));
+  if (!row) {
+    showToast("Entree d'audit introuvable.");
+    return;
+  }
+  const idEl = document.getElementById("audit-detail-id");
+  if (idEl) idEl.textContent = String(row.id ?? "—");
+  const set = (id, text) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text;
+  };
+  set("audit-detail-date", formatDateTimeDdMmYyyy(row.at));
+  set("audit-detail-site", row.siteNom || row.siteId || "—");
+  set("audit-detail-siteid", row.siteId || "—");
+  set("audit-detail-actor", row.actor || "—");
+  set("audit-detail-role", row.role || "—");
+  set("audit-detail-verb", staffAuditVerbLabel(row.verb));
+  set("audit-detail-entity", staffAuditEntityLabel(row.entity));
+  set("audit-detail-verbraw", row.verb || "—");
+  set("audit-detail-entityraw", row.entity || "—");
+  set("audit-detail-summary", row.summary || "—");
+  set("audit-detail-detail", row.detail || "—");
+  openModal("modal-staff-audit-detail");
+  document.getElementById("audit-detail-detail")?.focus();
+}
+
 function renderStaffAuditLog() {
   const container = document.getElementById("staff-audit-list");
   if (!container) return;
@@ -598,8 +626,12 @@ function renderStaffAuditLog() {
             <td>${escapeHtml(row.role || "")}</td>
             <td>${escapeHtml(staffAuditVerbLabel(row.verb))}</td>
             <td>${escapeHtml(staffAuditEntityLabel(row.entity))}</td>
-            <td style="max-width:220px">${escapeHtml(row.summary || "")}</td>
-            <td class="muted" style="max-width:280px;font-size:0.85rem">${escapeHtml(row.detail || "")}</td>
+            <td class="audit-cell-wrap">
+              <span class="audit-cell-expand" data-audit-open="${escapeHtml(String(row.id))}" role="button" tabindex="0" title="Voir le resume complet">${escapeHtml(row.summary || "")}</span>
+            </td>
+            <td class="audit-cell-wrap-muted">
+              <span class="audit-cell-expand-muted" data-audit-open="${escapeHtml(String(row.id))}" role="button" tabindex="0" title="Voir le detail complet">${escapeHtml(row.detail || "")}</span>
+            </td>
           </tr>`).join("")}
         </tbody>
       </table>
@@ -5073,6 +5105,13 @@ document.getElementById("fab-btn").addEventListener("click", () => {
       closeModal(closeButton.dataset.close);
       return;
     }
+    const auditOpen = event.target.closest("[data-audit-open]");
+    if (auditOpen) {
+      const raw = auditOpen.getAttribute("data-audit-open");
+      const id = Number(raw);
+      if (raw != null && raw !== "" && !Number.isNaN(id)) openStaffAuditDetailModal(id);
+      return;
+    }
     const removeFormatBtn = event.target.closest("[data-remove-sale-format]");
     if (removeFormatBtn) {
       const index = Number(removeFormatBtn.dataset.removeSaleFormat);
@@ -5217,6 +5256,15 @@ document.getElementById("fab-btn").addEventListener("click", () => {
     if (type === "vente" && window.confirm("Supprimer cette vente finalisee ?")) deleteFinalSale(id).catch(handleApiError);
     if (type === "stock" && window.confirm("Supprimer cet article du stock ?")) deleteStockItem(id).catch(handleApiError);
     if (type === "charge" && window.confirm("Supprimer cette depense ?")) deleteCharge(id).catch(handleApiError);
+  });
+  document.body.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const auditOpen = event.target.closest("[data-audit-open]");
+    if (!auditOpen) return;
+    event.preventDefault();
+    const raw = auditOpen.getAttribute("data-audit-open");
+    const id = Number(raw);
+    if (raw != null && raw !== "" && !Number.isNaN(id)) openStaffAuditDetailModal(id);
   });
   document.querySelectorAll(".modal-overlay").forEach((overlay) => {
     overlay.addEventListener("click", (event) => {

@@ -2227,3 +2227,103 @@ textarea { font: inherit; }
     padding: 6px 14px;
   }
 }
+
+/* Journal audit — cellules cliquables, aperçu tronqué */
+.audit-detail-dl {
+  display: grid;
+  gap: 8px 16px;
+  font-size: 0.9rem;
+}
+.audit-detail-dl > div {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 8px;
+  align-items: start;
+}
+.audit-detail-dl dt {
+  font-weight: 600;
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.audit-detail-dl dd {
+  margin: 0;
+  word-break: break-word;
+}
+.audit-detail-block {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--mm-bg);
+  border: 1px solid var(--line);
+  font-size: 0.9rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 140px;
+  overflow-y: auto;
+}
+.audit-detail-pre {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--mm-bg);
+  border: 1px solid var(--line);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.audit-cell-wrap {
+  max-width: 240px;
+  vertical-align: top;
+}
+.audit-cell-expand {
+  cursor: pointer;
+  color: var(--mm-primary-dark);
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 3px;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.35;
+  font-size: 0.85rem;
+}
+.audit-cell-expand:hover {
+  color: var(--mm-primary-darker);
+}
+.audit-cell-expand:focus {
+  outline: 2px solid var(--mm-primary);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.audit-cell-wrap-muted {
+  max-width: 300px;
+  vertical-align: top;
+}
+.audit-cell-expand-muted {
+  cursor: pointer;
+  color: var(--muted);
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 3px;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.35;
+  font-size: 0.85rem;
+}
+.audit-cell-expand-muted:hover {
+  color: var(--mm-text);
+}
+.audit-cell-expand-muted:focus {
+  outline: 2px solid var(--mm-primary);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
