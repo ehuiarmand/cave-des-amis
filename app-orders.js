@@ -543,9 +543,48 @@ function recordStaffAudit(verb, entity, summary, detail = "") {
     verb,
     entity,
     summary: String(summary || "").slice(0, 400),
-    detail: String(detail || "").slice(0, 1500),
+    detail: String(detail || "").slice(0, 16000),
   });
   if (state.staffAuditLog.length > STAFF_AUDIT_MAX) state.staffAuditLog.length = STAFF_AUDIT_MAX;
+}
+
+/** Liste lisible des lignes commande pour l'audit (annulation / trace). */
+function formatCommandeAuditDetail(order) {
+  if (!order) return "";
+  const lines = Array.isArray(order.lignes) ? order.lignes : [];
+  const meta = [];
+  if (order.table != null && String(order.table).trim() !== "") meta.push(`Table ${order.table}`);
+  if (order.statut) meta.push(`Statut: ${order.statut}`);
+  if (order.note && String(order.note).trim()) meta.push(`Note: ${String(order.note).trim()}`);
+  const header = meta.length ? `${meta.join(" · ")}\n\n` : "";
+  if (!lines.length) return `${header}Aucune ligne enregistree.`;
+  const body = lines.map((line, i) => {
+    const art = line.article || "?";
+    const q = fmt(line.qty);
+    const pu = fmt(line.prix || 0);
+    const net = fmt(calcNet(line));
+    const rem = Number(line.remise) || 0;
+    const remTxt = rem > 0 ? ` · remise ${fmt(rem)}` : "";
+    return `${i + 1}. ${art} · qte ${q} · PU ${pu}${remTxt} · ${net} FCFA`;
+  }).join("\n");
+  const total = lines.reduce((s, l) => s + (Number(calcNet(l)) || 0), 0);
+  return `${header}${body}\n\nTotal: ${fmt(total)} FCFA (${lines.length} ligne(s))`;
+}
+
+function formatPurchaseOrderAuditDetail(po) {
+  if (!po) return "";
+  const lines = Array.isArray(po.lines) ? po.lines : [];
+  if (!lines.length) return `${fmt(po.total || 0)} FCFA · aucune ligne`;
+  const body = lines.map((l, i) => {
+    const art = l.article || "?";
+    const cases = fmt(l.cases);
+    const cs = l.caseSize != null ? fmt(l.caseSize) : "";
+    const ppc = fmt(l.pricePerCase || 0);
+    const amt = fmt(l.amount || 0);
+    const csPart = cs ? ` · ${cs} btl/cas.` : "";
+    return `${i + 1}. ${art} · ${cases} cas.${csPart} · ${ppc} FCFA/cas. · ${amt} FCFA`;
+  }).join("\n");
+  return `${body}\n\nTotal: ${fmt(po.total || 0)} FCFA (${lines.length} ligne(s))`;
 }
 
 function staffAuditVerbLabel(verb) {
@@ -3064,7 +3103,7 @@ async function cancelPurchaseOrder(id) {
   po.status = "Annulée";
   po.cancelledAt = new Date().toISOString();
   po.cancelledBy = sessionUser || "system";
-  recordStaffAudit("update", "achat_fournisseur", `Commande annulee · ${po.supplier}`, `${fmt(po.total || 0)} FCFA · ${po.lines?.length || 0} ligne(s)`);
+  recordStaffAudit("update", "achat_fournisseur", `Commande annulee · ${po.supplier}`, formatPurchaseOrderAuditDetail(po));
   await persistState({ purchaseOrders: state.purchaseOrders });
   renderPurchaseOrders();
   refreshCreanciersIfVisible();
@@ -4549,7 +4588,7 @@ async function removeOrder(orderId) {
     showToast("Vous n'avez pas l'autorisation de supprimer cette commande.");
     return;
   }
-  recordStaffAudit("delete", "commande", `Commande annulee #${orderId} · ${order.client || ""}`, `${order.lignes?.length || 0} ligne(s)`);
+  recordStaffAudit("delete", "commande", `Commande annulee #${orderId} · ${order.client || ""}`, formatCommandeAuditDetail(order));
   state.commandes = state.commandes.filter((item) => item.id !== orderId);
   if (activeOrderId === orderId) activeOrderId = null;
   await persistState();

@@ -2394,7 +2394,7 @@ textarea { font: inherit; }
   line-height: 1.45;
   white-space: pre-wrap;
   word-break: break-word;
-  max-height: 220px;
+  max-height: min(52vh, 420px);
   overflow-y: auto;
 }
 .audit-cell-wrap {
