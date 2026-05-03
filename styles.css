@@ -799,12 +799,7 @@ textarea { font: inherit; }
   user-select: none;
 }
 
-.pdj-main-wrap.pdj-main--locked {
-  opacity: 1;
-  pointer-events: auto;
-  filter: none;
-  user-select: auto;
-}
+/* Ne plus verrouiller pdj-main-wrap entier (ancien HTML / fallback bloquait tout le point du jour). */
 
 .pdj-closing-cash-panel {
   margin-bottom: 12px;
@@ -2007,6 +2002,8 @@ textarea { font: inherit; }
   padding: 9px 10px;
   border-radius: 10px;
   outline: none;
+  pointer-events: auto;
+  touch-action: manipulation;
 }
 
 .stock-table tbody tr:hover { background: rgba(33, 150, 243, 0.04); }

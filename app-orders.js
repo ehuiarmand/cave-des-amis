@@ -1481,11 +1481,14 @@ async function recordCashOpening() {
 function renderCashOpeningPanel() {
   const container = document.getElementById("pdj-cash-opening");
   const lockBlock = document.getElementById("pdj-locked-block");
-  const wrap = lockBlock || document.getElementById("pdj-main-wrap");
-  if (!container || !wrap) return;
+  const mainWrap = document.getElementById("pdj-main-wrap");
+  if (!container) return;
   const book = dayBookFor(pdjCalendarDate(), currentSiteId());
   const needs = dayBookNeedsCashOpening(book);
-  wrap.classList.toggle("pdj-main--locked", needs);
+  mainWrap?.classList.remove("pdj-main--locked");
+  if (lockBlock) {
+    lockBlock.classList.toggle("pdj-main--locked", needs);
+  }
   if (!needs && book) {
     container.innerHTML = `
       <div class="pdj-opening-card pdj-opening-card--done">
