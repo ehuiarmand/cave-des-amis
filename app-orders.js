@@ -713,13 +713,16 @@ function renderTopbar() {
   document.getElementById("top-bar-name").textContent = currentSite()?.nom || "Mon Bar";
   document.getElementById("top-date").textContent = formatDateDdMmYyyy(new Date());
   document.getElementById("session-user").textContent = sessionUser || "utilisateur";
-  document.getElementById("role-badge").textContent = currentRole === "superadmin"
-    ? "super administrateur"
-    : currentRole === "admin"
-      ? "admin. maquis"
-      : currentRole === "manager"
-        ? "gerant"
-        : (currentRole || "utilisateur");
+  document.getElementById("role-badge").textContent = (() => {
+    const eff = String(sessionUser || "").trim().toLowerCase() === "admin" ? "superadmin" : currentRole;
+    return eff === "superadmin"
+      ? "super administrateur"
+      : eff === "admin"
+        ? "admin. maquis"
+        : eff === "manager"
+          ? "gerant"
+          : (eff || "utilisateur");
+  })();
 }
 
 function renderHero() {
@@ -2313,7 +2316,7 @@ function editUser(username) {
   document.getElementById("edit-user-username").value = user.username;
   document.getElementById("new-user-username").value = user.username;
   document.getElementById("new-user-username").disabled = true;
-  document.getElementById("new-user-role").value = user.role;
+  document.getElementById("new-user-role").value = String(user.username || "").trim().toLowerCase() === "admin" ? "superadmin" : user.role;
   document.getElementById("new-user-password").value = "";
   document.getElementById("new-user-password").placeholder = "Laisser vide pour garder l'ancien";
   document.getElementById("add-user-btn").textContent = "Enregistrer les modifications";
@@ -2321,7 +2324,8 @@ function editUser(username) {
   renderEditableUserSites(user);
 }
 
-function roleLabel(role) {
+function roleLabel(role, username = "") {
+  if (String(username || "").trim().toLowerCase() === "admin") return "Super administrateur";
   if (role === "superadmin") return "Super administrateur";
   if (role === "admin") return "Administrateur de maquis";
   if (role === "manager") return "Gerant";
@@ -2354,7 +2358,7 @@ function renderUsersList() {
       <div class="site-row">
         <div>
           <p class="list-item-title">${escapeHtml(user.username)}${twoFaBadge}</p>
-          <p class="list-item-sub">${roleLabel(user.role)} · ${siteNames}</p>
+          <p class="list-item-sub">${roleLabel(user.role, user.username)} · ${siteNames}</p>
         </div>
         <div class="line-actions">
           ${canEdit ? `<button type="button" class="mini-btn" data-edit-user="${escapeHtml(user.username)}">Modifier</button>` : ""}
@@ -2375,6 +2379,10 @@ async function addUser() {
   const username = document.getElementById("new-user-username").value.trim();
   const password = document.getElementById("new-user-password").value;
   const role = document.getElementById("new-user-role").value;
+  if (String(username || "").trim().toLowerCase() === "admin" && role !== "superadmin") {
+    showToast('Le compte "admin" doit rester super administrateur (tous les maquis).');
+    return;
+  }
   if (!username || (!editUsername && !password)) {
     showToast("Nom d'utilisateur et mot de passe obligatoires.");
     return;

@@ -1322,9 +1322,18 @@ class DataStore:
                         user["passwordHash"] = hash_password(password)
                         self._write(self._state)
                     allowed = [sid for sid in user.get("allowedSiteIds", all_site_ids) if sid in all_site_ids] or all_site_ids[:1]
-                    if str(user.get("role", "")) == "superadmin" or str(user.get("username", "")).strip().lower() == "admin":
+                    role = str(user.get("role", ""))
+                    if str(user.get("username", "")).strip().lower() == "admin":
+                        role = "superadmin"
                         allowed = list(all_site_ids)
-                    return {"username": user["username"], "role": user["role"], "allowedSiteIds": allowed}
+                        prev_sites = [str(x) for x in (user.get("allowedSiteIds") or [])]
+                        if user.get("role") != "superadmin" or prev_sites != [str(x) for x in all_site_ids]:
+                            user["role"] = "superadmin"
+                            user["allowedSiteIds"] = list(all_site_ids)
+                            self._write(self._state)
+                    elif role == "superadmin":
+                        allowed = list(all_site_ids)
+                    return {"username": user["username"], "role": role, "allowedSiteIds": allowed}
         return None
 
     def update_state(self, payload: dict[str, Any], session: dict[str, Any]) -> dict[str, Any]:
@@ -1486,13 +1495,22 @@ class AppHandler(BaseHTTPRequestHandler):
             session = self.require_session()
             if session is None:
                 return
+            role = session["role"]
+            allowed = list(session.get("allowedSiteIds") or [])
+            if str(session.get("username", "")).strip().lower() == "admin":
+                role = "superadmin"
+                with store._lock:
+                    allowed = [s["id"] for s in store._state["sites"]]
+            elif str(role) == "superadmin":
+                with store._lock:
+                    allowed = [s["id"] for s in store._state["sites"]]
             self.send_json(
                 HTTPStatus.OK,
                 {
                     "authenticated": True,
                     "username": session["username"],
-                    "role": session["role"],
-                    "allowedSiteIds": session["allowedSiteIds"],
+                    "role": role,
+                    "allowedSiteIds": allowed,
                 },
             )
             return
@@ -1611,8 +1629,16 @@ class AppHandler(BaseHTTPRequestHandler):
                     return
                 all_site_ids = [s["id"] for s in store._state["sites"]]
                 allowed = [sid for sid in user_data.get("allowedSiteIds", all_site_ids) if sid in all_site_ids] or all_site_ids[:1]
-                role = user_data["role"]
-                if str(role) == "superadmin" or str(username).strip().lower() == "admin":
+                role = str(user_data["role"])
+                if str(username).strip().lower() == "admin":
+                    role = "superadmin"
+                    allowed = list(all_site_ids)
+                    prev_sites = [str(x) for x in (user_data.get("allowedSiteIds") or [])]
+                    if user_data.get("role") != "superadmin" or prev_sites != [str(x) for x in all_site_ids]:
+                        user_data["role"] = "superadmin"
+                        user_data["allowedSiteIds"] = list(all_site_ids)
+                        store._write(store._state)
+                elif role == "superadmin":
                     allowed = list(all_site_ids)
             token = sessions.create(username, role, allowed)
             self.send_json(HTTPStatus.OK, {"authenticated": True, "username": username, "role": role, "allowedSiteIds": allowed}, cookie=token)
