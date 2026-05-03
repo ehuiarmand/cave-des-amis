@@ -544,6 +544,11 @@ function syncPdjWorkDateInput() {
   const t = today();
   el.max = t;
   if (!el.value || el.value > t) el.value = t;
+  const workDate = pdjCalendarDate();
+  const vDateEl = document.getElementById("v-date");
+  if (vDateEl) vDateEl.value = workDate;
+  const filterDateEl = document.getElementById("orders-filter-date");
+  if (filterDateEl) filterDateEl.value = workDate;
 }
 
 const STAFF_AUDIT_MAX = 800;
@@ -968,7 +973,7 @@ function navigate(page, opts = {}) {
   renderSiteSwitcher();
   if (page === "home") renderDashboard();
   if (page === "pdj") renderPointDuJour();
-  if (page === "ventes") { setVentesSubTab(ventesSubTab); renderVentesPage(); }
+  if (page === "ventes") { syncPdjWorkDateInput(); setVentesSubTab(ventesSubTab); renderVentesPage(); }
   if (page === "stock") { setStockSubTab(stockSubTab); renderStock(); }
   if (page === "charges") renderCharges();
   if (page === "params") {
@@ -2022,7 +2027,7 @@ function orderTime(order) {
 }
 
 function renderOrdersManagement() {
-  const date = document.getElementById("orders-filter-date")?.value || today();
+  const date = document.getElementById("orders-filter-date")?.value || pdjCalendarDate();
   const status = document.getElementById("orders-filter-status")?.value || "all";
   const type = document.getElementById("orders-filter-type")?.value || "all";
   const activeOrders = recordsForSite(state.commandes);
@@ -2794,7 +2799,7 @@ function openOrderEditor(orderId = null, lineId = null) {
   const order = orderId ? recordsForSite(state.commandes).find((item) => item.id === orderId) : null;
   const line = order && lineId ? order.lignes.find((item) => item.id === lineId) : null;
   populateOrderSelect();
-  document.getElementById("v-date").value = line?.date || order?.date || today();
+  document.getElementById("v-date").value = line?.date || order?.date || pdjCalendarDate();
   document.getElementById("v-client").value = order?.client || "";
   document.getElementById("v-order-select").value = order ? String(order.id) : "";
   document.getElementById("v-article").value = line?.article || "";
@@ -2817,7 +2822,7 @@ function openOrderEditor(orderId = null, lineId = null) {
 
 function resetOrderForm() {
   editingLineId = null;
-  document.getElementById("v-date").value = today();
+  document.getElementById("v-date").value = pdjCalendarDate();
   document.getElementById("v-client").value = "";
   document.getElementById("v-order-select").value = activeOrderId ? String(activeOrderId) : "";
   document.getElementById("v-article").value = "";
@@ -5150,11 +5155,11 @@ async function bootstrapAuthenticatedApp() {
   populateCategorySelects();
   populateSelect("c-cat", CHARGE_CATEGORIES);
   populateSelect("c-pay", CHARGE_PAYMENT_METHODS);
-  document.getElementById("v-date").value = today();
+  document.getElementById("v-date").value = pdjCalendarDate();
   document.getElementById("c-date").value = today();
   const creditDt = document.getElementById("credit-datetime");
   if (creditDt) creditDt.value = datetimeLocalNow();
-  document.getElementById("orders-filter-date").value = today();
+  document.getElementById("orders-filter-date").value = pdjCalendarDate();
   document.getElementById("stock-move-start").value = today().slice(0, 8) + "01";
   document.getElementById("stock-move-end").value = today();
   populateOrderSelect();
@@ -5312,11 +5317,16 @@ document.getElementById("fab-btn").addEventListener("click", () => {
   });
   document.getElementById("print-closure-btn").addEventListener("click", printDayClosure);
   document.getElementById("pdj-work-date")?.addEventListener("change", () => {
+    syncPdjWorkDateInput();
+    renderOrdersManagement();
     if (currentPage === "pdj") renderPointDuJour();
+    if (currentPage === "ventes") renderVentesPage();
   });
   document.getElementById("pdj-apply-work-date")?.addEventListener("click", () => {
     syncPdjWorkDateInput();
+    renderOrdersManagement();
     if (currentPage === "pdj") renderPointDuJour();
+    if (currentPage === "ventes") renderVentesPage();
   });
   document.getElementById("close-day-btn").addEventListener("click", () => {
     const dWork = pdjCalendarDate();
