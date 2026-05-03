@@ -1677,7 +1677,10 @@ function renderDailyStockCheck() {
       ? Math.round(Number(seedFromClose.closingCashFcfa))
       : null;
     const rows = items.map((item) => {
-      const stockAtOpen = Number(dayBook?.openingStockById?.[String(item.id)]) || stockActuel(item); // ouverture figée
+      const closedCheckItem = closed ? (closed.items || []).find((ci) => Number(ci.id) === Number(item.id)) : null;
+      const stockAtOpen = dStr === today()
+        ? stockActuel(item)
+        : (closedCheckItem?.stockAvant ?? stockActuel(item));
       const sortiesToday = todaySortiesBottlesForArticle(item.article, dStr);
       const remaining = Math.max(0, stockAtOpen - sortiesToday); // restant théorique
       const seedCi = seedFromClose ? (seedFromClose.items || []).find((ci) => Number(ci.id) === Number(item.id)) : null;
@@ -4061,10 +4064,14 @@ async function closeAccountingDay() {
   const expectedEspecesCash = openingCash + especesVentes - especesCharges;
   const cashEcartEspeces = closingCashFcfa - expectedEspecesCash;
 
+  const existingCloseCheck = stockCheckForSiteDate(dStr, currentSiteId());
   const checkedItems = items.map((item) => {
     const frigo = Math.max(0, Number(document.querySelector(`[data-check-frigo="${item.id}"]`)?.value) || 0);
     const reserve = Math.max(0, Number(document.querySelector(`[data-check-reserve="${item.id}"]`)?.value) || 0);
-    const stockAtOpen = Number(dayBook?.openingStockById?.[String(item.id)]) || stockActuel(item); // ouverture figée
+    const existingCloseItem = existingCloseCheck ? (existingCloseCheck.items || []).find((ci) => Number(ci.id) === Number(item.id)) : null;
+    const stockAtOpen = dStr === today()
+      ? stockActuel(item)
+      : (existingCloseItem?.stockAvant ?? stockActuel(item));
     const sortiesToday = todaySortiesBottlesForArticle(item.article, dStr);
     const expectedRemaining = Math.max(0, stockAtOpen - sortiesToday); // restant théorique après ventes
     const counted = frigo + reserve;
