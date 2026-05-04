@@ -2189,6 +2189,21 @@ function srUpdateQty(article, packSize, delta) {
   renderSrCart();
 }
 
+function srSetQty(article, packSize, newQty) {
+  const location = srCurrentLoc();
+  const product = findKnownProduct(article);
+  if (!product) return;
+  const format = (product.formatsVente || []).find((f) => Number(f.quantite) === Number(packSize)) || null;
+  const prix = formatPrice(format || { prixInterieur: product.prixInt, prixExterieur: product.prixExt }, location);
+  const qty = Math.max(0, Math.floor(Number(newQty) || 0));
+  const idx = srCart.findIndex((c) => c.article === article && c.packSize === packSize && c.location === location);
+  if (qty === 0 && idx >= 0) srCart.splice(idx, 1);
+  else if (qty > 0 && idx >= 0) srCart[idx].qty = qty;
+  else if (qty > 0) srCart.push({ article, cat: product.cat || "Autres", prix, packSize: Number(packSize), qty, location });
+  renderSrMenu(document.getElementById("sr-search")?.value || "");
+  renderSrCart();
+}
+
 function srItemCard(item, loc) {
   const primary = primarySaleFormat(item);
   const packSz = Math.max(1, Number(primary?.quantite) || Number(item.packSize) || 1);
@@ -2206,10 +2221,10 @@ function srItemCard(item, loc) {
   html += "<p style='margin:0 0 2px;font-size:0.92rem;font-weight:600;color:#212121;white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>" + artEsc + (packSz > 1 ? " <small style='background:#fff3e0;color:#e65100;border-radius:3px;padding:1px 4px;font-size:0.7rem'>kit x" + packSz + "</small>" : "") + "</p>";
   html += "<p style='margin:0;font-size:0.78rem;color:#757575'>" + fmt(prix) + " FCFA · Stock : " + fmt(stock) + (qtyOther > 0 ? " · <b style='color:#1976d2'>" + otherLabel + " x" + qtyOther + "</b>" : "") + "</p>";
   html += "</div>";
-  html += "<div style='display:flex;align-items:center;gap:6px;flex-shrink:0'>";
+  html += "<div style='display:flex;align-items:center;gap:5px;flex-shrink:0'>";
   if (hasQty) {
     html += "<button type='button' class='sr-dec' data-sr-article='" + artEsc + "' data-sr-pack='" + packSz + "' style='width:30px;height:30px;border-radius:50%;border:1px solid #bdbdbd;background:#fff;font-size:1.1rem;cursor:pointer;color:#212121'>−</button>";
-    html += "<span style='min-width:24px;text-align:center;font-weight:700;font-size:1rem;color:#1976d2'>" + qtyLoc + "</span>";
+    html += "<input type='number' min='0' value='" + qtyLoc + "' class='sr-qty-input' data-sr-article='" + artEsc + "' data-sr-pack='" + packSz + "' style='width:44px;text-align:center;font-weight:700;font-size:0.95rem;border:1px solid #90caf9;border-radius:6px;padding:2px 4px;color:#1976d2;background:#e3f2fd'>";
   }
   html += "<button type='button' class='sr-inc' data-sr-article='" + artEsc + "' data-sr-pack='" + packSz + "' style='width:30px;height:30px;border-radius:50%;border:none;background:#1976d2;color:#fff;font-size:1.2rem;cursor:pointer;font-weight:700'>+</button>";
   html += "</div></div>";
@@ -2288,6 +2303,9 @@ function openSaisieRapide() {
 
 async function submitSaisieRapide() {
   if (!srCart.length) { showToast("Ajoutez au moins un article."); return; }
+  const btn = document.getElementById("sr-submit-btn");
+  if (btn) { btn.disabled = true; btn.textContent = "Validation..."; }
+  try {
   const clientName = `Saisie rapide · ${sessionUser || "Serveuse"}`;
   const location = document.getElementById("sr-location")?.value || "Intérieur";
   const date = pdjCalendarDate();
@@ -2342,6 +2360,9 @@ async function submitSaisieRapide() {
   renderVentesPage();
   const warn = errors.length ? ` (${errors.length} article(s) ignores : stock insuffisant)` : "";
   showToast(`Commande creee : ${order.lignes.length} article(s) pour ${clientName}.${warn}`);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "Valider la commande"; }
+  }
 }
 
 function renderVentesPage() {
@@ -5238,6 +5259,7 @@ function closeModal(id) {
   document.getElementById(id).classList.remove("open");
   if (id === "modal-purchase-receive") pendingReceivePurchaseId = null;
   if (id === "modal-finalize") resetFinalizeModalUi();
+  if (id === "modal-saisie-rapide") { srCart = []; }
 }
 
 async function removeOrderLine(orderId, lineId) {
@@ -5752,6 +5774,10 @@ function attachEvents() {
     if (dec) { srUpdateQty(dec.dataset.srArticle, Number(dec.dataset.srPack), -1); return; }
     const inc = e.target.closest(".sr-inc");
     if (inc) { srUpdateQty(inc.dataset.srArticle, Number(inc.dataset.srPack), +1); return; }
+  });
+  document.getElementById("sr-menu")?.addEventListener("change", (e) => {
+    const input = e.target.closest(".sr-qty-input");
+    if (input) srSetQty(input.dataset.srArticle, Number(input.dataset.srPack), Number(input.value));
   });
   // Consignes
   document.getElementById("new-consigne-btn")?.addEventListener("click", () => {
