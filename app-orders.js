@@ -2160,20 +2160,34 @@ function renderOrders() {
 // ─── SAISIE RAPIDE (menu multi-articles pour serveuse) ────────────────────────
 
 let srCart = []; // [{ article, cat, prix, packSize, qty, location }]
+let srItemLoc = {}; // "article||packSize" -> location choisie pour ce produit
 
-function srKey(article, packSize) { return `${article}||${packSize}`; }
+function srDefaultLoc(article, packSize) {
+  return srItemLoc[`${article}||${packSize}`] || document.getElementById("sr-location")?.value || "Intérieur";
+}
 
-function srCartQty(article, packSize) {
-  return (srCart.find((c) => c.article === article && c.packSize === packSize) || {}).qty || 0;
+function srToggleLoc(article, packSize) {
+  const k = `${article}||${packSize}`;
+  const cur = srItemLoc[k] || document.getElementById("sr-location")?.value || "Intérieur";
+  srItemLoc[k] = cur.startsWith("Ext") ? "Intérieur" : "Extérieur";
+  renderSrMenu(document.getElementById("sr-search")?.value || "");
+}
+
+function srCartQtyForLoc(article, packSize, location) {
+  return (srCart.find((c) => c.article === article && c.packSize === packSize && c.location === location) || {}).qty || 0;
+}
+
+function srCartQtyTotal(article, packSize) {
+  return srCart.filter((c) => c.article === article && c.packSize === packSize).reduce((s, c) => s + c.qty, 0);
 }
 
 function srUpdateQty(article, packSize, delta) {
-  const location = document.getElementById("sr-location")?.value || "Intérieur";
+  const location = srDefaultLoc(article, packSize);
   const product = findKnownProduct(article);
   if (!product) return;
   const format = (product.formatsVente || []).find((f) => Number(f.quantite) === Number(packSize)) || null;
   const prix = formatPrice(format || { prixInterieur: product.prixInt, prixExterieur: product.prixExt }, location);
-  const idx = srCart.findIndex((c) => c.article === article && c.packSize === packSize);
+  const idx = srCart.findIndex((c) => c.article === article && c.packSize === packSize && c.location === location);
   const current = idx >= 0 ? srCart[idx].qty : 0;
   const next = Math.max(0, current + delta);
   if (next === 0 && idx >= 0) srCart.splice(idx, 1);
@@ -2183,27 +2197,9 @@ function srUpdateQty(article, packSize, delta) {
   renderSrCart();
 }
 
-function srSetQty(article, packSize, value) {
-  const qty = Math.max(0, Number(value) || 0);
-  const idx = srCart.findIndex((c) => c.article === article && c.packSize === packSize);
-  if (qty === 0 && idx >= 0) { srCart.splice(idx, 1); }
-  else if (qty > 0 && idx >= 0) { srCart[idx].qty = qty; }
-  else if (qty > 0) {
-    const location = document.getElementById("sr-location")?.value || "Intérieur";
-    const product = findKnownProduct(article);
-    if (!product) return;
-    const format = (product.formatsVente || []).find((f) => Number(f.quantite) === Number(packSize)) || null;
-    const prix = formatPrice(format || { prixInterieur: product.prixInt, prixExterieur: product.prixExt }, location);
-    srCart.push({ article, cat: product.cat || "Autres", prix, packSize: Number(packSize), qty, location });
-  }
-  renderSrMenu(document.getElementById("sr-search")?.value || "");
-  renderSrCart();
-}
-
 function renderSrMenu(query) {
   const container = document.getElementById("sr-menu");
   if (!container) return;
-  const location = document.getElementById("sr-location")?.value || "Intérieur";
   const q = (query || "").toLowerCase().trim();
   const products = recordsForSite(state.stock)
     .filter((item) => stockActuel(item) > 0)
@@ -2222,25 +2218,38 @@ function renderSrMenu(query) {
   });
 
   container.innerHTML = Object.entries(byCategory).map(([cat, items]) => `
-    <div style="margin-bottom:10px">
-      <p style="font-size:0.72rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);margin:0 0 6px 2px">${escapeHtml(cat)}</p>
+    <div style="margin-bottom:14px">
+      <p style="font-size:0.7rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:rgba(255,255,255,0.4);margin:0 0 6px 2px">${escapeHtml(cat)}</p>
       ${items.map((item) => {
-        const formatsVente = normalizeSaleFormats(item);
         const primary = primarySaleFormat(item);
         const packSz = Math.max(1, Number(primary?.quantite) || Number(item.packSize) || 1);
-        const prix = formatPrice(primary || { prixInterieur: Number(item.prixVenteInt) || 0, prixExterieur: Number(item.prixVenteExt) || 0 }, location);
-        const qty = srCartQty(item.article, packSz);
-        const packLabel = packSz > 1 ? `<span style="font-size:0.72rem;background:rgba(255,180,0,0.18);color:#ffb347;border-radius:4px;padding:1px 5px;margin-left:4px">kit ×${packSz}</span>` : "";
+        const itemLoc = srDefaultLoc(item.article, packSz);
+        const isExt = itemLoc.startsWith("Ext");
+        const prix = formatPrice(primary || { prixInterieur: Number(item.prixVenteInt) || 0, prixExterieur: Number(item.prixVenteExt) || 0 }, itemLoc);
+        const qtyInt = srCartQtyForLoc(item.article, packSz, "Intérieur");
+        const qtyExt = srCartQtyForLoc(item.article, packSz, "Extérieur");
+        const qtyTotal = qtyInt + qtyExt;
+        const hasQty = qtyTotal > 0;
         const stock = stockActuel(item);
-        return `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:var(--card-bg,#1e1e2e);border:1px solid var(--border);border-radius:8px;margin-bottom:5px;gap:8px">
+        // Badges des quantités déjà dans le panier
+        const qtyBadges = [
+          qtyInt > 0 ? `<span style="font-size:0.72rem;background:rgba(25,118,210,0.25);color:#64b5f6;border-radius:4px;padding:1px 6px">Cave ×${qtyInt}</span>` : "",
+          qtyExt > 0 ? `<span style="font-size:0.72rem;background:rgba(76,175,80,0.25);color:#81c784;border-radius:4px;padding:1px 6px">Terr. ×${qtyExt}</span>` : "",
+        ].filter(Boolean).join(" ");
+        return `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,${hasQty ? "0.2" : "0.08"});border-radius:10px;margin-bottom:6px;gap:8px${hasQty ? ";box-shadow:0 0 0 2px rgba(25,118,210,0.3)" : ""}">
           <div style="flex:1;min-width:0">
-            <div style="font-weight:600;font-size:0.88rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(item.article)}${packLabel}</div>
-            <div style="font-size:0.78rem;color:var(--muted)">${fmt(prix)} FCFA${packSz > 1 ? ` / kit de ${packSz}` : ""} · Stock : ${fmt(stock)}</div>
+            <p style="margin:0 0 3px;font-weight:600;font-size:0.92rem;color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(item.article)}${packSz > 1 ? `<span style="font-size:0.7rem;background:rgba(255,180,0,0.2);color:#ffb347;border-radius:4px;padding:1px 5px;margin-left:6px">kit ×${packSz}</span>` : ""}</p>
+            <p style="margin:0 0 3px;font-size:0.78rem;color:rgba(255,255,255,0.5)">${fmt(prix)} FCFA &nbsp;·&nbsp; Stock : ${fmt(stock)}</p>
+            ${qtyBadges ? `<p style="margin:0;display:flex;gap:4px;flex-wrap:wrap">${qtyBadges}</p>` : ""}
           </div>
-          <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
-            <button type="button" class="qty-btn sr-dec" data-sr-article="${escapeHtml(item.article)}" data-sr-pack="${packSz}" style="width:30px;height:30px;border-radius:50%;border:1px solid var(--border);background:transparent;color:var(--text);font-size:1.1rem;cursor:pointer;display:flex;align-items:center;justify-content:center">−</button>
-            <input type="number" min="0" value="${qty}" data-sr-qty="${escapeHtml(item.article)}" data-sr-pack="${packSz}" style="width:42px;text-align:center;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--text);padding:4px 2px;font-size:0.9rem">
-            <button type="button" class="qty-btn sr-inc" data-sr-article="${escapeHtml(item.article)}" data-sr-pack="${packSz}" style="width:30px;height:30px;border-radius:50%;border:1px solid var(--accent,#1976d2);background:var(--accent,#1976d2);color:#fff;font-size:1.1rem;cursor:pointer;display:flex;align-items:center;justify-content:center">+</button>
+          <div style="display:flex;align-items:center;gap:5px;flex-shrink:0">
+            <button type="button" data-sr-toggle="${escapeHtml(item.article)}" data-sr-pack="${packSz}"
+              style="font-size:0.7rem;font-weight:700;padding:4px 7px;border-radius:6px;cursor:pointer;border:1px solid ${isExt ? "rgba(76,175,80,0.6)" : "rgba(25,118,210,0.6)"};background:${isExt ? "rgba(76,175,80,0.15)" : "rgba(25,118,210,0.15)"};color:${isExt ? "#81c784" : "#64b5f6"};white-space:nowrap">
+              ${isExt ? "Terr." : "Cave"}
+            </button>
+            ${hasQty ? `<button type="button" class="sr-dec" data-sr-article="${escapeHtml(item.article)}" data-sr-pack="${packSz}" style="width:32px;height:32px;border-radius:50%;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.07);color:#fff;font-size:1.2rem;cursor:pointer;line-height:1">−</button>
+            <span style="min-width:22px;text-align:center;font-weight:700;font-size:1rem;color:#fff">${qtyTotal}</span>` : ""}
+            <button type="button" class="sr-inc" data-sr-article="${escapeHtml(item.article)}" data-sr-pack="${packSz}" style="width:32px;height:32px;border-radius:50%;border:none;background:#1976d2;color:#fff;font-size:1.2rem;cursor:pointer;line-height:1;font-weight:700">+</button>
           </div>
         </div>`;
       }).join("")}
@@ -2254,18 +2263,31 @@ function renderSrCart() {
   const total = srCart.reduce((s, c) => s + c.prix * c.qty, 0);
   if (totalEl) totalEl.textContent = `${fmt(total)} FCFA`;
   if (!srCart.length) {
-    container.innerHTML = `<p class="muted" style="text-align:center;font-size:0.82rem;padding:4px 0">Panier vide — ajoutez des produits ci-dessus.</p>`;
+    container.innerHTML = `<p style="text-align:center;font-size:0.82rem;padding:4px 0;color:rgba(255,255,255,0.4)">Panier vide — ajoutez des produits ci-dessus.</p>`;
     return;
   }
-  container.innerHTML = `<p style="font-size:0.72rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);margin:0 0 6px">Panier (${srCart.length} article(s))</p>` +
-    srCart.map((c) => `<div style="display:flex;justify-content:space-between;font-size:0.83rem;padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.05)">
-      <span>${escapeHtml(c.article)}${c.packSize > 1 ? ` ×${c.packSize}` : ""} × ${c.qty}</span>
-      <strong>${fmt(c.prix * c.qty)} FCFA</strong>
-    </div>`).join("");
+  const int = srCart.filter((c) => !c.location.startsWith("Ext"));
+  const ext = srCart.filter((c) => c.location.startsWith("Ext"));
+  const section = (items, label, color) => {
+    if (!items.length) return "";
+    const sub = items.reduce((s, c) => s + c.prix * c.qty, 0);
+    return `<div style="margin-bottom:8px">
+      <p style="font-size:0.7rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:${color};margin:0 0 4px">${label}</p>
+      ${items.map((c) => `<div style="display:flex;justify-content:space-between;font-size:0.83rem;padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.05)">
+        <span style="color:#fff">${escapeHtml(c.article)}${c.packSize > 1 ? ` ×${c.packSize}` : ""} &nbsp;<span style="color:rgba(255,255,255,0.45)">× ${c.qty}</span></span>
+        <strong style="color:#fff">${fmt(c.prix * c.qty)} FCFA</strong>
+      </div>`).join("")}
+      <div style="display:flex;justify-content:flex-end;font-size:0.78rem;color:${color};padding-top:3px">Sous-total : ${fmt(sub)} FCFA</div>
+    </div>`;
+  };
+  container.innerHTML =
+    section(int, "Cave (Interieur)", "#64b5f6") +
+    section(ext, "Terrasse (Exterieur)", "#81c784");
 }
 
 function openSaisieRapide() {
   srCart = [];
+  srItemLoc = {};
   const searchEl = document.getElementById("sr-search");
   if (searchEl) searchEl.value = "";
   renderSrMenu("");
@@ -5732,26 +5754,17 @@ function attachEvents() {
   document.getElementById("sr-submit-btn")?.addEventListener("click", () => submitSaisieRapide().catch(handleApiError));
   document.getElementById("sr-search")?.addEventListener("input", (e) => renderSrMenu(e.target.value));
   document.getElementById("sr-location")?.addEventListener("change", () => {
-    const location = document.getElementById("sr-location")?.value || "Intérieur";
-    srCart.forEach((item) => {
-      const product = findKnownProduct(item.article);
-      if (!product) return;
-      const format = (product.formatsVente || []).find((f) => Number(f.quantite) === item.packSize) || null;
-      item.prix = formatPrice(format || { prixInterieur: product.prixInt, prixExterieur: product.prixExt }, location);
-      item.location = location;
-    });
+    srItemLoc = {}; // reset les préférences par article pour suivre le nouveau défaut
     renderSrMenu(document.getElementById("sr-search")?.value || "");
     renderSrCart();
   });
   document.getElementById("sr-menu")?.addEventListener("click", (e) => {
+    const toggle = e.target.closest("[data-sr-toggle]");
+    if (toggle) { srToggleLoc(toggle.dataset.srToggle, Number(toggle.dataset.srPack)); return; }
     const dec = e.target.closest(".sr-dec");
     if (dec) { srUpdateQty(dec.dataset.srArticle, Number(dec.dataset.srPack), -1); return; }
     const inc = e.target.closest(".sr-inc");
     if (inc) { srUpdateQty(inc.dataset.srArticle, Number(inc.dataset.srPack), +1); return; }
-  });
-  document.getElementById("sr-menu")?.addEventListener("change", (e) => {
-    const qtyInput = e.target.closest("[data-sr-qty]");
-    if (qtyInput) srSetQty(qtyInput.dataset.srQty, Number(qtyInput.dataset.srPack), qtyInput.value);
   });
   // Consignes
   document.getElementById("new-consigne-btn")?.addEventListener("click", () => {
