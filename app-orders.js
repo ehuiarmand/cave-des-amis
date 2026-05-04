@@ -1069,63 +1069,78 @@ function clearBrasserieAttachmentSelection() {
   document.querySelectorAll("[data-brasserie-stock-id]:checked").forEach((input) => { input.checked = false; });
 }
 
-function openCasierOrderModal(article, cs) {
-  const articleEl = document.getElementById("co-article");
-  const csEl = document.getElementById("co-casesize");
+function openCasierOrderModal(brasserie, cs) {
+  const brassEl = document.getElementById("co-brasserie");
+  const csEl = document.getElementById("co-cs");
   const videsEl = document.getElementById("co-vides");
   const qtyEl = document.getElementById("co-qty");
   const preview = document.getElementById("co-preview");
-  if (articleEl) articleEl.value = article || "";
-  if (csEl) csEl.textContent = cs ? fmt(cs) + " btl/casier" : "—";
-  if (videsEl) videsEl.value = "";
+  // Remplir la liste des brasseries
+  if (brassEl) {
+    const brasseries = brasserieListForCurrentSite();
+    brassEl.innerHTML = brasseries.map((b) => `<option value="${escapeHtml(b)}"${b === brasserie ? " selected" : ""}>${escapeHtml(b)}</option>`).join("");
+    if (!brasseries.length) brassEl.innerHTML = `<option value="">Aucune brasserie configuree</option>`;
+  }
+  if (csEl && cs) csEl.value = String(cs);
+  if (videsEl) videsEl.value = "0";
   if (qtyEl) qtyEl.value = "";
   if (preview) preview.style.display = "none";
+  const submitBtn = document.getElementById("co-submit-btn");
+  if (submitBtn) submitBtn.disabled = true;
   openModal("modal-casier-order");
-  window.requestAnimationFrame(() => { if (!article) articleEl?.focus(); else videsEl?.focus(); });
+  window.requestAnimationFrame(() => videsEl?.focus());
 }
 
 function renderCasierOrderPreview() {
-  const article = (document.getElementById("co-article")?.value || "").trim();
-  const videsEl = document.getElementById("co-vides");
+  const brasserie = document.getElementById("co-brasserie")?.value || "";
+  const cs = Number(document.getElementById("co-cs")?.value) || 24;
+  const vides = Math.max(0, Number(document.getElementById("co-vides")?.value) || 0);
   const preview = document.getElementById("co-preview");
-  const csDisplay = document.getElementById("co-casesize");
   const submitBtn = document.getElementById("co-submit-btn");
-  if (!article || !videsEl || !preview) return;
-  const product = findKnownProduct(article);
-  const cs = product ? caseSize(product) : null;
-  if (csDisplay) csDisplay.textContent = cs ? fmt(cs) + " btl/casier" : "—";
-  const vides = Math.max(0, Number(videsEl.value) || 0);
-  if (!cs || vides === 0) { preview.style.display = "none"; if (submitBtn) submitBtn.disabled = true; return; }
-  const casiersFull = Math.floor(vides / cs);
-  const reste = vides % cs;
-  document.getElementById("co-casiers-full").textContent = fmt(casiersFull) + " casier(s)";
-  document.getElementById("co-reste").textContent = fmt(reste) + " btl (insuffisant pour 1 casier supplementaire)";
+  if (!preview) return;
+  if (vides === 0) { preview.style.display = "none"; if (submitBtn) submitBtn.disabled = true; return; }
+  // Articles de cette brasserie avec ce format de casier
+  const articles = recordsForSite(state.stock).filter((item) => {
+    const b = (item.brasserie || "").trim();
+    const fallback = b || item.cat || "";
+    return (b === brasserie || fallback === brasserie) && caseSize(item) === cs;
+  });
+  document.getElementById("co-casiers-full").textContent = fmt(vides);
+  document.getElementById("co-total-btl").textContent = fmt(vides * cs) + " btl";
+  const articlesEl = document.getElementById("co-articles-list");
+  if (articlesEl) {
+    articlesEl.innerHTML = articles.length
+      ? articles.map((a) => `<span style="background:#e3f2fd;color:#1565c0;border-radius:6px;padding:3px 8px;font-size:0.8rem;font-weight:600">${escapeHtml(a.article)}</span>`).join("")
+      : `<span style="color:#9e9e9e;font-size:0.82rem">Aucun article de cette brasserie avec ${fmt(cs)} btl/casier dans le catalogue.</span>`;
+  }
   const qtyEl = document.getElementById("co-qty");
-  if (qtyEl && !qtyEl.value) qtyEl.value = String(Math.max(1, casiersFull));
+  if (qtyEl && !qtyEl.value) qtyEl.value = String(vides);
   preview.style.display = "";
-  if (submitBtn) submitBtn.disabled = casiersFull < 1;
+  if (submitBtn) submitBtn.disabled = false;
 }
 
 function submitCasierOrder() {
-  const article = (document.getElementById("co-article")?.value || "").trim();
-  const vides = Math.max(0, Number(document.getElementById("co-vides")?.value) || 0);
+  const brasserie = document.getElementById("co-brasserie")?.value || "";
+  const cs = Number(document.getElementById("co-cs")?.value) || 24;
   const qty = Math.max(1, Number(document.getElementById("co-qty")?.value) || 1);
-  if (!article) { showToast("Selectionnez un article."); return; }
-  const product = findKnownProduct(article);
-  if (!product) { showToast("Article introuvable dans le catalogue."); return; }
-  const cs = caseSize(product);
-  if (vides < cs) { showToast("Bouteilles vides insuffisantes pour former un casier."); return; }
+  if (!brasserie) { showToast("Selectionnez une brasserie."); return; }
+  // Trouver le premier article correspondant pour pre-remplir le bon de commande
+  const article = recordsForSite(state.stock).find((item) => {
+    const b = (item.brasserie || "").trim() || item.cat || "";
+    return b === brasserie && caseSize(item) === cs;
+  });
   closeModal("modal-casier-order");
-  // Navigate to Achats fournisseurs and pre-fill
   navigateTo("stock");
   setStockSubTab("achats");
   window.requestAnimationFrame(() => {
     openPurchaseForm();
-    document.getElementById("purchase-article").value = product.article;
-    document.getElementById("purchase-cases").value = String(qty);
-    document.getElementById("purchase-case-size").value = String(cs);
-    syncPurchasePriceInput?.();
-    showToast("Commande pré-remplie : " + qty + " casier(s) de " + product.article + " · vérifiez le prix avant validation.");
+    if (article) {
+      document.getElementById("purchase-article").value = article.article;
+      document.getElementById("purchase-cases").value = String(qty);
+      document.getElementById("purchase-case-size").value = String(cs);
+      if (typeof syncPurchasePriceInput === "function") syncPurchasePriceInput();
+    }
+    showToast(qty + " casier(s) de " + cs + " btl · " + brasserie + " · verifiez et completez le bon de commande.");
   });
 }
 
@@ -6024,8 +6039,8 @@ function attachEvents() {
     document.getElementById("consigne-form-wrap")?.classList.add("hidden");
   });
   // Casier order modal
-  document.getElementById("co-article")?.addEventListener("input", renderCasierOrderPreview);
-  document.getElementById("co-article")?.addEventListener("change", renderCasierOrderPreview);
+  document.getElementById("co-brasserie")?.addEventListener("change", renderCasierOrderPreview);
+  document.getElementById("co-cs")?.addEventListener("change", renderCasierOrderPreview);
   document.getElementById("co-vides")?.addEventListener("input", renderCasierOrderPreview);
   document.getElementById("co-submit-btn")?.addEventListener("click", submitCasierOrder);
   document.getElementById("stock-card-casiers")?.addEventListener("click", (e) => {
