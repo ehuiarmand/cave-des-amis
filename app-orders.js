@@ -2370,7 +2370,7 @@ async function submitSaisieRapide() {
 }
 
 function renderVentesPage() {
-  document.getElementById("articles-list").innerHTML = knownProducts().map((item) => `<option value="${escapeHtml(item.article)}">`).join("");
+  document.getElementById("articles-list").innerHTML = recordsForSite(state.stock).map((item) => `<option value="${escapeHtml(item.article)}">`).join("");
   if (document.getElementById("modal-vente")?.classList.contains("open")) renderVenteArticlePicker();
   renderOrdersManagement();
   renderQrAlertBadge();
