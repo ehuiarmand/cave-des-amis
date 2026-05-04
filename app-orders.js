@@ -2266,19 +2266,17 @@ function renderSrCart() {
 
 function openSaisieRapide() {
   srCart = [];
-  const clientEl = document.getElementById("sr-client");
   const searchEl = document.getElementById("sr-search");
-  if (clientEl) clientEl.value = "";
   if (searchEl) searchEl.value = "";
   renderSrMenu("");
   renderSrCart();
   openModal("modal-saisie-rapide");
-  window.requestAnimationFrame(() => clientEl?.focus());
+  window.requestAnimationFrame(() => searchEl?.focus());
 }
 
 async function submitSaisieRapide() {
   if (!srCart.length) { showToast("Ajoutez au moins un article."); return; }
-  const clientName = (document.getElementById("sr-client")?.value || "").trim() || `Client ${new Date().getTime() % 10000}`;
+  const clientName = `Saisie rapide · ${sessionUser || "Serveuse"}`;
   const location = document.getElementById("sr-location")?.value || "Intérieur";
   const date = pdjCalendarDate();
   state.nextId = state.nextId || {};
@@ -5734,7 +5732,14 @@ function attachEvents() {
   document.getElementById("sr-submit-btn")?.addEventListener("click", () => submitSaisieRapide().catch(handleApiError));
   document.getElementById("sr-search")?.addEventListener("input", (e) => renderSrMenu(e.target.value));
   document.getElementById("sr-location")?.addEventListener("change", () => {
-    srCart = [];
+    const location = document.getElementById("sr-location")?.value || "Intérieur";
+    srCart.forEach((item) => {
+      const product = findKnownProduct(item.article);
+      if (!product) return;
+      const format = (product.formatsVente || []).find((f) => Number(f.quantite) === item.packSize) || null;
+      item.prix = formatPrice(format || { prixInterieur: product.prixInt, prixExterieur: product.prixExt }, location);
+      item.location = location;
+    });
     renderSrMenu(document.getElementById("sr-search")?.value || "");
     renderSrCart();
   });
