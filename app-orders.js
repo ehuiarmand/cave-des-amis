@@ -2189,6 +2189,33 @@ function srUpdateQty(article, packSize, delta) {
   renderSrCart();
 }
 
+function srItemCard(item, loc) {
+  const primary = primarySaleFormat(item);
+  const packSz = Math.max(1, Number(primary?.quantite) || Number(item.packSize) || 1);
+  const prix = formatPrice(primary || { prixInterieur: Number(item.prixVenteInt) || 0, prixExterieur: Number(item.prixVenteExt) || 0 }, loc);
+  const qtyLoc = srCartQtyForLoc(item.article, packSz, loc);
+  const qtyOther = srCartQtyTotal(item.article, packSz) - qtyLoc;
+  const stock = stockActuel(item);
+  const hasQty = qtyLoc > 0;
+  const otherLabel = loc.startsWith("Ext") ? "Cave" : "Terr.";
+  const artEsc = escapeHtml(item.article);
+  const border = hasQty ? "border:1px solid #2196f3;" : "border:1px solid #e0e0e0;";
+  const bg = hasQty ? "background:#e3f2fd;" : "background:#fafafa;";
+  let html = "<div style='display:flex;align-items:center;justify-content:space-between;padding:10px 12px;" + bg + border + "border-radius:10px;margin-bottom:6px;gap:10px'>";
+  html += "<div style='flex:1;min-width:0;overflow:hidden'>";
+  html += "<p style='margin:0 0 2px;font-size:0.92rem;font-weight:600;color:#212121;white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>" + artEsc + (packSz > 1 ? " <small style='background:#fff3e0;color:#e65100;border-radius:3px;padding:1px 4px;font-size:0.7rem'>kit x" + packSz + "</small>" : "") + "</p>";
+  html += "<p style='margin:0;font-size:0.78rem;color:#757575'>" + fmt(prix) + " FCFA · Stock : " + fmt(stock) + (qtyOther > 0 ? " · <b style='color:#1976d2'>" + otherLabel + " x" + qtyOther + "</b>" : "") + "</p>";
+  html += "</div>";
+  html += "<div style='display:flex;align-items:center;gap:6px;flex-shrink:0'>";
+  if (hasQty) {
+    html += "<button type='button' class='sr-dec' data-sr-article='" + artEsc + "' data-sr-pack='" + packSz + "' style='width:30px;height:30px;border-radius:50%;border:1px solid #bdbdbd;background:#fff;font-size:1.1rem;cursor:pointer;color:#212121'>−</button>";
+    html += "<span style='min-width:24px;text-align:center;font-weight:700;font-size:1rem;color:#1976d2'>" + qtyLoc + "</span>";
+  }
+  html += "<button type='button' class='sr-inc' data-sr-article='" + artEsc + "' data-sr-pack='" + packSz + "' style='width:30px;height:30px;border-radius:50%;border:none;background:#1976d2;color:#fff;font-size:1.2rem;cursor:pointer;font-weight:700'>+</button>";
+  html += "</div></div>";
+  return html;
+}
+
 function renderSrMenu(query) {
   const container = document.getElementById("sr-menu");
   if (!container) return;
@@ -2199,7 +2226,7 @@ function renderSrMenu(query) {
     .slice().sort((a, b) => (a.cat || "").localeCompare(b.cat || "", "fr") || a.article.localeCompare(b.article, "fr"));
 
   if (!products.length) {
-    container.innerHTML = `<p class="muted" style="text-align:center;padding:20px">Aucun produit disponible.</p>`;
+    container.innerHTML = "<p style='text-align:center;padding:20px;color:#757575'>Aucun produit disponible.</p>";
     return;
   }
   const byCategory = {};
@@ -2210,31 +2237,14 @@ function renderSrMenu(query) {
   });
 
   const loc = srCurrentLoc();
-  container.innerHTML = Object.entries(byCategory).map(([cat, items]) => `
-    <div style="margin-bottom:14px">
-      <p style="font-size:0.7rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);margin:0 0 6px 2px">${escapeHtml(cat)}</p>
-      ${items.map((item) => {
-        const primary = primarySaleFormat(item);
-        const packSz = Math.max(1, Number(primary?.quantite) || Number(item.packSize) || 1);
-        const prix = formatPrice(primary || { prixInterieur: Number(item.prixVenteInt) || 0, prixExterieur: Number(item.prixVenteExt) || 0 }, loc);
-        const qtyLoc = srCartQtyForLoc(item.article, packSz, loc);
-        const qtyOther = srCartQtyTotal(item.article, packSz) - qtyLoc;
-        const stock = stockActuel(item);
-        const hasQty = qtyLoc > 0;
-        const otherLoc = loc.startsWith("Ext") ? "Cave" : "Terr.";
-        return `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:${hasQty ? "rgba(33,150,243,0.06)" : "rgba(0,0,0,0.03)"};border:1px solid ${hasQty ? "var(--mm-primary,#2196f3)" : "rgba(0,0,0,0.1)"};border-radius:10px;margin-bottom:6px;gap:10px">
-          <div style="flex:1;min-width:0">
-            <p class="list-item-title" style="margin:0 0 2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(item.article)}${packSz > 1 ? `<span style="font-size:0.7rem;background:rgba(255,152,0,0.15);color:#e65100;border-radius:4px;padding:1px 5px;margin-left:6px">kit ×${packSz}</span>` : ""}</p>
-            <p class="list-item-sub" style="margin:0">${fmt(prix)} FCFA · Stock : ${fmt(stock)}${qtyOther > 0 ? ` · <span style="color:var(--mm-primary)">${otherLoc} ×${qtyOther}</span>` : ""}</p>
-          </div>
-          <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
-            ${hasQty ? `<button type="button" class="sr-dec" data-sr-article="${escapeHtml(item.article)}" data-sr-pack="${packSz}" style="width:32px;height:32px;border-radius:50%;border:1px solid rgba(0,0,0,0.15);background:rgba(0,0,0,0.05);font-size:1.2rem;cursor:pointer;color:var(--mm-text)">−</button>
-            <span style="min-width:22px;text-align:center;font-weight:700;font-size:1rem;color:var(--mm-primary)">${qtyLoc}</span>` : ""}
-            <button type="button" class="sr-inc" data-sr-article="${escapeHtml(item.article)}" data-sr-pack="${packSz}" style="width:32px;height:32px;border-radius:50%;border:none;background:var(--mm-primary,#1976d2);color:#fff;font-size:1.2rem;cursor:pointer;font-weight:700">+</button>
-          </div>
-        </div>`;
-      }).join("")}
-    </div>`).join("");
+  let html = "";
+  Object.entries(byCategory).forEach(([cat, items]) => {
+    html += "<div style='margin-bottom:14px'>";
+    html += "<p style='font-size:0.7rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#9e9e9e;margin:0 0 6px 2px'>" + escapeHtml(cat) + "</p>";
+    items.forEach((item) => { html += srItemCard(item, loc); });
+    html += "</div>";
+  });
+  container.innerHTML = html;
 }
 
 function renderSrCart() {
@@ -2244,7 +2254,7 @@ function renderSrCart() {
   const total = srCart.reduce((s, c) => s + c.prix * c.qty, 0);
   if (totalEl) totalEl.textContent = `${fmt(total)} FCFA`;
   if (!srCart.length) {
-    container.innerHTML = `<p style="text-align:center;font-size:0.82rem;padding:4px 0;color:rgba(255,255,255,0.4)">Panier vide — ajoutez des produits ci-dessus.</p>`;
+    container.innerHTML = "<p style='text-align:center;font-size:0.82rem;padding:4px 0;color:#9e9e9e'>Panier vide — ajoutez des produits ci-dessus.</p>";
     return;
   }
   const int = srCart.filter((c) => !c.location.startsWith("Ext"));
