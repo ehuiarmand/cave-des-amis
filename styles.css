@@ -2042,6 +2042,51 @@ textarea { font: inherit; }
   white-space: nowrap;
 }
 
+.brasserie-attach-panel {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  margin: 0 0 16px;
+  background: rgba(33, 150, 243, 0.04);
+}
+
+.brasserie-attach-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+  max-height: 260px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.brasserie-attach-item {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: flex-start;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--mm-surface);
+}
+
+.brasserie-attach-item input {
+  margin-top: 3px;
+}
+
+.brasserie-attach-item strong,
+.brasserie-attach-item span {
+  display: block;
+  min-width: 0;
+}
+
+.brasserie-attach-current {
+  color: var(--muted);
+  font-size: 0.78rem;
+  margin-top: 3px;
+}
+
 @media (max-width: 720px) {
   .stock-kpi-bar { grid-template-columns: 1fr 1fr; }
 }

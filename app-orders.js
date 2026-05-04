@@ -498,9 +498,19 @@ function populateCategorySelects() {
   populateSelect("s-cat", categoryList());
   const dl = document.getElementById("brasserie-list");
   if (dl) {
-    const brasseries = [...new Set(recordsForSite(state.stock).map((i) => i.brasserie || "").filter(Boolean))].sort((a, b) => a.localeCompare(b, "fr"));
+    const brasseries = brasserieListForCurrentSite();
     dl.innerHTML = brasseries.map((b) => `<option value="${escapeHtml(b)}">`).join("");
   }
+}
+
+const DEFAULT_BRASSERIES = ["Brassivoire", "Carré d'or", "Solibra"];
+
+function brasserieListForCurrentSite() {
+  const fromCatalogue = recordsForSite(state.stock)
+    .map((item) => String(item.brasserie || "").trim())
+    .filter(Boolean);
+  return [...new Set([...DEFAULT_BRASSERIES, ...fromCatalogue])]
+    .sort((a, b) => a.localeCompare(b, "fr"));
 }
 
 function setAuthVisible(isAuthenticated) {
@@ -920,6 +930,7 @@ function setStockSubTab(tab) {
 function renderCasiers() {
   const container = document.getElementById("casiers-content");
   if (!container) return;
+  renderBrasserieAttachMenu();
   const products = recordsForSite(state.stock);
   if (!products.length) {
     container.innerHTML = "<p class='muted' style='padding:20px;text-align:center'>Aucun article dans le catalogue.</p>";
@@ -966,7 +977,7 @@ function renderCasiers() {
       html += "<div style='margin-bottom:14px;padding:10px 12px 12px;border-radius:10px;border:1px solid #e0e0e0'>";
       html += "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>";
       html += "<span style='font-size:0.82rem;font-weight:700;color:#444'>Casier de <strong style=\"color:#1976d2\">" + fmt(csNum) + " btl</strong></span>";
-      html += "<button type='button' class='mini-btn co-open-btn' data-co-cat='" + escapeHtml(cat) + "' data-co-cs='" + csNum + "' style='background:#1976d2;color:#fff;border:none;padding:4px 10px;border-radius:6px;font-size:0.78rem;cursor:pointer'>+ Commander</button>";
+      html += "<button type='button' class='mini-btn co-open-btn' data-co-brasserie='" + escapeHtml(brasserie) + "' data-co-cs='" + csNum + "' style='background:#1976d2;color:#fff;border:none;padding:4px 10px;border-radius:6px;font-size:0.78rem;cursor:pointer'>+ Commander</button>";
       html += "</div>";
       html += "<div style='overflow-x:auto'><table class='data-table' style='width:100%'>";
       html += "<thead><tr><th>Article</th><th style='text-align:right'>Stock (btl)</th><th style='text-align:right'>Casiers complets</th><th style='text-align:right'>Reste (btl)</th><th style='text-align:right;color:#1565c0'>Btl pr. compléter</th><th>Statut</th></tr></thead><tbody>";
@@ -998,6 +1009,64 @@ function renderCasiers() {
   if (kpiTotal) kpiTotal.textContent = fmt(totalCasiersTous);
   if (kpiAlerte) kpiAlerte.textContent = String(nbAlerte);
   if (kpiEpuise) kpiEpuise.textContent = String(nbEpuise);
+}
+
+function renderBrasserieAttachMenu() {
+  const list = document.getElementById("brasserie-attach-list");
+  const count = document.getElementById("brasserie-attach-count");
+  if (!list) return;
+  const term = String(document.getElementById("brasserie-attach-filter")?.value || "").trim().toLowerCase();
+  const products = recordsForSite(state.stock)
+    .slice()
+    .sort((a, b) => String(a.article || "").localeCompare(String(b.article || ""), "fr"));
+  const filtered = term
+    ? products.filter((item) => String(item.article || "").toLowerCase().includes(term) || String(item.brasserie || "").toLowerCase().includes(term))
+    : products;
+  if (count) count.textContent = `${fmt(products.length)} article(s)`;
+  list.innerHTML = filtered.length
+    ? filtered.map((item) => `
+      <label class="brasserie-attach-item">
+        <input type="checkbox" data-brasserie-stock-id="${item.id}">
+        <span>
+          <strong>${escapeHtml(item.article || "")}</strong>
+          <span class="brasserie-attach-current">${escapeHtml(item.brasserie || "Sans brasserie")} · ${escapeHtml(item.cat || "Autres")} · ${fmt(stockActuel(item))} btl</span>
+        </span>
+      </label>
+    `).join("")
+    : emptyState("Aucun article", "Aucun article en stock ne correspond a ce filtre.");
+}
+
+async function saveBrasserieAttachment() {
+  if (!canAnyAdmin()) {
+    showToast("Rattachement reserve a un administrateur.");
+    return;
+  }
+  const brasserie = String(document.getElementById("brasserie-attach-name")?.value || "").trim();
+  if (!brasserie) {
+    showToast("Saisissez le nom de la brasserie.");
+    return;
+  }
+  const ids = [...document.querySelectorAll("[data-brasserie-stock-id]:checked")].map((input) => Number(input.dataset.brasserieStockId));
+  if (!ids.length) {
+    showToast("Selectionnez au moins un article.");
+    return;
+  }
+  const selected = new Set(ids);
+  let updated = 0;
+  state.stock = (state.stock || []).map((item) => {
+    if (!selected.has(Number(item.id)) || !rowMatchesSite(item, currentSiteId(), multiSiteActive())) return item;
+    updated++;
+    return { ...item, brasserie };
+  });
+  await persistState({ stock: state.stock });
+  populateCategorySelects();
+  renderStock();
+  renderCasiers();
+  showToast(`${fmt(updated)} article(s) rattache(s) a "${brasserie}".`);
+}
+
+function clearBrasserieAttachmentSelection() {
+  document.querySelectorAll("[data-brasserie-stock-id]:checked").forEach((input) => { input.checked = false; });
 }
 
 function openCasierOrderModal(article, cs) {
@@ -4595,8 +4664,10 @@ async function saveStock() {
   await persistState();
   closeModal("modal-stock");
   resetStockForm();
+  populateCategorySelects();
   if (currentPage === "home") renderDashboard();
   renderStock();
+  if (currentPage === "stock" && stockSubTab === "casiers") renderCasiers();
   showToast(editId ? `"${articleName}" mis a jour.` : "Article catalogue ajoute.");
 }
 
@@ -5960,6 +6031,16 @@ function attachEvents() {
   document.getElementById("stock-card-casiers")?.addEventListener("click", (e) => {
     const btn = e.target.closest(".co-open-btn");
     if (btn) openCasierOrderModal("", Number(btn.dataset.coCs) || null);
+  });
+  document.getElementById("save-brasserie-attach-btn")?.addEventListener("click", () => saveBrasserieAttachment().catch(handleApiError));
+  document.getElementById("clear-brasserie-attach-btn")?.addEventListener("click", clearBrasserieAttachmentSelection);
+  document.getElementById("brasserie-attach-filter")?.addEventListener("input", renderBrasserieAttachMenu);
+  document.getElementById("brasserie-attach-name")?.addEventListener("change", () => {
+    const name = String(document.getElementById("brasserie-attach-name")?.value || "").trim().toLowerCase();
+    document.querySelectorAll("[data-brasserie-stock-id]").forEach((input) => {
+      const item = recordsForSite(state.stock).find((stockItem) => Number(stockItem.id) === Number(input.dataset.brasserieStockId));
+      input.checked = !!name && String(item?.brasserie || "").trim().toLowerCase() === name;
+    });
   });
   // Kit
   document.getElementById("kit-price")?.addEventListener("input", renderKitProducts);

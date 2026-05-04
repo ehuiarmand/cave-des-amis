@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Flex:wght@500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./styles.css?v=32">
+  <link rel="stylesheet" href="./styles.css?v=33">
 </head>
 <body>
   <div class="app-bg"></div>
@@ -754,6 +754,30 @@
           <p class="muted" style="margin-bottom:14px;font-size:0.85rem">
             Stock exprime en casiers (lots) par categorie. La taille du casier se configure dans le catalogue (colonne <strong>Btl/casier</strong>).
           </p>
+          <div class="brasserie-attach-panel">
+            <div class="section-head compact-head">
+              <div>
+                <p class="eyebrow">Rattachement</p>
+                <h4>Articles en stock par brasserie</h4>
+              </div>
+              <span id="brasserie-attach-count" class="section-meta">0 article</span>
+            </div>
+            <div class="form-grid two-cols" style="margin-top:10px">
+              <div class="form-group">
+                <label for="brasserie-attach-name">Brasserie / fournisseur</label>
+                <input id="brasserie-attach-name" type="text" list="brasserie-list" placeholder="ex: Solibra, Brassivoire, Castel..." autocomplete="off">
+              </div>
+              <div class="form-group">
+                <label for="brasserie-attach-filter">Filtrer les articles</label>
+                <input id="brasserie-attach-filter" type="text" placeholder="ex: Castel, Beaufort, Coca...">
+              </div>
+            </div>
+            <div id="brasserie-attach-list" class="brasserie-attach-list"></div>
+            <div class="button-stack" style="grid-template-columns:1fr 1fr;display:grid;margin-top:12px">
+              <button id="save-brasserie-attach-btn" class="btn btn-primary" type="button">Rattacher les articles selectionnes</button>
+              <button id="clear-brasserie-attach-btn" class="btn btn-outline" type="button">Vider la selection</button>
+            </div>
+          </div>
           <div id="casiers-kpi-bar" class="stock-kpi-bar" style="margin-bottom:16px">
             <div class="stock-kpi"><span class="stock-kpi-label">Total casiers en stock</span><strong id="casiers-kpi-total" class="stock-kpi-val">0</strong></div>
             <div class="stock-kpi"><span class="stock-kpi-label">Articles en alerte</span><strong id="casiers-kpi-alerte" class="stock-kpi-val amber">0</strong></div>
@@ -1670,6 +1694,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=75"></script>
+  <script src="./app-orders.js?v=76"></script>
 </body>
 </html>
