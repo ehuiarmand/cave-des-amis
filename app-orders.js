@@ -496,6 +496,11 @@ function populateSelect(id, values, firstLabel = null) {
 
 function populateCategorySelects() {
   populateSelect("s-cat", categoryList());
+  const dl = document.getElementById("brasserie-list");
+  if (dl) {
+    const brasseries = [...new Set(recordsForSite(state.stock).map((i) => i.brasserie || "").filter(Boolean))].sort((a, b) => a.localeCompare(b, "fr"));
+    dl.innerHTML = brasseries.map((b) => `<option value="${escapeHtml(b)}">`).join("");
+  }
 }
 
 function setAuthVisible(isAuthenticated) {
@@ -920,25 +925,25 @@ function renderCasiers() {
     container.innerHTML = "<p class='muted' style='padding:20px;text-align:center'>Aucun article dans le catalogue.</p>";
     return;
   }
-  // Group by category then by caseSize
-  const byCategory = {};
+  // Group by brasserie (fallback to cat) then by caseSize
+  const byBrasserie = {};
   products.forEach((item) => {
-    const cat = item.cat || "Autres";
+    const key = (item.brasserie || "").trim() || (item.cat || "Autres");
     const cs = caseSize(item);
-    if (!byCategory[cat]) byCategory[cat] = {};
-    if (!byCategory[cat][cs]) byCategory[cat][cs] = [];
-    byCategory[cat][cs].push(item);
+    if (!byBrasserie[key]) byBrasserie[key] = {};
+    if (!byBrasserie[key][cs]) byBrasserie[key][cs] = [];
+    byBrasserie[key][cs].push(item);
   });
   let totalCasiersTous = 0, nbAlerte = 0, nbEpuise = 0;
   let html = "";
-  Object.entries(byCategory).sort(([a], [b]) => a.localeCompare(b, "fr")).forEach(([cat, byCaseSize]) => {
+  Object.entries(byBrasserie).sort(([a], [b]) => a.localeCompare(b, "fr")).forEach(([brasserie, byCaseSize]) => {
     const catCasiers = Object.values(byCaseSize).flat().reduce((s, item) => {
       const cs = caseSize(item); const stk = stockActuel(item);
       return s + (stk > 0 ? Math.floor(stk / cs) : 0);
     }, 0);
     html += "<div style='margin-bottom:26px'>";
     html += "<div style='display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px'>";
-    html += "<h4 style='margin:0;font-size:0.9rem;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:#1976d2'>" + escapeHtml(cat) + "</h4>";
+    html += "<h4 style='margin:0;font-size:0.9rem;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:#1976d2'>" + escapeHtml(brasserie) + "</h4>";
     html += "<span style='font-size:0.78rem;color:#757575'>" + fmt(catCasiers) + " casier(s) total</span>";
     html += "</div>";
     // Sub-group by caseSize (sorted descending)
@@ -4506,6 +4511,7 @@ function resetStockForm() {
   document.getElementById("s-prix-kit-ext").value = "";
   document.getElementById("s-price-location").value = "int";
   document.getElementById("s-price-location-value").value = "";
+  const bEl = document.getElementById("s-brasserie"); if (bEl) bEl.value = "";
   renderStockSaleFormats();
   document.getElementById("stock-modal-title").textContent = "Nouvel article en stock";
   document.getElementById("save-stock-btn").textContent = "Enregistrer l'article";
@@ -4528,6 +4534,7 @@ function openEditStock(itemId) {
   document.getElementById("s-frigo").value = String(stockFrigo(item));
   document.getElementById("s-reserve").value = String(stockReserve(item));
   document.getElementById("s-prix").value = String(item.prixAchat || "");
+  const bEditEl = document.getElementById("s-brasserie"); if (bEditEl) bEditEl.value = item.brasserie || "";
   document.getElementById("s-prix-kit-int").value = String(item.prixVenteInt || item.prixKitInt || item.prixBouteille || item.prixVente || "");
   document.getElementById("s-prix-kit-ext").value = String(item.prixVenteExt || item.prixKitExt || item.prixBouteille || item.prixVente || "");
   document.getElementById("s-price-location").value = "int";
@@ -4554,6 +4561,7 @@ async function saveStock() {
     caseSize: (VALID_CASE_SIZES.includes(Number(document.getElementById("s-case-size").value)) ? Number(document.getElementById("s-case-size").value) : 24),
     article: articleName,
     cat: document.getElementById("s-cat").value,
+    brasserie: (document.getElementById("s-brasserie")?.value || "").trim(),
     initCases: Number(document.getElementById("s-init").value) || 0,
     seuilMin: Number(document.getElementById("s-seuil").value) || 5,
     prixAchat: Number(document.getElementById("s-prix").value) || 0,
