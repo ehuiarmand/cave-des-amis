@@ -893,11 +893,13 @@ function setStockSubTab(tab) {
   const isMouvements = tab === "mouvements";
   const isAchats = tab === "achats";
   const isCreanciers = tab === "creanciers";
+  const isCasiers = tab === "casiers";
   document.getElementById("stock-card-catalogue").classList.toggle("hidden", !isCatalogue);
   document.getElementById("stock-list").classList.toggle("hidden", !isCatalogue);
   document.getElementById("stock-card-mouvements").classList.toggle("hidden", !isMouvements);
   document.getElementById("stock-card-achats").classList.toggle("hidden", !isAchats);
   document.getElementById("stock-card-creanciers").classList.toggle("hidden", !isCreanciers);
+  document.getElementById("stock-card-casiers")?.classList.toggle("hidden", !isCasiers);
   document.querySelectorAll("[data-subtab-stock]").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.subtabStock === tab);
   });
@@ -905,8 +907,75 @@ function setStockSubTab(tab) {
     if (isAchats) renderPurchaseOrders();
     else if (isCreanciers) renderCreanciers();
     else if (isMouvements) renderStockMovements();
+    else if (isCasiers) renderCasiers();
   }
   syncFabLabelForStockPage();
+}
+
+function renderCasiers() {
+  const container = document.getElementById("casiers-content");
+  if (!container) return;
+  const products = recordsForSite(state.stock);
+  if (!products.length) {
+    container.innerHTML = "<p class='muted' style='padding:20px;text-align:center'>Aucun article dans le catalogue.</p>";
+    return;
+  }
+  const byCategory = {};
+  products.forEach((item) => {
+    const cat = item.cat || "Autres";
+    if (!byCategory[cat]) byCategory[cat] = [];
+    byCategory[cat].push(item);
+  });
+  let totalCasiersTous = 0;
+  let nbAlerte = 0;
+  let nbEpuise = 0;
+  let html = "";
+  Object.entries(byCategory).sort(([a], [b]) => a.localeCompare(b, "fr")).forEach(([cat, items]) => {
+    const rows = items.map((item) => {
+      const cs = caseSize(item);
+      const stockBtl = stockActuel(item);
+      const casiersFull = Math.floor(stockBtl / cs);
+      const restesBtl = stockBtl % cs;
+      const seuil = Number(item.seuilAlerte) || 0;
+      const seuilCas = seuil > 0 ? Math.ceil(seuil / cs) : null;
+      const alerte = seuil > 0 && stockBtl > 0 && stockBtl <= seuil;
+      const epuise = stockBtl === 0;
+      if (!epuise) totalCasiersTous += casiersFull;
+      if (alerte) nbAlerte++;
+      if (epuise) nbEpuise++;
+      return { item, cs, stockBtl, casiersFull, restesBtl, seuilCas, alerte, epuise };
+    });
+    const subCasiers = rows.filter((r) => !r.epuise).reduce((s, r) => s + r.casiersFull, 0);
+    html += "<div style='margin-bottom:22px'>";
+    html += "<div style='display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px'>";
+    html += "<h4 style='margin:0;font-size:0.88rem;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#1976d2'>" + escapeHtml(cat) + "</h4>";
+    html += "<span style='font-size:0.78rem;color:#757575'>" + items.length + " article(s) · " + fmt(subCasiers) + " casier(s) disponibles</span>";
+    html += "</div>";
+    html += "<div style='overflow-x:auto'><table class='data-table' style='width:100%'>";
+    html += "<thead><tr><th>Article</th><th style='text-align:right'>Btl/casier</th><th style='text-align:right'>Stock (btl)</th><th style='text-align:right'>Casiers complets</th><th style='text-align:right'>Reste (btl)</th><th style='text-align:right'>Seuil alerte</th><th>Statut</th></tr></thead><tbody>";
+    rows.forEach(({ item, cs, stockBtl, casiersFull, restesBtl, seuilCas, alerte, epuise }) => {
+      const rowBg = epuise ? "background:#fff3e0;" : alerte ? "background:#fffde7;" : "";
+      const nameColor = epuise ? "color:#e53935;" : alerte ? "color:#f57c00;" : "";
+      const status = epuise ? "<span style='color:#e53935;font-weight:600'>Epuise</span>" : alerte ? "<span style='color:#f57c00;font-weight:600'>Commander</span>" : "<span style='color:#2e7d32'>OK</span>";
+      html += "<tr style='" + rowBg + "'>";
+      html += "<td style='font-weight:500;" + nameColor + "'>" + escapeHtml(item.article) + "</td>";
+      html += "<td style='text-align:right'>" + fmt(cs) + "</td>";
+      html += "<td style='text-align:right;font-weight:600'>" + fmt(stockBtl) + "</td>";
+      html += "<td style='text-align:right;font-weight:700;color:#1976d2'>" + (epuise ? "0" : fmt(casiersFull)) + "</td>";
+      html += "<td style='text-align:right;color:#757575'>" + (epuise ? "—" : fmt(restesBtl)) + "</td>";
+      html += "<td style='text-align:right;color:#9e9e9e'>" + (seuilCas !== null ? fmt(seuilCas) + " cas." : "—") + "</td>";
+      html += "<td>" + status + "</td>";
+      html += "</tr>";
+    });
+    html += "</tbody></table></div></div>";
+  });
+  container.innerHTML = html;
+  const kpiTotal = document.getElementById("casiers-kpi-total");
+  const kpiAlerte = document.getElementById("casiers-kpi-alerte");
+  const kpiEpuise = document.getElementById("casiers-kpi-epuise");
+  if (kpiTotal) kpiTotal.textContent = fmt(totalCasiersTous);
+  if (kpiAlerte) kpiAlerte.textContent = String(nbAlerte);
+  if (kpiEpuise) kpiEpuise.textContent = String(nbEpuise);
 }
 
 function setParamsSubTab(tab) {
@@ -2447,7 +2516,11 @@ async function saveConsigne() {
     createdBy: sessionUser || "-",
     createdAt: new Date().toISOString(),
   });
-  await persistState({ consignes: state.consignes, nextId: state.nextId });
+  const localConsignes = [...state.consignes];
+  const localNextId = { ...state.nextId };
+  await persistState({ consignes: localConsignes, nextId: localNextId });
+  if (!state.consignes?.length) state.consignes = localConsignes;
+  if (!state.nextId?.consigne) state.nextId = { ...state.nextId, ...localNextId };
   document.getElementById("consigne-form-wrap")?.classList.add("hidden");
   resetConsigneForm();
   renderConsignes();
@@ -2465,7 +2538,6 @@ async function returnConsigne(id) {
 }
 
 async function deleteConsigne(id) {
-  if (!window.confirm("Supprimer cette consigne ?")) return;
   state.consignes = (state.consignes || []).filter((c) => c.id !== Number(id) && c.id !== id);
   await persistState({ consignes: state.consignes });
   renderConsignes();

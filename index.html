@@ -552,6 +552,7 @@
           <button class="tab" data-subtab-stock="mouvements">Mouvements</button>
           <button class="tab" data-subtab-stock="achats">Achats fournisseurs</button>
           <button class="tab" data-subtab-stock="creanciers">Creanciers</button>
+          <button class="tab" data-subtab-stock="casiers">Gestion casiers</button>
         </div>
         <article class="card" id="stock-card-catalogue" style="margin-bottom:14px">
           <div class="section-head" style="margin-bottom:14px">
@@ -742,6 +743,23 @@
           <div class="section-head" style="margin-top:18px"><h4 style="margin:0;font-size:1rem">Dettes enregistrees en charges</h4></div>
           <p class="muted" style="font-size:0.82rem;margin-bottom:8px">Apres reception d&apos;une commande au credit, une charge est creee avec ce mode de paiement.</p>
           <div id="creanciers-charges-list"></div>
+        </article>
+        <article class="card hidden" id="stock-card-casiers" style="margin-bottom:14px">
+          <div class="section-head" style="margin-bottom:14px">
+            <div>
+              <p class="eyebrow">Inventaire par lot</p>
+              <h3>Gestion des casiers par brasserie</h3>
+            </div>
+          </div>
+          <p class="muted" style="margin-bottom:14px;font-size:0.85rem">
+            Stock exprime en casiers (lots) par categorie. La taille du casier se configure dans le catalogue (colonne <strong>Btl/casier</strong>).
+          </p>
+          <div id="casiers-kpi-bar" class="stock-kpi-bar" style="margin-bottom:16px">
+            <div class="stock-kpi"><span class="stock-kpi-label">Total casiers en stock</span><strong id="casiers-kpi-total" class="stock-kpi-val">0</strong></div>
+            <div class="stock-kpi"><span class="stock-kpi-label">Articles en alerte</span><strong id="casiers-kpi-alerte" class="stock-kpi-val amber">0</strong></div>
+            <div class="stock-kpi"><span class="stock-kpi-label">Articles epuises</span><strong id="casiers-kpi-epuise" class="stock-kpi-val red">0</strong></div>
+          </div>
+          <div id="casiers-content"></div>
         </article>
         <div id="stock-list"></div>
       </section>
