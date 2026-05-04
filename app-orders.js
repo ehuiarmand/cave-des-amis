@@ -5815,7 +5815,15 @@ function attachEvents() {
   document.getElementById("print-qr-int-btn").addEventListener("click", () => printQrCard("Intérieur"));
   document.getElementById("print-qr-ext-btn").addEventListener("click", () => printQrCard("Extérieur"));
 document.getElementById("fab-btn").addEventListener("click", () => {
-    if (currentPage === "ventes") openOrderEditor(activeOrderId || null, null);
+    if (currentPage === "ventes") {
+      if (ventesSubTab === "consignes") {
+        const wrap = document.getElementById("consigne-form-wrap");
+        if (wrap) { resetConsigneForm(); wrap.classList.remove("hidden"); document.getElementById("consigne-client")?.focus(); }
+        return;
+      }
+      openOrderEditor(activeOrderId || null, null);
+      return;
+    }
     if (currentPage === "stock") {
       if (stockSubTab === "creanciers") {
         openCreditorChargeModal();
