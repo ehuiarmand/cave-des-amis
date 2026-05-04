@@ -920,54 +920,71 @@ function renderCasiers() {
     container.innerHTML = "<p class='muted' style='padding:20px;text-align:center'>Aucun article dans le catalogue.</p>";
     return;
   }
+  // Group by category then by caseSize
   const byCategory = {};
   products.forEach((item) => {
     const cat = item.cat || "Autres";
-    if (!byCategory[cat]) byCategory[cat] = [];
-    byCategory[cat].push(item);
+    const cs = caseSize(item);
+    if (!byCategory[cat]) byCategory[cat] = {};
+    if (!byCategory[cat][cs]) byCategory[cat][cs] = [];
+    byCategory[cat][cs].push(item);
   });
-  let totalCasiersTous = 0;
-  let nbAlerte = 0;
-  let nbEpuise = 0;
+  let totalCasiersTous = 0, nbAlerte = 0, nbEpuise = 0;
   let html = "";
-  Object.entries(byCategory).sort(([a], [b]) => a.localeCompare(b, "fr")).forEach(([cat, items]) => {
-    const rows = items.map((item) => {
-      const cs = caseSize(item);
-      const stockBtl = stockActuel(item);
-      const casiersFull = Math.floor(stockBtl / cs);
-      const restesBtl = stockBtl % cs;
-      const seuil = Number(item.seuilAlerte) || 0;
-      const seuilCas = seuil > 0 ? Math.ceil(seuil / cs) : null;
-      const alerte = seuil > 0 && stockBtl > 0 && stockBtl <= seuil;
-      const epuise = stockBtl === 0;
-      if (!epuise) totalCasiersTous += casiersFull;
-      if (alerte) nbAlerte++;
-      if (epuise) nbEpuise++;
-      return { item, cs, stockBtl, casiersFull, restesBtl, seuilCas, alerte, epuise };
-    });
-    const subCasiers = rows.filter((r) => !r.epuise).reduce((s, r) => s + r.casiersFull, 0);
-    html += "<div style='margin-bottom:22px'>";
-    html += "<div style='display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px'>";
-    html += "<h4 style='margin:0;font-size:0.88rem;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#1976d2'>" + escapeHtml(cat) + "</h4>";
-    html += "<span style='font-size:0.78rem;color:#757575'>" + items.length + " article(s) · " + fmt(subCasiers) + " casier(s) disponibles</span>";
+  Object.entries(byCategory).sort(([a], [b]) => a.localeCompare(b, "fr")).forEach(([cat, byCaseSize]) => {
+    const catCasiers = Object.values(byCaseSize).flat().reduce((s, item) => {
+      const cs = caseSize(item); const stk = stockActuel(item);
+      return s + (stk > 0 ? Math.floor(stk / cs) : 0);
+    }, 0);
+    html += "<div style='margin-bottom:26px'>";
+    html += "<div style='display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px'>";
+    html += "<h4 style='margin:0;font-size:0.9rem;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:#1976d2'>" + escapeHtml(cat) + "</h4>";
+    html += "<span style='font-size:0.78rem;color:#757575'>" + fmt(catCasiers) + " casier(s) total</span>";
     html += "</div>";
-    html += "<div style='overflow-x:auto'><table class='data-table' style='width:100%'>";
-    html += "<thead><tr><th>Article</th><th style='text-align:right'>Btl/casier</th><th style='text-align:right'>Stock (btl)</th><th style='text-align:right'>Casiers complets</th><th style='text-align:right'>Reste (btl)</th><th style='text-align:right'>Seuil alerte</th><th>Statut</th></tr></thead><tbody>";
-    rows.forEach(({ item, cs, stockBtl, casiersFull, restesBtl, seuilCas, alerte, epuise }) => {
-      const rowBg = epuise ? "background:#fff3e0;" : alerte ? "background:#fffde7;" : "";
-      const nameColor = epuise ? "color:#e53935;" : alerte ? "color:#f57c00;" : "";
-      const status = epuise ? "<span style='color:#e53935;font-weight:600'>Epuise</span>" : alerte ? "<span style='color:#f57c00;font-weight:600'>Commander</span>" : "<span style='color:#2e7d32'>OK</span>";
-      html += "<tr style='" + rowBg + "'>";
-      html += "<td style='font-weight:500;" + nameColor + "'>" + escapeHtml(item.article) + "</td>";
-      html += "<td style='text-align:right'>" + fmt(cs) + "</td>";
-      html += "<td style='text-align:right;font-weight:600'>" + fmt(stockBtl) + "</td>";
-      html += "<td style='text-align:right;font-weight:700;color:#1976d2'>" + (epuise ? "0" : fmt(casiersFull)) + "</td>";
-      html += "<td style='text-align:right;color:#757575'>" + (epuise ? "—" : fmt(restesBtl)) + "</td>";
-      html += "<td style='text-align:right;color:#9e9e9e'>" + (seuilCas !== null ? fmt(seuilCas) + " cas." : "—") + "</td>";
-      html += "<td>" + status + "</td>";
-      html += "</tr>";
+    // Sub-group by caseSize (sorted descending)
+    Object.entries(byCaseSize).sort(([a], [b]) => Number(b) - Number(a)).forEach(([csStr, items]) => {
+      const csNum = Number(csStr);
+      const rows = items.map((item) => {
+        const stockBtl = stockActuel(item);
+        const casiersFull = Math.floor(stockBtl / csNum);
+        const reste = stockBtl % csNum;
+        const manquantes = reste > 0 ? csNum - reste : 0;
+        const seuil = Number(item.seuilAlerte) || 0;
+        const alerte = seuil > 0 && stockBtl > 0 && stockBtl <= seuil;
+        const epuise = stockBtl === 0;
+        if (!epuise) totalCasiersTous += casiersFull;
+        if (alerte) nbAlerte++;
+        if (epuise) nbEpuise++;
+        return { item, stockBtl, casiersFull, reste, manquantes, alerte, epuise };
+      });
+      const groupCasiers = rows.filter((r) => !r.epuise).reduce((s, r) => s + r.casiersFull, 0);
+      html += "<div style='margin-bottom:14px;padding:10px 12px 12px;border-radius:10px;border:1px solid #e0e0e0'>";
+      html += "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>";
+      html += "<span style='font-size:0.82rem;font-weight:700;color:#444'>Casier de <strong style=\"color:#1976d2\">" + fmt(csNum) + " btl</strong></span>";
+      html += "<button type='button' class='mini-btn co-open-btn' data-co-cat='" + escapeHtml(cat) + "' data-co-cs='" + csNum + "' style='background:#1976d2;color:#fff;border:none;padding:4px 10px;border-radius:6px;font-size:0.78rem;cursor:pointer'>+ Commander</button>";
+      html += "</div>";
+      html += "<div style='overflow-x:auto'><table class='data-table' style='width:100%'>";
+      html += "<thead><tr><th>Article</th><th style='text-align:right'>Stock (btl)</th><th style='text-align:right'>Casiers complets</th><th style='text-align:right'>Reste (btl)</th><th style='text-align:right;color:#1565c0'>Btl pr. compléter</th><th>Statut</th></tr></thead><tbody>";
+      rows.forEach(({ item, stockBtl, casiersFull, reste, manquantes, alerte, epuise }) => {
+        const rowBg = epuise ? "background:#fff3e0;" : alerte ? "background:#fffde7;" : "";
+        const nameColor = epuise ? "color:#e53935;" : alerte ? "color:#f57c00;" : "";
+        const manqHtml = manquantes > 0 ? "<span style='color:#1565c0;font-weight:700'>" + fmt(manquantes) + "</span>" : "<span style='color:#9e9e9e'>—</span>";
+        const statusHtml = epuise ? "<span style='color:#e53935;font-weight:600'>Epuise</span>" : alerte ? "<span style='color:#f57c00;font-weight:600'>Commander</span>" : "<span style='color:#2e7d32'>OK</span>";
+        html += "<tr style='" + rowBg + "'>";
+        html += "<td style='font-weight:500;" + nameColor + "'>" + escapeHtml(item.article) + "</td>";
+        html += "<td style='text-align:right;font-weight:600'>" + fmt(stockBtl) + "</td>";
+        html += "<td style='text-align:right;font-weight:700;color:#1976d2'>" + (epuise ? "0" : fmt(casiersFull)) + "</td>";
+        html += "<td style='text-align:right;color:#757575'>" + (epuise ? "—" : fmt(reste)) + "</td>";
+        html += "<td style='text-align:right'>" + manqHtml + "</td>";
+        html += "<td>" + statusHtml + "</td>";
+        html += "</tr>";
+      });
+      html += "</tbody></table></div>";
+      html += "<div style='display:flex;justify-content:flex-end;gap:16px;font-size:0.8rem;margin-top:6px;padding-top:6px;border-top:1px solid #e0e0e0;color:#555'>";
+      html += "<span><strong style='color:#1976d2'>" + fmt(groupCasiers) + "</strong> casier(s) complet(s) en stock</span>";
+      html += "</div></div>";
     });
-    html += "</tbody></table></div></div>";
+    html += "</div>";
   });
   container.innerHTML = html;
   const kpiTotal = document.getElementById("casiers-kpi-total");
@@ -976,6 +993,66 @@ function renderCasiers() {
   if (kpiTotal) kpiTotal.textContent = fmt(totalCasiersTous);
   if (kpiAlerte) kpiAlerte.textContent = String(nbAlerte);
   if (kpiEpuise) kpiEpuise.textContent = String(nbEpuise);
+}
+
+function openCasierOrderModal(article, cs) {
+  const articleEl = document.getElementById("co-article");
+  const csEl = document.getElementById("co-casesize");
+  const videsEl = document.getElementById("co-vides");
+  const qtyEl = document.getElementById("co-qty");
+  const preview = document.getElementById("co-preview");
+  if (articleEl) articleEl.value = article || "";
+  if (csEl) csEl.textContent = cs ? fmt(cs) + " btl/casier" : "—";
+  if (videsEl) videsEl.value = "";
+  if (qtyEl) qtyEl.value = "";
+  if (preview) preview.style.display = "none";
+  openModal("modal-casier-order");
+  window.requestAnimationFrame(() => { if (!article) articleEl?.focus(); else videsEl?.focus(); });
+}
+
+function renderCasierOrderPreview() {
+  const article = (document.getElementById("co-article")?.value || "").trim();
+  const videsEl = document.getElementById("co-vides");
+  const preview = document.getElementById("co-preview");
+  const csDisplay = document.getElementById("co-casesize");
+  const submitBtn = document.getElementById("co-submit-btn");
+  if (!article || !videsEl || !preview) return;
+  const product = findKnownProduct(article);
+  const cs = product ? caseSize(product) : null;
+  if (csDisplay) csDisplay.textContent = cs ? fmt(cs) + " btl/casier" : "—";
+  const vides = Math.max(0, Number(videsEl.value) || 0);
+  if (!cs || vides === 0) { preview.style.display = "none"; if (submitBtn) submitBtn.disabled = true; return; }
+  const casiersFull = Math.floor(vides / cs);
+  const reste = vides % cs;
+  document.getElementById("co-casiers-full").textContent = fmt(casiersFull) + " casier(s)";
+  document.getElementById("co-reste").textContent = fmt(reste) + " btl (insuffisant pour 1 casier supplementaire)";
+  const qtyEl = document.getElementById("co-qty");
+  if (qtyEl && !qtyEl.value) qtyEl.value = String(Math.max(1, casiersFull));
+  preview.style.display = "";
+  if (submitBtn) submitBtn.disabled = casiersFull < 1;
+}
+
+function submitCasierOrder() {
+  const article = (document.getElementById("co-article")?.value || "").trim();
+  const vides = Math.max(0, Number(document.getElementById("co-vides")?.value) || 0);
+  const qty = Math.max(1, Number(document.getElementById("co-qty")?.value) || 1);
+  if (!article) { showToast("Selectionnez un article."); return; }
+  const product = findKnownProduct(article);
+  if (!product) { showToast("Article introuvable dans le catalogue."); return; }
+  const cs = caseSize(product);
+  if (vides < cs) { showToast("Bouteilles vides insuffisantes pour former un casier."); return; }
+  closeModal("modal-casier-order");
+  // Navigate to Achats fournisseurs and pre-fill
+  navigateTo("stock");
+  setStockSubTab("achats");
+  window.requestAnimationFrame(() => {
+    openPurchaseForm();
+    document.getElementById("purchase-article").value = product.article;
+    document.getElementById("purchase-cases").value = String(qty);
+    document.getElementById("purchase-case-size").value = String(cs);
+    syncPurchasePriceInput?.();
+    showToast("Commande pré-remplie : " + qty + " casier(s) de " + product.article + " · vérifiez le prix avant validation.");
+  });
 }
 
 function setParamsSubTab(tab) {
@@ -5867,6 +5944,15 @@ function attachEvents() {
   document.getElementById("cancel-consigne-btn")?.addEventListener("click", () => {
     document.getElementById("consigne-form-wrap")?.classList.add("hidden");
   });
+  // Casier order modal
+  document.getElementById("co-article")?.addEventListener("input", renderCasierOrderPreview);
+  document.getElementById("co-article")?.addEventListener("change", renderCasierOrderPreview);
+  document.getElementById("co-vides")?.addEventListener("input", renderCasierOrderPreview);
+  document.getElementById("co-submit-btn")?.addEventListener("click", submitCasierOrder);
+  document.getElementById("stock-card-casiers")?.addEventListener("click", (e) => {
+    const btn = e.target.closest(".co-open-btn");
+    if (btn) openCasierOrderModal("", Number(btn.dataset.coCs) || null);
+  });
   // Kit
   document.getElementById("kit-price")?.addEventListener("input", renderKitProducts);
   document.getElementById("kit-size")?.addEventListener("change", () => { renderKitProducts(); updateKitCountInfo(); });
@@ -5898,6 +5984,10 @@ document.getElementById("fab-btn").addEventListener("click", () => {
         return;
       }
       openOrderEditor(activeOrderId || null, null);
+      return;
+    }
+    if (currentPage === "stock" && stockSubTab === "casiers") {
+      openCasierOrderModal("", null);
       return;
     }
     if (currentPage === "stock") {

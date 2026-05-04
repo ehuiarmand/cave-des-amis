@@ -1183,6 +1183,51 @@
     </div>
   </div>
 
+  <div id="modal-casier-order" class="modal-overlay" aria-hidden="true">
+    <div class="modal">
+      <div class="modal-handle"></div>
+      <div class="section-head">
+        <h3>Commander des casiers</h3>
+        <button class="icon-btn close-modal" data-close="modal-casier-order" type="button">Fermer</button>
+      </div>
+      <p class="muted" style="margin-bottom:14px;font-size:0.85rem">
+        Saisissez vos bouteilles vides disponibles. Le systeme calcule combien de casiers complets vous pouvez commander et pre-remplit le bon de commande fournisseur.
+      </p>
+      <div class="form-group">
+        <label for="co-article">Article</label>
+        <input id="co-article" type="text" list="articles-list" placeholder="ex: Beaufort 33" autocomplete="off">
+      </div>
+      <div class="form-grid two-cols">
+        <div class="form-group form-group--zero">
+          <label for="co-vides">Bouteilles vides disponibles</label>
+          <input id="co-vides" type="number" min="0" placeholder="0" inputmode="numeric">
+        </div>
+        <div class="form-group form-group--zero">
+          <label>Btl / casier (catalogue)</label>
+          <div id="co-casesize" style="padding:10px 12px;font-weight:600;color:#1976d2;font-size:1rem">—</div>
+        </div>
+      </div>
+      <div id="co-preview" class="inline-card" style="margin:14px 0;display:none">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <span class="muted">Casiers commandables</span>
+          <strong id="co-casiers-full" style="font-size:1.15rem;color:#1976d2">0 casier(s)</strong>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <span class="muted">Bouteilles restantes</span>
+          <span id="co-reste" style="color:#757575;font-size:0.85rem">0 btl</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;padding-top:8px;border-top:1px solid #e0e0e0">
+          <label for="co-qty" style="font-weight:600;margin:0">Casiers a commander</label>
+          <input id="co-qty" type="number" min="1" style="width:80px;text-align:center;font-weight:700;color:#1976d2;border:1px solid #90caf9;border-radius:8px;padding:6px 8px;font-size:1rem">
+        </div>
+      </div>
+      <div class="button-stack" style="position:sticky;bottom:-24px;background:#fff;padding:10px 0 2px;margin-top:8px">
+        <button id="co-submit-btn" class="btn btn-primary" type="button" disabled>Creer commande fournisseur</button>
+        <button class="btn btn-outline close-modal" data-close="modal-casier-order" type="button">Annuler</button>
+      </div>
+    </div>
+  </div>
+
   <div id="modal-replace-article" class="modal-overlay" aria-hidden="true">
     <div class="modal">
       <div class="modal-handle"></div>
