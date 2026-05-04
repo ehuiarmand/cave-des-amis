@@ -1191,7 +1191,11 @@ function syncKnownProduct() {
 
 /** Liste filtrée pour la modale commande (hors QR). */
 function productsForVentePicker(query) {
-  const items = knownProducts().slice().sort((a, b) => a.article.localeCompare(b.article, "fr"));
+  // Only show articles that exist in the current stock catalogue (not deleted articles from sales history)
+  const catalogueIds = new Set(recordsForSite(state.stock).map((i) => i.article.toLowerCase()));
+  const items = knownProducts()
+    .filter((p) => catalogueIds.has(p.article.toLowerCase()))
+    .sort((a, b) => a.article.localeCompare(b.article, "fr"));
   const q = query.trim().toLowerCase();
   if (!q) return items.slice(0, 55);
   const terms = q.split(/\s+/).filter(Boolean);
@@ -1207,7 +1211,7 @@ function renderVenteArticlePicker() {
   const search = document.getElementById("v-article-search");
   if (!wrap) return;
   const q = search ? String(search.value || "") : "";
-  const allCount = knownProducts().length;
+  const allCount = recordsForSite(state.stock).length;
   const list = productsForVentePicker(q);
   let hint = "";
   if (!q.trim() && allCount > list.length) {
