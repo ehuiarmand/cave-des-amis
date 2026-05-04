@@ -2160,17 +2160,9 @@ function renderOrders() {
 // ─── SAISIE RAPIDE (menu multi-articles pour serveuse) ────────────────────────
 
 let srCart = []; // [{ article, cat, prix, packSize, qty, location }]
-let srItemLoc = {}; // "article||packSize" -> location choisie pour ce produit
 
-function srDefaultLoc(article, packSize) {
-  return srItemLoc[`${article}||${packSize}`] || document.getElementById("sr-location")?.value || "Intérieur";
-}
-
-function srToggleLoc(article, packSize) {
-  const k = `${article}||${packSize}`;
-  const cur = srItemLoc[k] || document.getElementById("sr-location")?.value || "Intérieur";
-  srItemLoc[k] = cur.startsWith("Ext") ? "Intérieur" : "Extérieur";
-  renderSrMenu(document.getElementById("sr-search")?.value || "");
+function srCurrentLoc() {
+  return document.getElementById("sr-location")?.value || "Intérieur";
 }
 
 function srCartQtyForLoc(article, packSize, location) {
@@ -2182,7 +2174,7 @@ function srCartQtyTotal(article, packSize) {
 }
 
 function srUpdateQty(article, packSize, delta) {
-  const location = srDefaultLoc(article, packSize);
+  const location = srCurrentLoc();
   const product = findKnownProduct(article);
   if (!product) return;
   const format = (product.formatsVente || []).find((f) => Number(f.quantite) === Number(packSize)) || null;
@@ -2217,39 +2209,28 @@ function renderSrMenu(query) {
     byCategory[cat].push(item);
   });
 
+  const loc = srCurrentLoc();
   container.innerHTML = Object.entries(byCategory).map(([cat, items]) => `
     <div style="margin-bottom:14px">
-      <p style="font-size:0.7rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:rgba(255,255,255,0.4);margin:0 0 6px 2px">${escapeHtml(cat)}</p>
+      <p style="font-size:0.7rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);margin:0 0 6px 2px">${escapeHtml(cat)}</p>
       ${items.map((item) => {
         const primary = primarySaleFormat(item);
         const packSz = Math.max(1, Number(primary?.quantite) || Number(item.packSize) || 1);
-        const itemLoc = srDefaultLoc(item.article, packSz);
-        const isExt = itemLoc.startsWith("Ext");
-        const prix = formatPrice(primary || { prixInterieur: Number(item.prixVenteInt) || 0, prixExterieur: Number(item.prixVenteExt) || 0 }, itemLoc);
-        const qtyInt = srCartQtyForLoc(item.article, packSz, "Intérieur");
-        const qtyExt = srCartQtyForLoc(item.article, packSz, "Extérieur");
-        const qtyTotal = qtyInt + qtyExt;
-        const hasQty = qtyTotal > 0;
+        const prix = formatPrice(primary || { prixInterieur: Number(item.prixVenteInt) || 0, prixExterieur: Number(item.prixVenteExt) || 0 }, loc);
+        const qtyLoc = srCartQtyForLoc(item.article, packSz, loc);
+        const qtyOther = srCartQtyTotal(item.article, packSz) - qtyLoc;
         const stock = stockActuel(item);
-        // Badges des quantités déjà dans le panier
-        const qtyBadges = [
-          qtyInt > 0 ? `<span style="font-size:0.72rem;background:rgba(25,118,210,0.25);color:#64b5f6;border-radius:4px;padding:1px 6px">Cave ×${qtyInt}</span>` : "",
-          qtyExt > 0 ? `<span style="font-size:0.72rem;background:rgba(76,175,80,0.25);color:#81c784;border-radius:4px;padding:1px 6px">Terr. ×${qtyExt}</span>` : "",
-        ].filter(Boolean).join(" ");
-        return `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,${hasQty ? "0.2" : "0.08"});border-radius:10px;margin-bottom:6px;gap:8px${hasQty ? ";box-shadow:0 0 0 2px rgba(25,118,210,0.3)" : ""}">
+        const hasQty = qtyLoc > 0;
+        const otherLoc = loc.startsWith("Ext") ? "Cave" : "Terr.";
+        return `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:${hasQty ? "rgba(33,150,243,0.06)" : "rgba(0,0,0,0.03)"};border:1px solid ${hasQty ? "var(--mm-primary,#2196f3)" : "rgba(0,0,0,0.1)"};border-radius:10px;margin-bottom:6px;gap:10px">
           <div style="flex:1;min-width:0">
-            <p style="margin:0 0 3px;font-weight:600;font-size:0.92rem;color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(item.article)}${packSz > 1 ? `<span style="font-size:0.7rem;background:rgba(255,180,0,0.2);color:#ffb347;border-radius:4px;padding:1px 5px;margin-left:6px">kit ×${packSz}</span>` : ""}</p>
-            <p style="margin:0 0 3px;font-size:0.78rem;color:rgba(255,255,255,0.5)">${fmt(prix)} FCFA &nbsp;·&nbsp; Stock : ${fmt(stock)}</p>
-            ${qtyBadges ? `<p style="margin:0;display:flex;gap:4px;flex-wrap:wrap">${qtyBadges}</p>` : ""}
+            <p class="list-item-title" style="margin:0 0 2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(item.article)}${packSz > 1 ? `<span style="font-size:0.7rem;background:rgba(255,152,0,0.15);color:#e65100;border-radius:4px;padding:1px 5px;margin-left:6px">kit ×${packSz}</span>` : ""}</p>
+            <p class="list-item-sub" style="margin:0">${fmt(prix)} FCFA · Stock : ${fmt(stock)}${qtyOther > 0 ? ` · <span style="color:var(--mm-primary)">${otherLoc} ×${qtyOther}</span>` : ""}</p>
           </div>
-          <div style="display:flex;align-items:center;gap:5px;flex-shrink:0">
-            <button type="button" data-sr-toggle="${escapeHtml(item.article)}" data-sr-pack="${packSz}"
-              style="font-size:0.7rem;font-weight:700;padding:4px 7px;border-radius:6px;cursor:pointer;border:1px solid ${isExt ? "rgba(76,175,80,0.6)" : "rgba(25,118,210,0.6)"};background:${isExt ? "rgba(76,175,80,0.15)" : "rgba(25,118,210,0.15)"};color:${isExt ? "#81c784" : "#64b5f6"};white-space:nowrap">
-              ${isExt ? "Terr." : "Cave"}
-            </button>
-            ${hasQty ? `<button type="button" class="sr-dec" data-sr-article="${escapeHtml(item.article)}" data-sr-pack="${packSz}" style="width:32px;height:32px;border-radius:50%;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.07);color:#fff;font-size:1.2rem;cursor:pointer;line-height:1">−</button>
-            <span style="min-width:22px;text-align:center;font-weight:700;font-size:1rem;color:#fff">${qtyTotal}</span>` : ""}
-            <button type="button" class="sr-inc" data-sr-article="${escapeHtml(item.article)}" data-sr-pack="${packSz}" style="width:32px;height:32px;border-radius:50%;border:none;background:#1976d2;color:#fff;font-size:1.2rem;cursor:pointer;line-height:1;font-weight:700">+</button>
+          <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+            ${hasQty ? `<button type="button" class="sr-dec" data-sr-article="${escapeHtml(item.article)}" data-sr-pack="${packSz}" style="width:32px;height:32px;border-radius:50%;border:1px solid rgba(0,0,0,0.15);background:rgba(0,0,0,0.05);font-size:1.2rem;cursor:pointer;color:var(--mm-text)">−</button>
+            <span style="min-width:22px;text-align:center;font-weight:700;font-size:1rem;color:var(--mm-primary)">${qtyLoc}</span>` : ""}
+            <button type="button" class="sr-inc" data-sr-article="${escapeHtml(item.article)}" data-sr-pack="${packSz}" style="width:32px;height:32px;border-radius:50%;border:none;background:var(--mm-primary,#1976d2);color:#fff;font-size:1.2rem;cursor:pointer;font-weight:700">+</button>
           </div>
         </div>`;
       }).join("")}
@@ -2271,23 +2252,22 @@ function renderSrCart() {
   const section = (items, label, color) => {
     if (!items.length) return "";
     const sub = items.reduce((s, c) => s + c.prix * c.qty, 0);
-    return `<div style="margin-bottom:8px">
-      <p style="font-size:0.7rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:${color};margin:0 0 4px">${label}</p>
-      ${items.map((c) => `<div style="display:flex;justify-content:space-between;font-size:0.83rem;padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.05)">
-        <span style="color:#fff">${escapeHtml(c.article)}${c.packSize > 1 ? ` ×${c.packSize}` : ""} &nbsp;<span style="color:rgba(255,255,255,0.45)">× ${c.qty}</span></span>
-        <strong style="color:#fff">${fmt(c.prix * c.qty)} FCFA</strong>
+    return `<div style="margin-bottom:10px;padding:10px;border-radius:8px;border:1px solid ${color}22;background:${color}0d">
+      <p style="font-size:0.7rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:${color};margin:0 0 6px">${label}</p>
+      ${items.map((c) => `<div style="display:flex;justify-content:space-between;align-items:center;font-size:0.85rem;padding:4px 0;border-bottom:1px solid rgba(0,0,0,0.06)">
+        <span style="color:var(--mm-text)">${escapeHtml(c.article)}${c.packSize > 1 ? ` ×${c.packSize}` : ""} <span style="color:var(--muted)">× ${c.qty}</span></span>
+        <strong style="color:var(--mm-text)">${fmt(c.prix * c.qty)} FCFA</strong>
       </div>`).join("")}
-      <div style="display:flex;justify-content:flex-end;font-size:0.78rem;color:${color};padding-top:3px">Sous-total : ${fmt(sub)} FCFA</div>
+      <div style="display:flex;justify-content:flex-end;font-size:0.8rem;font-weight:600;color:${color};padding-top:5px">Sous-total : ${fmt(sub)} FCFA</div>
     </div>`;
   };
   container.innerHTML =
-    section(int, "Cave (Interieur)", "#64b5f6") +
-    section(ext, "Terrasse (Exterieur)", "#81c784");
+    section(int, "Cave (Interieur)", "#1976d2") +
+    section(ext, "Terrasse (Exterieur)", "#388e3c");
 }
 
 function openSaisieRapide() {
   srCart = [];
-  srItemLoc = {};
   const searchEl = document.getElementById("sr-search");
   if (searchEl) searchEl.value = "";
   renderSrMenu("");
@@ -5754,13 +5734,10 @@ function attachEvents() {
   document.getElementById("sr-submit-btn")?.addEventListener("click", () => submitSaisieRapide().catch(handleApiError));
   document.getElementById("sr-search")?.addEventListener("input", (e) => renderSrMenu(e.target.value));
   document.getElementById("sr-location")?.addEventListener("change", () => {
-    srItemLoc = {}; // reset les préférences par article pour suivre le nouveau défaut
     renderSrMenu(document.getElementById("sr-search")?.value || "");
     renderSrCart();
   });
   document.getElementById("sr-menu")?.addEventListener("click", (e) => {
-    const toggle = e.target.closest("[data-sr-toggle]");
-    if (toggle) { srToggleLoc(toggle.dataset.srToggle, Number(toggle.dataset.srPack)); return; }
     const dec = e.target.closest(".sr-dec");
     if (dec) { srUpdateQty(dec.dataset.srArticle, Number(dec.dataset.srPack), -1); return; }
     const inc = e.target.closest(".sr-inc");
