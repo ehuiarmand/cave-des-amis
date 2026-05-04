@@ -245,6 +245,7 @@
         <div class="tabs page-subtabs">
           <button class="tab active" data-subtab-ventes="commandes">Commandes</button>
           <button class="tab" data-subtab-ventes="caisse">Caisse &amp; Paiement</button>
+          <button class="tab" data-subtab-ventes="consignes">Consignes</button>
           <button class="tab" data-subtab-ventes="qr">QR Codes</button>
         </div>
         <article class="card" id="ventes-card-gestion">
@@ -380,9 +381,74 @@
               <h3>Commandes en cours</h3>
               <p id="qr-alert-badge" class="qr-alert-badge hidden">Nouvelle commande QR</p>
             </div>
-            <button id="new-order-btn" class="icon-btn" type="button">Nouveau client</button>
+            <div style="display:flex;gap:8px">
+              <button id="saisie-rapide-btn" class="btn btn-primary" type="button" style="width:auto;font-size:0.85rem">Saisie rapide</button>
+              <button id="new-order-btn" class="icon-btn" type="button">Nouveau client</button>
+            </div>
           </div>
           <div id="order-board"></div>
+        </article>
+
+        <article class="card hidden" id="ventes-card-consignes">
+          <div class="section-head">
+            <div>
+              <h3>Consignes</h3>
+              <p class="muted">Bouteilles vendues avec depot, a rendre ulterieurement</p>
+            </div>
+            <button id="new-consigne-btn" class="icon-btn" type="button">+ Nouvelle consigne</button>
+          </div>
+          <div class="pdj-kpis" style="margin-bottom:12px">
+            <div class="pdj-kpi"><span class="kpi-label">En cours</span><strong id="consigne-kpi-encours" class="pdj-val amber">0</strong></div>
+            <div class="pdj-kpi"><span class="kpi-label">Rendues</span><strong id="consigne-kpi-rendues" class="pdj-val green">0</strong></div>
+            <div class="pdj-kpi"><span class="kpi-label">Depot en cours</span><strong id="consigne-kpi-montant" class="pdj-val">0 FCFA</strong></div>
+          </div>
+          <div id="consigne-form-wrap" class="hidden" style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:14px">
+            <p class="eyebrow" style="margin-bottom:8px">Nouvelle consigne</p>
+            <div class="form-grid two-cols">
+              <div class="form-group form-group--zero">
+                <label for="consigne-client">Client</label>
+                <input id="consigne-client" type="text" placeholder="Nom du client">
+              </div>
+              <div class="form-group form-group--zero">
+                <label for="consigne-date">Date</label>
+                <input id="consigne-date" type="date">
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="consigne-article">Bouteille / article consigne</label>
+              <input id="consigne-article" type="text" placeholder="ex: Castel Beer 65cl (verre)">
+            </div>
+            <div class="form-grid two-cols">
+              <div class="form-group form-group--zero">
+                <label for="consigne-qty">Quantite</label>
+                <input id="consigne-qty" type="number" value="1" min="1">
+              </div>
+              <div class="form-group form-group--zero">
+                <label for="consigne-montant">Depot unitaire (FCFA)</label>
+                <input id="consigne-montant" type="number" min="0" placeholder="ex: 200">
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="consigne-note">Note</label>
+              <input id="consigne-note" type="text" placeholder="ex: client habitue, bouteille brune">
+            </div>
+            <div class="button-stack" style="flex-direction:row;gap:8px">
+              <button id="save-consigne-btn" class="btn btn-primary" type="button">Enregistrer</button>
+              <button id="cancel-consigne-btn" class="btn btn-outline" type="button">Annuler</button>
+            </div>
+          </div>
+          <div style="overflow-x:auto">
+            <table class="data-table" style="width:100%">
+              <thead><tr>
+                <th>Date</th><th>Client</th><th>Article</th>
+                <th style="text-align:right">Qte</th>
+                <th style="text-align:right">Depot/u</th>
+                <th style="text-align:right">Total</th>
+                <th>Statut</th><th>Actions</th>
+              </tr></thead>
+              <tbody id="consigne-list"></tbody>
+            </table>
+          </div>
         </article>
 
         <article class="card hidden caisse-card" id="ventes-card-historique">
@@ -1062,10 +1128,102 @@
           <input id="v-note" type="text" placeholder="ex: sans glacons, client presse">
         </div>
       </details>
+      <details class="form-collapse" id="kit-mode-details">
+        <summary>Ajouter un kit de produits (meme prix)</summary>
+        <p class="muted" style="font-size:0.8rem;margin-bottom:8px">Choisissez un prix : seuls les produits a ce prix s'affichent. Cochez jusqu'a N produits puis validez.</p>
+        <div class="form-grid two-cols">
+          <div class="form-group form-group--zero">
+            <label for="kit-size">Taille du kit</label>
+            <select id="kit-size">
+              <option value="2">2 produits</option>
+              <option value="3" selected>3 produits</option>
+              <option value="4">4 produits</option>
+              <option value="5">5 produits</option>
+            </select>
+          </div>
+          <div class="form-group form-group--zero">
+            <label for="kit-price">Prix unitaire (FCFA)</label>
+            <input id="kit-price" type="number" min="0" placeholder="ex: 1500">
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="kit-location">Lieu</label>
+          <select id="kit-location">
+            <option value="Intérieur">Intérieur (cave)</option>
+            <option value="Extérieur">Extérieur (terrasse)</option>
+          </select>
+        </div>
+        <p id="kit-count-info" class="form-hint"></p>
+        <div id="kit-products-list" style="display:flex;flex-wrap:wrap;gap:6px;margin:8px 0"></div>
+        <button id="confirm-kit-btn" class="btn btn-primary" type="button" style="margin-top:6px">Ajouter le kit a la commande</button>
+      </details>
       <div class="button-stack">
         <button id="save-vente-btn" class="btn btn-primary" type="button">Ajouter un article</button>
         <button id="finalize-order-btn" class="btn btn-outline hidden" type="button">Encaisser</button>
         <button class="btn btn-outline close-modal" data-close="modal-vente" type="button">Annuler</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-replace-article" class="modal-overlay" aria-hidden="true">
+    <div class="modal">
+      <div class="modal-handle"></div>
+      <div class="section-head">
+        <h3>Remplacer l'article</h3>
+        <button class="icon-btn close-modal" data-close="modal-replace-article" type="button">Fermer</button>
+      </div>
+      <p id="replace-current-info" class="muted" style="margin-bottom:10px"></p>
+      <div class="form-group">
+        <label for="replace-search">Nouveau produit</label>
+        <input id="replace-search" type="search" placeholder="Rechercher..." autocomplete="off">
+        <div id="replace-picker" class="vente-article-picker" style="margin-top:6px"></div>
+      </div>
+      <div class="button-stack">
+        <button id="confirm-replace-btn" class="btn btn-primary" type="button" disabled>Confirmer le remplacement</button>
+        <button class="btn btn-outline close-modal" data-close="modal-replace-article" type="button">Annuler</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- SAISIE RAPIDE : menu serveuse multi-articles -->
+  <div id="modal-saisie-rapide" class="modal-overlay" aria-hidden="true">
+    <div class="modal" style="max-height:92vh;display:flex;flex-direction:column;overflow:hidden">
+      <div class="modal-handle"></div>
+      <div class="section-head" style="flex-shrink:0">
+        <h3>Saisie rapide</h3>
+        <button class="icon-btn close-modal" data-close="modal-saisie-rapide" type="button">Fermer</button>
+      </div>
+      <div style="flex-shrink:0;padding-bottom:8px">
+        <div class="form-grid two-cols" style="margin-bottom:6px">
+          <div class="form-group form-group--zero">
+            <label for="sr-client">Client / table</label>
+            <input id="sr-client" type="text" placeholder="ex: Table 3 · Konan">
+          </div>
+          <div class="form-group form-group--zero">
+            <label for="sr-location">Lieu</label>
+            <select id="sr-location">
+              <option value="Intérieur">Intérieur (cave)</option>
+              <option value="Extérieur">Extérieur (terrasse)</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group form-group--zero">
+          <input id="sr-search" type="search" placeholder="Rechercher un produit..." autocomplete="off" style="width:100%">
+        </div>
+      </div>
+      <!-- Menu scrollable -->
+      <div id="sr-menu" style="flex:1;overflow-y:auto;padding:4px 0 8px"></div>
+      <!-- Panier sticky en bas -->
+      <div style="flex-shrink:0;border-top:1px solid var(--border);padding-top:10px;margin-top:4px">
+        <div id="sr-cart" style="margin-bottom:6px"></div>
+        <div class="inline-card" style="margin-bottom:10px">
+          <span class="muted">Total commande</span>
+          <strong id="sr-total" style="font-size:1.15rem">0 FCFA</strong>
+        </div>
+        <div class="button-stack">
+          <button id="sr-submit-btn" class="btn btn-primary" type="button">Valider la commande</button>
+          <button class="btn btn-outline close-modal" data-close="modal-saisie-rapide" type="button">Annuler</button>
+        </div>
       </div>
     </div>
   </div>
@@ -1451,6 +1609,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=66"></script>
+  <script src="./app-orders.js?v=69"></script>
 </body>
 </html>

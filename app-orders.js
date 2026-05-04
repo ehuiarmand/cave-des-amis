@@ -233,6 +233,31 @@ function today() {
   return new Date().toISOString().slice(0, 10);
 }
 
+// Heure (locale) avant laquelle on considère qu'on est encore dans la nuit de la veille
+const NIGHT_SHIFT_CUTOFF_HOUR = 8;
+
+/**
+ * Date de travail effective : si on est avant NIGHT_SHIFT_CUTOFF_HOUR et que la journée
+ * d'hier est encore ouverte (dayBook existant, pas encore clôturé), on reste sur hier.
+ * Cela couvre les maquis qui ferment au petit matin.
+ */
+function workingDate() {
+  const now = new Date();
+  if (now.getHours() < NIGHT_SHIFT_CUTOFF_HOUR) {
+    const yest = new Date(now);
+    yest.setDate(yest.getDate() - 1);
+    const yStr = [
+      yest.getFullYear(),
+      String(yest.getMonth() + 1).padStart(2, "0"),
+      String(yest.getDate()).padStart(2, "0"),
+    ].join("-");
+    const yBook = dayBookFor(yStr, currentSiteId());
+    const yClosed = stockCheckForSiteDate(yStr, currentSiteId());
+    if (yBook && !yClosed) return yStr;
+  }
+  return today();
+}
+
 function pad2(n) {
   return String(n).padStart(2, "0");
 }
@@ -528,14 +553,15 @@ function canAnyAdmin() {
   return canSuperAdmin() || canSiteAdmin();
 }
 
-/** Date traitee sur le Point du jour : admin et superadmin peuvent choisir une journee anterieure pour corriger les ecarts. */
+/** Date traitee sur le Point du jour : admin et superadmin peuvent choisir une journee anterieure pour corriger les ecarts.
+ *  Pour tous les roles, si la journee d'hier est encore ouverte (maquis ouvert la nuit), on reste sur hier. */
 function pdjCalendarDate() {
   const t = today();
-  if (!canAnyAdmin()) return t;
+  if (!canAnyAdmin()) return workingDate();
   const el = document.getElementById("pdj-work-date");
   const v = el?.value?.trim();
   if (v && /^\d{4}-\d{2}-\d{2}$/.test(v)) return v > t ? t : v;
-  return t;
+  return workingDate();
 }
 
 function syncPdjWorkDateInput() {
@@ -543,7 +569,7 @@ function syncPdjWorkDateInput() {
   if (!el || !canAnyAdmin()) return;
   const t = today();
   el.max = t;
-  if (!el.value || el.value > t) el.value = t;
+  if (!el.value || el.value > t) el.value = workingDate();
   const workDate = pdjCalendarDate();
   const vDateEl = document.getElementById("v-date");
   if (vDateEl) vDateEl.value = workDate;
@@ -848,10 +874,12 @@ function setVentesSubTab(tab) {
   const isCommandes = tab === "commandes";
   const isCaisse = tab === "caisse";
   const isQr = tab === "qr";
+  const isConsignes = tab === "consignes";
   document.getElementById("ventes-card-gestion").classList.toggle("hidden", !isCommandes);
   document.getElementById("ventes-card-board").classList.toggle("hidden", !isCommandes);
   document.getElementById("ventes-card-qr").classList.toggle("hidden", !isQr);
   document.getElementById("ventes-card-historique").classList.toggle("hidden", !isCaisse);
+  document.getElementById("ventes-card-consignes")?.classList.toggle("hidden", !isConsignes);
   document.querySelectorAll("[data-subtab-ventes]").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.subtabVentes === tab);
   });
@@ -2114,7 +2142,7 @@ function renderOrders() {
           <div class="order-total">${fmt(total)} FCFA</div>
         </div>
         <div class="order-lines">
-          ${order.lignes.length ? order.lignes.map((line) => `<div class="order-line"><div><p class="list-item-title">${escapeHtml(line.article)}</p><p class="list-item-sub">${escapeHtml(line.cat)} · ${fmt(line.qty)} x ${fmt(line.prix)} FCFA${line.remise ? ` · -${fmt(line.remise)}` : ""} · ${escapeHtml(line.paiement)}</p></div><div class="line-actions"><button type="button" class="mini-btn" data-edit-line="${line.id}" data-order-id="${order.id}">Modifier</button><button type="button" class="mini-btn" data-remove-line="${line.id}" data-order-id="${order.id}">Retirer</button></div></div>`).join("") : emptyState("Commande vide", "Ajoutez une premiere boisson a cette commande.")}
+          ${order.lignes.length ? order.lignes.map((line) => `<div class="order-line"><div><p class="list-item-title">${escapeHtml(line.article)}</p><p class="list-item-sub">${escapeHtml(line.cat)} · ${fmt(line.qty)} x ${fmt(line.prix)} FCFA${line.remise ? ` · -${fmt(line.remise)}` : ""} · ${escapeHtml(line.paiement)}</p></div><div class="line-actions"><button type="button" class="mini-btn" data-edit-line="${line.id}" data-order-id="${order.id}">Modifier</button><button type="button" class="mini-btn" data-replace-line="${line.id}" data-order-id="${order.id}">Remplacer</button><button type="button" class="mini-btn" data-remove-line="${line.id}" data-order-id="${order.id}">Retirer</button></div></div>`).join("") : emptyState("Commande vide", "Ajoutez une premiere boisson a cette commande.")}
         </div>
         <div class="order-actions">
           <button type="button" class="mini-btn" data-activate-order="${order.id}">Ouvrir la commande</button>
@@ -2129,6 +2157,183 @@ function renderOrders() {
   populateOrderSelect();
 }
 
+// ─── SAISIE RAPIDE (menu multi-articles pour serveuse) ────────────────────────
+
+let srCart = []; // [{ article, cat, prix, packSize, qty, location }]
+
+function srKey(article, packSize) { return `${article}||${packSize}`; }
+
+function srCartQty(article, packSize) {
+  return (srCart.find((c) => c.article === article && c.packSize === packSize) || {}).qty || 0;
+}
+
+function srUpdateQty(article, packSize, delta) {
+  const location = document.getElementById("sr-location")?.value || "Intérieur";
+  const product = findKnownProduct(article);
+  if (!product) return;
+  const format = (product.formatsVente || []).find((f) => Number(f.quantite) === Number(packSize)) || null;
+  const prix = formatPrice(format || { prixInterieur: product.prixInt, prixExterieur: product.prixExt }, location);
+  const idx = srCart.findIndex((c) => c.article === article && c.packSize === packSize);
+  const current = idx >= 0 ? srCart[idx].qty : 0;
+  const next = Math.max(0, current + delta);
+  if (next === 0 && idx >= 0) srCart.splice(idx, 1);
+  else if (next > 0 && idx >= 0) srCart[idx].qty = next;
+  else if (next > 0) srCart.push({ article, cat: product.cat || "Autres", prix, packSize: Number(packSize), qty: next, location });
+  renderSrMenu(document.getElementById("sr-search")?.value || "");
+  renderSrCart();
+}
+
+function srSetQty(article, packSize, value) {
+  const qty = Math.max(0, Number(value) || 0);
+  const idx = srCart.findIndex((c) => c.article === article && c.packSize === packSize);
+  if (qty === 0 && idx >= 0) { srCart.splice(idx, 1); }
+  else if (qty > 0 && idx >= 0) { srCart[idx].qty = qty; }
+  else if (qty > 0) {
+    const location = document.getElementById("sr-location")?.value || "Intérieur";
+    const product = findKnownProduct(article);
+    if (!product) return;
+    const format = (product.formatsVente || []).find((f) => Number(f.quantite) === Number(packSize)) || null;
+    const prix = formatPrice(format || { prixInterieur: product.prixInt, prixExterieur: product.prixExt }, location);
+    srCart.push({ article, cat: product.cat || "Autres", prix, packSize: Number(packSize), qty, location });
+  }
+  renderSrMenu(document.getElementById("sr-search")?.value || "");
+  renderSrCart();
+}
+
+function renderSrMenu(query) {
+  const container = document.getElementById("sr-menu");
+  if (!container) return;
+  const location = document.getElementById("sr-location")?.value || "Intérieur";
+  const q = (query || "").toLowerCase().trim();
+  const products = recordsForSite(state.stock)
+    .filter((item) => stockActuel(item) > 0)
+    .filter((item) => !q || item.article.toLowerCase().includes(q) || (item.cat || "").toLowerCase().includes(q))
+    .slice().sort((a, b) => (a.cat || "").localeCompare(b.cat || "", "fr") || a.article.localeCompare(b.article, "fr"));
+
+  if (!products.length) {
+    container.innerHTML = `<p class="muted" style="text-align:center;padding:20px">Aucun produit disponible.</p>`;
+    return;
+  }
+  const byCategory = {};
+  products.forEach((item) => {
+    const cat = item.cat || "Autres";
+    if (!byCategory[cat]) byCategory[cat] = [];
+    byCategory[cat].push(item);
+  });
+
+  container.innerHTML = Object.entries(byCategory).map(([cat, items]) => `
+    <div style="margin-bottom:10px">
+      <p style="font-size:0.72rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);margin:0 0 6px 2px">${escapeHtml(cat)}</p>
+      ${items.map((item) => {
+        const formatsVente = normalizeSaleFormats(item);
+        const primary = primarySaleFormat(item);
+        const packSz = Math.max(1, Number(primary?.quantite) || Number(item.packSize) || 1);
+        const prix = formatPrice(primary || { prixInterieur: Number(item.prixVenteInt) || 0, prixExterieur: Number(item.prixVenteExt) || 0 }, location);
+        const qty = srCartQty(item.article, packSz);
+        const packLabel = packSz > 1 ? `<span style="font-size:0.72rem;background:rgba(255,180,0,0.18);color:#ffb347;border-radius:4px;padding:1px 5px;margin-left:4px">kit ×${packSz}</span>` : "";
+        const stock = stockActuel(item);
+        return `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:var(--card-bg,#1e1e2e);border:1px solid var(--border);border-radius:8px;margin-bottom:5px;gap:8px">
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:600;font-size:0.88rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(item.article)}${packLabel}</div>
+            <div style="font-size:0.78rem;color:var(--muted)">${fmt(prix)} FCFA${packSz > 1 ? ` / kit de ${packSz}` : ""} · Stock : ${fmt(stock)}</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+            <button type="button" class="qty-btn sr-dec" data-sr-article="${escapeHtml(item.article)}" data-sr-pack="${packSz}" style="width:30px;height:30px;border-radius:50%;border:1px solid var(--border);background:transparent;color:var(--text);font-size:1.1rem;cursor:pointer;display:flex;align-items:center;justify-content:center">−</button>
+            <input type="number" min="0" value="${qty}" data-sr-qty="${escapeHtml(item.article)}" data-sr-pack="${packSz}" style="width:42px;text-align:center;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--text);padding:4px 2px;font-size:0.9rem">
+            <button type="button" class="qty-btn sr-inc" data-sr-article="${escapeHtml(item.article)}" data-sr-pack="${packSz}" style="width:30px;height:30px;border-radius:50%;border:1px solid var(--accent,#1976d2);background:var(--accent,#1976d2);color:#fff;font-size:1.1rem;cursor:pointer;display:flex;align-items:center;justify-content:center">+</button>
+          </div>
+        </div>`;
+      }).join("")}
+    </div>`).join("");
+}
+
+function renderSrCart() {
+  const container = document.getElementById("sr-cart");
+  const totalEl = document.getElementById("sr-total");
+  if (!container) return;
+  const total = srCart.reduce((s, c) => s + c.prix * c.qty, 0);
+  if (totalEl) totalEl.textContent = `${fmt(total)} FCFA`;
+  if (!srCart.length) {
+    container.innerHTML = `<p class="muted" style="text-align:center;font-size:0.82rem;padding:4px 0">Panier vide — ajoutez des produits ci-dessus.</p>`;
+    return;
+  }
+  container.innerHTML = `<p style="font-size:0.72rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);margin:0 0 6px">Panier (${srCart.length} article(s))</p>` +
+    srCart.map((c) => `<div style="display:flex;justify-content:space-between;font-size:0.83rem;padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.05)">
+      <span>${escapeHtml(c.article)}${c.packSize > 1 ? ` ×${c.packSize}` : ""} × ${c.qty}</span>
+      <strong>${fmt(c.prix * c.qty)} FCFA</strong>
+    </div>`).join("");
+}
+
+function openSaisieRapide() {
+  srCart = [];
+  const clientEl = document.getElementById("sr-client");
+  const searchEl = document.getElementById("sr-search");
+  if (clientEl) clientEl.value = "";
+  if (searchEl) searchEl.value = "";
+  renderSrMenu("");
+  renderSrCart();
+  openModal("modal-saisie-rapide");
+  window.requestAnimationFrame(() => clientEl?.focus());
+}
+
+async function submitSaisieRapide() {
+  if (!srCart.length) { showToast("Ajoutez au moins un article."); return; }
+  const clientName = (document.getElementById("sr-client")?.value || "").trim() || `Client ${new Date().getTime() % 10000}`;
+  const location = document.getElementById("sr-location")?.value || "Intérieur";
+  const date = pdjCalendarDate();
+  state.nextId = state.nextId || {};
+  state.nextId.commande = (Number(state.nextId.commande) || 0) + 1;
+  const order = {
+    id: state.nextId.commande,
+    siteId: currentSiteId(),
+    client: clientName,
+    date,
+    createdAt: new Date().toISOString(),
+    status: "Servi",
+    type: "sur-place",
+    server: sessionUser || "Serveuse",
+    note: "",
+    lignes: [],
+  };
+  const errors = [];
+  for (const item of srCart) {
+    const product = findKnownProduct(item.article);
+    if (!product) { errors.push(item.article); continue; }
+    const bottles = item.qty * item.packSize;
+    const avail = stockAvailabilityForLine(product.article, bottles, order.id, null);
+    if (!avail.stockItem || avail.available < bottles) {
+      errors.push(`${item.article} (stock insuffisant : ${fmt(avail.available)} btl)`);
+      continue;
+    }
+    state.nextId.ligneCommande = (Number(state.nextId.ligneCommande) || 0) + 1;
+    order.lignes.push({
+      id: state.nextId.ligneCommande,
+      date,
+      article: product.article,
+      cat: product.cat || "Autres",
+      location,
+      formatQuantite: item.packSize,
+      prix: item.prix,
+      qty: item.qty,
+      remise: 0,
+      paiement: "A regler",
+    });
+  }
+  if (!order.lignes.length) {
+    showToast(errors.length ? `Aucune ligne ajoutee : ${errors.join(", ")}` : "Aucune ligne valide.");
+    return;
+  }
+  state.commandes = state.commandes || [];
+  state.commandes.unshift(order);
+  activeOrderId = order.id;
+  await persistState({ commandes: state.commandes, nextId: state.nextId });
+  closeModal("modal-saisie-rapide");
+  srCart = [];
+  renderVentesPage();
+  const warn = errors.length ? ` (${errors.length} article(s) ignores : stock insuffisant)` : "";
+  showToast(`Commande creee : ${order.lignes.length} article(s) pour ${clientName}.${warn}`);
+}
+
 function renderVentesPage() {
   document.getElementById("articles-list").innerHTML = knownProducts().map((item) => `<option value="${escapeHtml(item.article)}">`).join("");
   if (document.getElementById("modal-vente")?.classList.contains("open")) renderVenteArticlePicker();
@@ -2137,6 +2342,261 @@ function renderVentesPage() {
   renderOrders();
   renderSalesHistory();
   renderCreditRecovery();
+  renderConsignes();
+}
+
+// ─── CONSIGNES ────────────────────────────────────────────────────────────────
+
+function consignesForSite() {
+  return (state.consignes || []).filter((c) => c.siteId === currentSiteId());
+}
+
+function renderConsignes() {
+  const list = document.getElementById("consigne-list");
+  if (!list) return;
+  const all = consignesForSite().slice().sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  const enCours = all.filter((c) => c.statut !== "Rendu");
+  const rendues = all.filter((c) => c.statut === "Rendu");
+  const montantEnCours = enCours.reduce((s, c) => s + (Number(c.total) || 0), 0);
+  const kpiE = document.getElementById("consigne-kpi-encours");
+  const kpiR = document.getElementById("consigne-kpi-rendues");
+  const kpiM = document.getElementById("consigne-kpi-montant");
+  if (kpiE) kpiE.textContent = String(enCours.length);
+  if (kpiR) kpiR.textContent = String(rendues.length);
+  if (kpiM) kpiM.textContent = `${fmt(montantEnCours)} FCFA`;
+  list.innerHTML = all.length
+    ? all.map((c) => {
+      const isEnCours = c.statut !== "Rendu";
+      return `<tr>
+        <td>${escapeHtml(formatDateDdMmYyyy(c.date))}</td>
+        <td>${escapeHtml(c.client || "-")}</td>
+        <td>${escapeHtml(c.article || "-")}</td>
+        <td style="text-align:right">${fmt(c.qty)}</td>
+        <td style="text-align:right">${fmt(c.montantUnitaire)} FCFA</td>
+        <td style="text-align:right"><strong>${fmt(c.total)} FCFA</strong></td>
+        <td><span style="color:${isEnCours ? "#ffb347" : "#72d7a9"}">${isEnCours ? "En cours" : `Rendu ${formatDateDdMmYyyy(c.dateRetour || "")}`}</span></td>
+        <td>
+          ${isEnCours
+            ? `<button class="mini-btn" data-return-consigne="${c.id}">Marquer rendu</button>`
+            : ""}
+          <button class="mini-btn" data-delete-consigne="${c.id}">Suppr.</button>
+        </td>
+      </tr>`;
+    }).join("")
+    : `<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:32px">Aucune consigne enregistree</td></tr>`;
+}
+
+async function saveConsigne() {
+  const client = (document.getElementById("consigne-client")?.value || "").trim();
+  const article = (document.getElementById("consigne-article")?.value || "").trim();
+  const qty = Math.max(1, Number(document.getElementById("consigne-qty")?.value) || 1);
+  const montantUnitaire = Math.max(0, Number(document.getElementById("consigne-montant")?.value) || 0);
+  const date = document.getElementById("consigne-date")?.value || pdjCalendarDate();
+  const note = (document.getElementById("consigne-note")?.value || "").trim();
+  if (!article) { showToast("Saisissez le nom de l'article consigne."); return; }
+  if (!client) { showToast("Saisissez le nom du client."); return; }
+  state.consignes = state.consignes || [];
+  state.nextId = state.nextId || {};
+  state.nextId.consigne = (Number(state.nextId.consigne) || 0) + 1;
+  state.consignes.unshift({
+    id: state.nextId.consigne,
+    siteId: currentSiteId(),
+    date,
+    client,
+    article,
+    qty,
+    montantUnitaire,
+    total: qty * montantUnitaire,
+    note,
+    statut: "En cours",
+    createdBy: sessionUser || "-",
+    createdAt: new Date().toISOString(),
+  });
+  await persistState({ consignes: state.consignes, nextId: state.nextId });
+  document.getElementById("consigne-form-wrap")?.classList.add("hidden");
+  resetConsigneForm();
+  renderConsignes();
+  showToast("Consigne enregistree.");
+}
+
+async function returnConsigne(id) {
+  const c = (state.consignes || []).find((x) => x.id === Number(id) || x.id === id);
+  if (!c) return;
+  c.statut = "Rendu";
+  c.dateRetour = pdjCalendarDate();
+  await persistState({ consignes: state.consignes });
+  renderConsignes();
+  showToast(`Consigne de ${c.client} marquee comme rendue.`);
+}
+
+async function deleteConsigne(id) {
+  if (!window.confirm("Supprimer cette consigne ?")) return;
+  state.consignes = (state.consignes || []).filter((c) => c.id !== Number(id) && c.id !== id);
+  await persistState({ consignes: state.consignes });
+  renderConsignes();
+}
+
+function resetConsigneForm() {
+  ["consigne-client", "consigne-article", "consigne-note"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.value = "";
+  });
+  const qtyEl = document.getElementById("consigne-qty");
+  if (qtyEl) qtyEl.value = "1";
+  const mEl = document.getElementById("consigne-montant");
+  if (mEl) mEl.value = "";
+  const dEl = document.getElementById("consigne-date");
+  if (dEl) dEl.value = pdjCalendarDate();
+}
+
+// ─── KIT (sélection multi-produits même prix) ─────────────────────────────────
+
+function renderKitProducts() {
+  const price = Number(document.getElementById("kit-price")?.value) || 0;
+  const location = document.getElementById("kit-location")?.value || "Intérieur";
+  const size = Number(document.getElementById("kit-size")?.value) || 3;
+  const container = document.getElementById("kit-products-list");
+  const info = document.getElementById("kit-count-info");
+  if (!container) return;
+  if (price <= 0) {
+    container.innerHTML = "";
+    if (info) info.textContent = "Saisissez un prix pour voir les produits disponibles.";
+    return;
+  }
+  const products = knownProducts().filter((p) => {
+    const pInt = Number(p.prixInt) || Number(p.prix) || 0;
+    const pExt = Number(p.prixExt) || pInt;
+    const unitPrice = String(location).startsWith("Ext") ? pExt : pInt;
+    return unitPrice === price;
+  });
+  if (!products.length) {
+    container.innerHTML = `<p class="muted" style="font-size:0.85rem">Aucun produit a ce prix.</p>`;
+    if (info) info.textContent = "";
+    return;
+  }
+  const checked = container.querySelectorAll("input[type=checkbox]:checked");
+  const checkedArticles = new Set([...checked].map((cb) => cb.value));
+  container.innerHTML = products.map((p) => {
+    const id = `kit-cb-${p.article.replace(/\s+/g, "-")}`;
+    const isChecked = checkedArticles.has(p.article) ? "checked" : "";
+    return `<label style="display:flex;align-items:center;gap:6px;background:var(--card-bg,#1e1e2e);border:1px solid var(--border);border-radius:6px;padding:6px 10px;cursor:pointer;font-size:0.85rem">
+      <input type="checkbox" id="${escapeHtml(id)}" class="kit-cb" value="${escapeHtml(p.article)}" ${isChecked}>
+      ${escapeHtml(p.article)}
+    </label>`;
+  }).join("");
+  updateKitCountInfo();
+}
+
+function updateKitCountInfo() {
+  const size = Number(document.getElementById("kit-size")?.value) || 3;
+  const checked = document.querySelectorAll("#kit-products-list .kit-cb:checked").length;
+  const info = document.getElementById("kit-count-info");
+  if (info) info.textContent = `${checked} / ${size} produit(s) selectionne(s)`;
+  // disable extra checkboxes when full
+  document.querySelectorAll("#kit-products-list .kit-cb").forEach((cb) => {
+    cb.disabled = !cb.checked && checked >= size;
+  });
+}
+
+async function confirmKit() {
+  const size = Number(document.getElementById("kit-size")?.value) || 3;
+  const price = Number(document.getElementById("kit-price")?.value) || 0;
+  const location = document.getElementById("kit-location")?.value || "Intérieur";
+  const checked = [...document.querySelectorAll("#kit-products-list .kit-cb:checked")].map((cb) => cb.value);
+  if (!checked.length) { showToast("Selectionnez au moins un produit."); return; }
+  if (price <= 0) { showToast("Saisissez le prix unitaire."); return; }
+  const clientName = (document.getElementById("v-client")?.value || "").trim();
+  const date = document.getElementById("v-date")?.value || pdjCalendarDate();
+  const note = document.getElementById("v-note")?.value || "";
+  let anyAdded = false;
+  for (const article of checked) {
+    const product = findKnownProduct(article);
+    if (!product) continue;
+    const packSize = Math.max(1, Number(product.packSize) || 1);
+    const availability = stockAvailabilityForLine(product.article, packSize, activeOrderId, null);
+    if (!availability.stockItem || availability.available < packSize) {
+      showToast(`Stock insuffisant : ${product.article}`);
+      continue;
+    }
+    const order = ensureOrder(clientName, date, note);
+    state.nextId = state.nextId || {};
+    state.nextId.ligneCommande = (Number(state.nextId.ligneCommande) || 0) + 1;
+    order.lignes.push({
+      id: state.nextId.ligneCommande,
+      date,
+      article: product.article,
+      cat: product.cat || "Autres",
+      location,
+      formatQuantite: packSize,
+      prix: price,
+      qty: 1,
+      remise: 0,
+      paiement: "A regler",
+    });
+    anyAdded = true;
+  }
+  if (!anyAdded) { showToast("Aucun article n'a pu etre ajoute."); return; }
+  await persistState({ commandes: state.commandes, nextId: state.nextId });
+  document.getElementById("kit-mode-details")?.removeAttribute("open");
+  renderVentesPage();
+  showToast(`Kit de ${checked.length} produit(s) ajoute.`);
+}
+
+// ─── REMPLACEMENT D'ARTICLE ───────────────────────────────────────────────────
+
+let replacingLine = null; // { orderId, lineId, article }
+let replaceSelectedArticle = null;
+
+function openReplaceModal(orderId, lineId) {
+  const order = recordsForSite(state.commandes).find((o) => o.id === Number(orderId));
+  if (!order) return;
+  const line = (order.lignes || []).find((l) => l.id === Number(lineId));
+  if (!line) return;
+  replacingLine = { orderId: Number(orderId), lineId: Number(lineId), article: line.article };
+  replaceSelectedArticle = null;
+  const infoEl = document.getElementById("replace-current-info");
+  if (infoEl) infoEl.textContent = `Article actuel : ${line.article} · ${fmt(line.qty)} x ${fmt(line.prix)} FCFA`;
+  const searchEl = document.getElementById("replace-search");
+  if (searchEl) searchEl.value = "";
+  renderReplacePicker("");
+  const btn = document.getElementById("confirm-replace-btn");
+  if (btn) btn.disabled = true;
+  openModal("modal-replace-article");
+  window.requestAnimationFrame(() => searchEl?.focus());
+}
+
+function renderReplacePicker(query) {
+  const picker = document.getElementById("replace-picker");
+  if (!picker) return;
+  const q = (query || "").toLowerCase().trim();
+  const products = knownProducts().filter((p) =>
+    !q || p.article.toLowerCase().includes(q) || (p.cat || "").toLowerCase().includes(q)
+  ).slice(0, 24);
+  picker.innerHTML = products.map((p) => `
+    <div class="picker-item${replaceSelectedArticle === p.article ? " selected" : ""}"
+      data-pick-replace="${escapeHtml(p.article)}"
+      style="cursor:pointer;padding:8px 10px;border-radius:6px;margin-bottom:4px;background:var(--card-bg,#1e1e2e);border:1px solid ${replaceSelectedArticle === p.article ? "var(--accent)" : "var(--border)"}">
+      <strong style="font-size:0.9rem">${escapeHtml(p.article)}</strong>
+      <span class="muted" style="font-size:0.8rem;margin-left:6px">${fmt(p.prixInt)} FCFA</span>
+    </div>`).join("");
+}
+
+async function confirmReplace() {
+  if (!replacingLine || !replaceSelectedArticle) return;
+  const order = recordsForSite(state.commandes).find((o) => o.id === replacingLine.orderId);
+  if (!order) return;
+  const line = (order.lignes || []).find((l) => l.id === replacingLine.lineId);
+  if (!line) return;
+  const newProduct = findKnownProduct(replaceSelectedArticle);
+  if (!newProduct) { showToast("Produit introuvable."); return; }
+  line.article = newProduct.article;
+  line.cat = newProduct.cat || line.cat;
+  await persistState({ commandes: state.commandes });
+  closeModal("modal-replace-article");
+  replacingLine = null;
+  replaceSelectedArticle = null;
+  renderVentesPage();
+  showToast("Article remplace.");
 }
 
 function qrLocationLabel(location) {
@@ -2970,6 +3430,7 @@ async function persistState(overrides = {}) {
       dayBooks: overrides.dayBooks !== undefined ? overrides.dayBooks : (state.dayBooks || []),
       purchaseOrders: overrides.purchaseOrders ?? state.purchaseOrders ?? [],
       creditRecoveries: overrides.creditRecoveries || state.creditRecoveries || [],
+      consignes: overrides.consignes ?? state.consignes ?? [],
       categories: overrides.categories || state.categories || CATEGORIES,
       charges: overrides.charges || state.charges,
       nextId: overrides.nextId || state.nextId,
@@ -5157,6 +5618,8 @@ async function bootstrapAuthenticatedApp() {
   populateSelect("c-pay", CHARGE_PAYMENT_METHODS);
   document.getElementById("v-date").value = pdjCalendarDate();
   document.getElementById("c-date").value = today();
+  const consigneDateEl = document.getElementById("consigne-date");
+  if (consigneDateEl) consigneDateEl.value = pdjCalendarDate();
   const creditDt = document.getElementById("credit-datetime");
   if (creditDt) creditDt.value = datetimeLocalNow();
   document.getElementById("orders-filter-date").value = pdjCalendarDate();
@@ -5266,6 +5729,56 @@ function attachEvents() {
   ["orders-filter-date", "orders-filter-status", "orders-filter-type"].forEach((id) => {
     document.getElementById(id).addEventListener("change", renderOrdersManagement);
   });
+  // Saisie rapide
+  document.getElementById("saisie-rapide-btn")?.addEventListener("click", openSaisieRapide);
+  document.getElementById("sr-submit-btn")?.addEventListener("click", () => submitSaisieRapide().catch(handleApiError));
+  document.getElementById("sr-search")?.addEventListener("input", (e) => renderSrMenu(e.target.value));
+  document.getElementById("sr-location")?.addEventListener("change", () => {
+    srCart = [];
+    renderSrMenu(document.getElementById("sr-search")?.value || "");
+    renderSrCart();
+  });
+  document.getElementById("sr-menu")?.addEventListener("click", (e) => {
+    const dec = e.target.closest(".sr-dec");
+    if (dec) { srUpdateQty(dec.dataset.srArticle, Number(dec.dataset.srPack), -1); return; }
+    const inc = e.target.closest(".sr-inc");
+    if (inc) { srUpdateQty(inc.dataset.srArticle, Number(inc.dataset.srPack), +1); return; }
+  });
+  document.getElementById("sr-menu")?.addEventListener("change", (e) => {
+    const qtyInput = e.target.closest("[data-sr-qty]");
+    if (qtyInput) srSetQty(qtyInput.dataset.srQty, Number(qtyInput.dataset.srPack), qtyInput.value);
+  });
+  // Consignes
+  document.getElementById("new-consigne-btn")?.addEventListener("click", () => {
+    const wrap = document.getElementById("consigne-form-wrap");
+    if (!wrap) return;
+    resetConsigneForm();
+    wrap.classList.remove("hidden");
+    document.getElementById("consigne-client")?.focus();
+  });
+  document.getElementById("save-consigne-btn")?.addEventListener("click", () => saveConsigne().catch(handleApiError));
+  document.getElementById("cancel-consigne-btn")?.addEventListener("click", () => {
+    document.getElementById("consigne-form-wrap")?.classList.add("hidden");
+  });
+  // Kit
+  document.getElementById("kit-price")?.addEventListener("input", renderKitProducts);
+  document.getElementById("kit-size")?.addEventListener("change", () => { renderKitProducts(); updateKitCountInfo(); });
+  document.getElementById("kit-location")?.addEventListener("change", renderKitProducts);
+  document.getElementById("kit-products-list")?.addEventListener("change", (e) => {
+    if (e.target.classList.contains("kit-cb")) updateKitCountInfo();
+  });
+  document.getElementById("confirm-kit-btn")?.addEventListener("click", () => confirmKit().catch(handleApiError));
+  // Remplacement d'article
+  document.getElementById("replace-search")?.addEventListener("input", (e) => renderReplacePicker(e.target.value));
+  document.getElementById("replace-picker")?.addEventListener("click", (e) => {
+    const item = e.target.closest("[data-pick-replace]");
+    if (!item) return;
+    replaceSelectedArticle = item.dataset.pickReplace;
+    renderReplacePicker(document.getElementById("replace-search")?.value || "");
+    const btn = document.getElementById("confirm-replace-btn");
+    if (btn) btn.disabled = false;
+  });
+  document.getElementById("confirm-replace-btn")?.addEventListener("click", () => confirmReplace().catch(handleApiError));
   document.getElementById("generate-qr-btn").addEventListener("click", renderQrPreview);
   document.getElementById("print-all-qr-btn").addEventListener("click", () => printAllQrTables());
   document.getElementById("print-qr-int-btn").addEventListener("click", () => printQrCard("Intérieur"));
@@ -5578,6 +6091,21 @@ document.getElementById("fab-btn").addEventListener("click", () => {
     const removeLine = event.target.closest("[data-remove-line]");
     if (removeLine && window.confirm("Retirer cette ligne de la commande ?")) {
       removeOrderLine(Number(removeLine.dataset.orderId), Number(removeLine.dataset.removeLine)).catch(handleApiError);
+      return;
+    }
+    const replaceLine = event.target.closest("[data-replace-line]");
+    if (replaceLine) {
+      openReplaceModal(replaceLine.dataset.orderId, replaceLine.dataset.replaceLine);
+      return;
+    }
+    const returnConsigneBtn = event.target.closest("[data-return-consigne]");
+    if (returnConsigneBtn) {
+      returnConsigne(returnConsigneBtn.dataset.returnConsigne).catch(handleApiError);
+      return;
+    }
+    const deleteConsigneBtn = event.target.closest("[data-delete-consigne]");
+    if (deleteConsigneBtn && window.confirm("Supprimer cette consigne ?")) {
+      deleteConsigne(deleteConsigneBtn.dataset.deleteConsigne).catch(handleApiError);
       return;
     }
     const finalize = event.target.closest("[data-finalize-order]");
