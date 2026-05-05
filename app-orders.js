@@ -3881,7 +3881,31 @@ function stopLiveSync() {
 
 async function syncStateSilently() {
   if (!state || modalIsOpen()) return;
-  if (!["ventes", "home"].includes(currentPage)) return;
+  if (!["ventes", "home", "stock"].includes(currentPage)) return;
+
+  if (currentPage === "stock") {
+    // Full reload for stock page — delta only returns commandes, not stock/purchases
+    try {
+      const fresh = await apiRequest(API.state);
+      if (fresh) {
+        const _casiers = state.casiers ?? [];
+        const _casierMouvements = state.casierMouvements ?? [];
+        state = fresh;
+        if (!state.casiers?.length && _casiers.length) state.casiers = _casiers;
+        if (!state.casierMouvements?.length && _casierMouvements.length) state.casierMouvements = _casierMouvements;
+        lsSaveCasiers();
+      }
+    } catch (e) { return; }
+    renderTopbar();
+    renderSiteSwitcher();
+    renderStock();
+    if (stockSubTab === "mouvements") renderStockMovements();
+    else if (stockSubTab === "achats") renderPurchaseOrders();
+    else if (stockSubTab === "creanciers") renderCreanciers();
+    else if (stockSubTab === "casiers") renderCasiers();
+    return;
+  }
+
   const previousQrIds = new Set(qrOrdersForCurrentSite(state).map((item) => item.id));
   const since = state?.meta?.updatedAt || "";
   try {
