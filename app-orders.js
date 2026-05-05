@@ -603,11 +603,10 @@ function populatePurchaseArticlesByBrasserie(br) {
     sel.innerHTML = `<option value="">— Choisir d'abord une brasserie —</option>`;
     return;
   }
-  // Articles du stock rattachés à cette brasserie
   const articles = recordsForSite(state.stock).filter((item) =>
     normalizeBrasserieName(item.brasserie) === br && lotType(item) !== "unite"
   );
-  // Compter casiers vides par article
+  // Casiers vides par article
   const videsByArticle = {};
   casiersForSite().forEach((c) => {
     const stockIt = stockItemForArticle(c.article);
@@ -617,13 +616,25 @@ function populatePurchaseArticlesByBrasserie(br) {
     if (!videsByArticle[c.article]) videsByArticle[c.article] = 0;
     videsByArticle[c.article] += fullVides;
   });
-  sel.innerHTML = `<option value="">— Choisir un article —</option>` +
-    articles.map((item) => {
+  // Grouper par capacité (nombre de bouteilles par casier)
+  const byCap = {};
+  articles.forEach((item) => {
+    const cap = caseSize(item) || 24;
+    if (!byCap[cap]) byCap[cap] = [];
+    byCap[cap].push(item);
+  });
+  const caps = Object.keys(byCap).map(Number).sort((a, b) => b - a);
+  let html = `<option value="">— Choisir un article —</option>`;
+  for (const cap of caps) {
+    html += `<optgroup label="B${cap}">`;
+    for (const item of byCap[cap]) {
       const v = videsByArticle[item.article] || 0;
-      const label = v > 0 ? `${item.article}  ↩ ${fmt(v)} casier(s) vide(s)` : item.article;
-      return `<option value="${escapeHtml(item.article)}">${escapeHtml(label)}</option>`;
-    }).join("");
-  // Auto-sélectionner si un seul article
+      const videsLabel = v > 0 ? `  ↩ ${fmt(v)} casier(s) vide(s)` : "";
+      html += `<option value="${escapeHtml(item.article)}">${escapeHtml(item.article + videsLabel)}</option>`;
+    }
+    html += `</optgroup>`;
+  }
+  sel.innerHTML = html;
   if (articles.length === 1) { sel.value = articles[0].article; syncPurchaseLineInputsFromStock(); }
 }
 
