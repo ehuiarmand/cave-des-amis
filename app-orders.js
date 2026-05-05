@@ -731,7 +731,63 @@ function openStaffAuditDetailModal(entryId) {
   set("audit-detail-verbraw", row.verb || "—");
   set("audit-detail-entityraw", row.entity || "—");
   set("audit-detail-summary", row.summary || "—");
-  set("audit-detail-detail", row.detail || "—");
+  let detailText = row.detail || "—";
+  // Amélioration UX: pour "Commande fournisseur", si l'ancien audit est trop court,
+  // tenter de reconstituer la liste des lignes à partir de state.purchaseOrders.
+  if (String(row.entity || "") === "achat_fournisseur") {
+    const hasList = typeof detailText === "string" && (detailText.includes("\n1.") || detailText.includes("Total:"));
+    if (!hasList && Array.isArray(state?.purchaseOrders) && state.purchaseOrders.length) {
+      const supplierFromSummary = (() => {
+        const s = String(row.summary || "");
+        const m = s.match(/Commande fournisseur\s+(.+?)(?:\s+\(#?\d+\))?$/i);
+        return (m && m[1]) ? m[1].trim() : "";
+      })();
+      const at = String(row.at || "");
+      const datePrefix = at ? at.slice(0, 10) : "";
+      const actor = String(row.actor || "");
+      const candidates = state.purchaseOrders.filter((po) => {
+        if (supplierFromSummary && String(po.supplier || "").trim() !== supplierFromSummary) return false;
+        if (datePrefix && String(po.date || "").slice(0, 10) !== datePrefix) return false;
+        if (actor && String(po.createdBy || "").trim() !== actor) return false;
+        return true;
+      });
+      if (candidates.length) {
+        // Choisir le plus proche de l'heure de l'audit.
+        const targetTs = at ? Date.parse(at) : NaN;
+        candidates.sort((a, b) => {
+          const da = Math.abs((Date.parse(a.createdAt || "") || 0) - (Number.isNaN(targetTs) ? 0 : targetTs));
+          const db = Math.abs((Date.parse(b.createdAt || "") || 0) - (Number.isNaN(targetTs) ? 0 : targetTs));
+          return da - db;
+        });
+        const po = candidates[0];
+        const rebuilt = formatPurchaseOrderAuditDetail(po);
+        if (rebuilt) detailText = `${detailText}\n\n---\nDETAIL (reconstruit)\n\n${rebuilt}`;
+      }
+    }
+  }
+  // Commandes: si le détail est trop court (ex "7 ligne(s)"), tenter de retrouver un détail complet
+  // depuis une autre entrée d'audit concernant la même commande (#id).
+  if (String(row.entity || "") === "commande") {
+    const hasList = typeof detailText === "string" && (detailText.includes("\n1.") || detailText.includes("Total:"));
+    if (!hasList) {
+      const m = String(row.summary || "").match(/#(\d+)/);
+      const orderId = m ? Number(m[1]) : null;
+      if (orderId && Array.isArray(state?.staffAuditLog)) {
+        const candidates = state.staffAuditLog
+          .filter((r) => Number(r.id) !== Number(row.id))
+          .filter((r) => String(r.entity || "") === "commande" || String(r.entity || "") === "commande_statut")
+          .filter((r) => String(r.summary || "").includes(`#${orderId}`))
+          .filter((r) => typeof r.detail === "string" && (r.detail.includes("\n1.") || r.detail.includes("Total:")));
+        if (candidates.length) {
+          // Prendre l'entrée la plus proche (id/temps).
+          candidates.sort((a, b) => Math.abs(Number(a.id) - Number(row.id)) - Math.abs(Number(b.id) - Number(row.id)));
+          const rebuilt = String(candidates[0].detail || "").trim();
+          if (rebuilt) detailText = `${detailText}\n\n---\nDETAIL (reconstruit)\n\n${rebuilt}`;
+        }
+      }
+    }
+  }
+  set("audit-detail-detail", detailText);
   openModal("modal-staff-audit-detail");
   detailEl?.focus();
 }
@@ -3808,6 +3864,8 @@ async function persistState(overrides = {}) {
       nextId: overrides.nextId || state.nextId,
       staffAuditLog: overrides.staffAuditLog !== undefined ? overrides.staffAuditLog : (state.staffAuditLog || []),
       auth: overrides.auth || { users: state.auth.users || [] },
+      casiers: overrides.casiers ?? state.casiers ?? [],
+      casierMouvements: overrides.casierMouvements ?? state.casierMouvements ?? [],
     }),
   });
   renderTopbar();
@@ -4104,7 +4162,12 @@ async function savePurchaseOrder() {
     total,
   };
   state.purchaseOrders = [po, ...(state.purchaseOrders || [])];
-  recordStaffAudit("create", "achat_fournisseur", `Commande fournisseur ${supplier}`, `${fmt(total)} FCFA · ${pay} · ${selectedLines.length} ligne(s)`);
+  recordStaffAudit(
+    "create",
+    "achat_fournisseur",
+    `Commande fournisseur ${supplier} (#${po.id})`,
+    formatPurchaseOrderAuditDetail(po),
+  );
   await persistState({ purchaseOrders: state.purchaseOrders });
   document.getElementById("purchase-form")?.classList.add("hidden");
   purchaseDraftLines = [];
@@ -4641,6 +4704,12 @@ async function finalizeOrder(orderId = activeOrderId) {
       stockItem.lastSortieAt = new Date().toISOString();
       stockItem.lastSortieBy = sessionUser || "Serveur";
       consumePhysicalStock(stockItem, bottles);
+      const brasserie = normalizeBrasserieName(stockItem.brasserie) || "Sans brasserie";
+      const res = fillBrasserieCasiers(brasserie, bottles, { source: "vente", commentaire: `Facture ${factureNumber}` });
+      if (res?.created) {
+        // Info légère (pas bloquante) : des casiers ont été auto-créés.
+        console.info("Casiers auto-crees (vente)", brasserie, res.created);
+      }
     }
   });
 
@@ -6188,6 +6257,88 @@ function findCasierByCode(code) {
   return (state.casiers || []).find((c) => String(c.code || "").toUpperCase() === norm) || null;
 }
 
+function preferredCasierCapacityForBrasserie(brasserie, siteId = currentSiteId()) {
+  const b = normalizeBrasserieName(brasserie);
+  const items = recordsForSite(state.stock || []).filter((it) => normalizeBrasserieName(it.brasserie) === b);
+  if (!items.length) return 24;
+  const counts = {};
+  items.forEach((it) => {
+    const cs = Math.max(1, Number(caseSize(it)) || 24);
+    counts[cs] = (counts[cs] || 0) + 1;
+  });
+  const best = Object.entries(counts).sort((a, b2) => b2[1] - a[1])[0];
+  return best ? Number(best[0]) : 24;
+}
+
+function casiersForBrasserie(brasserie, siteId = currentSiteId()) {
+  const b = normalizeBrasserieName(brasserie);
+  return (state.casiers || []).filter((c) => rowMatchesSite(c, siteId, multiSiteActive()))
+    .filter((c) => normalizeBrasserieName(c.article) === b);
+}
+
+function fillBrasserieCasiers(brasserie, bottles, { source = "vente", commentaire = "" } = {}) {
+  const b = normalizeBrasserieName(brasserie) || "Sans brasserie";
+  let remaining = Math.max(0, Math.floor(Number(bottles) || 0));
+  if (remaining <= 0) return { filled: 0, created: 0 };
+  state.casiers = state.casiers || [];
+  state.casierMouvements = state.casierMouvements || [];
+  state.nextId = state.nextId || {};
+  if (!state.nextId.casier || Number.isNaN(Number(state.nextId.casier))) state.nextId.casier = 1;
+  if (!state.nextId.casierMouvement || Number.isNaN(Number(state.nextId.casierMouvement))) state.nextId.casierMouvement = 1;
+
+  const all = casiersForBrasserie(b).slice();
+  // Remplir dans l'ordre des codes CAS-XXXX : on complète le premier casier disponible,
+  // puis on passe au suivant quand il est plein.
+  all.sort((a, b2) => String(a.code || "").localeCompare(String(b2.code || ""), "fr"));
+
+  let filled = 0;
+  let created = 0;
+  const now = new Date().toISOString();
+  for (const c of all) {
+    if (remaining <= 0) break;
+    const cap = Math.max(1, Number(c.capacite) || 24);
+    const cur = Math.max(0, Number(c.quantiteActuelle) || 0);
+    const free = cap - cur;
+    if (free <= 0) continue;
+    const add = Math.min(free, remaining);
+    const before = { quantiteActuelle: cur };
+    c.quantiteActuelle = cur + add;
+    recomputeCasierStatus(c);
+    c.lastMoveAt = now;
+    c.lastMoveBy = sessionUser || "system";
+    state.casierMouvements.unshift({
+      id: state.nextId.casierMouvement++,
+      siteId: currentSiteId(),
+      casierId: c.id,
+      casierCode: c.code,
+      article: c.article,
+      type: "entree",
+      quantite: add,
+      source,
+      motif: "",
+      commentaire,
+      user: sessionUser || "system",
+      role: currentRole || "-",
+      date: today(),
+      createdAt: now,
+    });
+    logCasierAudit("create", c, before, null, null, add, { type: "ENTREE", label: "Remplissage casier", source, commentaire, entity: "casier_entree" });
+    remaining -= add;
+    filled += add;
+  }
+
+  // Si pas assez de place, on n'auto-crée pas : il faut créer des casiers manuellement (objectif du module).
+  if (remaining > 0) {
+    recordStaffAudit(
+      "create",
+      "casier_entree",
+      `Remplissage casiers (incomplet) · ${b}`,
+      `${fmt(filled)} btl affectée(s) · ${fmt(remaining)} btl non affectée(s) (pas assez de casiers disponibles)${commentaire ? ` · ${commentaire}` : ""}`,
+    );
+  }
+  return { filled, created };
+}
+
 function suggestReapproCasiers(article) {
   const item = stockItemForArticle(article);
   if (!item) return { manque: 0, casiers: 0 };
@@ -6207,21 +6358,26 @@ function canMoveCasier() {
   return Boolean(sessionUser);
 }
 
+function normalizeBrasserieName(name) {
+  return String(name || "").trim();
+}
+
+function brasserieForArticle(article, siteId = currentSiteId()) {
+  const item = stockItemForArticle(article, siteId);
+  const b = normalizeBrasserieName(item?.brasserie);
+  return b || "Sans brasserie";
+}
+
 function logCasierAudit(verb, casier, before, item, beforeStock, qty, opts = {}) {
   const codeLabel = casier?.code || "CAS-?";
   const article = casier?.article || "?";
   const cap = Math.max(1, Number(casier?.capacite) || 1);
   const qBefore = Math.max(0, Number(before?.quantiteActuelle) || 0);
   const qAfter = Math.max(0, Number(casier?.quantiteActuelle) || 0);
-  const stAfter = item ? stockActuel(item) : null;
-  const frigoAfter = item ? stockFrigo(item) : null;
-  const reserveAfter = item ? stockReserve(item) : null;
   const lines = [];
   lines.push(`${codeLabel} · ${article} · ${String(opts.type || verb).toUpperCase()} · qty ${fmt(qty)}`);
   lines.push(`casier ${fmt(qBefore)} → ${fmt(qAfter)} (cap ${fmt(cap)} · ${casier?.statut || "?"})`);
-  if (item) {
-    lines.push(`reserve ${fmt(beforeStock?.reserve || 0)} → ${fmt(reserveAfter)} · frigo ${fmt(beforeStock?.frigo || 0)} → ${fmt(frigoAfter)} · stock ${fmt(beforeStock?.total || 0)} → ${fmt(stAfter)}`);
-  }
+  // Dans la logique "casiers par brasserie remplis par vente", les casiers ne modifient pas le stock.
   if (opts.source) lines.push(`source: ${opts.source}`);
   if (opts.motif) lines.push(`motif: ${opts.motif}`);
   if (opts.commentaire) lines.push(`note: ${opts.commentaire}`);
@@ -6300,10 +6456,8 @@ async function createCasier({ article, capacite, emplacement, quantiteActuelle =
     showToast("Reserve au gerant ou administrateur.");
     return null;
   }
-  const articleName = String(article || "").trim();
-  if (!articleName) { showToast("Choisissez un article."); return null; }
-  const item = stockItemForArticle(articleName);
-  if (!item) { showToast("Article introuvable dans le stock."); return null; }
+  const brasserie = normalizeBrasserieName(article);
+  if (!brasserie) { showToast("Choisissez une brasserie."); return null; }
   const cap = Math.max(1, Math.floor(Number(capacite) || 0));
   if (cap <= 0) { showToast("Capacite invalide."); return null; }
   const qty0 = Math.max(0, Math.floor(Number(quantiteActuelle) || 0));
@@ -6311,12 +6465,11 @@ async function createCasier({ article, capacite, emplacement, quantiteActuelle =
   state.casiers = state.casiers || [];
   state.nextId = state.nextId || {};
   const code = nextCasierCode();
-  const beforeStock = snapshotItemStock(item);
   const casier = {
     id: state.nextId.casier++,
     siteId: currentSiteId(),
     code,
-    article: item.article,
+    article: brasserie,
     capacite: cap,
     quantiteActuelle: qty0,
     emplacement: String(emplacement || "").trim() || "—",
@@ -6327,8 +6480,6 @@ async function createCasier({ article, capacite, emplacement, quantiteActuelle =
   recomputeCasierStatus(casier);
   state.casiers.push(casier);
   if (qty0 > 0) {
-    item.entrees = (Number(item.entrees) || 0) + qty0;
-    item.reserve = stockReserve(item) + qty0;
     state.casierMouvements = state.casierMouvements || [];
     state.casierMouvements.unshift({
       id: state.nextId.casierMouvement++,
@@ -6338,7 +6489,7 @@ async function createCasier({ article, capacite, emplacement, quantiteActuelle =
       article: casier.article,
       type: "entree",
       quantite: qty0,
-      source: "creation",
+      source: "correction",
       motif: "",
       commentaire: "Quantite initiale (creation casier)",
       user: sessionUser || "-",
@@ -6349,14 +6500,14 @@ async function createCasier({ article, capacite, emplacement, quantiteActuelle =
     casier.lastMoveAt = new Date().toISOString();
     casier.lastMoveBy = sessionUser || "-";
   }
-  logCasierAudit("create", casier, { quantiteActuelle: 0 }, item, beforeStock, qty0, {
+  logCasierAudit("create", casier, { quantiteActuelle: 0 }, null, null, qty0, {
     type: "CREATE",
     label: "Nouveau casier",
-    source: qty0 > 0 ? "creation" : "",
+    source: qty0 > 0 ? "correction" : "",
     commentaire: emplacement ? `emplacement: ${emplacement}` : "",
     entity: "casier",
   });
-  await persistState({ stock: state.stock, casiers: state.casiers, casierMouvements: state.casierMouvements, nextId: state.nextId });
+  await persistState({ casiers: state.casiers, casierMouvements: state.casierMouvements, nextId: state.nextId });
   return casier;
 }
 
@@ -6372,20 +6523,12 @@ async function casierEntree(casierId, qty, { source = "fournisseur", commentaire
     showToast(`Capacite depassee (${cap}). Disponible: ${cap - current}.`);
     return false;
   }
-  const item = stockItemForArticle(casier.article);
-  if (!item) { showToast("Article du casier introuvable."); return false; }
   const before = JSON.parse(JSON.stringify(casier));
-  const beforeStock = snapshotItemStock(item);
 
   casier.quantiteActuelle = current + q;
   recomputeCasierStatus(casier);
   casier.lastMoveAt = new Date().toISOString();
   casier.lastMoveBy = sessionUser || "-";
-
-  item.entrees = (Number(item.entrees) || 0) + q;
-  item.reserve = stockReserve(item) + q;
-  item.lastReapproAt = new Date().toISOString();
-  item.lastReapproBy = sessionUser || "-";
 
   state.casierMouvements = state.casierMouvements || [];
   state.casierMouvements.unshift({
@@ -6404,14 +6547,14 @@ async function casierEntree(casierId, qty, { source = "fournisseur", commentaire
     date: today(),
     createdAt: new Date().toISOString(),
   });
-  logCasierAudit("create", casier, before, item, beforeStock, q, {
+  logCasierAudit("create", casier, before, null, null, q, {
     type: "ENTREE",
     label: "Entree casier",
     source,
     commentaire,
     entity: "casier_entree",
   });
-  await persistState({ stock: state.stock, casiers: state.casiers, casierMouvements: state.casierMouvements, nextId: state.nextId });
+  await persistState({ casiers: state.casiers, casierMouvements: state.casierMouvements, nextId: state.nextId });
   return true;
 }
 
@@ -6426,50 +6569,12 @@ async function casierSortie(casierId, qty, { motif = "autre", commentaire = "" }
     showToast(`Stock insuffisant dans le casier (${current}).`);
     return false;
   }
-  const item = stockItemForArticle(casier.article);
-  if (!item) { showToast("Article du casier introuvable."); return false; }
   const before = JSON.parse(JSON.stringify(casier));
-  const beforeStock = snapshotItemStock(item);
-  const motifKey = String(motif || "autre").toLowerCase();
 
   casier.quantiteActuelle = current - q;
   recomputeCasierStatus(casier);
   casier.lastMoveAt = new Date().toISOString();
   casier.lastMoveBy = sessionUser || "-";
-
-  if (motifKey === "frigo") {
-    // Transfert reserve -> frigo : casier - q ; item.reserve - q ; item.frigo + q (compteurs entrees/sorties inchangés)
-    item.reserve = Math.max(0, stockReserve(item) - q);
-    item.frigo = stockFrigo(item) + q;
-  } else {
-    // Sortie reelle (vente / casse / transfert vers exterieur / autre)
-    item.sorties = (Number(item.sorties) || 0) + q;
-    item.reserve = Math.max(0, stockReserve(item) - q);
-    item.lastSortieAt = new Date().toISOString();
-    item.lastSortieBy = sessionUser || "-";
-    if (motifKey === "casse" || motifKey === "perte" || motifKey === "vol" || motifKey === "peremption") {
-      state.stockLosses = state.stockLosses || [];
-      if (state.nextId.stockLoss == null || Number.isNaN(Number(state.nextId.stockLoss))) {
-        const maxL = state.stockLosses.reduce((m, l) => Math.max(m, Number(l.id) || 0), 0);
-        state.nextId.stockLoss = Math.max(100, maxL + 1);
-      }
-      state.stockLosses.push({
-        id: state.nextId.stockLoss++,
-        siteId: currentSiteId(),
-        article: casier.article,
-        qty: q,
-        cases: 0,
-        caseSize: Number(casier.capacite) || 0,
-        motif: String(motif || "Perte"),
-        notes: `${casier.code}${commentaire ? " · " + commentaire : ""}`,
-        date: today(),
-        createdAt: new Date().toISOString(),
-        createdBy: sessionUser || "-",
-        casierId: casier.id,
-        casierCode: casier.code,
-      });
-    }
-  }
 
   state.casierMouvements = state.casierMouvements || [];
   state.casierMouvements.unshift({
@@ -6488,14 +6593,14 @@ async function casierSortie(casierId, qty, { motif = "autre", commentaire = "" }
     date: today(),
     createdAt: new Date().toISOString(),
   });
-  logCasierAudit("create", casier, before, item, beforeStock, q, {
+  logCasierAudit("create", casier, before, null, null, q, {
     type: "SORTIE",
     label: "Sortie casier",
     motif,
     commentaire,
     entity: "casier_sortie",
   });
-  await persistState({ stock: state.stock, casiers: state.casiers, casierMouvements: state.casierMouvements, nextId: state.nextId, stockLosses: state.stockLosses });
+  await persistState({ casiers: state.casiers, casierMouvements: state.casierMouvements, nextId: state.nextId });
   return true;
 }
 
@@ -6655,15 +6760,7 @@ function openCasierEditModal() {
   const codeEl = document.getElementById("casier-edit-code");
   if (codeEl) codeEl.value = `CAS-${String(Number(state?.nextId?.casier) || 1).padStart(4, "0")}`;
   const sel = document.getElementById("casier-edit-article");
-  if (sel) {
-    const items = recordsForSite(state.stock || [])
-      .filter((it) => lotType(it) !== "unite")
-      .slice()
-      .sort((a, b) => String(a.article || "").localeCompare(String(b.article || ""), "fr"));
-    sel.innerHTML = items.length
-      ? items.map((it) => `<option value="${escapeHtml(it.article)}" data-cs="${caseSize(it)}">${escapeHtml(it.article)} · ${fmt(caseSize(it))} btl/lot</option>`).join("")
-      : `<option value="">— Aucun article (créez d'abord un article au catalogue) —</option>`;
-  }
+  if (sel && !String(sel.value || "").trim()) sel.value = "";
   syncCasierEditFromArticle();
   const empEl = document.getElementById("casier-edit-emplacement");
   if (empEl) empEl.value = "";
@@ -6677,15 +6774,10 @@ function syncCasierEditFromArticle() {
   const capEl = document.getElementById("casier-edit-capacite");
   const info = document.getElementById("casier-edit-article-info");
   if (!sel) return;
-  const opt = sel.options[sel.selectedIndex];
-  const cs = Number(opt?.dataset?.cs) || 24;
-  if (capEl && (!capEl.value || Number(capEl.value) === 0)) capEl.value = String(cs);
-  const item = stockItemForArticle(sel.value);
-  if (info) {
-    info.textContent = item
-      ? `Stock actuel: ${fmt(stockActuel(item))} btl · Frigo: ${fmt(stockFrigo(item))} · Réserve: ${fmt(stockReserve(item))}`
-      : "";
-  }
+  const brasserie = normalizeBrasserieName(sel.value);
+  const cap = preferredCasierCapacityForBrasserie(brasserie);
+  if (capEl && (!capEl.value || Number(capEl.value) === 0)) capEl.value = String(cap);
+  if (info) info.textContent = brasserie ? `Brasserie: ${brasserie} · Capacite conseillée: ${fmt(cap)} btl/casier` : "";
 }
 
 async function submitCasierEdit() {
@@ -6914,7 +7006,6 @@ async function bootstrapAuthenticatedApp() {
   if (!state.nextId.casier || Number.isNaN(Number(state.nextId.casier))) state.nextId.casier = 1;
   if (!state.nextId.casierMouvement || Number.isNaN(Number(state.nextId.casierMouvement))) state.nextId.casierMouvement = 1;
   if (state.nextId.auditEntry === undefined || state.nextId.auditEntry === null) state.nextId.auditEntry = 0;
-  await ensurePhysicalCasiersFromReserve();
   knownQrOrderIds = new Set(qrOrdersForCurrentSite(state).map((item) => item.id));
   qrAlertCount = 0;
   renderSiteSwitcher();

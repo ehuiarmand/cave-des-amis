@@ -795,8 +795,8 @@
             </div>
             <div class="form-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:12px">
               <div class="form-group">
-                <label for="casier-phys-filter-article">Article</label>
-                <input id="casier-phys-filter-article" type="text" placeholder="Filtrer par article">
+                <label for="casier-phys-filter-article">Brasserie</label>
+                <input id="casier-phys-filter-article" type="text" placeholder="Filtrer par brasserie">
               </div>
               <div class="form-group">
                 <label for="casier-phys-filter-emplacement">Emplacement</label>
@@ -1779,8 +1779,8 @@
         </div>
       </div>
       <div class="form-group">
-        <label for="casier-edit-article">Article</label>
-        <select id="casier-edit-article"></select>
+        <label for="casier-edit-article">Brasserie</label>
+        <input id="casier-edit-article" type="text" list="brasserie-list" placeholder="ex: Solibra, Brassivoire, Castel..." autocomplete="off">
         <p class="form-hint" id="casier-edit-article-info"></p>
       </div>
       <div class="form-grid two-cols">
@@ -1791,7 +1791,7 @@
         <div class="form-group">
           <label for="casier-edit-qty">Quantité initiale</label>
           <input id="casier-edit-qty" type="number" min="0" step="1" value="0" placeholder="0">
-          <p class="form-hint">Si > 0, traitée comme une entrée et ajoutée à la réserve.</p>
+          <p class="form-hint">Si > 0, correction manuelle (n'affecte pas le stock).</p>
         </div>
       </div>
       <div class="button-stack">
@@ -1890,13 +1890,9 @@
       <dl class="audit-detail-dl">
         <div><dt>Date</dt><dd id="audit-detail-date">—</dd></div>
         <div><dt>Maquis</dt><dd id="audit-detail-site">—</dd></div>
-        <div><dt>ID site</dt><dd id="audit-detail-siteid" class="muted">—</dd></div>
         <div><dt>Utilisateur</dt><dd id="audit-detail-actor">—</dd></div>
-        <div><dt>Role</dt><dd id="audit-detail-role">—</dd></div>
         <div><dt>Action</dt><dd id="audit-detail-verb">—</dd></div>
         <div><dt>Type</dt><dd id="audit-detail-entity">—</dd></div>
-        <div><dt>Code action</dt><dd id="audit-detail-verbraw" class="muted" style="font-size:0.82rem">—</dd></div>
-        <div><dt>Code type</dt><dd id="audit-detail-entityraw" class="muted" style="font-size:0.82rem">—</dd></div>
       </dl>
       <div class="form-group" style="margin-top:14px">
         <label>Resume</label>
