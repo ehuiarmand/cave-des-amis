@@ -7148,11 +7148,14 @@ async function retourVidesCasier(casierId, qty) {
   if (!canMoveCasier()) { showToast("Connexion requise."); return false; }
   const casier = findCasierById(casierId);
   if (!casier) { showToast("Casier introuvable."); return false; }
+  const cap = Math.max(1, Number(casier.capacite) || 24);
   const q = Math.max(0, Math.floor(Number(qty) || 0));
   if (q <= 0) { showToast("Quantité invalide."); return false; }
   const vides = Math.max(0, Number(casier.bouteillesVides) || 0);
   if (q > vides) { showToast(`Seulement ${fmt(vides)} bouteille(s) vide(s) dans ce casier.`); return false; }
+  const nbCasiers = Math.floor(q / cap);
   casier.bouteillesVides = vides - q;
+  recomputeCasierStatus(casier);
   casier.lastMoveAt = new Date().toISOString();
   casier.lastMoveBy = sessionUser || "system";
   state.casierMouvements = state.casierMouvements || [];
@@ -7166,15 +7169,16 @@ async function retourVidesCasier(casierId, qty) {
     article: casier.article,
     type: "retour_vide",
     quantite: q,
+    nbCasiers,
     source: "",
     motif: "retour_fournisseur",
-    commentaire: "",
+    commentaire: `${fmt(nbCasiers)} casier(s) de ${fmt(cap)} btl vides`,
     user: sessionUser || "system",
     role: currentRole || "-",
     date: today(),
     createdAt: new Date().toISOString(),
   });
-  recordStaffAudit("create", "casier_retour_vide", `Retour vides ${casier.code}`, `${fmt(q)} btl vide(s) retournée(s) fournisseur`);
+  recordStaffAudit("create", "casier_retour_vide", `Retour ${casier.code} : ${fmt(nbCasiers)} casier(s) vide(s)`, `${fmt(nbCasiers)} casier(s) × ${fmt(cap)} btl = ${fmt(q)} btl vide(s) retournée(s) fournisseur`);
   await persistState({ casiers: state.casiers, casierMouvements: state.casierMouvements, nextId: state.nextId });
   return true;
 }
@@ -7265,7 +7269,11 @@ function renderCasierPhysique() {
               <button type="button" class="mini-btn" data-casier-phys-in="${c.id}">+ IN</button>
               <button type="button" class="mini-btn" data-casier-phys-out="${c.id}">- OUT</button>
               <button type="button" class="mini-btn" data-casier-phys-frigo="${c.id}" ${qty <= 0 ? "disabled" : ""}>→ Frigo</button>
-              ${vides > 0 ? `<button type="button" class="mini-btn" data-casier-phys-retour="${c.id}" style="background:rgba(230,81,0,0.12);color:#e65100" title="Retourner bouteilles vides au fournisseur">↩ ${fmt(vides)} vide(s)</button>` : ""}
+              ${(function() {
+                const fullRetour = Math.floor(vides / cap);
+                if (fullRetour < 1) return vides > 0 ? `<span style="color:#e65100;font-size:0.75rem;padding:0 6px" title="${fmt(vides)} btl vides — pas encore un casier complet (${fmt(cap)} btl)">${fmt(vides)} btl vides</span>` : "";
+                return `<button type="button" class="mini-btn" data-casier-phys-retour="${c.id}" style="background:rgba(230,81,0,0.12);color:#e65100;font-weight:700" title="${fmt(fullRetour)} casier(s) plein(s) de vides à retourner · ${fmt(vides)} btl">↩ ${fmt(fullRetour)} casier(s) vide(s)</button>`;
+              })()}
               ${canDelete ? `<button type="button" class="stock-del-btn" data-casier-phys-delete="${c.id}" style="background:rgba(197,79,65,0.18);color:#ff8e82">Suppr.</button>` : ""}
             </td>
           </tr>`;
@@ -7303,8 +7311,8 @@ function renderCasierPhysique() {
             <td><strong>${escapeHtml(m.casierCode || "-")}</strong></td>
             <td>${escapeHtml(m.article || "-")}</td>
             <td>${m.type === "retour_vide" ? "<span class='badge badge-amber'>Retour vides</span>" : m.type === "sortie" ? "<span class='badge badge-red'>Sortie</span>" : "<span class='badge badge-green'>Entrée</span>"}</td>
-            <td style="text-align:right">${fmt(m.quantite)}</td>
-            <td>${escapeHtml(m.type === "retour_vide" ? "retour fournisseur" : m.type === "sortie" ? (m.motif || "") : (m.source || ""))}</td>
+            <td style="text-align:right">${m.type === "retour_vide" && m.nbCasiers ? `<strong>${fmt(m.nbCasiers)} casier(s)</strong> <span class="muted">(${fmt(m.quantite)} btl)</span>` : fmt(m.quantite)}</td>
+            <td>${escapeHtml(m.type === "retour_vide" ? (m.commentaire || "retour fournisseur") : m.type === "sortie" ? (m.motif || "") : (m.source || ""))}</td>
             <td>${escapeHtml(m.commentaire || "")}</td>
             <td>${escapeHtml(m.user || "-")}</td>
           </tr>`).join("")}
@@ -7804,10 +7812,19 @@ function attachEvents() {
       const id = Number(retourBtn.dataset.casierPhysRetour);
       const c = findCasierById(id);
       if (!c) return;
-      const max = Math.max(0, Number(c.bouteillesVides) || 0);
-      const raw = window.prompt(`Combien de bouteilles vides retourner au fournisseur depuis ${c.code} ? (max ${fmt(max)})`, String(max));
-      const qty = Math.max(0, Math.floor(Number(raw) || 0));
-      if (!qty) return;
+      const cap = Math.max(1, Number(c.capacite) || 24);
+      const vides = Math.max(0, Number(c.bouteillesVides) || 0);
+      const maxCasiers = Math.floor(vides / cap);
+      if (maxCasiers < 1) { showToast("Pas encore un casier complet de vides à retourner."); return; }
+      const raw = window.prompt(
+        `Combien de casiers vides à retourner au fournisseur ?\n` +
+        `Casier ${c.code} · ${c.article} · ${fmt(cap)} btl/casier\n` +
+        `(max ${fmt(maxCasiers)} casier(s) = ${fmt(maxCasiers * cap)} btl)`,
+        String(maxCasiers)
+      );
+      const nbCasiers = Math.max(0, Math.min(maxCasiers, Math.floor(Number(raw) || 0)));
+      if (!nbCasiers) return;
+      const qty = nbCasiers * cap;
       retourVidesCasier(id, qty)
         .then((ok) => {
           if (ok) {
