@@ -177,6 +177,8 @@ DEFAULT_STATE: dict[str, Any] = {
     "stockChecks": [],
     "dayBooks": [],
     "purchaseOrders": [],
+    "casiers": [],
+    "casierMouvements": [],
     "creditRecoveries": [],
     "categories": ["Bières", "Sodas & Jus", "Eaux", "Vins & Spiritueux", "Cocktails", "Snacks", "Autres"],
     "charges": [
@@ -196,6 +198,8 @@ DEFAULT_STATE: dict[str, Any] = {
         "stockEntree": 100,
         "stockLoss": 100,
         "auditEntry": 0,
+        "casier": 1,
+        "casierMouvement": 1,
     },
 }
 
@@ -272,6 +276,8 @@ def build_default_state() -> dict[str, Any]:
         "stockChecks": [],
         "dayBooks": [],
         "purchaseOrders": [],
+        "casiers": [],
+        "casierMouvements": [],
         "creditRecoveries": [],
         "categories": legacy.get("categories", DEFAULT_STATE["categories"]),
         "charges": [
@@ -288,6 +294,8 @@ def build_default_state() -> dict[str, Any]:
             "stockEntree": legacy.get("nextId", {}).get("stockEntree", 100),
             "stockLoss": legacy.get("nextId", {}).get("stockLoss", 100),
             "auditEntry": legacy.get("nextId", {}).get("auditEntry", 0),
+            "casier": legacy.get("nextId", {}).get("casier", 1),
+            "casierMouvement": legacy.get("nextId", {}).get("casierMouvement", 1),
         },
     }
 
@@ -332,6 +340,8 @@ def migrate_state(payload: dict[str, Any]) -> dict[str, Any]:
             "charges": [{**item, "siteId": item.get("siteId", site_id)} for item in payload.get("charges", default["charges"])],
             "dayBooks": [{**item, "siteId": item.get("siteId", site_id)} for item in payload.get("dayBooks", [])],
             "purchaseOrders": [{**item, "siteId": item.get("siteId", site_id)} for item in payload.get("purchaseOrders", [])],
+            "casiers": [{**item, "siteId": item.get("siteId", site_id)} for item in payload.get("casiers", [])],
+            "casierMouvements": [{**item, "siteId": item.get("siteId", site_id)} for item in payload.get("casierMouvements", [])],
             "staffAuditLog": payload.get("staffAuditLog", []),
             "stockEntrees": [{**item, "siteId": item.get("siteId", site_id)} for item in payload.get("stockEntrees", [])],
             "stockLosses": [{**item, "siteId": item.get("siteId", site_id)} for item in payload.get("stockLosses", [])],
@@ -821,6 +831,8 @@ class DataStore:
             merged["charges"] = payload.get("charges", merged["charges"])
             merged["dayBooks"] = payload.get("dayBooks", merged.get("dayBooks", []))
             merged["purchaseOrders"] = payload.get("purchaseOrders", merged.get("purchaseOrders", []))
+            merged["casiers"] = payload.get("casiers", merged.get("casiers", []))
+            merged["casierMouvements"] = payload.get("casierMouvements", merged.get("casierMouvements", []))
             merged["creditRecoveries"] = payload.get("creditRecoveries", merged.get("creditRecoveries", []))
             merged["staffAuditLog"] = payload.get("staffAuditLog", merged.get("staffAuditLog", []))
             merged["stockEntrees"] = payload.get("stockEntrees", merged.get("stockEntrees", []))
@@ -859,6 +871,8 @@ class DataStore:
         merged["charges"] = payload.get("charges", merged["charges"])
         merged["dayBooks"] = payload.get("dayBooks", merged.get("dayBooks", []))
         merged["purchaseOrders"] = payload.get("purchaseOrders", merged.get("purchaseOrders", []))
+        merged["casiers"] = payload.get("casiers", merged.get("casiers", []))
+        merged["casierMouvements"] = payload.get("casierMouvements", merged.get("casierMouvements", []))
         merged["creditRecoveries"] = payload.get("creditRecoveries", merged.get("creditRecoveries", []))
         merged["staffAuditLog"] = payload.get("staffAuditLog", merged.get("staffAuditLog", []))
         merged["stockEntrees"] = payload.get("stockEntrees", merged.get("stockEntrees", []))
@@ -950,6 +964,8 @@ class DataStore:
                 "stockLosses": json.loads(json.dumps(self._state.get("stockLosses", []))),
                 "dayBooks": json.loads(json.dumps(self._state.get("dayBooks", []))),
                 "purchaseOrders": json.loads(json.dumps(self._state.get("purchaseOrders", []))),
+                "casiers": json.loads(json.dumps(self._state.get("casiers", []))),
+                "casierMouvements": json.loads(json.dumps(self._state.get("casierMouvements", []))),
                 "creditRecoveries": json.loads(json.dumps(self._state.get("creditRecoveries", []))),
                 "categories": json.loads(json.dumps(self._state.get("categories", DEFAULT_STATE["categories"]))),
                 "charges": json.loads(json.dumps(self._state["charges"])),
@@ -1014,6 +1030,8 @@ class DataStore:
                 "stockLosses": filter_site_rows(self._state.get("stockLosses", [])),
                 "dayBooks": filter_site_rows(self._state.get("dayBooks", [])),
                 "purchaseOrders": filter_site_rows(self._state.get("purchaseOrders", [])),
+                "casiers": filter_site_rows(self._state.get("casiers", [])),
+                "casierMouvements": filter_site_rows(self._state.get("casierMouvements", [])),
                 "creditRecoveries": filter_site_rows(self._state.get("creditRecoveries", [])),
                 "categories": full["categories"],
                 "charges": filter_site_rows(self._state.get("charges", [])),
@@ -1067,6 +1085,8 @@ class DataStore:
             merged["stockChecks"] = payload.get("stockChecks", merged.get("stockChecks", []))
             merged["dayBooks"] = payload.get("dayBooks", merged.get("dayBooks", []))
             merged["purchaseOrders"] = payload.get("purchaseOrders", merged.get("purchaseOrders", []))
+            merged["casiers"] = payload.get("casiers", merged.get("casiers", []))
+            merged["casierMouvements"] = payload.get("casierMouvements", merged.get("casierMouvements", []))
             merged["creditRecoveries"] = payload.get("creditRecoveries", merged.get("creditRecoveries", []))
             merged["staffAuditLog"] = payload.get("staffAuditLog", merged.get("staffAuditLog", []))
             merged["stockEntrees"] = payload.get("stockEntrees", merged.get("stockEntrees", []))
@@ -1370,6 +1390,8 @@ class DataStore:
                 current["stockChecks"] = payload.get("stockChecks", current.get("stockChecks", []))
                 current["dayBooks"] = payload.get("dayBooks", current.get("dayBooks", []))
                 current["purchaseOrders"] = payload.get("purchaseOrders", current.get("purchaseOrders", []))
+                current["casiers"] = payload.get("casiers", current.get("casiers", []))
+                current["casierMouvements"] = payload.get("casierMouvements", current.get("casierMouvements", []))
                 current["creditRecoveries"] = payload.get("creditRecoveries", current.get("creditRecoveries", []))
                 current["categories"] = payload.get("categories", current.get("categories", DEFAULT_STATE["categories"]))
                 current["charges"] = payload.get("charges", current["charges"])
@@ -1440,6 +1462,8 @@ class DataStore:
             current["stockChecks"] = merge_scoped_rows(current.get("stockChecks", []), payload.get("stockChecks", []), allowed, sid_list)
             current["dayBooks"] = merge_scoped_rows(current.get("dayBooks", []), payload.get("dayBooks", []), allowed, sid_list)
             current["purchaseOrders"] = merge_scoped_rows(current.get("purchaseOrders", []), payload.get("purchaseOrders", []), allowed, sid_list)
+            current["casiers"] = merge_scoped_rows(current.get("casiers", []), payload.get("casiers", []), allowed, sid_list)
+            current["casierMouvements"] = merge_scoped_rows(current.get("casierMouvements", []), payload.get("casierMouvements", []), allowed, sid_list)
             current["creditRecoveries"] = merge_scoped_rows(current.get("creditRecoveries", []), payload.get("creditRecoveries", []), allowed, sid_list)
             current["charges"] = merge_scoped_rows(current.get("charges", []), payload.get("charges", []), allowed, sid_list)
             current["staffAuditLog"] = merge_scoped_rows(current.get("staffAuditLog", []), payload.get("staffAuditLog", []), allowed, sid_list)

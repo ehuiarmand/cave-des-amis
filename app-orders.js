@@ -428,11 +428,28 @@ function stockAvailabilityForLine(article, bottlesNeeded, excludeOrderId = null,
   return { stockItem, reserved, available, bottlesNeeded };
 }
 
-const VALID_CASE_SIZES = [6, 9, 12, 16, 20, 24];
+const VALID_CASE_SIZES = [1, 6, 9, 12, 16, 20, 24];
+
+function lotType(item = {}) {
+  const raw = String(item.lotType || "").trim().toLowerCase();
+  if (raw === "carton") return "carton";
+  if (raw === "unite" || raw === "unité" || raw === "unit" || raw === "u") return "unite";
+  return "casier";
+}
+
+function lotLabel(item = {}) {
+  const t = lotType(item);
+  if (t === "carton") return "carton";
+  if (t === "unite") return "unité";
+  return "casier";
+}
 
 function caseSize(item = {}) {
   const value = Number(item.caseSize) || 24;
-  return VALID_CASE_SIZES.includes(value) ? value : 24;
+  if (VALID_CASE_SIZES.includes(value)) return value;
+  // Unités par lot : si l'article est "unité", on retombe à 1
+  if (lotType(item) === "unite") return 1;
+  return 24;
 }
 
 function casesFromBottles(bottles, item = {}) {
@@ -596,8 +613,7 @@ const STAFF_AUDIT_MAX = 800;
 
 function shouldRecordStaffAudit() {
   if (!sessionUser) return false;
-  if (canSuperAdmin() || canSiteAdmin()) return false;
-  return currentRole === "manager" || currentRole === "serveuse";
+  return true;
 }
 
 function recordStaffAudit(verb, entity, summary, detail = "") {
@@ -931,19 +947,21 @@ function renderCasiers() {
   const container = document.getElementById("casiers-content");
   if (!container) return;
   renderBrasserieAttachMenu();
-  const products = recordsForSite(state.stock);
+  const products = recordsForSite(state.stock).filter((item) => lotType(item) !== "unite");
   if (!products.length) {
     container.innerHTML = "<p class='muted' style='padding:20px;text-align:center'>Aucun article dans le catalogue.</p>";
     return;
   }
-  // Group by brasserie (fallback to cat) then by caseSize
+  // Group by brasserie (fallback to cat) then by lotType+caseSize
   const byBrasserie = {};
   products.forEach((item) => {
     const key = (item.brasserie || "").trim() || (item.cat || "Autres");
     const cs = caseSize(item);
+    const lt = lotType(item);
+    const groupKey = `${lt}:${cs}`;
     if (!byBrasserie[key]) byBrasserie[key] = {};
-    if (!byBrasserie[key][cs]) byBrasserie[key][cs] = [];
-    byBrasserie[key][cs].push(item);
+    if (!byBrasserie[key][groupKey]) byBrasserie[key][groupKey] = [];
+    byBrasserie[key][groupKey].push(item);
   });
   let totalCasiersTous = 0, nbAlerte = 0, nbEpuise = 0;
   let html = "";
@@ -957,9 +975,18 @@ function renderCasiers() {
     html += "<h4 style='margin:0;font-size:0.9rem;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:#1976d2'>" + escapeHtml(brasserie) + "</h4>";
     html += "<span style='font-size:0.78rem;color:#757575'>" + fmt(catCasiers) + " casier(s) total</span>";
     html += "</div>";
-    // Sub-group by caseSize (sorted descending)
-    Object.entries(byCaseSize).sort(([a], [b]) => Number(b) - Number(a)).forEach(([csStr, items]) => {
-      const csNum = Number(csStr);
+    // Sub-group by lot type + case size (sorted by case size desc then casier/carton)
+    const groupEntries = Object.entries(byCaseSize).sort(([a], [b]) => {
+      const [ta, sa] = String(a).split(":");
+      const [tb, sb] = String(b).split(":");
+      const na = Number(sa) || 0;
+      const nb = Number(sb) || 0;
+      if (nb !== na) return nb - na;
+      return String(ta).localeCompare(String(tb), "fr");
+    });
+    groupEntries.forEach(([groupKey, items]) => {
+      const [lt, csStr] = String(groupKey).split(":");
+      const csNum = Number(csStr) || 24;
       const rows = items.map((item) => {
         const stockBtl = stockActuel(item);
         const casiersFull = Math.floor(stockBtl / csNum);
@@ -976,7 +1003,8 @@ function renderCasiers() {
       const groupCasiers = rows.filter((r) => !r.epuise).reduce((s, r) => s + r.casiersFull, 0);
       html += "<div style='margin-bottom:14px;padding:10px 12px 12px;border-radius:10px;border:1px solid #e0e0e0'>";
       html += "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>";
-      html += "<span style='font-size:0.82rem;font-weight:700;color:#444'>Casier de <strong style=\"color:#1976d2\">" + fmt(csNum) + " btl</strong></span>";
+      const groupLabel = lt === "carton" ? "Carton" : "Casier";
+      html += "<span style='font-size:0.82rem;font-weight:700;color:#444'>" + groupLabel + " de <strong style=\"color:#1976d2\">" + fmt(csNum) + " unité(s)</strong></span>";
       html += "<button type='button' class='mini-btn co-open-btn' data-co-brasserie='" + escapeHtml(brasserie) + "' data-co-cs='" + csNum + "' style='background:#1976d2;color:#fff;border:none;padding:4px 10px;border-radius:6px;font-size:0.78rem;cursor:pointer'>+ Commander</button>";
       html += "</div>";
       html += "<div style='overflow-x:auto'><table class='data-table' style='width:100%'>";
@@ -2062,7 +2090,51 @@ function renderDashboard() {
       </article>`).join("")}`
     : emptyState("Tout va bien", "Aucune alerte stock critique pour le moment.");
   renderBreakdown("pay-chart", paymentTotals(ventes), caTotal, "Aucun paiement disponible.");
+  renderDashboardCasierKpis(stock);
   syncMobileBottomBadges();
+}
+
+function renderDashboardCasierKpis(stockSiteList) {
+  const all = casiersForSite();
+  const k = { total: all.length, plein: 0, partiel: 0, vide: 0 };
+  all.forEach((c) => {
+    const st = String(c.statut || "vide").toLowerCase();
+    if (st === "plein") k.plein++;
+    else if (st === "partiel") k.partiel++;
+    else k.vide++;
+  });
+  const setText = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = String(val); };
+  setText("dash-casier-total", fmt(k.total));
+  setText("dash-casier-plein", fmt(k.plein));
+  setText("dash-casier-partiel", fmt(k.partiel));
+  setText("dash-casier-vide", fmt(k.vide));
+
+  const wrap = document.getElementById("dashboard-casier-suggest");
+  if (!wrap) return;
+  const items = (stockSiteList || recordsForSite(state.stock || []))
+    .filter((it) => lotType(it) !== "unite")
+    .map((it) => ({ item: it, sug: suggestReapproCasiers(it.article) }))
+    .filter((x) => x.sug.casiers > 0)
+    .sort((a, b) => b.sug.casiers - a.sug.casiers)
+    .slice(0, 6);
+  if (!items.length) {
+    wrap.innerHTML = `<p class="muted" style="margin:0;font-size:0.85rem">Aucun produit sous seuil. Le parc est equilibre.</p>`;
+    return;
+  }
+  wrap.innerHTML = `<p class="muted" style="margin:0 0 8px;font-size:0.82rem">Suggestion de casiers à commander (cible : 2× seuil min).</p>` +
+    items.map(({ item, sug }) => `<article class="list-item">
+      <div style="min-width:0">
+        <p class="list-item-title">${escapeHtml(item.article)}</p>
+        <p class="list-item-sub">Stock: ${fmt(stockActuel(item))} btl · Seuil: ${fmt(item.seuilMin || 0)} · ${fmt(caseSize(item))} btl/casier</p>
+      </div>
+      <div class="list-side">
+        <div>
+          <p class="list-item-amount" style="color:#ffcf79">${fmt(sug.casiers)} casier(s)</p>
+          <p class="list-item-date">${fmt(sug.manque)} btl manquantes</p>
+        </div>
+        <button type="button" class="mini-btn" data-propose-purchase="${item.id}">Proposer commande</button>
+      </div>
+    </article>`).join("");
 }
 
 function suggestPurchaseCases(stockItem) {
@@ -3100,7 +3172,7 @@ function renderStock() {
       <td class="stock-actions-cell">
         ${isFrigoLow && reserve > 0 ? `<button type="button" class="mini-btn" data-auto-fill-fridge="${item.id}">Remplir frigo</button>` : ""}
         <button type="button" class="stock-del-btn" style="background:rgba(197,79,65,0.18);color:#ff8e82" data-perte-id="${item.id}">Perte</button>
-        ${canAnyAdmin() ? `<button type="button" class="mini-btn" data-edit-stock="${item.id}">Modifier</button>
+        ${canManage() ? `<button type="button" class="mini-btn" data-edit-stock="${item.id}">Modifier</button>
         <button class="stock-del-btn" type="button" data-delete-type="stock" data-id="${item.id}">Suppr.</button>` : ""}
       </td>
     </tr>`;
@@ -4050,7 +4122,8 @@ function purchaseReceiptNeedsSnapshot(originalLines, receivedLines) {
   return false;
 }
 
-async function applyPurchaseReceipt(po, linesReceived) {
+async function applyPurchaseReceipt(po, linesReceived, opts = {}) {
+  const rangerCasiers = opts.rangerCasiers !== false;
   const receivedTotal = Math.round(linesReceived.reduce((sum, l) => sum + (Number(l.amount) || 0), 0));
   if (!linesReceived.length || receivedTotal <= 0) return false;
 
@@ -4068,12 +4141,20 @@ async function applyPurchaseReceipt(po, linesReceived) {
     const maxE = stockEntrees.reduce((m, e) => Math.max(m, Number(e.id) || 0), 0);
     state.nextId.stockEntree = Math.max(100, maxE + 1);
   }
+  state.casiers = state.casiers || [];
+  state.casierMouvements = state.casierMouvements || [];
+  if (!state.nextId.casier || Number.isNaN(Number(state.nextId.casier))) state.nextId.casier = 1;
+  if (!state.nextId.casierMouvement || Number.isNaN(Number(state.nextId.casierMouvement))) state.nextId.casierMouvement = 1;
+  let casiersCreated = 0;
+  let casiersUsed = 0;
+
   linesReceived.forEach((line) => {
     const cases = Number(line.cases) || 0;
     if (cases <= 0) return;
     const item = stockItems.find((s) => s.siteId === siteId && String(s.article || "").toLowerCase() === String(line.article || "").toLowerCase());
     if (!item) return;
-    const bottles = cases * (Number(line.caseSize) || caseSize(item));
+    const cs = Number(line.caseSize) || caseSize(item);
+    const bottles = cases * cs;
     item.entrees = (Number(item.entrees) || 0) + bottles;
     item.reserve = Math.max(0, Number(item.reserve) || 0) + bottles;
     item.lastReapproAt = new Date().toISOString();
@@ -4088,6 +4169,81 @@ async function applyPurchaseReceipt(po, linesReceived) {
       caseSize: line.caseSize,
       user: sessionUser || "system",
     });
+
+    if (rangerCasiers && lotType(item) !== "unite") {
+      let remaining = bottles;
+      const partials = (state.casiers || [])
+        .filter((c) => c.siteId === siteId && String(c.article || "").toLowerCase() === String(item.article || "").toLowerCase())
+        .filter((c) => (Number(c.quantiteActuelle) || 0) < (Number(c.capacite) || 0))
+        .sort((a, b) => (Number(b.quantiteActuelle) || 0) - (Number(a.quantiteActuelle) || 0));
+      partials.forEach((c) => {
+        if (remaining <= 0) return;
+        const cap = Math.max(1, Number(c.capacite) || 1);
+        const cur = Math.max(0, Number(c.quantiteActuelle) || 0);
+        const free = cap - cur;
+        if (free <= 0) return;
+        const add = Math.min(free, remaining);
+        c.quantiteActuelle = cur + add;
+        recomputeCasierStatus(c);
+        c.lastMoveAt = new Date().toISOString();
+        c.lastMoveBy = sessionUser || "system";
+        state.casierMouvements.unshift({
+          id: state.nextId.casierMouvement++,
+          siteId,
+          casierId: c.id,
+          casierCode: c.code,
+          article: item.article,
+          type: "entree",
+          quantite: add,
+          source: "fournisseur",
+          motif: "",
+          commentaire: `Réception ${po.supplier || "fournisseur"}`,
+          user: sessionUser || "system",
+          role: currentRole || "-",
+          date: po.date || today(),
+          createdAt: new Date().toISOString(),
+        });
+        remaining -= add;
+        casiersUsed++;
+      });
+      while (remaining > 0) {
+        const code = nextCasierCode();
+        const fill = Math.min(cs, remaining);
+        const newCasier = {
+          id: state.nextId.casier++,
+          siteId,
+          code,
+          article: item.article,
+          capacite: cs,
+          quantiteActuelle: fill,
+          emplacement: "À ranger",
+          statut: fill >= cs ? "plein" : "partiel",
+          createdAt: new Date().toISOString(),
+          createdBy: sessionUser || "system",
+          lastMoveAt: new Date().toISOString(),
+          lastMoveBy: sessionUser || "system",
+        };
+        state.casiers.push(newCasier);
+        state.casierMouvements.unshift({
+          id: state.nextId.casierMouvement++,
+          siteId,
+          casierId: newCasier.id,
+          casierCode: newCasier.code,
+          article: item.article,
+          type: "entree",
+          quantite: fill,
+          source: "fournisseur",
+          motif: "",
+          commentaire: `Création + réception ${po.supplier || "fournisseur"}`,
+          user: sessionUser || "system",
+          role: currentRole || "-",
+          date: po.date || today(),
+          createdAt: new Date().toISOString(),
+        });
+        remaining -= fill;
+        casiersCreated++;
+      }
+    }
   });
 
   state.charges = state.charges || [];
@@ -4105,17 +4261,22 @@ async function applyPurchaseReceipt(po, linesReceived) {
   po.status = "Reçue";
   po.receivedAt = new Date().toISOString();
   po.receivedBy = sessionUser || "system";
+  const casierDetail = rangerCasiers ? ` · casiers: ${casiersUsed} re-utilise(s), ${casiersCreated} cree(s)` : "";
   recordStaffAudit(
     "update",
     "reception_fournisseur",
     `Reception · ${po.supplier}`,
-    `${fmt(receivedTotal)} FCFA · ${linesReceived.length} ligne(s) livree(s) · ${po.payment || ""}`
+    `${fmt(receivedTotal)} FCFA · ${linesReceived.length} ligne(s) livree(s) · ${po.payment || ""}${casierDetail}`
   );
-  await persistState({ stock: stockItems, purchaseOrders: state.purchaseOrders, charges: state.charges, nextId: state.nextId, stockEntrees });
+  await persistState({ stock: stockItems, purchaseOrders: state.purchaseOrders, charges: state.charges, nextId: state.nextId, stockEntrees, casiers: state.casiers, casierMouvements: state.casierMouvements });
   renderStock();
   renderPurchaseOrders();
   refreshCreanciersIfVisible();
-  showToast("Commande receptionnee selon les quantites livrees.");
+  if (rangerCasiers && (casiersCreated + casiersUsed) > 0) {
+    showToast(`Commande receptionnee. ${casiersCreated} nouveau(x) casier(s), ${casiersUsed} casier(s) complete(s).`);
+  } else {
+    showToast("Commande receptionnee selon les quantites livrees.");
+  }
   return true;
 }
 
@@ -4205,8 +4366,10 @@ async function confirmReceivePurchaseOrder() {
     )
   )
     return;
+  const rangerEl = document.getElementById("purchase-receive-ranger");
+  const rangerCasiers = rangerEl ? Boolean(rangerEl.checked) : true;
   closeModal("modal-purchase-receive");
-  await applyPurchaseReceipt(po, linesReceived);
+  await applyPurchaseReceipt(po, linesReceived, { rangerCasiers });
 }
 
 async function removePurchaseOrderLine(poId, lineIndex) {
@@ -4586,6 +4749,7 @@ function resetStockForm() {
   document.getElementById("s-article").value = "";
   document.getElementById("s-init").value = "0";
   document.getElementById("s-case-size").value = "24";
+  document.getElementById("s-lot-type").value = "casier";
   document.getElementById("s-seuil").value = "5";
   document.getElementById("s-pack").value = "1";
   document.getElementById("s-frigo").value = "0";
@@ -4602,8 +4766,8 @@ function resetStockForm() {
 }
 
 function openEditStock(itemId) {
-  if (!canAnyAdmin()) {
-    showToast("Modification du catalogue reservee a un administrateur.");
+  if (!canManage()) {
+    showToast("Modification du catalogue reservee au gerant ou administrateur.");
     return;
   }
   const item = state.stock.find((i) => i.id === itemId);
@@ -4612,6 +4776,7 @@ function openEditStock(itemId) {
   document.getElementById("s-article").value = item.article;
   document.getElementById("s-cat").value = item.cat;
   document.getElementById("s-case-size").value = String(caseSize(item));
+  document.getElementById("s-lot-type").value = lotType(item);
   document.getElementById("s-init").value = String(item.initCases ?? casesFromBottles(item.init, item));
   document.getElementById("s-seuil").value = String(item.seuilMin || 5);
   document.getElementById("s-pack").value = String(item.packSize || 1);
@@ -4631,8 +4796,8 @@ function openEditStock(itemId) {
 
 async function saveStock() {
   commitStockPriceInput();
-  if (!canAnyAdmin()) {
-    showToast("Modification du catalogue reservee a un administrateur.");
+  if (!canManage()) {
+    showToast("Modification du catalogue reservee au gerant ou administrateur.");
     return;
   }
   const editId = document.getElementById("s-edit-id").value;
@@ -4643,6 +4808,7 @@ async function saveStock() {
   }
   const fields = {
     caseSize: (VALID_CASE_SIZES.includes(Number(document.getElementById("s-case-size").value)) ? Number(document.getElementById("s-case-size").value) : 24),
+    lotType: String(document.getElementById("s-lot-type")?.value || "casier"),
     article: articleName,
     cat: document.getElementById("s-cat").value,
     brasserie: (document.getElementById("s-brasserie")?.value || "").trim(),
@@ -4655,6 +4821,10 @@ async function saveStock() {
   fields.packSize = Math.max(1, Number(primaryFormat?.quantite) || Number(document.getElementById("s-pack").value) || 1);
   fields.prixVenteInt = Number(primaryFormat?.prixInterieur) || Number(document.getElementById("s-prix-kit-int").value) || 0;
   fields.prixVenteExt = Number(primaryFormat?.prixExterieur) || Number(document.getElementById("s-prix-kit-ext").value) || fields.prixVenteInt;
+  // Si article à l'unité, forcer 1 unité par lot.
+  if (String(fields.lotType).toLowerCase() === "unite" || String(fields.lotType).toLowerCase() === "unité") {
+    fields.caseSize = 1;
+  }
   fields.init = fields.initCases * fields.caseSize;
   fields.frigo = Math.max(0, Number(document.getElementById("s-frigo").value) || 0);
   const reserveInput = document.getElementById("s-reserve").value;
@@ -4671,7 +4841,36 @@ async function saveStock() {
   }
   if (editId) {
     const item = state.stock.find((i) => i.id === Number(editId));
-    if (item) Object.assign(item, fields);
+    if (item) {
+      const before = JSON.parse(JSON.stringify(item));
+      Object.assign(item, fields);
+      const changes = [];
+      const pushChange = (label, a, b) => {
+        const sa = a == null ? "" : String(a);
+        const sb = b == null ? "" : String(b);
+        if (sa !== sb) changes.push(`${label}: ${sa || "—"} → ${sb || "—"}`);
+      };
+      pushChange("Article", before.article, item.article);
+      pushChange("Categorie", before.cat, item.cat);
+      pushChange("Type lot", lotType(before), lotType(item));
+      pushChange("Unites/lot", caseSize(before), caseSize(item));
+      pushChange("Seuil (btl)", before.seuilMin, item.seuilMin);
+      pushChange("PA/lot", before.prixAchat, item.prixAchat);
+      pushChange("Pack", before.packSize, item.packSize);
+      pushChange("PV int", before.prixVenteInt, item.prixVenteInt);
+      pushChange("PV ext", before.prixVenteExt, item.prixVenteExt);
+      pushChange("Init lots", before.initCases, item.initCases);
+      pushChange("Stock init (btl)", before.init, item.init);
+      pushChange("Frigo (btl)", before.frigo, item.frigo);
+      pushChange("Reserve (btl)", before.reserve, item.reserve);
+      const header = `ID ${item.id} · ${item.siteId || ""}`.trim();
+      recordStaffAudit(
+        "update",
+        "catalogue_article",
+        `Article modifie : ${articleName}`,
+        `${header}\n${changes.length ? changes.join("\n") : "Aucun changement detecte."}`,
+      );
+    }
   } else {
     state.stock.push({ id: state.nextId.stock++, siteId: currentSiteId(), entrees: 0, sorties: 0, createdAt: new Date().toISOString(), createdBy: sessionUser || "-", ...fields });
     recordStaffAudit("create", "catalogue_article", `Article ajoute : ${articleName}`, `${fields.cat} · PA ${fmt(fields.prixAchat)}/cas. · vente int. ${fmt(fields.prixVenteInt)}`);
@@ -4889,11 +5088,26 @@ async function closeAccountingDay() {
     check,
     ...(state.stockChecks || []).filter((item) => !(item.siteId === check.siteId && item.date === check.date)),
   ];
+  const gapLines = stockGaps
+    .slice()
+    .sort((a, b) => Math.abs(Number(b.ecart) || 0) - Math.abs(Number(a.ecart) || 0))
+    .map((g, i) => {
+      const sign = g.ecart > 0 ? "+" : "";
+      return `${i + 1}. ${g.article} · ouv ${fmt(g.stockAvant)} · ventes ${fmt(g.sortiesToday)} · theo ${fmt(g.expected)} · compte ${fmt(g.counted)} (F ${fmt(g.frigo)} / R ${fmt(g.reserve)}) · ecart ${sign}${fmt(g.ecart)}`;
+    });
+  const cashBlock = [
+    `Date: ${formatDateDdMmYyyy(dStr)}`,
+    `CA encaisse: ${fmt(caEncaisse)} FCFA · Creances: ${fmt(caCreances)} FCFA · Nb ventes: ${fmt(ventesJour.length)}`,
+    `Caisse especes: ouverture ${fmt(openingCash)} · ventes ${fmt(especesVentes)} · charges ${fmt(especesCharges)} · attendu ${fmt(expectedEspecesCash)} · denombre ${fmt(closingCashFcfa)} · ecart ${cashEcartEspeces > 0 ? "+" : ""}${fmt(cashEcartEspeces)}`,
+  ].join("\n");
+  const stockBlock = gapLines.length
+    ? `\n\nEcarts stock (${gapLines.length}):\n${gapLines.join("\n")}`
+    : "\n\nEcarts stock: aucun (OK).";
   recordStaffAudit(
     "update",
     "cloture_jour",
     `Cloture journee ${formatDateDdMmYyyy(dStr)}`,
-    `CA encaisse ${fmt(caEncaisse)} · stock conforme · caisse esp. ecart ${fmt(cashEcartEspeces)}`,
+    `${cashBlock}${stockBlock}`,
   );
   await persistState({ stock: state.stock, stockChecks: state.stockChecks });
   renderStock();
@@ -5735,6 +5949,7 @@ async function savePerte() {
     return;
   }
   item.sorties = (Number(item.sorties) || 0) + qty;
+  consumePhysicalStock(item, qty);
   item.lastSortieAt = new Date().toISOString();
   item.lastSortieBy = sessionUser || "-";
   state.stockLosses = state.stockLosses || [];
@@ -5760,6 +5975,785 @@ async function savePerte() {
   renderStock();
   renderDashboard();
   showToast(`Perte de ${fmt(qty)} btl "${item.article}" enregistree (${motif}).`);
+}
+
+function updateCasierMoveInfos() {
+  const sel = document.getElementById("casier-move-article");
+  const itemId = Number(sel?.value);
+  const item = (state?.stock || []).find((i) => i.id === itemId) || null;
+  const stockInfo = document.getElementById("casier-move-stock-info");
+  const caseInfo = document.getElementById("casier-move-case-info");
+  const preview = document.getElementById("casier-move-preview");
+  const cases = Math.max(0, Math.floor(Number(document.getElementById("casier-move-cases")?.value) || 0));
+  if (!item) {
+    if (stockInfo) stockInfo.textContent = "";
+    if (caseInfo) caseInfo.textContent = "—";
+    if (preview) preview.textContent = "";
+    return;
+  }
+  const cs = caseSize(item);
+  const label = lotLabel(item);
+  if (stockInfo) stockInfo.textContent = `Frigo: ${fmt(stockFrigo(item))} btl · Reserve: ${fmt(stockReserve(item))} btl · Total: ${fmt(stockActuel(item))} btl`;
+  if (caseInfo) caseInfo.textContent = `${fmt(cs)} unité(s) / ${label}`;
+  const bottles = cases > 0 ? cases * cs : 0;
+  const mode = document.getElementById("casier-move-mode")?.value || "entree";
+  if (preview) preview.textContent = bottles > 0 ? `${mode === "sortie" ? "-" : "+"}${fmt(cases)} ${label}(s) = ${fmt(bottles)} unité(s) pour "${item.article}".` : "";
+}
+
+function openCasierMoveModal(mode = "entree") {
+  const title = document.getElementById("casier-move-title");
+  const modeEl = document.getElementById("casier-move-mode");
+  if (modeEl) modeEl.value = mode === "sortie" ? "sortie" : "entree";
+  if (title) title.textContent = mode === "sortie" ? "Sortie de lots" : "Entrée de lots";
+
+  const items = recordsForSite(state.stock).filter((i) => lotType(i) !== "unite").slice().sort((a, b) => String(a.article || "").localeCompare(String(b.article || ""), "fr"));
+  const sel = document.getElementById("casier-move-article");
+  if (sel) {
+    sel.innerHTML = items.map((i) => `<option value="${i.id}">${escapeHtml(i.article)} (${fmt(stockActuel(i))} btl)</option>`).join("");
+  }
+  const casesEl = document.getElementById("casier-move-cases");
+  const notesEl = document.getElementById("casier-move-notes");
+  if (casesEl) casesEl.value = "";
+  if (notesEl) notesEl.value = "";
+  updateCasierMoveInfos();
+  openModal("modal-casier-move");
+  window.requestAnimationFrame(() => casesEl?.focus());
+}
+
+async function submitCasierMove() {
+  const mode = document.getElementById("casier-move-mode")?.value || "entree";
+  const itemId = Number(document.getElementById("casier-move-article")?.value);
+  const cases = Math.max(0, Math.floor(Number(document.getElementById("casier-move-cases")?.value) || 0));
+  const notes = String(document.getElementById("casier-move-notes")?.value || "").trim();
+  if (!itemId) { showToast("Choisissez un article."); return; }
+  if (cases <= 0) { showToast("Entrez un nombre de casiers valide."); return; }
+  const item = state.stock.find((i) => i.id === itemId);
+  if (!item) return;
+  const cs = caseSize(item);
+  const bottles = cases * cs;
+
+  if (!state.nextId) state.nextId = {};
+
+  if (mode === "sortie") {
+    if (bottles > stockActuel(item)) {
+      showToast(`Stock insuffisant (${fmt(stockActuel(item))} btl disponibles).`);
+      return;
+    }
+    item.sorties = (Number(item.sorties) || 0) + bottles;
+    consumePhysicalStock(item, bottles);
+    item.lastSortieAt = new Date().toISOString();
+    item.lastSortieBy = sessionUser || "-";
+
+    state.stockLosses = state.stockLosses || [];
+    if (state.nextId.stockLoss == null || Number.isNaN(Number(state.nextId.stockLoss))) {
+      const maxL = state.stockLosses.reduce((m, l) => Math.max(m, Number(l.id) || 0), 0);
+      state.nextId.stockLoss = Math.max(100, maxL + 1);
+    }
+    state.stockLosses.push({
+      id: state.nextId.stockLoss++,
+      siteId: currentSiteId(),
+      article: item.article,
+      qty: bottles,
+      cases,
+      caseSize: cs,
+      motif: "Sortie casiers",
+      notes,
+      date: today(),
+      createdAt: new Date().toISOString(),
+      createdBy: sessionUser || "-",
+    });
+    recordStaffAudit("create", "casiers_sortie", `Sortie casiers · ${item.article}`, `${fmt(cases)} cas. x ${fmt(cs)} btl · ${fmt(bottles)} btl${notes ? ` · ${notes}` : ""}`);
+    await persistState({ stock: state.stock, nextId: state.nextId, stockLosses: state.stockLosses });
+    closeModal("modal-casier-move");
+    renderStock();
+    renderCasiers();
+    renderDashboard();
+    showToast(`-${fmt(cases)} casier(s) (${fmt(bottles)} btl) pour "${item.article}".`);
+    return;
+  }
+
+  item.entrees = (Number(item.entrees) || 0) + bottles;
+  item.reserve = stockReserve(item) + bottles;
+  item.lastReapproAt = new Date().toISOString();
+  item.lastReapproBy = sessionUser || "-";
+
+  state.stockEntrees = state.stockEntrees || [];
+  if (state.nextId.stockEntree == null || Number.isNaN(Number(state.nextId.stockEntree))) {
+    const maxE = state.stockEntrees.reduce((m, e) => Math.max(m, Number(e.id) || 0), 0);
+    state.nextId.stockEntree = Math.max(100, maxE + 1);
+  }
+  state.stockEntrees.unshift({
+    id: state.nextId.stockEntree++,
+    siteId: currentSiteId(),
+    date: today(),
+    article: item.article,
+    cases,
+    caseSize: cs,
+    qty: bottles,
+    user: sessionUser || "-",
+    notes,
+    source: "casiers",
+  });
+  recordStaffAudit("create", "casiers_entree", `Entree casiers · ${item.article}`, `${fmt(cases)} cas. x ${fmt(cs)} btl · ${fmt(bottles)} btl${notes ? ` · ${notes}` : ""}`);
+  await persistState({ stock: state.stock, nextId: state.nextId, stockEntrees: state.stockEntrees });
+  closeModal("modal-casier-move");
+  renderStock();
+  renderCasiers();
+  renderDashboard();
+  showToast(`+${fmt(cases)} casier(s) (${fmt(bottles)} btl) pour "${item.article}".`);
+}
+
+/* ===========================================================
+ * MODULE CASIERS PHYSIQUES (CAS-XXXX)
+ * =========================================================== */
+
+let casierPhysFilters = { article: "", emplacement: "", statut: "all" };
+let casierViewMode = "lots"; // "lots" | "physique"
+
+function casiersForSite(sourceState = state) {
+  const list = Array.isArray(sourceState?.casiers) ? sourceState.casiers : [];
+  return list.filter((c) => rowMatchesSite(c, currentSiteId(), multiSiteActive()));
+}
+
+function casierMouvementsForSite(sourceState = state) {
+  const list = Array.isArray(sourceState?.casierMouvements) ? sourceState.casierMouvements : [];
+  return list.filter((c) => rowMatchesSite(c, currentSiteId(), multiSiteActive()));
+}
+
+function recomputeCasierStatus(casier) {
+  if (!casier) return casier;
+  const cap = Math.max(1, Number(casier.capacite) || 1);
+  const qty = Math.max(0, Number(casier.quantiteActuelle) || 0);
+  if (qty <= 0) casier.statut = "vide";
+  else if (qty >= cap) casier.statut = "plein";
+  else casier.statut = "partiel";
+  return casier;
+}
+
+function casierStatutBadge(casier) {
+  const st = String(casier?.statut || "vide").toLowerCase();
+  if (st === "plein") return `<span class="badge badge-green">Plein</span>`;
+  if (st === "partiel") return `<span class="badge badge-amber">Partiel</span>`;
+  return `<span class="badge badge-red">Vide</span>`;
+}
+
+function nextCasierCode() {
+  state.casiers = state.casiers || [];
+  state.nextId = state.nextId || {};
+  let n = Math.max(1, Number(state.nextId.casier) || 1);
+  const usedCodes = new Set(state.casiers.map((c) => String(c.code || "").toUpperCase()));
+  let code;
+  do {
+    code = `CAS-${String(n).padStart(4, "0")}`;
+    n += 1;
+  } while (usedCodes.has(code));
+  state.nextId.casier = n;
+  return code;
+}
+
+function findCasierById(id) {
+  return (state.casiers || []).find((c) => Number(c.id) === Number(id)) || null;
+}
+
+function findCasierByCode(code) {
+  const norm = String(code || "").trim().toUpperCase();
+  if (!norm) return null;
+  return (state.casiers || []).find((c) => String(c.code || "").toUpperCase() === norm) || null;
+}
+
+function suggestReapproCasiers(article) {
+  const item = stockItemForArticle(article);
+  if (!item) return { manque: 0, casiers: 0 };
+  const stock = stockActuel(item);
+  const seuil = Math.max(0, Number(item.seuilMin) || 0);
+  const target = seuil * 2;
+  const manque = Math.max(0, target - stock);
+  const cs = Math.max(1, caseSize(item));
+  return { manque, casiers: Math.ceil(manque / cs) };
+}
+
+function canManageCasier() {
+  return canManage();
+}
+
+function canMoveCasier() {
+  return Boolean(sessionUser);
+}
+
+function logCasierAudit(verb, casier, before, item, beforeStock, qty, opts = {}) {
+  const codeLabel = casier?.code || "CAS-?";
+  const article = casier?.article || "?";
+  const cap = Math.max(1, Number(casier?.capacite) || 1);
+  const qBefore = Math.max(0, Number(before?.quantiteActuelle) || 0);
+  const qAfter = Math.max(0, Number(casier?.quantiteActuelle) || 0);
+  const stAfter = item ? stockActuel(item) : null;
+  const frigoAfter = item ? stockFrigo(item) : null;
+  const reserveAfter = item ? stockReserve(item) : null;
+  const lines = [];
+  lines.push(`${codeLabel} · ${article} · ${String(opts.type || verb).toUpperCase()} · qty ${fmt(qty)}`);
+  lines.push(`casier ${fmt(qBefore)} → ${fmt(qAfter)} (cap ${fmt(cap)} · ${casier?.statut || "?"})`);
+  if (item) {
+    lines.push(`reserve ${fmt(beforeStock?.reserve || 0)} → ${fmt(reserveAfter)} · frigo ${fmt(beforeStock?.frigo || 0)} → ${fmt(frigoAfter)} · stock ${fmt(beforeStock?.total || 0)} → ${fmt(stAfter)}`);
+  }
+  if (opts.source) lines.push(`source: ${opts.source}`);
+  if (opts.motif) lines.push(`motif: ${opts.motif}`);
+  if (opts.commentaire) lines.push(`note: ${opts.commentaire}`);
+  recordStaffAudit(verb, opts.entity || "casier", `${codeLabel} · ${article} · ${opts.label || verb}`, lines.join("\n"));
+}
+
+async function ensurePhysicalCasiersFromReserve() {
+  if (!state || !Array.isArray(state.stock)) return;
+  state.casiers = state.casiers || [];
+  state.casierMouvements = state.casierMouvements || [];
+  if (state.casiers.length > 0) return;
+  const eligible = (state.stock || []).filter((item) => {
+    if (lotType(item) === "unite") return false;
+    if (!item.siteId) return true;
+    return true;
+  });
+  let created = 0;
+  eligible.forEach((item) => {
+    const reserve = stockReserve(item);
+    if (reserve <= 0) return;
+    const cap = Math.max(1, caseSize(item));
+    const fullCount = Math.floor(reserve / cap);
+    const remainder = reserve - fullCount * cap;
+    for (let i = 0; i < fullCount; i++) {
+      const code = nextCasierCode();
+      state.casiers.push({
+        id: state.nextId.casier++,
+        siteId: item.siteId || currentSiteId(),
+        code,
+        article: item.article,
+        capacite: cap,
+        quantiteActuelle: cap,
+        emplacement: "À ranger",
+        statut: "plein",
+        createdAt: new Date().toISOString(),
+        createdBy: sessionUser || "-",
+        autoInitialized: true,
+      });
+      created++;
+    }
+    if (remainder > 0) {
+      const code = nextCasierCode();
+      state.casiers.push({
+        id: state.nextId.casier++,
+        siteId: item.siteId || currentSiteId(),
+        code,
+        article: item.article,
+        capacite: cap,
+        quantiteActuelle: remainder,
+        emplacement: "À ranger",
+        statut: "partiel",
+        createdAt: new Date().toISOString(),
+        createdBy: sessionUser || "-",
+        autoInitialized: true,
+      });
+      created++;
+    }
+  });
+  if (created > 0) {
+    recordStaffAudit("create", "casier_init", `Initialisation casiers physiques (${created})`, `Création automatique de ${created} casier(s) à partir de la réserve actuelle.`);
+    try {
+      await persistState({ casiers: state.casiers, nextId: state.nextId });
+    } catch (e) {
+      console.warn("ensurePhysicalCasiersFromReserve: persist failed", e);
+    }
+  }
+}
+
+function snapshotItemStock(item) {
+  if (!item) return { frigo: 0, reserve: 0, total: 0 };
+  return { frigo: stockFrigo(item), reserve: stockReserve(item), total: stockActuel(item) };
+}
+
+async function createCasier({ article, capacite, emplacement, quantiteActuelle = 0 }) {
+  if (!canManageCasier()) {
+    showToast("Reserve au gerant ou administrateur.");
+    return null;
+  }
+  const articleName = String(article || "").trim();
+  if (!articleName) { showToast("Choisissez un article."); return null; }
+  const item = stockItemForArticle(articleName);
+  if (!item) { showToast("Article introuvable dans le stock."); return null; }
+  const cap = Math.max(1, Math.floor(Number(capacite) || 0));
+  if (cap <= 0) { showToast("Capacite invalide."); return null; }
+  const qty0 = Math.max(0, Math.floor(Number(quantiteActuelle) || 0));
+  if (qty0 > cap) { showToast(`Quantite initiale (${qty0}) > capacite (${cap}).`); return null; }
+  state.casiers = state.casiers || [];
+  state.nextId = state.nextId || {};
+  const code = nextCasierCode();
+  const beforeStock = snapshotItemStock(item);
+  const casier = {
+    id: state.nextId.casier++,
+    siteId: currentSiteId(),
+    code,
+    article: item.article,
+    capacite: cap,
+    quantiteActuelle: qty0,
+    emplacement: String(emplacement || "").trim() || "—",
+    statut: "vide",
+    createdAt: new Date().toISOString(),
+    createdBy: sessionUser || "-",
+  };
+  recomputeCasierStatus(casier);
+  state.casiers.push(casier);
+  if (qty0 > 0) {
+    item.entrees = (Number(item.entrees) || 0) + qty0;
+    item.reserve = stockReserve(item) + qty0;
+    state.casierMouvements = state.casierMouvements || [];
+    state.casierMouvements.unshift({
+      id: state.nextId.casierMouvement++,
+      siteId: currentSiteId(),
+      casierId: casier.id,
+      casierCode: casier.code,
+      article: casier.article,
+      type: "entree",
+      quantite: qty0,
+      source: "creation",
+      motif: "",
+      commentaire: "Quantite initiale (creation casier)",
+      user: sessionUser || "-",
+      role: currentRole || "-",
+      date: today(),
+      createdAt: new Date().toISOString(),
+    });
+    casier.lastMoveAt = new Date().toISOString();
+    casier.lastMoveBy = sessionUser || "-";
+  }
+  logCasierAudit("create", casier, { quantiteActuelle: 0 }, item, beforeStock, qty0, {
+    type: "CREATE",
+    label: "Nouveau casier",
+    source: qty0 > 0 ? "creation" : "",
+    commentaire: emplacement ? `emplacement: ${emplacement}` : "",
+    entity: "casier",
+  });
+  await persistState({ stock: state.stock, casiers: state.casiers, casierMouvements: state.casierMouvements, nextId: state.nextId });
+  return casier;
+}
+
+async function casierEntree(casierId, qty, { source = "fournisseur", commentaire = "" } = {}) {
+  if (!canMoveCasier()) { showToast("Connexion requise."); return false; }
+  const casier = findCasierById(casierId);
+  if (!casier) { showToast("Casier introuvable."); return false; }
+  const q = Math.max(0, Math.floor(Number(qty) || 0));
+  if (q <= 0) { showToast("Quantite invalide."); return false; }
+  const cap = Math.max(1, Number(casier.capacite) || 1);
+  const current = Math.max(0, Number(casier.quantiteActuelle) || 0);
+  if (current + q > cap) {
+    showToast(`Capacite depassee (${cap}). Disponible: ${cap - current}.`);
+    return false;
+  }
+  const item = stockItemForArticle(casier.article);
+  if (!item) { showToast("Article du casier introuvable."); return false; }
+  const before = JSON.parse(JSON.stringify(casier));
+  const beforeStock = snapshotItemStock(item);
+
+  casier.quantiteActuelle = current + q;
+  recomputeCasierStatus(casier);
+  casier.lastMoveAt = new Date().toISOString();
+  casier.lastMoveBy = sessionUser || "-";
+
+  item.entrees = (Number(item.entrees) || 0) + q;
+  item.reserve = stockReserve(item) + q;
+  item.lastReapproAt = new Date().toISOString();
+  item.lastReapproBy = sessionUser || "-";
+
+  state.casierMouvements = state.casierMouvements || [];
+  state.casierMouvements.unshift({
+    id: state.nextId.casierMouvement++,
+    siteId: currentSiteId(),
+    casierId: casier.id,
+    casierCode: casier.code,
+    article: casier.article,
+    type: "entree",
+    quantite: q,
+    source: String(source || "autre"),
+    motif: "",
+    commentaire: String(commentaire || ""),
+    user: sessionUser || "-",
+    role: currentRole || "-",
+    date: today(),
+    createdAt: new Date().toISOString(),
+  });
+  logCasierAudit("create", casier, before, item, beforeStock, q, {
+    type: "ENTREE",
+    label: "Entree casier",
+    source,
+    commentaire,
+    entity: "casier_entree",
+  });
+  await persistState({ stock: state.stock, casiers: state.casiers, casierMouvements: state.casierMouvements, nextId: state.nextId });
+  return true;
+}
+
+async function casierSortie(casierId, qty, { motif = "autre", commentaire = "" } = {}) {
+  if (!canMoveCasier()) { showToast("Connexion requise."); return false; }
+  const casier = findCasierById(casierId);
+  if (!casier) { showToast("Casier introuvable."); return false; }
+  const q = Math.max(0, Math.floor(Number(qty) || 0));
+  if (q <= 0) { showToast("Quantite invalide."); return false; }
+  const current = Math.max(0, Number(casier.quantiteActuelle) || 0);
+  if (q > current) {
+    showToast(`Stock insuffisant dans le casier (${current}).`);
+    return false;
+  }
+  const item = stockItemForArticle(casier.article);
+  if (!item) { showToast("Article du casier introuvable."); return false; }
+  const before = JSON.parse(JSON.stringify(casier));
+  const beforeStock = snapshotItemStock(item);
+  const motifKey = String(motif || "autre").toLowerCase();
+
+  casier.quantiteActuelle = current - q;
+  recomputeCasierStatus(casier);
+  casier.lastMoveAt = new Date().toISOString();
+  casier.lastMoveBy = sessionUser || "-";
+
+  if (motifKey === "frigo") {
+    // Transfert reserve -> frigo : casier - q ; item.reserve - q ; item.frigo + q (compteurs entrees/sorties inchangés)
+    item.reserve = Math.max(0, stockReserve(item) - q);
+    item.frigo = stockFrigo(item) + q;
+  } else {
+    // Sortie reelle (vente / casse / transfert vers exterieur / autre)
+    item.sorties = (Number(item.sorties) || 0) + q;
+    item.reserve = Math.max(0, stockReserve(item) - q);
+    item.lastSortieAt = new Date().toISOString();
+    item.lastSortieBy = sessionUser || "-";
+    if (motifKey === "casse" || motifKey === "perte" || motifKey === "vol" || motifKey === "peremption") {
+      state.stockLosses = state.stockLosses || [];
+      if (state.nextId.stockLoss == null || Number.isNaN(Number(state.nextId.stockLoss))) {
+        const maxL = state.stockLosses.reduce((m, l) => Math.max(m, Number(l.id) || 0), 0);
+        state.nextId.stockLoss = Math.max(100, maxL + 1);
+      }
+      state.stockLosses.push({
+        id: state.nextId.stockLoss++,
+        siteId: currentSiteId(),
+        article: casier.article,
+        qty: q,
+        cases: 0,
+        caseSize: Number(casier.capacite) || 0,
+        motif: String(motif || "Perte"),
+        notes: `${casier.code}${commentaire ? " · " + commentaire : ""}`,
+        date: today(),
+        createdAt: new Date().toISOString(),
+        createdBy: sessionUser || "-",
+        casierId: casier.id,
+        casierCode: casier.code,
+      });
+    }
+  }
+
+  state.casierMouvements = state.casierMouvements || [];
+  state.casierMouvements.unshift({
+    id: state.nextId.casierMouvement++,
+    siteId: currentSiteId(),
+    casierId: casier.id,
+    casierCode: casier.code,
+    article: casier.article,
+    type: "sortie",
+    quantite: q,
+    source: "",
+    motif: String(motif || "autre"),
+    commentaire: String(commentaire || ""),
+    user: sessionUser || "-",
+    role: currentRole || "-",
+    date: today(),
+    createdAt: new Date().toISOString(),
+  });
+  logCasierAudit("create", casier, before, item, beforeStock, q, {
+    type: "SORTIE",
+    label: "Sortie casier",
+    motif,
+    commentaire,
+    entity: "casier_sortie",
+  });
+  await persistState({ stock: state.stock, casiers: state.casiers, casierMouvements: state.casierMouvements, nextId: state.nextId, stockLosses: state.stockLosses });
+  return true;
+}
+
+async function deleteCasier(casierId) {
+  if (!canManageCasier()) { showToast("Reserve au gerant ou administrateur."); return false; }
+  const casier = findCasierById(casierId);
+  if (!casier) return false;
+  if ((Number(casier.quantiteActuelle) || 0) > 0) {
+    showToast("Casier non vide : videz-le avant de le supprimer.");
+    return false;
+  }
+  if (!window.confirm(`Supprimer le casier ${casier.code} (${casier.article}) ?`)) return false;
+  state.casiers = (state.casiers || []).filter((c) => Number(c.id) !== Number(casierId));
+  recordStaffAudit("delete", "casier", `Suppression casier ${casier.code}`, `${casier.code} · ${casier.article} · emplacement ${casier.emplacement || "-"}`);
+  await persistState({ casiers: state.casiers });
+  return true;
+}
+
+/* -----------------------------------------------------------
+ * Rendu et UI Casiers physiques
+ * ----------------------------------------------------------- */
+
+function setCasierViewMode(mode) {
+  casierViewMode = mode === "physique" ? "physique" : "lots";
+  const lotsEl = document.getElementById("casier-view-lots");
+  const lotsExtra = document.getElementById("casier-view-lots-extra");
+  const physEl = document.getElementById("casier-view-physique");
+  if (lotsEl) lotsEl.classList.toggle("hidden", casierViewMode !== "lots");
+  if (lotsExtra) lotsExtra.classList.toggle("hidden", casierViewMode !== "lots");
+  if (physEl) physEl.classList.toggle("hidden", casierViewMode !== "physique");
+  document.querySelectorAll("[data-casier-view]").forEach((btn) => {
+    const active = btn.dataset.casierView === casierViewMode;
+    btn.classList.toggle("active", active);
+    btn.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  if (casierViewMode === "physique") renderCasierPhysique();
+  else renderCasiers();
+}
+
+function renderCasierPhysique() {
+  const list = document.getElementById("casier-phys-list");
+  if (!list) return;
+  const all = casiersForSite();
+  const fArticle = String(casierPhysFilters.article || "").trim().toLowerCase();
+  const fEmplacement = String(casierPhysFilters.emplacement || "").trim().toLowerCase();
+  const fStatut = String(casierPhysFilters.statut || "all").toLowerCase();
+  const filtered = all.filter((c) => {
+    if (fArticle && !String(c.article || "").toLowerCase().includes(fArticle)) return false;
+    if (fEmplacement && !String(c.emplacement || "").toLowerCase().includes(fEmplacement)) return false;
+    if (fStatut !== "all" && String(c.statut || "").toLowerCase() !== fStatut) return false;
+    return true;
+  });
+  // KPIs
+  const kpis = { total: all.length, plein: 0, partiel: 0, vide: 0 };
+  all.forEach((c) => {
+    const st = String(c.statut || "vide").toLowerCase();
+    if (st === "plein") kpis.plein++;
+    else if (st === "partiel") kpis.partiel++;
+    else kpis.vide++;
+  });
+  const setText = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = String(val); };
+  setText("casier-phys-kpi-total", fmt(kpis.total));
+  setText("casier-phys-kpi-plein", fmt(kpis.plein));
+  setText("casier-phys-kpi-partiel", fmt(kpis.partiel));
+  setText("casier-phys-kpi-vide", fmt(kpis.vide));
+
+  if (!filtered.length) {
+    list.innerHTML = emptyState(
+      all.length ? "Aucun casier ne correspond" : "Aucun casier physique",
+      all.length ? "Ajustez les filtres ci-dessus." : "Cliquez sur '+ Nouveau casier' pour démarrer.",
+    );
+  } else {
+    const sorted = filtered.slice().sort((a, b) => String(a.code || "").localeCompare(String(b.code || "")));
+    list.innerHTML = `<div class="stock-table-wrap"><table class="stock-table">
+      <thead><tr>
+        <th class="th-orange">Code</th>
+        <th class="th-orange">Article</th>
+        <th class="th-orange">Emplacement</th>
+        <th class="th-blue" style="text-align:right">Qté / Cap</th>
+        <th class="th-blue" style="text-align:center">Statut</th>
+        <th></th>
+      </tr></thead>
+      <tbody>
+        ${sorted.map((c) => {
+          const cap = Math.max(1, Number(c.capacite) || 1);
+          const qty = Math.max(0, Number(c.quantiteActuelle) || 0);
+          const pct = Math.round((qty / cap) * 100);
+          const canManageRow = canManageCasier();
+          const canDelete = canManageRow && qty === 0;
+          return `<tr>
+            <td><strong>${escapeHtml(c.code)}</strong></td>
+            <td>${escapeHtml(c.article || "-")}</td>
+            <td>${escapeHtml(c.emplacement || "—")}</td>
+            <td style="text-align:right">${fmt(qty)} / ${fmt(cap)} <span class="muted" style="font-size:0.78rem">(${pct}%)</span></td>
+            <td style="text-align:center">${casierStatutBadge(c)}</td>
+            <td class="stock-actions-cell" style="white-space:nowrap">
+              <button type="button" class="mini-btn" data-casier-phys-in="${c.id}">+ IN</button>
+              <button type="button" class="mini-btn" data-casier-phys-out="${c.id}">- OUT</button>
+              <button type="button" class="mini-btn" data-casier-phys-frigo="${c.id}" ${qty <= 0 ? "disabled" : ""}>→ Frigo</button>
+              ${canDelete ? `<button type="button" class="stock-del-btn" data-casier-phys-delete="${c.id}" style="background:rgba(197,79,65,0.18);color:#ff8e82">Suppr.</button>` : ""}
+            </td>
+          </tr>`;
+        }).join("")}
+      </tbody>
+    </table></div>`;
+  }
+
+  // Mouvements (50 derniers)
+  const mvtList = document.getElementById("casier-phys-mvt-list");
+  const mvtCount = document.getElementById("casier-phys-mvt-count");
+  if (mvtList) {
+    const mvts = casierMouvementsForSite()
+      .slice()
+      .sort((a, b) => String(b.createdAt || b.date || "").localeCompare(String(a.createdAt || a.date || "")));
+    if (mvtCount) mvtCount.textContent = `${fmt(mvts.length)} mouvement(s)`;
+    const head = mvts.slice(0, 50);
+    if (!head.length) {
+      mvtList.innerHTML = emptyState("Aucun mouvement", "Les entrées et sorties de casiers apparaîtront ici.");
+    } else {
+      mvtList.innerHTML = `<div class="stock-table-wrap"><table class="stock-table">
+        <thead><tr>
+          <th>Date</th>
+          <th>Casier</th>
+          <th>Article</th>
+          <th>Type</th>
+          <th style="text-align:right">Qté</th>
+          <th>Source / motif</th>
+          <th>Note</th>
+          <th>Utilisateur</th>
+        </tr></thead>
+        <tbody>
+          ${head.map((m) => `<tr>
+            <td>${escapeHtml(formatDateDdMmYyyy(m.date || (m.createdAt || "").slice(0,10)))}</td>
+            <td><strong>${escapeHtml(m.casierCode || "-")}</strong></td>
+            <td>${escapeHtml(m.article || "-")}</td>
+            <td>${m.type === "sortie" ? "<span class='badge badge-red'>Sortie</span>" : "<span class='badge badge-green'>Entrée</span>"}</td>
+            <td style="text-align:right">${fmt(m.quantite)}</td>
+            <td>${escapeHtml(m.type === "sortie" ? (m.motif || "") : (m.source || ""))}</td>
+            <td>${escapeHtml(m.commentaire || "")}</td>
+            <td>${escapeHtml(m.user || "-")}</td>
+          </tr>`).join("")}
+        </tbody>
+      </table></div>`;
+    }
+  }
+}
+
+/* -----------------------------------------------------------
+ * Modal "Nouveau casier"
+ * ----------------------------------------------------------- */
+
+function openCasierEditModal() {
+  if (!canManageCasier()) {
+    showToast("Reserve au gerant ou administrateur.");
+    return;
+  }
+  const codeEl = document.getElementById("casier-edit-code");
+  if (codeEl) codeEl.value = `CAS-${String(Number(state?.nextId?.casier) || 1).padStart(4, "0")}`;
+  const sel = document.getElementById("casier-edit-article");
+  if (sel) {
+    const items = recordsForSite(state.stock || [])
+      .filter((it) => lotType(it) !== "unite")
+      .slice()
+      .sort((a, b) => String(a.article || "").localeCompare(String(b.article || ""), "fr"));
+    sel.innerHTML = items.length
+      ? items.map((it) => `<option value="${escapeHtml(it.article)}" data-cs="${caseSize(it)}">${escapeHtml(it.article)} · ${fmt(caseSize(it))} btl/lot</option>`).join("")
+      : `<option value="">— Aucun article (créez d'abord un article au catalogue) —</option>`;
+  }
+  syncCasierEditFromArticle();
+  const empEl = document.getElementById("casier-edit-emplacement");
+  if (empEl) empEl.value = "";
+  const qtyEl = document.getElementById("casier-edit-qty");
+  if (qtyEl) qtyEl.value = "0";
+  openModal("modal-casier-edit");
+}
+
+function syncCasierEditFromArticle() {
+  const sel = document.getElementById("casier-edit-article");
+  const capEl = document.getElementById("casier-edit-capacite");
+  const info = document.getElementById("casier-edit-article-info");
+  if (!sel) return;
+  const opt = sel.options[sel.selectedIndex];
+  const cs = Number(opt?.dataset?.cs) || 24;
+  if (capEl && (!capEl.value || Number(capEl.value) === 0)) capEl.value = String(cs);
+  const item = stockItemForArticle(sel.value);
+  if (info) {
+    info.textContent = item
+      ? `Stock actuel: ${fmt(stockActuel(item))} btl · Frigo: ${fmt(stockFrigo(item))} · Réserve: ${fmt(stockReserve(item))}`
+      : "";
+  }
+}
+
+async function submitCasierEdit() {
+  const article = document.getElementById("casier-edit-article")?.value || "";
+  const capacite = Math.max(1, Math.floor(Number(document.getElementById("casier-edit-capacite")?.value) || 0));
+  const emplacement = String(document.getElementById("casier-edit-emplacement")?.value || "").trim();
+  const qty0 = Math.max(0, Math.floor(Number(document.getElementById("casier-edit-qty")?.value) || 0));
+  const created = await createCasier({ article, capacite, emplacement, quantiteActuelle: qty0 });
+  if (!created) return;
+  closeModal("modal-casier-edit");
+  renderCasierPhysique();
+  renderStock();
+  renderDashboard();
+  showToast(`Casier ${created.code} créé pour ${created.article}.`);
+}
+
+/* -----------------------------------------------------------
+ * Modal "Mouvement casier physique" (IN/OUT)
+ * ----------------------------------------------------------- */
+
+function openCasierPhysMoveModal(type, prefilledCasierId = null) {
+  if (!canMoveCasier()) { showToast("Connexion requise."); return; }
+  const t = type === "sortie" ? "sortie" : "entree";
+  const typeEl = document.getElementById("casier-phys-move-type");
+  const titleEl = document.getElementById("casier-phys-move-title");
+  if (typeEl) typeEl.value = t;
+  if (titleEl) titleEl.textContent = t === "sortie" ? "Sortie casier" : "Entrée casier";
+  document.getElementById("casier-phys-move-source-wrap")?.classList.toggle("hidden", t === "sortie");
+  document.getElementById("casier-phys-move-motif-wrap")?.classList.toggle("hidden", t === "entree");
+
+  const sel = document.getElementById("casier-phys-move-casier");
+  if (sel) {
+    const all = casiersForSite().slice().sort((a, b) => String(a.code || "").localeCompare(String(b.code || "")));
+    sel.innerHTML = all.length
+      ? all.map((c) => `<option value="${c.id}">${escapeHtml(c.code)} · ${escapeHtml(c.article || "-")} · ${fmt(c.quantiteActuelle || 0)}/${fmt(c.capacite || 0)}</option>`).join("")
+      : `<option value="">— Aucun casier —</option>`;
+    if (prefilledCasierId) sel.value = String(prefilledCasierId);
+  }
+  const qtyEl = document.getElementById("casier-phys-move-qty");
+  if (qtyEl) qtyEl.value = "";
+  const cmtEl = document.getElementById("casier-phys-move-comment");
+  if (cmtEl) cmtEl.value = "";
+  updateCasierPhysMovePreview();
+  openModal("modal-casier-phys-move");
+}
+
+function updateCasierPhysMovePreview() {
+  const sel = document.getElementById("casier-phys-move-casier");
+  const info = document.getElementById("casier-phys-move-casier-info");
+  const preview = document.getElementById("casier-phys-move-preview");
+  const c = findCasierById(Number(sel?.value));
+  const t = document.getElementById("casier-phys-move-type")?.value || "entree";
+  const qty = Math.max(0, Math.floor(Number(document.getElementById("casier-phys-move-qty")?.value) || 0));
+  if (!c) {
+    if (info) info.textContent = "";
+    if (preview) preview.textContent = "";
+    return;
+  }
+  const cap = Math.max(1, Number(c.capacite) || 1);
+  const cur = Math.max(0, Number(c.quantiteActuelle) || 0);
+  if (info) info.textContent = `${c.code} · ${c.article} · ${fmt(cur)}/${fmt(cap)} btl · ${c.statut || "-"} · empl: ${c.emplacement || "-"}`;
+  if (preview) {
+    if (qty <= 0) { preview.textContent = ""; return; }
+    if (t === "entree") {
+      const after = cur + qty;
+      if (after > cap) preview.textContent = `Refusé : capacité dépassée (max ${fmt(cap - cur)}).`;
+      else preview.textContent = `Après : ${fmt(after)}/${fmt(cap)} btl.`;
+    } else {
+      if (qty > cur) preview.textContent = `Refusé : stock insuffisant (max ${fmt(cur)}).`;
+      else preview.textContent = `Après : ${fmt(cur - qty)}/${fmt(cap)} btl.`;
+    }
+  }
+}
+
+async function submitCasierPhysMove() {
+  const t = document.getElementById("casier-phys-move-type")?.value || "entree";
+  const id = Number(document.getElementById("casier-phys-move-casier")?.value);
+  const qty = Math.max(0, Math.floor(Number(document.getElementById("casier-phys-move-qty")?.value) || 0));
+  const commentaire = String(document.getElementById("casier-phys-move-comment")?.value || "").trim();
+  if (!id) { showToast("Choisissez un casier."); return; }
+  if (qty <= 0) { showToast("Quantité invalide."); return; }
+  let ok = false;
+  if (t === "entree") {
+    const source = document.getElementById("casier-phys-move-source")?.value || "autre";
+    ok = await casierEntree(id, qty, { source, commentaire });
+  } else {
+    const motif = document.getElementById("casier-phys-move-motif")?.value || "autre";
+    ok = await casierSortie(id, qty, { motif, commentaire });
+  }
+  if (!ok) return;
+  closeModal("modal-casier-phys-move");
+  renderCasierPhysique();
+  renderStock();
+  renderDashboard();
+  showToast(t === "entree" ? "Entrée enregistrée." : "Sortie enregistrée.");
 }
 
 async function setupTwoFactor(username) {
@@ -5883,12 +6877,17 @@ async function bootstrapAuthenticatedApp() {
   if (!Array.isArray(state.dayBooks)) state.dayBooks = [];
   if (!Array.isArray(state.stockEntrees)) state.stockEntrees = [];
   if (!Array.isArray(state.stockLosses)) state.stockLosses = [];
+  if (!Array.isArray(state.casiers)) state.casiers = [];
+  if (!Array.isArray(state.casierMouvements)) state.casierMouvements = [];
   if (!Array.isArray(state.staffAuditLog)) state.staffAuditLog = [];
   if (!state.nextId.stockEntree || Number.isNaN(Number(state.nextId.stockEntree))) state.nextId.stockEntree = 100;
   if (!state.nextId.stockLoss || Number.isNaN(Number(state.nextId.stockLoss))) state.nextId.stockLoss = 100;
   if (!state.nextId) state.nextId = {};
   if (!state.nextId.creditRecovery) state.nextId.creditRecovery = 100;
+  if (!state.nextId.casier || Number.isNaN(Number(state.nextId.casier))) state.nextId.casier = 1;
+  if (!state.nextId.casierMouvement || Number.isNaN(Number(state.nextId.casierMouvement))) state.nextId.casierMouvement = 1;
   if (state.nextId.auditEntry === undefined || state.nextId.auditEntry === null) state.nextId.auditEntry = 0;
+  await ensurePhysicalCasiersFromReserve();
   knownQrOrderIds = new Set(qrOrdersForCurrentSite(state).map((item) => item.id));
   qrAlertCount = 0;
   renderSiteSwitcher();
@@ -6046,6 +7045,74 @@ function attachEvents() {
   document.getElementById("stock-card-casiers")?.addEventListener("click", (e) => {
     const btn = e.target.closest(".co-open-btn");
     if (btn) openCasierOrderModal("", Number(btn.dataset.coCs) || null);
+  });
+  document.getElementById("casiers-entree-btn")?.addEventListener("click", () => openCasierMoveModal("entree"));
+  document.getElementById("casiers-sortie-btn")?.addEventListener("click", () => openCasierMoveModal("sortie"));
+  document.getElementById("casier-move-article")?.addEventListener("change", updateCasierMoveInfos);
+  document.getElementById("casier-move-cases")?.addEventListener("input", updateCasierMoveInfos);
+  document.getElementById("casier-move-submit")?.addEventListener("click", () => submitCasierMove().catch(handleApiError));
+  // Toggle vue Lots / Casiers physiques
+  document.querySelectorAll("[data-casier-view]").forEach((btn) => {
+    btn.addEventListener("click", () => setCasierViewMode(btn.dataset.casierView));
+  });
+  // Casiers physiques : actions globales
+  document.getElementById("casier-phys-new-btn")?.addEventListener("click", openCasierEditModal);
+  document.getElementById("casier-phys-move-in-btn")?.addEventListener("click", () => openCasierPhysMoveModal("entree"));
+  document.getElementById("casier-phys-move-out-btn")?.addEventListener("click", () => openCasierPhysMoveModal("sortie"));
+  // Modal Nouveau casier
+  document.getElementById("casier-edit-article")?.addEventListener("change", syncCasierEditFromArticle);
+  document.getElementById("casier-edit-submit")?.addEventListener("click", () => submitCasierEdit().catch(handleApiError));
+  // Modal Mouvement casier physique
+  document.getElementById("casier-phys-move-casier")?.addEventListener("change", updateCasierPhysMovePreview);
+  document.getElementById("casier-phys-move-qty")?.addEventListener("input", updateCasierPhysMovePreview);
+  document.getElementById("casier-phys-move-submit")?.addEventListener("click", () => submitCasierPhysMove().catch(handleApiError));
+  // Filtres casiers physiques
+  document.getElementById("casier-phys-filter-article")?.addEventListener("input", (e) => {
+    casierPhysFilters.article = e.target.value;
+    renderCasierPhysique();
+  });
+  document.getElementById("casier-phys-filter-emplacement")?.addEventListener("input", (e) => {
+    casierPhysFilters.emplacement = e.target.value;
+    renderCasierPhysique();
+  });
+  document.getElementById("casier-phys-filter-statut")?.addEventListener("change", (e) => {
+    casierPhysFilters.statut = e.target.value;
+    renderCasierPhysique();
+  });
+  // Actions par ligne (table casiers physiques)
+  document.getElementById("casier-phys-list")?.addEventListener("click", (e) => {
+    const inBtn = e.target.closest("[data-casier-phys-in]");
+    if (inBtn) { openCasierPhysMoveModal("entree", Number(inBtn.dataset.casierPhysIn)); return; }
+    const outBtn = e.target.closest("[data-casier-phys-out]");
+    if (outBtn) { openCasierPhysMoveModal("sortie", Number(outBtn.dataset.casierPhysOut)); return; }
+    const frigoBtn = e.target.closest("[data-casier-phys-frigo]");
+    if (frigoBtn) {
+      const id = Number(frigoBtn.dataset.casierPhysFrigo);
+      const c = findCasierById(id);
+      if (!c) return;
+      const max = Math.max(0, Number(c.quantiteActuelle) || 0);
+      if (max <= 0) { showToast("Casier vide."); return; }
+      const raw = window.prompt(`Combien de bouteilles transférer au frigo depuis ${c.code} ? (max ${max})`, String(max));
+      const qty = Math.max(0, Math.floor(Number(raw) || 0));
+      if (qty <= 0) return;
+      casierSortie(id, qty, { motif: "frigo", commentaire: "Transfert vers frigo" })
+        .then((ok) => {
+          if (ok) {
+            renderCasierPhysique();
+            renderStock();
+            renderDashboard();
+            showToast(`${fmt(qty)} btl transférée(s) au frigo.`);
+          }
+        })
+        .catch(handleApiError);
+      return;
+    }
+    const delBtn = e.target.closest("[data-casier-phys-delete]");
+    if (delBtn) {
+      deleteCasier(Number(delBtn.dataset.casierPhysDelete))
+        .then((ok) => { if (ok) renderCasierPhysique(); })
+        .catch(handleApiError);
+    }
   });
   document.getElementById("save-brasserie-attach-btn")?.addEventListener("click", () => saveBrasserieAttachment().catch(handleApiError));
   document.getElementById("clear-brasserie-attach-btn")?.addEventListener("click", clearBrasserieAttachmentSelection);

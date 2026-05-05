@@ -233,6 +233,20 @@
 
           <article class="card">
             <div class="section-head">
+              <h3>Casiers physiques</h3>
+              <span class="section-meta">État du parc</span>
+            </div>
+            <div id="dashboard-casier-kpis" class="stock-kpi-bar" style="margin-bottom:12px">
+              <div class="stock-kpi"><span class="stock-kpi-label">Total</span><strong id="dash-casier-total" class="stock-kpi-val">0</strong></div>
+              <div class="stock-kpi"><span class="stock-kpi-label">Pleins</span><strong id="dash-casier-plein" class="stock-kpi-val">0</strong></div>
+              <div class="stock-kpi"><span class="stock-kpi-label">Partiels</span><strong id="dash-casier-partiel" class="stock-kpi-val amber">0</strong></div>
+              <div class="stock-kpi"><span class="stock-kpi-label">Vides</span><strong id="dash-casier-vide" class="stock-kpi-val red">0</strong></div>
+            </div>
+            <div id="dashboard-casier-suggest"></div>
+          </article>
+
+          <article class="card">
+            <div class="section-head">
               <h3>Modes de paiement</h3>
               <span class="section-meta">Encaissements</span>
             </div>
@@ -748,12 +762,64 @@
           <div class="section-head" style="margin-bottom:14px">
             <div>
               <p class="eyebrow">Inventaire par lot</p>
-              <h3>Gestion des casiers par brasserie</h3>
+              <h3>Gestion des casiers</h3>
             </div>
           </div>
-          <p class="muted" style="margin-bottom:14px;font-size:0.85rem">
-            Stock exprime en casiers (lots) par categorie. La taille du casier se configure dans le catalogue (colonne <strong>Btl/casier</strong>).
-          </p>
+          <div class="tabs page-subtabs" role="tablist" aria-label="Vue casiers" style="margin-bottom:14px">
+            <button type="button" class="tab active" data-casier-view="lots" role="tab" aria-selected="true">Lots par produit</button>
+            <button type="button" class="tab" data-casier-view="physique" role="tab" aria-selected="false">Casiers physiques</button>
+          </div>
+          <div id="casier-view-lots">
+            <p class="muted" style="margin-bottom:14px;font-size:0.85rem">
+              Stock exprime en <strong>lots</strong> (casiers ou cartons) par categorie. La taille du lot se configure dans le catalogue (champ <strong>Unités par lot</strong>).
+            </p>
+            <div class="button-stack" style="grid-template-columns:1fr 1fr;display:grid;margin:0 0 14px">
+              <button id="casiers-entree-btn" class="btn btn-primary" type="button">Entrée de lots</button>
+              <button id="casiers-sortie-btn" class="btn btn-outline" type="button">Sortie de lots</button>
+            </div>
+          </div>
+          <div id="casier-view-physique" class="hidden">
+            <p class="muted" style="margin-bottom:14px;font-size:0.85rem">
+              Suivi des casiers physiques (CAS-XXXX) avec emplacement et statut. Chaque mouvement (entrée / sortie) est tracé dans l'audit.
+            </p>
+            <div class="button-stack" style="grid-template-columns:1fr 1fr 1fr;display:grid;margin:0 0 14px">
+              <button id="casier-phys-new-btn" class="btn btn-primary manager-only" type="button">+ Nouveau casier</button>
+              <button id="casier-phys-move-in-btn" class="btn btn-outline" type="button">+ Entrée</button>
+              <button id="casier-phys-move-out-btn" class="btn btn-outline" type="button">- Sortie</button>
+            </div>
+            <div id="casier-phys-kpi-bar" class="stock-kpi-bar" style="margin-bottom:16px">
+              <div class="stock-kpi"><span class="stock-kpi-label">Casiers totaux</span><strong id="casier-phys-kpi-total" class="stock-kpi-val">0</strong></div>
+              <div class="stock-kpi"><span class="stock-kpi-label">Pleins</span><strong id="casier-phys-kpi-plein" class="stock-kpi-val">0</strong></div>
+              <div class="stock-kpi"><span class="stock-kpi-label">Partiels</span><strong id="casier-phys-kpi-partiel" class="stock-kpi-val amber">0</strong></div>
+              <div class="stock-kpi"><span class="stock-kpi-label">Vides</span><strong id="casier-phys-kpi-vide" class="stock-kpi-val red">0</strong></div>
+            </div>
+            <div class="form-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:12px">
+              <div class="form-group">
+                <label for="casier-phys-filter-article">Article</label>
+                <input id="casier-phys-filter-article" type="text" placeholder="Filtrer par article">
+              </div>
+              <div class="form-group">
+                <label for="casier-phys-filter-emplacement">Emplacement</label>
+                <input id="casier-phys-filter-emplacement" type="text" placeholder="Filtrer par emplacement">
+              </div>
+              <div class="form-group">
+                <label for="casier-phys-filter-statut">Statut</label>
+                <select id="casier-phys-filter-statut">
+                  <option value="all">Tous</option>
+                  <option value="plein">Plein</option>
+                  <option value="partiel">Partiel</option>
+                  <option value="vide">Vide</option>
+                </select>
+              </div>
+            </div>
+            <div id="casier-phys-list"></div>
+            <div class="section-head" style="margin-top:18px">
+              <h4 style="margin:0;font-size:1rem">Mouvements de casiers (50 derniers)</h4>
+              <span id="casier-phys-mvt-count" class="section-meta">0</span>
+            </div>
+            <div id="casier-phys-mvt-list"></div>
+          </div>
+          <div id="casier-view-lots-extra">
           <div class="brasserie-attach-panel">
             <div class="section-head compact-head">
               <div>
@@ -784,6 +850,7 @@
             <div class="stock-kpi"><span class="stock-kpi-label">Articles epuises</span><strong id="casiers-kpi-epuise" class="stock-kpi-val red">0</strong></div>
           </div>
           <div id="casiers-content"></div>
+          </div>
         </article>
         <div id="stock-list"></div>
       </section>
@@ -1438,6 +1505,10 @@
         <span class="muted">Total reception</span>
         <strong id="purchase-receive-total-preview">0 FCFA</strong>
       </div>
+      <label style="display:flex;align-items:center;gap:10px;margin-top:14px;font-size:0.88rem">
+        <input type="checkbox" id="purchase-receive-ranger" checked>
+        <span>Ranger dans des casiers physiques (répartition automatique sur casiers existants partiels, sinon nouveaux casiers)</span>
+      </label>
       <div class="button-stack" style="margin-top:18px">
         <button id="purchase-receive-confirm-btn" class="btn btn-primary" type="button">Valider la reception</button>
         <button class="btn btn-outline close-modal" data-close="modal-purchase-receive" type="button">Annuler</button>
@@ -1466,14 +1537,24 @@
         <input id="s-brasserie" type="text" list="brasserie-list" placeholder="ex: Brassivoire, Solibra, Castel..." autocomplete="off">
         <datalist id="brasserie-list"></datalist>
       </div>
+      <div class="form-group">
+        <label for="s-lot-type">Type de lot</label>
+        <select id="s-lot-type">
+          <option value="casier" selected>Casier (consigné / réutilisable)</option>
+          <option value="carton">Carton (jetable)</option>
+          <option value="unite">Unité (pas de lot)</option>
+        </select>
+        <p class="form-hint">Détermine l’affichage dans l’onglet Lots et les libellés (casier/carton). “Unité” n’apparaît pas dans l’inventaire par lots.</p>
+      </div>
       <div class="form-grid two-cols">
         <div class="form-group">
-          <label for="s-init">Stock initial (casiers)</label>
+          <label for="s-init">Stock initial (lots)</label>
           <input id="s-init" type="number" value="0" min="0" step="1" placeholder="ex: 10">
         </div>
         <div class="form-group">
-          <label for="s-case-size">Bouteilles par casier</label>
+          <label for="s-case-size">Unités par lot</label>
           <select id="s-case-size">
+            <option value="1">1 unité</option>
             <option value="6">6 bouteilles</option>
             <option value="9">9 bouteilles</option>
             <option value="12">12 bouteilles</option>
@@ -1489,7 +1570,7 @@
           <input id="s-seuil" type="number" value="5" placeholder="5">
         </div>
         <div class="form-group">
-          <label for="s-prix">Prix achat / casier (FCFA)</label>
+          <label for="s-prix">Prix achat / lot (FCFA)</label>
           <input id="s-prix" type="number" placeholder="ex: 12000">
         </div>
       </div>
@@ -1644,6 +1725,133 @@
     </div>
   </div>
 
+  <div id="modal-casier-move" class="modal-overlay" aria-hidden="true">
+    <div class="modal">
+      <div class="modal-handle"></div>
+      <div class="section-head">
+        <h3 id="casier-move-title">Mouvement de casiers</h3>
+        <button class="icon-btn close-modal" data-close="modal-casier-move" type="button">Fermer</button>
+      </div>
+      <input type="hidden" id="casier-move-mode" value="entree">
+      <div class="form-group">
+        <label for="casier-move-article">Article</label>
+        <select id="casier-move-article"></select>
+        <p class="form-hint" id="casier-move-stock-info"></p>
+      </div>
+      <div class="form-grid two-cols">
+        <div class="form-group">
+          <label for="casier-move-cases">Nombre de casiers</label>
+          <input id="casier-move-cases" type="number" min="1" step="1" placeholder="ex: 2">
+        </div>
+        <div class="form-group">
+          <label>Btl / casier</label>
+          <p id="casier-move-case-info" style="padding:14px 15px;border-radius:14px;background:var(--mm-bg);border:1px solid var(--line);color:var(--mm-primary-dark);font-weight:700;font-family:Roboto,system-ui,sans-serif;margin-top:4px">—</p>
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="casier-move-notes">Notes (optionnel)</label>
+        <input id="casier-move-notes" type="text" placeholder="ex: retour fournisseur, transfert, casse casier...">
+        <p class="form-hint" id="casier-move-preview"></p>
+      </div>
+      <div class="button-stack">
+        <button id="casier-move-submit" class="btn btn-primary" type="button">Valider</button>
+        <button class="btn btn-outline close-modal" data-close="modal-casier-move" type="button">Annuler</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-casier-edit" class="modal-overlay" aria-hidden="true">
+    <div class="modal">
+      <div class="modal-handle"></div>
+      <div class="section-head">
+        <h3 id="casier-edit-title">Nouveau casier</h3>
+        <button class="icon-btn close-modal" data-close="modal-casier-edit" type="button">Fermer</button>
+      </div>
+      <input type="hidden" id="casier-edit-id">
+      <div class="form-grid two-cols">
+        <div class="form-group">
+          <label for="casier-edit-code">Code casier</label>
+          <input id="casier-edit-code" type="text" readonly aria-readonly="true" placeholder="CAS-0001">
+        </div>
+        <div class="form-group">
+          <label for="casier-edit-emplacement">Emplacement</label>
+          <input id="casier-edit-emplacement" type="text" placeholder="ex: Zone A · Rayon 2">
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="casier-edit-article">Article</label>
+        <select id="casier-edit-article"></select>
+        <p class="form-hint" id="casier-edit-article-info"></p>
+      </div>
+      <div class="form-grid two-cols">
+        <div class="form-group">
+          <label for="casier-edit-capacite">Capacité (bouteilles)</label>
+          <input id="casier-edit-capacite" type="number" min="1" step="1" value="24" placeholder="ex: 24">
+        </div>
+        <div class="form-group">
+          <label for="casier-edit-qty">Quantité initiale</label>
+          <input id="casier-edit-qty" type="number" min="0" step="1" value="0" placeholder="0">
+          <p class="form-hint">Si > 0, traitée comme une entrée et ajoutée à la réserve.</p>
+        </div>
+      </div>
+      <div class="button-stack">
+        <button id="casier-edit-submit" class="btn btn-primary" type="button">Créer le casier</button>
+        <button class="btn btn-outline close-modal" data-close="modal-casier-edit" type="button">Annuler</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-casier-phys-move" class="modal-overlay" aria-hidden="true">
+    <div class="modal">
+      <div class="modal-handle"></div>
+      <div class="section-head">
+        <h3 id="casier-phys-move-title">Mouvement casier</h3>
+        <button class="icon-btn close-modal" data-close="modal-casier-phys-move" type="button">Fermer</button>
+      </div>
+      <input type="hidden" id="casier-phys-move-type" value="entree">
+      <div class="form-group">
+        <label for="casier-phys-move-casier">Casier</label>
+        <select id="casier-phys-move-casier"></select>
+        <p class="form-hint" id="casier-phys-move-casier-info"></p>
+      </div>
+      <div class="form-grid two-cols">
+        <div class="form-group">
+          <label for="casier-phys-move-qty">Quantité (bouteilles)</label>
+          <input id="casier-phys-move-qty" type="number" min="1" step="1" placeholder="ex: 12">
+        </div>
+        <div class="form-group" id="casier-phys-move-source-wrap">
+          <label for="casier-phys-move-source">Source</label>
+          <select id="casier-phys-move-source">
+            <option value="fournisseur">Fournisseur</option>
+            <option value="depot">Depot / autre maquis</option>
+            <option value="retour">Retour</option>
+            <option value="transfert">Transfert</option>
+            <option value="autre">Autre</option>
+          </select>
+        </div>
+        <div class="form-group hidden" id="casier-phys-move-motif-wrap">
+          <label for="casier-phys-move-motif">Motif</label>
+          <select id="casier-phys-move-motif">
+            <option value="frigo">Vers frigo</option>
+            <option value="vente">Vente</option>
+            <option value="casse">Casse / perte</option>
+            <option value="transfert">Transfert sortant</option>
+            <option value="autre">Autre</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="casier-phys-move-comment">Commentaire (optionnel)</label>
+        <input id="casier-phys-move-comment" type="text" placeholder="ex: livraison du 05/05">
+        <p class="form-hint" id="casier-phys-move-preview"></p>
+      </div>
+      <div class="button-stack">
+        <button id="casier-phys-move-submit" class="btn btn-primary" type="button">Valider</button>
+        <button class="btn btn-outline close-modal" data-close="modal-casier-phys-move" type="button">Annuler</button>
+      </div>
+    </div>
+  </div>
+
   <div id="modal-2fa" class="modal-overlay" aria-hidden="true">
     <div class="modal">
       <div class="modal-handle"></div>
@@ -1707,6 +1915,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=76"></script>
+  <script src="./app-orders.js?v=80"></script>
 </body>
 </html>
