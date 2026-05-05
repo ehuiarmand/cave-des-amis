@@ -4357,16 +4357,38 @@ function syncPurchaseQtyFromStock() {
   const { cases } = suggestPurchaseCases(item);
   casesInput.value = String(cases);
 
-  // Indicateur casiers vides
-  const nbVides = emptyCasiersCountForArticle(article);
-  if (videsBtn) { videsBtn.style.display = nbVides > 0 ? "" : "none"; videsBtn.dataset.nbVides = nbVides; }
+  // Bilan des casiers physiques pour cet article
+  const cap = Math.max(1, caseSize(item));
+  const casiersArticle = casiersForSite().filter((c) => c.article === article);
+  let nbPleins = 0, nbPartiels = 0, nbVidesC = 0, btlPleines = 0, btlVides = 0, nbCasiersVidesRetour = 0;
+  casiersArticle.forEach((c) => {
+    const st = String(c.statut || "vide").toLowerCase();
+    if (st === "plein") nbPleins++;
+    else if (st === "partiel") nbPartiels++;
+    else nbVidesC++;
+    btlPleines += Math.max(0, Number(c.quantiteActuelle) || 0);
+    const v = Math.max(0, Number(c.bouteillesVides) || 0);
+    btlVides += v;
+    nbCasiersVidesRetour += Math.floor(v / cap);
+  });
+
+  if (videsBtn) { videsBtn.style.display = nbCasiersVidesRetour > 0 ? "" : "none"; videsBtn.dataset.nbVides = nbCasiersVidesRetour; }
   if (videsHint) {
-    if (nbVides > 0) {
+    if (casiersArticle.length > 0) {
       videsHint.style.display = "";
-      videsHint.textContent = `${fmt(nbVides)} casier(s) vide(s) prêt(s) à retourner au fournisseur — cliquez ↩ Vides pour commander exactement ce nombre.`;
-      videsHint.style.color = "#e65100";
+      const parts = [];
+      if (nbPleins > 0)  parts.push(`<span style="color:#2e7d32;font-weight:700">${fmt(nbPleins)} plein(s)</span>`);
+      if (nbPartiels > 0) parts.push(`<span style="color:#f57c00;font-weight:700">${fmt(nbPartiels)} partiel(s)</span>`);
+      if (nbVidesC > 0)  parts.push(`<span style="color:#e53935;font-weight:700">${fmt(nbVidesC)} vide(s)</span>`);
+      const btlInfo = `${fmt(btlPleines)} btl pleines`;
+      const videsInfo = nbCasiersVidesRetour > 0
+        ? ` · <span style="color:#e65100;font-weight:700">↩ ${fmt(nbCasiersVidesRetour)} casier(s) à retourner (${fmt(btlVides)} btl vides)</span>`
+        : "";
+      videsHint.innerHTML = `Casiers disponibles : ${parts.join(" · ")} · ${btlInfo}${videsInfo}`;
+      videsHint.style.color = "";
     } else {
-      videsHint.style.display = "none";
+      videsHint.style.display = "";
+      videsHint.innerHTML = `<span style="color:#9e9e9e">Aucun casier physique enregistré pour cet article.</span>`;
     }
   }
 }
