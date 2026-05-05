@@ -2108,7 +2108,6 @@ function renderDailyStockCheck() {
   const dayBook = dayBookFor(dStr, currentSiteId());
   const container = document.getElementById("pdj-stock-check");
   const button = document.getElementById("close-day-btn");
-  const manualButton = document.getElementById("manual-close-day-btn");
   const printBtn = document.getElementById("print-closure-btn");
   if (!container || !button) return;
   const superadminCorrection = Boolean(closed && canAnyAdmin());
@@ -2116,12 +2115,11 @@ function renderDailyStockCheck() {
     ? "Mettre a jour la cloture"
     : closed
       ? "Reverifier la journee"
-      : "Verifier et cloturer";
+      : "Verifier avant cloture";
   if (printBtn) printBtn.classList.toggle("hidden", !closed);
   if (!items.length) {
     container.innerHTML = emptyState("Aucun stock", "Ajoutez des articles avant de faire le point de fermeture.");
     button.disabled = false;
-    if (manualButton) manualButton.disabled = true;
     return;
   }
 
@@ -2133,11 +2131,9 @@ function renderDailyStockCheck() {
       "Validez le montant en caisse en haut de cette page avant la verification stock et la cloture.",
     );
     button.disabled = true;
-    if (manualButton) manualButton.disabled = false;
     return;
   }
   button.disabled = false;
-  if (manualButton) manualButton.disabled = false;
 
   if (closed && !canAnyAdmin()) {
     const checkItems = closed.items || [];
@@ -2170,7 +2166,7 @@ function renderDailyStockCheck() {
     container.innerHTML = `
       ${cashBlock}
       <div class="inline-card" style="margin-bottom:12px">
-        <span class="muted">${closed.manualClose ? "Cloture manuelle enregistree le" : "Journee cloturee le"}</span>
+        <span class="muted">Journee cloturee le</span>
         <strong>${escapeHtml(formatDateTimeDdMmYyyy(closed.createdAt))}</strong>
       </div>
       <div class="stock-table-wrap"><table class="stock-table">
@@ -2589,14 +2585,7 @@ function orderTime(order) {
   return "--:--";
 }
 
-function renderOrdersManagement() {
-  const date = document.getElementById("orders-filter-date")?.value || pdjCalendarDate();
-  const status = document.getElementById("orders-filter-status")?.value || "all";
-  const type = document.getElementById("orders-filter-type")?.value || "all";
-  const activeOrders = recordsForSite(state.commandes);
-  const salesToday = recordsForSite(state.ventes).filter((vente) => saleDateValue(vente) === date);
-
-  // Reconstruct paid orders from state.ventes grouped by factureNumber
+function paidOrdersFromSales() {
   const paidByFacture = {};
   recordsForSite(state.ventes).forEach((v) => {
     const key = v.factureNumber || `V-${v.id}`;
@@ -2618,7 +2607,73 @@ function renderOrdersManagement() {
     const ts = v.soldAt || v.createdAt;
     if (ts && !paidByFacture[key].createdAt) paidByFacture[key].createdAt = ts;
   });
-  const paidOrders = Object.values(paidByFacture);
+  return Object.values(paidByFacture);
+}
+
+function managementOrders() {
+  return [...recordsForSite(state.commandes), ...paidOrdersFromSales()];
+}
+
+function openOrderDetailModal(orderKey) {
+  const order = managementOrders().find((item) => String(item.id) === String(orderKey) || String(item.factureNumber || "") === String(orderKey));
+  if (!order) {
+    showToast("Commande introuvable.");
+    return;
+  }
+  const title = document.getElementById("order-detail-title");
+  const body = document.getElementById("order-detail-body");
+  if (!body) return;
+  const total = orderTotal(order);
+  const invoiceNumber = order.factureNumber || String(order.id);
+  if (title) title.textContent = `Detail ${invoiceNumber}`;
+  const paymentRows = order._isPaid
+    ? Object.entries(paymentTotals(order.lignes || []))
+      .map(([method, amount]) => `<div><dt>${escapeHtml(method)}</dt><dd>${fmt(amount)} FCFA</dd></div>`)
+      .join("")
+    : `<div><dt>Paiement</dt><dd>${escapeHtml((order.lignes || [])[0]?.paiement || "-")}</dd></div>`;
+  const lineRows = (order.lignes || []).map((line) => `
+    <tr>
+      <td>${escapeHtml(line.article)}</td>
+      <td>${escapeHtml(line.cat || "-")}</td>
+      <td>${escapeHtml(lineQtyLabel(line, stockItemForArticle(line.article)))}</td>
+      <td style="text-align:right">${fmt(line.prix || 0)} FCFA</td>
+      <td style="text-align:right">${fmt(line.remise || 0)} FCFA</td>
+      <td style="text-align:right">${fmt(calcNet(line))} FCFA</td>
+    </tr>
+  `).join("");
+  body.innerHTML = `
+    <dl class="audit-detail-dl">
+      <div><dt>Numero</dt><dd>${escapeHtml(invoiceNumber)}</dd></div>
+      <div><dt>Date</dt><dd>${escapeHtml(formatDateDdMmYyyy(order.date))}</dd></div>
+      <div><dt>Heure</dt><dd>${escapeHtml(orderTime(order))}</dd></div>
+      <div><dt>Statut</dt><dd>${escapeHtml(orderStatus(order))}</dd></div>
+      <div><dt>Table / client</dt><dd>${escapeHtml(order.table || order.client || "Comptoir")}</dd></div>
+      <div><dt>Serveur</dt><dd>${escapeHtml(order.server || order.serveur || "-")}</dd></div>
+      <div><dt>Type</dt><dd>${orderType(order) === "a-emporter" ? "A emporter" : "Sur place"}</dd></div>
+      <div><dt>Total</dt><dd><strong>${fmt(total)} FCFA</strong></dd></div>
+      ${paymentRows}
+    </dl>
+    <div class="stock-table-wrap" style="margin-top:14px">
+      <table class="stock-table">
+        <thead><tr><th>Article</th><th>Categorie</th><th>Quantite</th><th style="text-align:right">Prix</th><th style="text-align:right">Remise</th><th style="text-align:right">Total</th></tr></thead>
+        <tbody>${lineRows || `<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:24px">Aucun article</td></tr>`}</tbody>
+      </table>
+    </div>
+    <div class="order-actions" style="margin-top:14px">
+      ${order._isPaid && order.factureNumber ? `<button type="button" class="mini-btn" data-print-invoice="${escapeHtml(order.factureNumber)}">Imprimer facture</button>` : `<button type="button" class="mini-btn" data-print-order="${escapeHtml(order.id)}">Ticket</button>`}
+    </div>
+  `;
+  openModal("modal-order-detail");
+}
+
+function renderOrdersManagement() {
+  const date = document.getElementById("orders-filter-date")?.value || pdjCalendarDate();
+  const status = document.getElementById("orders-filter-status")?.value || "all";
+  const type = document.getElementById("orders-filter-type")?.value || "all";
+  const activeOrders = recordsForSite(state.commandes);
+  const salesToday = recordsForSite(state.ventes).filter((vente) => saleDateValue(vente) === date);
+
+  const paidOrders = paidOrdersFromSales();
 
   const baseOrders = status === "Paye"
     ? paidOrders
@@ -2649,6 +2704,7 @@ function renderOrdersManagement() {
         <td style="text-align:right">${fmt(orderTotal(order))} FCFA</td>
         <td>${escapeHtml(orderTime(order))}</td>
         <td>
+          <button type="button" class="mini-btn" data-order-details="${escapeHtml(order.id)}">Details</button>
           ${order._isPaid ? "" : `<button type="button" class="mini-btn" data-activate-order="${order.id}">Ouvrir</button>`}
           ${next ? `<button type="button" class="mini-btn" data-advance-order="${order.id}">${escapeHtml(next)}</button>` : ""}
           ${!order._isPaid && canDeleteOrder(order) ? `<button type="button" class="mini-btn" data-delete-order="${order.id}">Annuler</button>` : ""}
@@ -5344,77 +5400,6 @@ function closureCashSnapshot(dStr) {
   };
 }
 
-async function closeAccountingDayManual() {
-  const items = recordsForSite(state.stock);
-  if (!items.length) {
-    showToast("Aucun stock a cloturer.");
-    return;
-  }
-  const dStr = pdjCalendarDate();
-  if (!canAnyAdmin() && dStr !== today()) {
-    showToast("Seul un administrateur peut cloturer une autre date.");
-    return;
-  }
-  const existingClose = stockCheckForSiteDate(dStr, currentSiteId());
-  const msg = existingClose
-    ? `Remplacer la cloture du ${formatDateDdMmYyyy(dStr)} par une cloture manuelle ?`
-    : `Enregistrer une cloture manuelle pour le ${formatDateDdMmYyyy(dStr)} ?`;
-  if (!window.confirm(`${msg}\n\nCette cloture fige le stock actuel et ne genere pas de nouvelles sorties de stock.`)) return;
-  if (existingClose) revertStockCheckLedgerEffects(existingClose);
-  const cash = closureCashSnapshot(dStr);
-  const checkedItems = items.map((item) => {
-    const sortiesToday = todaySortiesBottlesForArticle(item.article, dStr);
-    const frigo = stockFrigo(item);
-    const reserve = stockReserve(item);
-    const counted = frigo + reserve;
-    return {
-      id: item.id,
-      article: item.article,
-      cat: item.cat || "",
-      stockAvant: counted + sortiesToday,
-      sortiesToday,
-      expected: counted,
-      frigo,
-      reserve,
-      counted,
-      ecart: 0,
-      stockApres: counted,
-      manual: true,
-    };
-  });
-  const check = {
-    id: Date.now(),
-    siteId: currentSiteId(),
-    date: dStr,
-    createdAt: new Date().toISOString(),
-    openedAt: cash.dayBook?.openedAt || "",
-    openingCashFcfa: cash.openingCash,
-    closingCashFcfa: cash.closingCashFcfa,
-    expectedEspecesCash: cash.expectedEspecesCash,
-    cashEcartEspeces: cash.cashEcartEspeces,
-    caEncaisse: cash.caEncaisse,
-    caCreances: cash.caCreances,
-    nbVentes: cash.ventesJour.length,
-    totauxJour: cash.totauxJour,
-    manualClose: true,
-    items: checkedItems,
-  };
-  state.stockChecks = [
-    check,
-    ...(state.stockChecks || []).filter((item) => !(item.siteId === check.siteId && item.date === check.date)),
-  ];
-  recordStaffAudit(
-    "create",
-    "cloture_jour",
-    `Cloture manuelle ${formatDateDdMmYyyy(dStr)}`,
-    `Fige le stock actuel sans ecriture supplementaire.\nCA encaisse ${fmt(cash.caEncaisse)} FCFA · caisse attendue ${fmt(cash.expectedEspecesCash)} · denombre ${fmt(cash.closingCashFcfa)} · ecart ${cash.cashEcartEspeces > 0 ? "+" : ""}${fmt(cash.cashEcartEspeces)} FCFA`,
-  );
-  await persistState({ stock: state.stock, stockChecks: state.stockChecks });
-  renderStock();
-  renderPointDuJour();
-  showToast("Cloture manuelle enregistree.");
-}
-
 async function closeAccountingDay() {
   const items = recordsForSite(state.stock);
   if (!items.length) {
@@ -7860,9 +7845,6 @@ document.getElementById("fab-btn").addEventListener("click", () => {
     }
     closeAccountingDay().catch(handleApiError);
   });
-  document.getElementById("manual-close-day-btn")?.addEventListener("click", () => {
-    closeAccountingDayManual().catch(handleApiError);
-  });
   document.getElementById("add-user-btn").addEventListener("click", () => addUser().catch(handleApiError));
   document.getElementById("add-site-btn").addEventListener("click", () => addSite().catch(handleApiError));
   document.getElementById("cancel-edit-user-btn").addEventListener("click", resetUserForm);
@@ -8094,6 +8076,11 @@ document.getElementById("fab-btn").addEventListener("click", () => {
       const formats = readStockSaleFormats();
       formats.splice(index, 1);
       renderStockSaleFormats(formats);
+      return;
+    }
+    const orderDetails = event.target.closest("[data-order-details]");
+    if (orderDetails) {
+      openOrderDetailModal(orderDetails.dataset.orderDetails);
       return;
     }
     const activateOrder = event.target.closest("[data-activate-order]");
