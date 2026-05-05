@@ -4277,6 +4277,16 @@ function purchasePriceInputValue() {
   return Math.max(0, Math.round(Number(document.getElementById("purchase-price")?.value) || 0));
 }
 
+function emptyCasiersCountForArticle(article) {
+  if (!article) return 0;
+  const item = stockItemForArticle(article);
+  const cap = Math.max(1, caseSize(item));
+  return casiersForSite().filter((c) =>
+    c.article === article &&
+    Math.floor(Math.max(0, Number(c.bouteillesVides) || 0) / cap) >= 1
+  ).length;
+}
+
 /** Casiers et btl/casier alignés sur la ligne stock + suggestion au seuil (comme depuis « Commander » sur une ligne catalogue). */
 function syncPurchaseQtyFromStock() {
   const casesInput = document.getElementById("purchase-cases");
@@ -4284,15 +4294,32 @@ function syncPurchaseQtyFromStock() {
   if (!casesInput || !caseSizeField) return;
   const article = document.getElementById("purchase-article")?.value?.trim() || "";
   const item = stockItemForArticle(article);
+  const videsBtn = document.getElementById("purchase-from-vides-btn");
+  const videsHint = document.getElementById("purchase-vides-hint");
   if (!item) {
     casesInput.value = "";
     caseSizeField.value = "24";
+    if (videsBtn) videsBtn.style.display = "none";
+    if (videsHint) videsHint.style.display = "none";
     return;
   }
   const cs = caseSize(item);
   caseSizeField.value = String(VALID_CASE_SIZES.includes(cs) ? cs : 24);
   const { cases } = suggestPurchaseCases(item);
   casesInput.value = String(cases);
+
+  // Indicateur casiers vides
+  const nbVides = emptyCasiersCountForArticle(article);
+  if (videsBtn) { videsBtn.style.display = nbVides > 0 ? "" : "none"; videsBtn.dataset.nbVides = nbVides; }
+  if (videsHint) {
+    if (nbVides > 0) {
+      videsHint.style.display = "";
+      videsHint.textContent = `${fmt(nbVides)} casier(s) vide(s) prêt(s) à retourner au fournisseur — cliquez ↩ Vides pour commander exactement ce nombre.`;
+      videsHint.style.color = "#e65100";
+    } else {
+      videsHint.style.display = "none";
+    }
+  }
 }
 
 function syncPurchaseLineInputsFromStock() {
@@ -6971,7 +6998,7 @@ function snapshotItemStock(item) {
   return { frigo: stockFrigo(item), reserve: stockReserve(item), total: stockActuel(item) };
 }
 
-async function createCasier({ article, capacite, emplacement, quantiteActuelle = 0 }) {
+async function createCasier({ article, capacite, emplacement, quantiteActuelle = 0, bouteillesVides = 0 }) {
   if (!canManageCasier()) {
     showToast("Reserve au gerant ou administrateur.");
     return null;
@@ -6981,10 +7008,14 @@ async function createCasier({ article, capacite, emplacement, quantiteActuelle =
   const cap = Math.max(1, Math.floor(Number(capacite) || 0));
   if (cap <= 0) { showToast("Capacite invalide."); return null; }
   const qty0 = Math.max(0, Math.floor(Number(quantiteActuelle) || 0));
+  const vides0 = Math.max(0, Math.floor(Number(bouteillesVides) || 0));
   if (qty0 > cap) { showToast(`Quantite initiale (${qty0}) > capacite (${cap}).`); return null; }
+  if (vides0 > cap) { showToast(`Bouteilles vides (${vides0}) > capacite (${cap}).`); return null; }
   state.casiers = state.casiers || [];
   state.nextId = state.nextId || {};
+  if (!state.nextId.casierMouvement) state.nextId.casierMouvement = 1;
   const code = nextCasierCode();
+  const now = new Date().toISOString();
   const casier = {
     id: state.nextId.casier++,
     siteId: currentSiteId(),
@@ -6992,40 +7023,43 @@ async function createCasier({ article, capacite, emplacement, quantiteActuelle =
     article: brasserie,
     capacite: cap,
     quantiteActuelle: qty0,
-    bouteillesVides: 0,
+    bouteillesVides: vides0,
     emplacement: String(emplacement || "").trim() || "—",
     statut: "vide",
-    createdAt: new Date().toISOString(),
+    createdAt: now,
     createdBy: sessionUser || "-",
   };
   recomputeCasierStatus(casier);
   state.casiers.push(casier);
+  state.casierMouvements = state.casierMouvements || [];
   if (qty0 > 0) {
-    state.casierMouvements = state.casierMouvements || [];
     state.casierMouvements.unshift({
       id: state.nextId.casierMouvement++,
-      siteId: currentSiteId(),
-      casierId: casier.id,
-      casierCode: casier.code,
-      article: casier.article,
-      type: "entree",
-      quantite: qty0,
-      source: "correction",
-      motif: "",
+      siteId: currentSiteId(), casierId: casier.id, casierCode: casier.code, article: casier.article,
+      type: "entree", quantite: qty0, source: "correction", motif: "",
       commentaire: "Quantite initiale (creation casier)",
-      user: sessionUser || "-",
-      role: currentRole || "-",
-      date: today(),
-      createdAt: new Date().toISOString(),
+      user: sessionUser || "-", role: currentRole || "-", date: today(), createdAt: now,
     });
-    casier.lastMoveAt = new Date().toISOString();
+    casier.lastMoveAt = now;
+    casier.lastMoveBy = sessionUser || "-";
+  }
+  if (vides0 > 0) {
+    state.casierMouvements.unshift({
+      id: state.nextId.casierMouvement++,
+      siteId: currentSiteId(), casierId: casier.id, casierCode: casier.code, article: casier.article,
+      type: "retour_vide", quantite: vides0, nbCasiers: Math.floor(vides0 / cap),
+      source: "", motif: "retour_fournisseur",
+      commentaire: `${vides0} btl vides (saisie initiale)`,
+      user: sessionUser || "-", role: currentRole || "-", date: today(), createdAt: now,
+    });
+    casier.lastMoveAt = now;
     casier.lastMoveBy = sessionUser || "-";
   }
   logCasierAudit("create", casier, { quantiteActuelle: 0 }, null, null, qty0, {
     type: "CREATE",
-    label: "Nouveau casier",
+    label: vides0 > 0 ? "Nouveau casier vide" : "Nouveau casier",
     source: qty0 > 0 ? "correction" : "",
-    commentaire: emplacement ? `emplacement: ${emplacement}` : "",
+    commentaire: [emplacement ? `emplacement: ${emplacement}` : "", vides0 > 0 ? `${vides0} btl vides` : ""].filter(Boolean).join(" · "),
     entity: "casier",
   });
   await persistState({ casiers: state.casiers, casierMouvements: state.casierMouvements, nextId: state.nextId });
@@ -7414,6 +7448,19 @@ function renderCasierPhysique() {
  * Modal "Nouveau casier"
  * ----------------------------------------------------------- */
 
+function setCasierEditType(type) {
+  const isVide = type === "vide";
+  const qtyWrap = document.getElementById("casier-edit-qty-wrap");
+  const videsWrap = document.getElementById("casier-edit-vides-wrap");
+  const empEl = document.getElementById("casier-edit-emplacement");
+  if (qtyWrap) qtyWrap.style.display = isVide ? "none" : "";
+  if (videsWrap) videsWrap.style.display = isVide ? "" : "none";
+  if (isVide && empEl && !empEl.value.trim()) empEl.value = "À retourner";
+  if (!isVide && empEl && empEl.value === "À retourner") empEl.value = "Réserve";
+  document.getElementById("casier-edit-type-plein").checked = !isVide;
+  document.getElementById("casier-edit-type-vide").checked = isVide;
+}
+
 function openCasierEditModal() {
   if (!canManageCasier()) {
     showToast("Reserve au gerant ou administrateur.");
@@ -7428,6 +7475,9 @@ function openCasierEditModal() {
   if (empEl) empEl.value = "";
   const qtyEl = document.getElementById("casier-edit-qty");
   if (qtyEl) qtyEl.value = "0";
+  const videsEl = document.getElementById("casier-edit-vides");
+  if (videsEl) videsEl.value = "0";
+  setCasierEditType("plein");
   openModal("modal-casier-edit");
 }
 
@@ -7446,14 +7496,16 @@ async function submitCasierEdit() {
   const article = document.getElementById("casier-edit-article")?.value || "";
   const capacite = Math.max(1, Math.floor(Number(document.getElementById("casier-edit-capacite")?.value) || 0));
   const emplacement = String(document.getElementById("casier-edit-emplacement")?.value || "").trim();
-  const qty0 = Math.max(0, Math.floor(Number(document.getElementById("casier-edit-qty")?.value) || 0));
-  const created = await createCasier({ article, capacite, emplacement, quantiteActuelle: qty0 });
+  const isVide = document.getElementById("casier-edit-type-vide")?.checked === true;
+  const qty0 = isVide ? 0 : Math.max(0, Math.floor(Number(document.getElementById("casier-edit-qty")?.value) || 0));
+  const vides0 = isVide ? Math.max(0, Math.floor(Number(document.getElementById("casier-edit-vides")?.value) || 0)) : 0;
+  const created = await createCasier({ article, capacite, emplacement, quantiteActuelle: qty0, bouteillesVides: vides0 });
   if (!created) return;
   closeModal("modal-casier-edit");
   renderCasierPhysique();
   renderStock();
   renderDashboard();
-  showToast(`Casier ${created.code} créé pour ${created.article}.`);
+  showToast(`Casier ${created.code} créé (${isVide ? `${vides0} btl vides` : `${qty0} btl pleines`}).`);
 }
 
 /* -----------------------------------------------------------
@@ -7850,6 +7902,8 @@ function attachEvents() {
   // Modal Nouveau casier
   document.getElementById("casier-edit-article")?.addEventListener("change", syncCasierEditFromArticle);
   document.getElementById("casier-edit-submit")?.addEventListener("click", () => submitCasierEdit().catch(handleApiError));
+  document.getElementById("casier-edit-type-plein")?.addEventListener("change", () => setCasierEditType("plein"));
+  document.getElementById("casier-edit-type-vide")?.addEventListener("change", () => setCasierEditType("vide"));
   // Modal Mouvement casier physique
   document.getElementById("casier-phys-move-casier")?.addEventListener("change", updateCasierPhysMovePreview);
   document.getElementById("casier-phys-move-qty")?.addEventListener("input", updateCasierPhysMovePreview);
@@ -8181,6 +8235,14 @@ document.getElementById("fab-btn").addEventListener("click", () => {
   document.getElementById("purchase-new-btn")?.addEventListener("click", () => openPurchaseForm());
   document.getElementById("purchase-add-line-btn")?.addEventListener("click", () => addPurchaseLine());
   document.getElementById("purchase-save-btn")?.addEventListener("click", () => savePurchaseOrder().catch(handleApiError));
+  document.getElementById("purchase-from-vides-btn")?.addEventListener("click", () => {
+    const btn = document.getElementById("purchase-from-vides-btn");
+    const nb = Number(btn?.dataset?.nbVides) || 0;
+    if (nb > 0) {
+      document.getElementById("purchase-cases").value = String(nb);
+      showToast(`Quantité définie sur ${fmt(nb)} casier(s) vide(s) à retourner.`);
+    }
+  });
   document.getElementById("purchase-receive-confirm-btn")?.addEventListener("click", () => confirmReceivePurchaseOrder().catch(handleApiError));
   // Audit detail: copy + expand
   document.getElementById("audit-detail-copy-btn")?.addEventListener("click", () => {

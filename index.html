@@ -698,8 +698,12 @@
               </div>
               <div class="form-group">
                 <label for="purchase-cases">Casiers</label>
-                <input id="purchase-cases" type="number" min="0" step="1" placeholder="Depuis stock">
-                <p class="muted" style="margin-top:6px;font-size:0.82rem">Rempli automatiquement selon le stock reel et le seuil de l&apos;article (vous pouvez ajuster).</p>
+                <div style="display:flex;gap:6px;align-items:center">
+                  <input id="purchase-cases" type="number" min="0" step="1" placeholder="Depuis stock" style="flex:1">
+                  <button type="button" id="purchase-from-vides-btn" class="mini-btn" style="display:none;white-space:nowrap;background:rgba(230,81,0,0.12);color:#e65100;font-weight:700;border:1px solid #e65100;padding:4px 10px">↩ Vides</button>
+                </div>
+                <p id="purchase-vides-hint" class="muted" style="margin-top:5px;font-size:0.82rem;display:none"></p>
+                <p class="muted" style="margin-top:4px;font-size:0.79rem">Rempli automatiquement selon le stock reel et le seuil de l&apos;article (vous pouvez ajuster).</p>
               </div>
               <div class="form-group">
                 <label for="purchase-case-size">Btl / casier</label>
@@ -1785,15 +1789,31 @@
         <input id="casier-edit-article" type="text" list="brasserie-list" placeholder="ex: Solibra, Brassivoire, Castel..." autocomplete="off">
         <p class="form-hint" id="casier-edit-article-info"></p>
       </div>
+      <div class="form-group">
+        <label>Type de casier</label>
+        <div style="display:flex;gap:10px;margin-top:4px">
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.9rem">
+            <input type="radio" name="casier-edit-type" id="casier-edit-type-plein" value="plein" checked> Plein (bouteilles pleines)
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.9rem">
+            <input type="radio" name="casier-edit-type" id="casier-edit-type-vide" value="vide"> Vide (bouteilles vides à retourner)
+          </label>
+        </div>
+      </div>
       <div class="form-grid two-cols">
         <div class="form-group">
           <label for="casier-edit-capacite">Capacité (bouteilles)</label>
           <input id="casier-edit-capacite" type="number" min="1" step="1" value="24" placeholder="ex: 24">
         </div>
-        <div class="form-group">
-          <label for="casier-edit-qty">Quantité initiale</label>
+        <div class="form-group" id="casier-edit-qty-wrap">
+          <label for="casier-edit-qty">Bouteilles pleines</label>
           <input id="casier-edit-qty" type="number" min="0" step="1" value="0" placeholder="0">
-          <p class="form-hint">Si > 0, correction manuelle (n'affecte pas le stock).</p>
+          <p class="form-hint">Quantité de bouteilles pleines dans ce casier.</p>
+        </div>
+        <div class="form-group" id="casier-edit-vides-wrap" style="display:none">
+          <label for="casier-edit-vides">Bouteilles vides</label>
+          <input id="casier-edit-vides" type="number" min="0" step="1" value="0" placeholder="0">
+          <p class="form-hint">Nombre de bouteilles vides à retourner au fournisseur.</p>
         </div>
       </div>
       <div class="button-stack">
