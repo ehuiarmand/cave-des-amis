@@ -3890,9 +3890,14 @@ async function syncStateSilently() {
       if (fresh) {
         const _casiers = state.casiers ?? [];
         const _casierMouvements = state.casierMouvements ?? [];
+        const _nextCasier = state.nextId?.casier;
+        const _nextCasierMvt = state.nextId?.casierMouvement;
         state = fresh;
+        if (!state.nextId) state.nextId = {};
         if (!state.casiers?.length && _casiers.length) state.casiers = _casiers;
         if (!state.casierMouvements?.length && _casierMouvements.length) state.casierMouvements = _casierMouvements;
+        if (!state.nextId.casier && _nextCasier) state.nextId.casier = _nextCasier;
+        if (!state.nextId.casierMouvement && _nextCasierMvt) state.nextId.casierMouvement = _nextCasierMvt;
         lsSaveCasiers();
       }
     } catch (e) { return; }
@@ -6324,6 +6329,7 @@ function lsSaveCasiers() {
 
 function lsRestoreCasiers() {
   try {
+    if (!state.nextId) state.nextId = {};
     const rawC = localStorage.getItem(LS_CASIERS_KEY);
     const rawM = localStorage.getItem(LS_CASIER_MVT_KEY);
     if (rawC) {
@@ -7235,14 +7241,15 @@ async function bootstrapAuthenticatedApp() {
   if (!Array.isArray(state.stockLosses)) state.stockLosses = [];
   if (!Array.isArray(state.casiers)) state.casiers = [];
   if (!Array.isArray(state.casierMouvements)) state.casierMouvements = [];
-  if (!state.casiers.length || !state.casierMouvements.length) lsRestoreCasiers();
   if (!Array.isArray(state.staffAuditLog)) state.staffAuditLog = [];
+  if (!state.nextId) state.nextId = {};
   if (!state.nextId.stockEntree || Number.isNaN(Number(state.nextId.stockEntree))) state.nextId.stockEntree = 100;
   if (!state.nextId.stockLoss || Number.isNaN(Number(state.nextId.stockLoss))) state.nextId.stockLoss = 100;
-  if (!state.nextId) state.nextId = {};
   if (!state.nextId.creditRecovery) state.nextId.creditRecovery = 100;
   if (!state.nextId.casier || Number.isNaN(Number(state.nextId.casier))) state.nextId.casier = 1;
   if (!state.nextId.casierMouvement || Number.isNaN(Number(state.nextId.casierMouvement))) state.nextId.casierMouvement = 1;
+  // Restaurer depuis localStorage si le serveur n'a pas les casiers (champ non persisté côté serveur)
+  if (!state.casiers.length) lsRestoreCasiers();
   if (state.nextId.auditEntry === undefined || state.nextId.auditEntry === null) state.nextId.auditEntry = 0;
   knownQrOrderIds = new Set(qrOrdersForCurrentSite(state).map((item) => item.id));
   qrAlertCount = 0;
