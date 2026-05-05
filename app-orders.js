@@ -7523,19 +7523,6 @@ function renderCasierPhysique() {
  * Modal "Nouveau casier"
  * ----------------------------------------------------------- */
 
-function setCasierEditType(type) {
-  const isVide = type === "vide";
-  const qtyWrap = document.getElementById("casier-edit-qty-wrap");
-  const videsWrap = document.getElementById("casier-edit-vides-wrap");
-  const empEl = document.getElementById("casier-edit-emplacement");
-  if (qtyWrap) qtyWrap.style.display = isVide ? "none" : "";
-  if (videsWrap) videsWrap.style.display = isVide ? "" : "none";
-  if (isVide && empEl && !empEl.value.trim()) empEl.value = "À retourner";
-  if (!isVide && empEl && empEl.value === "À retourner") empEl.value = "Réserve";
-  document.getElementById("casier-edit-type-plein").checked = !isVide;
-  document.getElementById("casier-edit-type-vide").checked = isVide;
-}
-
 function openCasierEditModal() {
   if (!canManageCasier()) {
     showToast("Reserve au gerant ou administrateur.");
@@ -7547,12 +7534,9 @@ function openCasierEditModal() {
   if (sel && !String(sel.value || "").trim()) sel.value = "";
   syncCasierEditFromArticle();
   const empEl = document.getElementById("casier-edit-emplacement");
-  if (empEl) empEl.value = "";
-  const qtyEl = document.getElementById("casier-edit-qty");
-  if (qtyEl) qtyEl.value = "0";
+  if (empEl) empEl.value = "À retourner";
   const videsEl = document.getElementById("casier-edit-vides");
   if (videsEl) videsEl.value = "0";
-  setCasierEditType("plein");
   openModal("modal-casier-edit");
 }
 
@@ -7570,17 +7554,15 @@ function syncCasierEditFromArticle() {
 async function submitCasierEdit() {
   const article = document.getElementById("casier-edit-article")?.value || "";
   const capacite = Math.max(1, Math.floor(Number(document.getElementById("casier-edit-capacite")?.value) || 0));
-  const emplacement = String(document.getElementById("casier-edit-emplacement")?.value || "").trim();
-  const isVide = document.getElementById("casier-edit-type-vide")?.checked === true;
-  const qty0 = isVide ? 0 : Math.max(0, Math.floor(Number(document.getElementById("casier-edit-qty")?.value) || 0));
-  const vides0 = isVide ? Math.max(0, Math.floor(Number(document.getElementById("casier-edit-vides")?.value) || 0)) : 0;
-  const created = await createCasier({ article, capacite, emplacement, quantiteActuelle: qty0, bouteillesVides: vides0 });
+  const emplacement = String(document.getElementById("casier-edit-emplacement")?.value || "À retourner").trim();
+  const vides0 = Math.max(0, Math.floor(Number(document.getElementById("casier-edit-vides")?.value) || 0));
+  const created = await createCasier({ article, capacite, emplacement, quantiteActuelle: 0, bouteillesVides: vides0 });
   if (!created) return;
   closeModal("modal-casier-edit");
   renderCasierPhysique();
   renderStock();
   renderDashboard();
-  showToast(`Casier ${created.code} créé (${isVide ? `${vides0} btl vides` : `${qty0} btl pleines`}).`);
+  showToast(`Casier ${created.code} créé (${vides0} btl vides).`);
 }
 
 /* -----------------------------------------------------------
@@ -7977,8 +7959,6 @@ function attachEvents() {
   // Modal Nouveau casier
   document.getElementById("casier-edit-article")?.addEventListener("change", syncCasierEditFromArticle);
   document.getElementById("casier-edit-submit")?.addEventListener("click", () => submitCasierEdit().catch(handleApiError));
-  document.getElementById("casier-edit-type-plein")?.addEventListener("change", () => setCasierEditType("plein"));
-  document.getElementById("casier-edit-type-vide")?.addEventListener("change", () => setCasierEditType("vide"));
   // Modal Mouvement casier physique
   document.getElementById("casier-phys-move-casier")?.addEventListener("change", updateCasierPhysMovePreview);
   document.getElementById("casier-phys-move-qty")?.addEventListener("input", updateCasierPhysMovePreview);

@@ -1773,7 +1773,7 @@
     <div class="modal">
       <div class="modal-handle"></div>
       <div class="section-head">
-        <h3 id="casier-edit-title">Nouveau casier</h3>
+        <h3 id="casier-edit-title">Nouveau casier vide</h3>
         <button class="icon-btn close-modal" data-close="modal-casier-edit" type="button">Fermer</button>
       </div>
       <input type="hidden" id="casier-edit-id">
@@ -1784,7 +1784,7 @@
         </div>
         <div class="form-group">
           <label for="casier-edit-emplacement">Emplacement</label>
-          <input id="casier-edit-emplacement" type="text" placeholder="ex: Zone A · Rayon 2">
+          <input id="casier-edit-emplacement" type="text" placeholder="ex: À retourner">
         </div>
       </div>
       <div class="form-group">
@@ -1792,35 +1792,19 @@
         <input id="casier-edit-article" type="text" list="brasserie-list" placeholder="ex: Solibra, Brassivoire, Castel..." autocomplete="off">
         <p class="form-hint" id="casier-edit-article-info"></p>
       </div>
-      <div class="form-group">
-        <label>Type de casier</label>
-        <div style="display:flex;gap:10px;margin-top:4px">
-          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.9rem">
-            <input type="radio" name="casier-edit-type" id="casier-edit-type-plein" value="plein" checked> Plein (bouteilles pleines)
-          </label>
-          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.9rem">
-            <input type="radio" name="casier-edit-type" id="casier-edit-type-vide" value="vide"> Vide (bouteilles vides à retourner)
-          </label>
-        </div>
-      </div>
       <div class="form-grid two-cols">
         <div class="form-group">
           <label for="casier-edit-capacite">Capacité (bouteilles)</label>
           <input id="casier-edit-capacite" type="number" min="1" step="1" value="24" placeholder="ex: 24">
         </div>
-        <div class="form-group" id="casier-edit-qty-wrap">
-          <label for="casier-edit-qty">Bouteilles pleines</label>
-          <input id="casier-edit-qty" type="number" min="0" step="1" value="0" placeholder="0">
-          <p class="form-hint">Quantité de bouteilles pleines dans ce casier.</p>
-        </div>
-        <div class="form-group" id="casier-edit-vides-wrap" style="display:none">
+        <div class="form-group">
           <label for="casier-edit-vides">Bouteilles vides</label>
           <input id="casier-edit-vides" type="number" min="0" step="1" value="0" placeholder="0">
           <p class="form-hint">Nombre de bouteilles vides à retourner au fournisseur.</p>
         </div>
       </div>
       <div class="button-stack">
-        <button id="casier-edit-submit" class="btn btn-primary" type="button">Créer le casier</button>
+        <button id="casier-edit-submit" class="btn btn-primary" type="button">Créer le casier vide</button>
         <button class="btn btn-outline close-modal" data-close="modal-casier-edit" type="button">Annuler</button>
       </div>
     </div>
