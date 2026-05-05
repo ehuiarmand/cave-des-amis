@@ -7144,15 +7144,21 @@ async function deleteCasier(casierId) {
   return true;
 }
 
-async function retourVidesGroupe(article, cap, nbCasiers) {
+async function retourVidesGroupeBrasserie(br, cap, nbCasiers) {
   if (!canMoveCasier()) { showToast("Connexion requise."); return 0; }
-  const siteId = currentSiteId();
-  const matchingVides = casiersForSite().filter((c) =>
-    c.article === article &&
-    Math.max(1, Number(c.capacite) || 1) === cap &&
-    Math.max(0, Number(c.bouteillesVides) || 0) >= cap
-  ).slice(0, nbCasiers);
+  const matchingVides = casiersForSite().filter((c) => {
+    const stockIt = stockItemForArticle(c.article);
+    const cBr = normalizeBrasserieName(stockIt?.brasserie || "");
+    return cBr === br &&
+      Math.max(1, Number(c.capacite) || 1) === cap &&
+      Math.max(0, Number(c.bouteillesVides) || 0) >= cap;
+  }).slice(0, nbCasiers);
+  return _retourVidesLot(matchingVides, cap, `${br} B${cap}`);
+}
+
+async function _retourVidesLot(matchingVides, cap, label) {
   if (!matchingVides.length) { showToast("Aucun casier de vides trouvé."); return 0; }
+  const siteId = currentSiteId();
   state.casierMouvements = state.casierMouvements || [];
   state.nextId = state.nextId || {};
   if (!state.nextId.casierMouvement) state.nextId.casierMouvement = 1;
@@ -7179,11 +7185,21 @@ async function retourVidesGroupe(article, cap, nbCasiers) {
   if (!processed) { showToast("Aucun casier traité."); return 0; }
   lsSaveCasiers();
   recordStaffAudit("create", "casier_retour_vide",
-    `Retour groupe ${article} B${cap} : ${processed} casier(s)`,
+    `Retour ${label} : ${processed} casier(s)`,
     `${processed} casier(s) × ${cap} btl = ${processed * cap} btl vides retournées fournisseur`
   );
   await persistState({ casiers: state.casiers, casierMouvements: state.casierMouvements, nextId: state.nextId });
   return processed;
+}
+
+async function retourVidesGroupe(article, cap, nbCasiers) {
+  if (!canMoveCasier()) { showToast("Connexion requise."); return 0; }
+  const matchingVides = casiersForSite().filter((c) =>
+    c.article === article &&
+    Math.max(1, Number(c.capacite) || 1) === cap &&
+    Math.max(0, Number(c.bouteillesVides) || 0) >= cap
+  ).slice(0, nbCasiers);
+  return _retourVidesLot(matchingVides, cap, `${article} B${cap}`);
 }
 
 async function retourVidesCasier(casierId, qty) {
@@ -7275,16 +7291,16 @@ function renderCasierPhysique() {
   setText("casier-phys-kpi-vide", fmt(kpis.vide));
   setText("casier-phys-kpi-btl-vides", fmt(kpis.btlVides));
 
-  // Grouper par brasserie > article + capacité
+  // Grouper par brasserie > format (capacité) — exclure les articles sans brasserie
   const byBr = {};
   filtered.forEach((c) => {
     const stockIt = stockItemForArticle(c.article);
-    const br = normalizeBrasserieName(stockIt?.brasserie || c.article) || "Sans brasserie";
+    const rawBr = normalizeBrasserieName(stockIt?.brasserie || "");
+    if (!rawBr) return; // ignorer les articles non rattachés à une brasserie
     const cap = Math.max(1, Number(c.capacite) || 24);
-    const key = `${c.article}|||${cap}`;
-    if (!byBr[br]) byBr[br] = {};
-    if (!byBr[br][key]) byBr[br][key] = { article: c.article, cap, pleins: 0, partiels: 0, vides: 0, btlPleines: 0, btlVides: 0 };
-    const g = byBr[br][key];
+    if (!byBr[rawBr]) byBr[rawBr] = {};
+    if (!byBr[rawBr][cap]) byBr[rawBr][cap] = { cap, pleins: 0, partiels: 0, vides: 0, btlPleines: 0, btlVides: 0 };
+    const g = byBr[rawBr][cap];
     const st = String(c.statut || "vide").toLowerCase();
     if (st === "plein") g.pleins++;
     else if (st === "partiel") g.partiels++;
@@ -7301,7 +7317,8 @@ function renderCasierPhysique() {
   } else {
     let html = "";
     Object.entries(byBr).sort(([a], [b]) => a.localeCompare(b, "fr")).forEach(([br, groups]) => {
-      const entries = Object.entries(groups).sort(([a], [b]) => a.localeCompare(b, "fr"));
+      // trier par capacité décroissante (B24 avant B12)
+      const entries = Object.entries(groups).sort(([a], [b]) => Number(b) - Number(a));
       const brTot = entries.reduce((t, [, g]) => {
         t.pleins += g.pleins; t.partiels += g.partiels; t.vides += g.vides;
         t.btlPleines += g.btlPleines; t.btlVides += g.btlVides; return t;
@@ -7333,7 +7350,7 @@ function renderCasierPhysique() {
               ${entries.map(([, g]) => {
                 const fullVides = Math.floor(g.btlVides / g.cap);
                 const retourBtn = fullVides >= 1
-                  ? `<button type="button" class="mini-btn" data-casier-grp-retour-article="${escapeHtml(g.article)}" data-casier-grp-retour-cap="${g.cap}" style="background:rgba(230,81,0,0.12);color:#e65100;font-weight:700">↩ ${fmt(fullVides)} casier(s) vide(s)</button>`
+                  ? `<button type="button" class="mini-btn" data-casier-grp-retour-br="${escapeHtml(br)}" data-casier-grp-retour-cap="${g.cap}" style="background:rgba(230,81,0,0.12);color:#e65100;font-weight:700">↩ ${fmt(fullVides)} casier(s) vide(s)</button>`
                   : g.btlVides > 0 ? `<span style="color:#e65100;font-size:0.75rem;padding:0 4px">${fmt(g.btlVides)} btl vides</span>` : "";
                 return `<tr>
                   <td style="text-align:center"><span style="background:#e3f2fd;color:#1565c0;padding:2px 9px;border-radius:5px;font-size:0.8rem;font-weight:700">B${g.cap}</span></td>
@@ -7878,23 +7895,25 @@ function attachEvents() {
         .catch(handleApiError);
       return;
     }
-    const grpRetourBtn = e.target.closest("[data-casier-grp-retour-article]");
+    const grpRetourBtn = e.target.closest("[data-casier-grp-retour-br]");
     if (grpRetourBtn) {
-      const article = grpRetourBtn.dataset.casierGrpRetourArticle;
+      const br = grpRetourBtn.dataset.casierGrpRetourBr;
       const cap = Number(grpRetourBtn.dataset.casierGrpRetourCap) || 24;
-      const maxCasiers = casiersForSite().filter((c) =>
-        c.article === article &&
-        Math.max(1, Number(c.capacite) || 1) === cap &&
-        Math.max(0, Number(c.bouteillesVides) || 0) >= cap
-      ).length;
+      const maxCasiers = casiersForSite().filter((c) => {
+        const stockIt = stockItemForArticle(c.article);
+        const cBr = normalizeBrasserieName(stockIt?.brasserie || "");
+        return cBr === br &&
+          Math.max(1, Number(c.capacite) || 1) === cap &&
+          Math.max(0, Number(c.bouteillesVides) || 0) >= cap;
+      }).length;
       if (maxCasiers < 1) { showToast("Pas de casier complet de vides à retourner."); return; }
       const raw = window.prompt(
-        `Combien de casiers vides à retourner au fournisseur ?\n${article} · B${cap}\n(max ${fmt(maxCasiers)} casier(s))`,
+        `Combien de casiers vides à retourner au fournisseur ?\n${br} · B${cap}\n(max ${fmt(maxCasiers)} casier(s))`,
         String(maxCasiers)
       );
       const nb = Math.max(0, Math.min(maxCasiers, Math.floor(Number(raw) || 0)));
       if (!nb) return;
-      retourVidesGroupe(article, cap, nb)
+      retourVidesGroupeBrasserie(br, cap, nb)
         .then((done) => { if (done) { renderCasierPhysique(); renderDashboard(); showToast(`${fmt(done)} casier(s) vide(s) retourné(s) au fournisseur.`); } })
         .catch(handleApiError);
       return;
