@@ -404,9 +404,39 @@ function availableStock(item) {
   return stockActuel(item);
 }
 
+function linePackSize(line, stockItem = null) {
+  const explicitPackSize = Math.max(0, Number(line?.formatQuantite) || Number(line?.packSize) || 0);
+  if (explicitPackSize > 0) return explicitPackSize;
+  const linePrice = Number(line?.prix) || 0;
+  const matchingFormat = linePrice > 0 && stockItem
+    ? normalizeSaleFormats(stockItem)
+      .filter((format) => Number(format.quantite) > 1)
+      .sort((a, b) => Number(b.quantite) - Number(a.quantite))
+      .find((format) => Number(format.prixInterieur) === linePrice || Number(format.prixExterieur) === linePrice)
+    : null;
+  return Math.max(1, Number(matchingFormat?.quantite) || Number(stockItem?.packSize) || 1);
+}
+
 function lineBottleQty(line, stockItem = null) {
-  const packSize = Math.max(1, Number(line?.formatQuantite) || Number(line?.packSize) || Number(stockItem?.packSize) || 1);
-  return (Number(line?.qty) || 0) * packSize;
+  return (Number(line?.qty) || 0) * linePackSize(line, stockItem);
+}
+
+function lineQtyLabel(line, stockItem = null) {
+  const qty = Number(line?.qty) || 0;
+  const packSize = linePackSize(line, stockItem);
+  if (packSize > 1) {
+    return `${fmt(qty * packSize)} btl (${fmt(qty)} x kit de ${fmt(packSize)})`;
+  }
+  return fmt(qty);
+}
+
+function lineQtyPriceLabel(line, stockItem = null) {
+  const packSize = linePackSize(line, stockItem);
+  const price = fmt(line?.prix || 0);
+  if (packSize > 1) {
+    return `${lineQtyLabel(line, stockItem)} · ${price} FCFA`;
+  }
+  return `${lineQtyLabel(line, stockItem)} x ${price} FCFA`;
 }
 
 function stockItemForArticle(article, siteId = currentSiteId()) {
@@ -668,7 +698,7 @@ function formatCommandeAuditDetail(order) {
   if (!lines.length) return `${header}Aucune ligne enregistree.`;
   const body = lines.map((line, i) => {
     const art = line.article || "?";
-    const q = fmt(line.qty);
+    const q = lineQtyLabel(line, stockItemForArticle(line.article));
     const pu = fmt(line.prix || 0);
     const net = fmt(calcNet(line));
     const rem = Number(line.remise) || 0;
@@ -2078,6 +2108,7 @@ function renderDailyStockCheck() {
   const dayBook = dayBookFor(dStr, currentSiteId());
   const container = document.getElementById("pdj-stock-check");
   const button = document.getElementById("close-day-btn");
+  const manualButton = document.getElementById("manual-close-day-btn");
   const printBtn = document.getElementById("print-closure-btn");
   if (!container || !button) return;
   const superadminCorrection = Boolean(closed && canAnyAdmin());
@@ -2090,6 +2121,7 @@ function renderDailyStockCheck() {
   if (!items.length) {
     container.innerHTML = emptyState("Aucun stock", "Ajoutez des articles avant de faire le point de fermeture.");
     button.disabled = false;
+    if (manualButton) manualButton.disabled = true;
     return;
   }
 
@@ -2101,9 +2133,11 @@ function renderDailyStockCheck() {
       "Validez le montant en caisse en haut de cette page avant la verification stock et la cloture.",
     );
     button.disabled = true;
+    if (manualButton) manualButton.disabled = false;
     return;
   }
   button.disabled = false;
+  if (manualButton) manualButton.disabled = false;
 
   if (closed && !canAnyAdmin()) {
     const checkItems = closed.items || [];
@@ -2136,7 +2170,7 @@ function renderDailyStockCheck() {
     container.innerHTML = `
       ${cashBlock}
       <div class="inline-card" style="margin-bottom:12px">
-        <span class="muted">Journee cloturee le</span>
+        <span class="muted">${closed.manualClose ? "Cloture manuelle enregistree le" : "Journee cloturee le"}</span>
         <strong>${escapeHtml(formatDateTimeDdMmYyyy(closed.createdAt))}</strong>
       </div>
       <div class="stock-table-wrap"><table class="stock-table">
@@ -2487,7 +2521,7 @@ function renderSalesHistory() {
           <div class="order-total">${fmt(total)} FCFA</div>
         </div>
         <div class="order-lines">
-          ${invoice.lignes.map((vente) => `<div class="order-line"><div><p class="list-item-title">${escapeHtml(vente.article)}</p><p class="list-item-sub">${escapeHtml(vente.cat)} · ${fmt(vente.qty)} x ${fmt(vente.prix)} FCFA${vente.remise ? ` · -${fmt(vente.remise)}` : ""}</p></div><button class="del-btn" type="button" data-delete-type="vente" data-id="${vente.id}">Suppr.</button></div>`).join("")}
+          ${invoice.lignes.map((vente) => `<div class="order-line"><div><p class="list-item-title">${escapeHtml(vente.article)}</p><p class="list-item-sub">${escapeHtml(vente.cat)} · ${escapeHtml(lineQtyPriceLabel(vente, stockItemForArticle(vente.article)))}${vente.remise ? ` · -${fmt(vente.remise)}` : ""}</p></div><button class="del-btn" type="button" data-delete-type="vente" data-id="${vente.id}">Suppr.</button></div>`).join("")}
         </div>
         <div class="order-actions">
           <button type="button" class="mini-btn" data-print-invoice="${escapeHtml(invoice.factureNumber)}">Imprimer facture</button>
@@ -2643,7 +2677,7 @@ function renderOrders() {
           <div class="order-total">${fmt(total)} FCFA</div>
         </div>
         <div class="order-lines">
-          ${order.lignes.length ? order.lignes.map((line) => `<div class="order-line"><div><p class="list-item-title">${escapeHtml(line.article)}</p><p class="list-item-sub">${escapeHtml(line.cat)} · ${fmt(line.qty)} x ${fmt(line.prix)} FCFA${line.remise ? ` · -${fmt(line.remise)}` : ""} · ${escapeHtml(line.paiement)}</p></div><div class="line-actions"><button type="button" class="mini-btn" data-edit-line="${line.id}" data-order-id="${order.id}">Modifier</button><button type="button" class="mini-btn" data-replace-line="${line.id}" data-order-id="${order.id}">Remplacer</button><button type="button" class="mini-btn" data-remove-line="${line.id}" data-order-id="${order.id}">Retirer</button></div></div>`).join("") : emptyState("Commande vide", "Ajoutez une premiere boisson a cette commande.")}
+          ${order.lignes.length ? order.lignes.map((line) => `<div class="order-line"><div><p class="list-item-title">${escapeHtml(line.article)}</p><p class="list-item-sub">${escapeHtml(line.cat)} · ${escapeHtml(lineQtyPriceLabel(line, stockItemForArticle(line.article)))}${line.remise ? ` · -${fmt(line.remise)}` : ""} · ${escapeHtml(line.paiement)}</p></div><div class="line-actions"><button type="button" class="mini-btn" data-edit-line="${line.id}" data-order-id="${order.id}">Modifier</button><button type="button" class="mini-btn" data-replace-line="${line.id}" data-order-id="${order.id}">Remplacer</button><button type="button" class="mini-btn" data-remove-line="${line.id}" data-order-id="${order.id}">Retirer</button></div></div>`).join("") : emptyState("Commande vide", "Ajoutez une premiere boisson a cette commande.")}
         </div>
         <div class="order-actions">
           <button type="button" class="mini-btn" data-activate-order="${order.id}">Ouvrir la commande</button>
@@ -3095,7 +3129,7 @@ function openReplaceModal(orderId, lineId) {
   replacingLine = { orderId: Number(orderId), lineId: Number(lineId), article: line.article };
   replaceSelectedArticle = null;
   const infoEl = document.getElementById("replace-current-info");
-  if (infoEl) infoEl.textContent = `Article actuel : ${line.article} · ${fmt(line.qty)} x ${fmt(line.prix)} FCFA`;
+  if (infoEl) infoEl.textContent = `Article actuel : ${line.article} · ${lineQtyPriceLabel(line, stockItemForArticle(line.article))}`;
   const searchEl = document.getElementById("replace-search");
   if (searchEl) searchEl.value = "";
   renderReplacePicker("");
@@ -4904,6 +4938,8 @@ async function finalizeOrder(orderId = activeOrderId) {
     cat: line.cat,
     prix: line.prix,
     qty: line.qty,
+    formatQuantite: linePackSize(line, stockItemForArticle(line.article, siteId)),
+    packSize: linePackSize(line, stockItemForArticle(line.article, siteId)),
     remise: line.remise,
     paiement: paymentMethod,
     paiementDetails: splitPaymentDetails(paymentMix.details, calcNet(line), orderTotal),
@@ -5271,6 +5307,112 @@ function renderStockMovements() {
       <td>${escapeHtml(item.user)}</td>
     </tr>`).join("")
     : `<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:32px">Aucun mouvement trouve</td></tr>`;
+}
+
+function closureCashSnapshot(dStr) {
+  const ventesJour = recordsForSite(state.ventes).filter((v) => v.date.slice(0, 10) === dStr);
+  const totauxJour = paymentTotals(ventesJour);
+  const caEncaisse = Object.entries(totauxJour).reduce((sum, [m, a]) => String(m).includes("dit client") ? sum : sum + a, 0);
+  const caCreances = Object.entries(totauxJour).reduce((sum, [m, a]) => String(m).includes("dit client") ? sum + a : sum, 0);
+  const especesVentes = Number(totauxJour["Espèces"]) || Number(totauxJour["EspÃ¨ces"]) || 0;
+  const chargesJour = recordsForSite(state.charges).filter((c) => (c.date || "").slice(0, 10) === dStr);
+  const especesCharges = chargesJour.reduce((sum, c) => (
+    normalizePaymentMethodKey(c.paiement) === normalizePaymentMethodKey("Espèces")
+    || normalizePaymentMethodKey(c.paiement) === normalizePaymentMethodKey("EspÃ¨ces")
+      ? sum + (Number(c.montant) || 0)
+      : sum
+  ), 0);
+  const dayBook = dayBookFor(dStr, currentSiteId());
+  const openingCash = Number(dayBook?.openingCashFcfa) || 0;
+  const expectedEspecesCash = openingCash + especesVentes - especesCharges;
+  const closingRaw = document.getElementById("pdj-closing-cash")?.value;
+  const closingCashFcfa = closingRaw === undefined || closingRaw === null || String(closingRaw).trim() === ""
+    ? expectedEspecesCash
+    : Math.max(0, Number(closingRaw) || 0);
+  return {
+    dayBook,
+    ventesJour,
+    totauxJour,
+    caEncaisse,
+    caCreances,
+    especesVentes,
+    especesCharges,
+    openingCash,
+    expectedEspecesCash,
+    closingCashFcfa,
+    cashEcartEspeces: closingCashFcfa - expectedEspecesCash,
+  };
+}
+
+async function closeAccountingDayManual() {
+  const items = recordsForSite(state.stock);
+  if (!items.length) {
+    showToast("Aucun stock a cloturer.");
+    return;
+  }
+  const dStr = pdjCalendarDate();
+  if (!canAnyAdmin() && dStr !== today()) {
+    showToast("Seul un administrateur peut cloturer une autre date.");
+    return;
+  }
+  const existingClose = stockCheckForSiteDate(dStr, currentSiteId());
+  const msg = existingClose
+    ? `Remplacer la cloture du ${formatDateDdMmYyyy(dStr)} par une cloture manuelle ?`
+    : `Enregistrer une cloture manuelle pour le ${formatDateDdMmYyyy(dStr)} ?`;
+  if (!window.confirm(`${msg}\n\nCette cloture fige le stock actuel et ne genere pas de nouvelles sorties de stock.`)) return;
+  if (existingClose) revertStockCheckLedgerEffects(existingClose);
+  const cash = closureCashSnapshot(dStr);
+  const checkedItems = items.map((item) => {
+    const sortiesToday = todaySortiesBottlesForArticle(item.article, dStr);
+    const frigo = stockFrigo(item);
+    const reserve = stockReserve(item);
+    const counted = frigo + reserve;
+    return {
+      id: item.id,
+      article: item.article,
+      cat: item.cat || "",
+      stockAvant: counted + sortiesToday,
+      sortiesToday,
+      expected: counted,
+      frigo,
+      reserve,
+      counted,
+      ecart: 0,
+      stockApres: counted,
+      manual: true,
+    };
+  });
+  const check = {
+    id: Date.now(),
+    siteId: currentSiteId(),
+    date: dStr,
+    createdAt: new Date().toISOString(),
+    openedAt: cash.dayBook?.openedAt || "",
+    openingCashFcfa: cash.openingCash,
+    closingCashFcfa: cash.closingCashFcfa,
+    expectedEspecesCash: cash.expectedEspecesCash,
+    cashEcartEspeces: cash.cashEcartEspeces,
+    caEncaisse: cash.caEncaisse,
+    caCreances: cash.caCreances,
+    nbVentes: cash.ventesJour.length,
+    totauxJour: cash.totauxJour,
+    manualClose: true,
+    items: checkedItems,
+  };
+  state.stockChecks = [
+    check,
+    ...(state.stockChecks || []).filter((item) => !(item.siteId === check.siteId && item.date === check.date)),
+  ];
+  recordStaffAudit(
+    "create",
+    "cloture_jour",
+    `Cloture manuelle ${formatDateDdMmYyyy(dStr)}`,
+    `Fige le stock actuel sans ecriture supplementaire.\nCA encaisse ${fmt(cash.caEncaisse)} FCFA · caisse attendue ${fmt(cash.expectedEspecesCash)} · denombre ${fmt(cash.closingCashFcfa)} · ecart ${cash.cashEcartEspeces > 0 ? "+" : ""}${fmt(cash.cashEcartEspeces)} FCFA`,
+  );
+  await persistState({ stock: state.stock, stockChecks: state.stockChecks });
+  renderStock();
+  renderPointDuJour();
+  showToast("Cloture manuelle enregistree.");
 }
 
 async function closeAccountingDay() {
@@ -5688,7 +5830,7 @@ function printOrderTicket(orderId = activeOrderId) {
     showToast("Impossible d'ouvrir la fenetre d'impression.");
     return;
   }
-  ticketWindow.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>Ticket ${escapeHtml(order.client)}</title><style>body{font-family:Arial,sans-serif;padding:24px;color:#111}h1,h2,p{margin:0 0 8px}table{width:100%;border-collapse:collapse;margin-top:16px}td,th{padding:8px 0;border-bottom:1px solid #ddd;text-align:left}th:last-child,td:last-child{text-align:right}.total{margin-top:16px;font-size:20px;font-weight:700}.muted{color:#666;font-size:12px}</style></head><body><h1>${escapeHtml(site?.nom || "Maquis")}</h1><p>${escapeHtml(site?.ville || "")} ${escapeHtml(site?.pays || "")}</p><p class="muted">Client: ${escapeHtml(order.client || "Comptoir")} · Date: ${escapeHtml(formatDateDdMmYyyy(order.date))}</p><table><thead><tr><th>Article</th><th>Qté</th><th>Montant</th></tr></thead><tbody>${order.lignes.map((line) => `<tr><td>${escapeHtml(line.article)}</td><td>${fmt(line.qty)}</td><td>${fmt(calcNet(line))} FCFA</td></tr>`).join("")}</tbody></table><p class="total">Total: ${fmt(total)} FCFA</p><p class="muted">${escapeHtml(order.note || "")}</p><script>window.onload=function(){window.print();}</script></body></html>`);
+  ticketWindow.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>Ticket ${escapeHtml(order.client)}</title><style>body{font-family:Arial,sans-serif;padding:24px;color:#111}h1,h2,p{margin:0 0 8px}table{width:100%;border-collapse:collapse;margin-top:16px}td,th{padding:8px 0;border-bottom:1px solid #ddd;text-align:left}th:last-child,td:last-child{text-align:right}.total{margin-top:16px;font-size:20px;font-weight:700}.muted{color:#666;font-size:12px}</style></head><body><h1>${escapeHtml(site?.nom || "Maquis")}</h1><p>${escapeHtml(site?.ville || "")} ${escapeHtml(site?.pays || "")}</p><p class="muted">Client: ${escapeHtml(order.client || "Comptoir")} · Date: ${escapeHtml(formatDateDdMmYyyy(order.date))}</p><table><thead><tr><th>Article</th><th>Qté</th><th>Montant</th></tr></thead><tbody>${order.lignes.map((line) => `<tr><td>${escapeHtml(line.article)}</td><td>${escapeHtml(lineQtyLabel(line, stockItemForArticle(line.article)))}</td><td>${fmt(calcNet(line))} FCFA</td></tr>`).join("")}</tbody></table><p class="total">Total: ${fmt(total)} FCFA</p><p class="muted">${escapeHtml(order.note || "")}</p><script>window.onload=function(){window.print();}</script></body></html>`);
   ticketWindow.document.close();
 }
 
@@ -5717,7 +5859,7 @@ function printInvoice(factureNumber) {
   const creditSection = debiteur
     ? `<p style="color:#c54f41"><span>Débiteur</span><span>${escapeHtml(debiteur)}</span></p>${creditIssuerPrint ? `<p class="meta"><span>Crédit accordé par</span><span>${escapeHtml(creditIssuerPrint)}</span></p>` : ""}`
     : "";
-  ticketWindow.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>Facture ${escapeHtml(factureNumber)}</title><style>body{font-family:Arial,sans-serif;padding:32px;color:#111;background:#fff}header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #222;padding-bottom:16px;margin-bottom:18px}h1,h2,p{margin:0 0 8px}table{width:100%;border-collapse:collapse;margin-top:14px}th,td{padding:10px 8px;border-bottom:1px solid #ddd;text-align:left}th:last-child,td:last-child{text-align:right}.meta{color:#555}.totals{margin-top:18px;display:flex;justify-content:flex-end}.totals-box{min-width:300px;border:1px solid #111;padding:16px}.totals-box p{display:flex;justify-content:space-between;margin-bottom:6px}.grand{font-size:20px;font-weight:700;border-top:1px solid #111;padding-top:8px;margin-top:8px}.footer{margin-top:26px;color:#666;font-size:12px}.pay-label{font-size:12px;color:#555;font-weight:700;text-transform:uppercase;margin-bottom:4px}</style></head><body><header><div><h1>${escapeHtml(site?.nom || "Maquis")}</h1><p>${escapeHtml(site?.ville || "")} - ${escapeHtml(site?.pays || "")}</p><p>Gerant: ${escapeHtml(site?.gerant || "-")}</p></div><div><h2>Facture</h2><p class="meta">Numero: ${escapeHtml(factureNumber)}</p><p class="meta">Date: ${escapeHtml(formatDateDdMmYyyy(lignes[0].date))}</p><p class="meta">Client: ${escapeHtml(client)}</p></div></header><table><thead><tr><th>Article</th><th>Qte</th><th>Prix unit.</th><th>Remise</th><th>Total</th></tr></thead><tbody>${lignes.map((line) => `<tr><td>${escapeHtml(line.article)}</td><td>${fmt(line.qty)}</td><td>${fmt(line.prix)} FCFA</td><td>${fmt(line.remise || 0)} FCFA</td><td>${fmt(calcNet(line))} FCFA</td></tr>`).join("")}</tbody></table><div class="totals"><div class="totals-box">${isMixed ? `<p class="pay-label" style="display:block">Paiement mixte</p>` : ""}${paymentSection}${creditSection}<p class="grand"><span>Total facture</span><span>${fmt(total)} FCFA</span></p></div></div><p class="footer">Merci pour votre visite.</p><script>window.onload=function(){window.print();}</script></body></html>`);
+  ticketWindow.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>Facture ${escapeHtml(factureNumber)}</title><style>body{font-family:Arial,sans-serif;padding:32px;color:#111;background:#fff}header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #222;padding-bottom:16px;margin-bottom:18px}h1,h2,p{margin:0 0 8px}table{width:100%;border-collapse:collapse;margin-top:14px}th,td{padding:10px 8px;border-bottom:1px solid #ddd;text-align:left}th:last-child,td:last-child{text-align:right}.meta{color:#555}.totals{margin-top:18px;display:flex;justify-content:flex-end}.totals-box{min-width:300px;border:1px solid #111;padding:16px}.totals-box p{display:flex;justify-content:space-between;margin-bottom:6px}.grand{font-size:20px;font-weight:700;border-top:1px solid #111;padding-top:8px;margin-top:8px}.footer{margin-top:26px;color:#666;font-size:12px}.pay-label{font-size:12px;color:#555;font-weight:700;text-transform:uppercase;margin-bottom:4px}</style></head><body><header><div><h1>${escapeHtml(site?.nom || "Maquis")}</h1><p>${escapeHtml(site?.ville || "")} - ${escapeHtml(site?.pays || "")}</p><p>Gerant: ${escapeHtml(site?.gerant || "-")}</p></div><div><h2>Facture</h2><p class="meta">Numero: ${escapeHtml(factureNumber)}</p><p class="meta">Date: ${escapeHtml(formatDateDdMmYyyy(lignes[0].date))}</p><p class="meta">Client: ${escapeHtml(client)}</p></div></header><table><thead><tr><th>Article</th><th>Qte</th><th>Prix unit.</th><th>Remise</th><th>Total</th></tr></thead><tbody>${lignes.map((line) => `<tr><td>${escapeHtml(line.article)}</td><td>${escapeHtml(lineQtyLabel(line, stockItemForArticle(line.article)))}</td><td>${fmt(line.prix)} FCFA</td><td>${fmt(line.remise || 0)} FCFA</td><td>${fmt(calcNet(line))} FCFA</td></tr>`).join("")}</tbody></table><div class="totals"><div class="totals-box">${isMixed ? `<p class="pay-label" style="display:block">Paiement mixte</p>` : ""}${paymentSection}${creditSection}<p class="grand"><span>Total facture</span><span>${fmt(total)} FCFA</span></p></div></div><p class="footer">Merci pour votre visite.</p><script>window.onload=function(){window.print();}</script></body></html>`);
   ticketWindow.document.close();
 }
 
@@ -5961,7 +6103,7 @@ function printSalesHistory() {
       <td>${escapeHtml(vente.client || "Client comptoir")}</td>
       <td>${escapeHtml(vente.article)}</td>
       <td>${escapeHtml(vente.cat)}</td>
-      <td>${fmt(vente.qty)}</td>
+      <td>${escapeHtml(lineQtyLabel(vente, stockItemForArticle(vente.article)))}</td>
       <td>${fmt(vente.prix)} FCFA</td>
       <td>${fmt(vente.remise || 0)} FCFA</td>
       <td>${escapeHtml(paymentLabel(vente))}</td>
@@ -7717,6 +7859,9 @@ document.getElementById("fab-btn").addEventListener("click", () => {
       return;
     }
     closeAccountingDay().catch(handleApiError);
+  });
+  document.getElementById("manual-close-day-btn")?.addEventListener("click", () => {
+    closeAccountingDayManual().catch(handleApiError);
   });
   document.getElementById("add-user-btn").addEventListener("click", () => addUser().catch(handleApiError));
   document.getElementById("add-site-btn").addEventListener("click", () => addSite().catch(handleApiError));
