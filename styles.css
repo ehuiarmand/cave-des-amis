@@ -2467,6 +2467,9 @@ textarea { font: inherit; }
   max-height: min(52vh, 420px);
   overflow-y: auto;
 }
+.audit-detail-pre.is-expanded {
+  max-height: min(72vh, 620px);
+}
 .audit-cell-wrap {
   max-width: 240px;
   vertical-align: top;

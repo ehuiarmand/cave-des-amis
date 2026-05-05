@@ -713,6 +713,10 @@ function openStaffAuditDetailModal(entryId) {
   }
   const idEl = document.getElementById("audit-detail-id");
   if (idEl) idEl.textContent = String(row.id ?? "—");
+  const detailEl = document.getElementById("audit-detail-detail");
+  if (detailEl) detailEl.classList.remove("is-expanded");
+  const toggleBtn = document.getElementById("audit-detail-toggle-btn");
+  if (toggleBtn) toggleBtn.textContent = "Agrandir";
   const set = (id, text) => {
     const el = document.getElementById(id);
     if (el) el.textContent = text;
@@ -729,7 +733,30 @@ function openStaffAuditDetailModal(entryId) {
   set("audit-detail-summary", row.summary || "—");
   set("audit-detail-detail", row.detail || "—");
   openModal("modal-staff-audit-detail");
-  document.getElementById("audit-detail-detail")?.focus();
+  detailEl?.focus();
+}
+
+function copyTextToClipboard(text) {
+  const raw = String(text || "");
+  if (!raw) return Promise.resolve(false);
+  if (navigator?.clipboard?.writeText) {
+    return navigator.clipboard.writeText(raw).then(() => true).catch(() => false);
+  }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = raw;
+    ta.setAttribute("readonly", "true");
+    ta.style.position = "fixed";
+    ta.style.top = "-1000px";
+    ta.style.left = "-1000px";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return Promise.resolve(Boolean(ok));
+  } catch {
+    return Promise.resolve(false);
+  }
 }
 
 function renderStaffAuditLog() {
@@ -3172,8 +3199,8 @@ function renderStock() {
       <td class="stock-actions-cell">
         ${isFrigoLow && reserve > 0 ? `<button type="button" class="mini-btn" data-auto-fill-fridge="${item.id}">Remplir frigo</button>` : ""}
         <button type="button" class="stock-del-btn" style="background:rgba(197,79,65,0.18);color:#ff8e82" data-perte-id="${item.id}">Perte</button>
-        ${canManage() ? `<button type="button" class="mini-btn" data-edit-stock="${item.id}">Modifier</button>
-        <button class="stock-del-btn" type="button" data-delete-type="stock" data-id="${item.id}">Suppr.</button>` : ""}
+        ${canManage() ? `<button type="button" class="mini-btn" data-edit-stock="${item.id}">Modifier</button>` : ""}
+        ${canAnyAdmin() ? `<button class="stock-del-btn" type="button" data-delete-type="stock" data-id="${item.id}">Suppr.</button>` : ""}
       </td>
     </tr>`;
   }).join("");
@@ -7342,6 +7369,21 @@ document.getElementById("fab-btn").addEventListener("click", () => {
   document.getElementById("purchase-add-line-btn")?.addEventListener("click", () => addPurchaseLine());
   document.getElementById("purchase-save-btn")?.addEventListener("click", () => savePurchaseOrder().catch(handleApiError));
   document.getElementById("purchase-receive-confirm-btn")?.addEventListener("click", () => confirmReceivePurchaseOrder().catch(handleApiError));
+  // Audit detail: copy + expand
+  document.getElementById("audit-detail-copy-btn")?.addEventListener("click", () => {
+    const detail = document.getElementById("audit-detail-detail")?.textContent || "";
+    copyTextToClipboard(detail).then((ok) => {
+      showToast(ok ? "Detail copie." : "Impossible de copier.");
+    });
+  });
+  document.getElementById("audit-detail-toggle-btn")?.addEventListener("click", () => {
+    const pre = document.getElementById("audit-detail-detail");
+    const btn = document.getElementById("audit-detail-toggle-btn");
+    if (!pre || !btn) return;
+    const expanded = pre.classList.toggle("is-expanded");
+    btn.textContent = expanded ? "Reduire" : "Agrandir";
+    if (expanded) pre.scrollIntoView({ block: "nearest" });
+  });
   document.getElementById("modal-purchase-receive")?.addEventListener("input", (event) => {
     if (!event.target.classList?.contains("recv-cases-input")) return;
     const po = (state.purchaseOrders || []).find((p) => p.id === pendingReceivePurchaseId);
