@@ -3921,6 +3921,9 @@ async function syncStateSilently() {
 }
 
 async function persistState(overrides = {}) {
+  const _casiers = overrides.casiers ?? state.casiers ?? [];
+  const _casierMouvements = overrides.casierMouvements ?? state.casierMouvements ?? [];
+  const _consignes = overrides.consignes ?? state.consignes ?? [];
   state = await apiRequest(API.state, {
     method: "PUT",
     body: JSON.stringify({
@@ -3936,16 +3939,21 @@ async function persistState(overrides = {}) {
       dayBooks: overrides.dayBooks !== undefined ? overrides.dayBooks : (state.dayBooks || []),
       purchaseOrders: overrides.purchaseOrders ?? state.purchaseOrders ?? [],
       creditRecoveries: overrides.creditRecoveries || state.creditRecoveries || [],
-      consignes: overrides.consignes ?? state.consignes ?? [],
+      consignes: _consignes,
       categories: overrides.categories || state.categories || CATEGORIES,
       charges: overrides.charges || state.charges,
       nextId: overrides.nextId || state.nextId,
       staffAuditLog: overrides.staffAuditLog !== undefined ? overrides.staffAuditLog : (state.staffAuditLog || []),
       auth: overrides.auth || { users: state.auth.users || [] },
-      casiers: overrides.casiers ?? state.casiers ?? [],
-      casierMouvements: overrides.casierMouvements ?? state.casierMouvements ?? [],
+      casiers: _casiers,
+      casierMouvements: _casierMouvements,
     }),
   });
+  // Le serveur peut ne pas renvoyer les nouveaux champs — on les préserve localement
+  if (!state.casiers?.length && _casiers.length) state.casiers = _casiers;
+  if (!state.casierMouvements?.length && _casierMouvements.length) state.casierMouvements = _casierMouvements;
+  if (!state.consignes?.length && _consignes.length) state.consignes = _consignes;
+  lsSaveCasiers();
   renderTopbar();
 }
 
@@ -6280,6 +6288,39 @@ async function submitCasierMove() {
  * MODULE CASIERS PHYSIQUES (CAS-XXXX)
  * =========================================================== */
 
+const LS_CASIERS_KEY = "cda_casiers_v1";
+const LS_CASIER_MVT_KEY = "cda_casierMouvements_v1";
+
+function lsSaveCasiers() {
+  try {
+    localStorage.setItem(LS_CASIERS_KEY, JSON.stringify(state.casiers || []));
+    localStorage.setItem(LS_CASIER_MVT_KEY, JSON.stringify(state.casierMouvements || []));
+  } catch (e) { /* quota plein ou mode privé */ }
+}
+
+function lsRestoreCasiers() {
+  try {
+    const rawC = localStorage.getItem(LS_CASIERS_KEY);
+    const rawM = localStorage.getItem(LS_CASIER_MVT_KEY);
+    if (rawC) {
+      const list = JSON.parse(rawC);
+      if (Array.isArray(list) && list.length) {
+        state.casiers = list;
+        const maxId = list.reduce((m, c) => Math.max(m, Number(c.id) || 0), 0);
+        if (!state.nextId.casier || state.nextId.casier <= maxId) state.nextId.casier = maxId + 1;
+      }
+    }
+    if (rawM) {
+      const list = JSON.parse(rawM);
+      if (Array.isArray(list) && list.length) {
+        state.casierMouvements = list;
+        const maxId = list.reduce((m, c) => Math.max(m, Number(c.id) || 0), 0);
+        if (!state.nextId.casierMouvement || state.nextId.casierMouvement <= maxId) state.nextId.casierMouvement = maxId + 1;
+      }
+    }
+  } catch (e) { /* localStorage corrompu */ }
+}
+
 let casierPhysFilters = { article: "", emplacement: "", statut: "all" };
 let casierViewMode = "lots"; // "lots" | "physique"
 
@@ -7170,6 +7211,7 @@ async function bootstrapAuthenticatedApp() {
   if (!Array.isArray(state.stockLosses)) state.stockLosses = [];
   if (!Array.isArray(state.casiers)) state.casiers = [];
   if (!Array.isArray(state.casierMouvements)) state.casierMouvements = [];
+  if (!state.casiers.length || !state.casierMouvements.length) lsRestoreCasiers();
   if (!Array.isArray(state.staffAuditLog)) state.staffAuditLog = [];
   if (!state.nextId.stockEntree || Number.isNaN(Number(state.nextId.stockEntree))) state.nextId.stockEntree = 100;
   if (!state.nextId.stockLoss || Number.isNaN(Number(state.nextId.stockLoss))) state.nextId.stockLoss = 100;
