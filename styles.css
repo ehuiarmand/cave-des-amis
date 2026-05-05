@@ -1994,6 +1994,7 @@ textarea { font: inherit; }
 
 .th-orange { color: #fb8c00 !important; }
 .th-blue { color: var(--mm-primary-dark) !important; }
+.th-amber { color: #e65100 !important; }
 
 .stock-check-input {
   width: 110px;
