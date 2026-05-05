@@ -1173,7 +1173,11 @@ function renderCasiers() {
     byBrasserie[key][groupKey].push(item);
   });
   let totalCasiersTous = 0, nbAlerte = 0, nbEpuise = 0;
-  let html = "";
+  let html = `<div style="display:flex;justify-content:flex-end;margin-bottom:14px">
+    <button type="button" class="sync-casiers-btn" style="background:#1565c0;color:#fff;border:none;padding:7px 16px;border-radius:8px;font-size:0.82rem;cursor:pointer;font-weight:600;letter-spacing:0.01em">
+      ⟳ Créer casiers depuis stock &amp; ventes
+    </button>
+  </div>`;
   Object.entries(byBrasserie).sort(([a], [b]) => a.localeCompare(b, "fr")).forEach(([brasserie, byCaseSize]) => {
     const catCasiers = Object.values(byCaseSize).flat().reduce((s, item) => {
       const cs = caseSize(item); const stk = stockActuel(item);
@@ -6807,6 +6811,99 @@ function logCasierAudit(verb, casier, before, item, beforeStock, qty, opts = {})
   recordStaffAudit(verb, opts.entity || "casier", `${codeLabel} · ${article} · ${opts.label || verb}`, lines.join("\n"));
 }
 
+async function syncCasiersFromStockEtVentes() {
+  if (!canAnyAdmin()) { showToast("Réservé aux administrateurs."); return; }
+  const siteId = currentSiteId();
+  const eligible = recordsForSite(state.stock).filter((item) => lotType(item) !== "unite");
+  if (!eligible.length) { showToast("Aucun article en stock pour initialiser les casiers."); return; }
+
+  let previewPleins = 0, previewVides = 0;
+  eligible.forEach((item) => {
+    const cap = Math.max(1, caseSize(item));
+    previewPleins += Math.ceil(Math.max(0, stockActuel(item)) / cap);
+    previewVides  += Math.ceil(Math.max(0, Number(item.sorties) || 0) / cap);
+  });
+
+  if (!confirm(
+    `Créer les casiers depuis le stock et les ventes ?\n\n` +
+    `  • ${previewPleins} casier(s) PLEINS  (stock actuel)\n` +
+    `  • ${previewVides} casier(s) VIDES   (bouteilles vendues)\n\n` +
+    `Les casiers existants de ce site seront remplacés.`
+  )) return;
+
+  state.casiers = state.casiers || [];
+  state.casierMouvements = state.casierMouvements || [];
+  if (!state.nextId) state.nextId = {};
+  if (!state.nextId.casier) state.nextId.casier = 1;
+
+  // Supprimer les casiers du site courant
+  state.casiers = state.casiers.filter((c) => !rowMatchesSite(c, siteId, multiSiteActive()));
+
+  const now = new Date().toISOString();
+  let createdPleins = 0, createdVides = 0;
+
+  eligible.forEach((item) => {
+    const cap = Math.max(1, caseSize(item));
+
+    // --- Casiers PLEINS (stock actuel) ---
+    const stockBtl = Math.max(0, stockActuel(item));
+    if (stockBtl > 0) {
+      const fullCount = Math.floor(stockBtl / cap);
+      const remainder = stockBtl % cap;
+      for (let i = 0; i < fullCount; i++) {
+        const c = { id: state.nextId.casier++, siteId, code: nextCasierCode(), article: item.article,
+          capacite: cap, quantiteActuelle: cap, bouteillesVides: 0,
+          emplacement: "Réserve", statut: "plein", createdAt: now, createdBy: sessionUser || "-", autoInitialized: true };
+        recomputeCasierStatus(c);
+        state.casiers.push(c);
+        createdPleins++;
+      }
+      if (remainder > 0) {
+        const c = { id: state.nextId.casier++, siteId, code: nextCasierCode(), article: item.article,
+          capacite: cap, quantiteActuelle: remainder, bouteillesVides: 0,
+          emplacement: "Réserve", statut: "partiel", createdAt: now, createdBy: sessionUser || "-", autoInitialized: true };
+        recomputeCasierStatus(c);
+        state.casiers.push(c);
+        createdPleins++;
+      }
+    }
+
+    // --- Casiers VIDES (bouteilles vendues, à retourner fournisseur) ---
+    const sorties = Math.max(0, Number(item.sorties) || 0);
+    if (sorties > 0) {
+      const fullVides = Math.floor(sorties / cap);
+      const remainderVides = sorties % cap;
+      for (let i = 0; i < fullVides; i++) {
+        const c = { id: state.nextId.casier++, siteId, code: nextCasierCode(), article: item.article,
+          capacite: cap, quantiteActuelle: 0, bouteillesVides: cap,
+          emplacement: "À retourner", statut: "vide", createdAt: now, createdBy: sessionUser || "-", autoInitialized: true };
+        recomputeCasierStatus(c);
+        state.casiers.push(c);
+        createdVides++;
+      }
+      if (remainderVides > 0) {
+        const c = { id: state.nextId.casier++, siteId, code: nextCasierCode(), article: item.article,
+          capacite: cap, quantiteActuelle: 0, bouteillesVides: remainderVides,
+          emplacement: "À retourner", statut: "vide", createdAt: now, createdBy: sessionUser || "-", autoInitialized: true };
+        recomputeCasierStatus(c);
+        state.casiers.push(c);
+        createdVides++;
+      }
+    }
+  });
+
+  lsSaveCasiers();
+  recordStaffAudit("create", "casier_sync",
+    `Sync casiers: ${createdPleins} pleins · ${createdVides} vides`,
+    `Initialisation depuis stock actuel et ventes totales du site.`
+  );
+  try {
+    await persistState({ casiers: state.casiers, casierMouvements: state.casierMouvements, nextId: state.nextId });
+  } catch (e) { lsSaveCasiers(); }
+  renderCasiers();
+  showToast(`${fmt(createdPleins + createdVides)} casier(s) créé(s) : ${fmt(createdPleins)} plein(s) · ${fmt(createdVides)} vide(s)`);
+}
+
 async function ensurePhysicalCasiersFromReserve() {
   if (!state || !Array.isArray(state.stock)) return;
   state.casiers = state.casiers || [];
@@ -7634,6 +7731,10 @@ function attachEvents() {
   document.getElementById("co-vides")?.addEventListener("input", renderCasierOrderPreview);
   document.getElementById("co-submit-btn")?.addEventListener("click", submitCasierOrder);
   document.getElementById("stock-card-casiers")?.addEventListener("click", (e) => {
+    if (e.target.closest(".sync-casiers-btn")) {
+      syncCasiersFromStockEtVentes().catch(handleApiError);
+      return;
+    }
     const btn = e.target.closest(".co-open-btn");
     if (btn) openCasierOrderModal(btn.dataset.coBrasserie || "", Number(btn.dataset.coCs) || null);
   });
