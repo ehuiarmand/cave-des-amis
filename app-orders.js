@@ -573,9 +573,58 @@ function supplierNamesForCurrentSite() {
 }
 
 function populateSupplierList() {
-  const dl = document.getElementById("supplier-list");
-  if (!dl) return;
-  dl.innerHTML = supplierNamesForCurrentSite().map((name) => `<option value="${escapeHtml(name)}">`).join("");
+  const sel = document.getElementById("purchase-supplier");
+  if (!sel) return;
+  const brasseries = brasserieListForCurrentSite();
+  // Calculer le nombre de casiers vides par brasserie
+  const videsByBr = {};
+  casiersForSite().forEach((c) => {
+    const stockIt = stockItemForArticle(c.article);
+    const br = normalizeBrasserieName(stockIt?.brasserie || c.article) || "";
+    if (!br) return;
+    const cap = Math.max(1, Number(c.capacite) || 24);
+    const fullVides = Math.floor(Math.max(0, Number(c.bouteillesVides) || 0) / cap);
+    if (!videsByBr[br]) videsByBr[br] = 0;
+    videsByBr[br] += fullVides;
+  });
+  const currentVal = sel.value;
+  sel.innerHTML = `<option value="">— Choisir une brasserie —</option>` +
+    brasseries.map((br) => {
+      const v = videsByBr[br] || 0;
+      const label = v > 0 ? `${br}  (${fmt(v)} casier(s) vide(s))` : br;
+      return `<option value="${escapeHtml(br)}" ${currentVal === br ? "selected" : ""}>${escapeHtml(label)}</option>`;
+    }).join("");
+}
+
+function populatePurchaseArticlesByBrasserie(br) {
+  const sel = document.getElementById("purchase-article");
+  if (!sel) return;
+  if (!br) {
+    sel.innerHTML = `<option value="">— Choisir d'abord une brasserie —</option>`;
+    return;
+  }
+  // Articles du stock rattachés à cette brasserie
+  const articles = recordsForSite(state.stock).filter((item) =>
+    normalizeBrasserieName(item.brasserie) === br && lotType(item) !== "unite"
+  );
+  // Compter casiers vides par article
+  const videsByArticle = {};
+  casiersForSite().forEach((c) => {
+    const stockIt = stockItemForArticle(c.article);
+    if (normalizeBrasserieName(stockIt?.brasserie || "") !== br) return;
+    const cap = Math.max(1, Number(c.capacite) || 24);
+    const fullVides = Math.floor(Math.max(0, Number(c.bouteillesVides) || 0) / cap);
+    if (!videsByArticle[c.article]) videsByArticle[c.article] = 0;
+    videsByArticle[c.article] += fullVides;
+  });
+  sel.innerHTML = `<option value="">— Choisir un article —</option>` +
+    articles.map((item) => {
+      const v = videsByArticle[item.article] || 0;
+      const label = v > 0 ? `${item.article}  ↩ ${fmt(v)} casier(s) vide(s)` : item.article;
+      return `<option value="${escapeHtml(item.article)}">${escapeHtml(label)}</option>`;
+    }).join("");
+  // Auto-sélectionner si un seul article
+  if (articles.length === 1) { sel.value = articles[0].article; syncPurchaseLineInputsFromStock(); }
 }
 
 function setAuthVisible(isAuthenticated) {
@@ -4388,6 +4437,8 @@ function openPurchaseForm() {
   document.getElementById("purchase-date").value = today();
   document.getElementById("purchase-feedback").textContent = "";
   populateSupplierList();
+  // Réinitialiser le select article (aucune brasserie sélectionnée au départ)
+  populatePurchaseArticlesByBrasserie("");
   syncPurchaseLineInputsFromStock();
   renderPurchaseDraft();
 }
@@ -4408,7 +4459,9 @@ function addPurchaseLine() {
   }
   const amount = Math.round(cases * price);
   purchaseDraftLines.push({ article, cases, caseSize: caseSizeVal, pricePerCase: price, amount, selected: true });
-  document.getElementById("purchase-article").value = "";
+  // Re-peupler la liste article filtrée par brasserie courante
+  const curBr = document.getElementById("purchase-supplier")?.value || "";
+  populatePurchaseArticlesByBrasserie(curBr);
   document.getElementById("purchase-cases").value = "";
   syncPurchaseLineInputsFromStock();
   if (feedback) feedback.textContent = "";
@@ -8264,10 +8317,18 @@ document.getElementById("fab-btn").addEventListener("click", () => {
     const po = (state.purchaseOrders || []).find((p) => p.id === pendingReceivePurchaseId);
     if (po) updateReceivePurchaseModalTotals(po);
   });
-  document.getElementById("purchase-article")?.addEventListener("input", () => syncPurchaseLineInputsFromStock());
   document.getElementById("purchase-article")?.addEventListener("change", () => syncPurchaseLineInputsFromStock());
-  document.getElementById("purchase-supplier")?.addEventListener("input", syncPurchasePriceInput);
-  document.getElementById("purchase-supplier")?.addEventListener("change", syncPurchasePriceInput);
+  document.getElementById("purchase-supplier")?.addEventListener("change", (e) => {
+    const br = e.target.value;
+    populatePurchaseArticlesByBrasserie(br);
+    syncPurchasePriceInput();
+    // Reset article et casiers
+    document.getElementById("purchase-cases").value = "";
+    const videsBtn = document.getElementById("purchase-from-vides-btn");
+    const videsHint = document.getElementById("purchase-vides-hint");
+    if (videsBtn) videsBtn.style.display = "none";
+    if (videsHint) videsHint.style.display = "none";
+  });
   document.getElementById("stock-card-achats")?.addEventListener("click", (event) => {
     const rmPoLineBtn = event.target.closest("[data-purchase-remove-line]");
     if (rmPoLineBtn && rmPoLineBtn.dataset.lineIndex !== undefined && rmPoLineBtn.dataset.lineIndex !== "") {

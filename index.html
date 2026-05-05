@@ -671,9 +671,10 @@
           <div id="purchase-form" class="hidden">
             <div class="form-grid three-cols" style="margin-top:0">
               <div class="form-group">
-                <label for="purchase-supplier">Fournisseur</label>
-                <input id="purchase-supplier" type="text" list="supplier-list" placeholder="ex: Brasserie / Grossiste" autocomplete="off">
-                <datalist id="supplier-list"></datalist>
+                <label for="purchase-supplier">Brasserie</label>
+                <select id="purchase-supplier">
+                  <option value="">— Choisir une brasserie —</option>
+                </select>
               </div>
               <div class="form-group">
                 <label for="purchase-date">Date</label>
@@ -694,7 +695,9 @@
             <div class="form-grid four-cols">
               <div class="form-group">
                 <label for="purchase-article">Article</label>
-                <input id="purchase-article" type="text" list="articles-list" placeholder="ex: Guinness 33">
+                <select id="purchase-article">
+                  <option value="">— Choisir d'abord une brasserie —</option>
+                </select>
               </div>
               <div class="form-group">
                 <label for="purchase-cases">Casiers</label>
