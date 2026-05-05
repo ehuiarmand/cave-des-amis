@@ -530,6 +530,24 @@ function brasserieListForCurrentSite() {
     .sort((a, b) => a.localeCompare(b, "fr"));
 }
 
+function supplierKey(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function supplierNamesForCurrentSite() {
+  return [...new Set([
+    ...brasserieListForCurrentSite(),
+    ...purchaseOrdersForSite().map((po) => String(po.supplier || "").trim()).filter(Boolean),
+    ...recordsForSite(state.supplierPrices || []).map((row) => String(row.supplier || "").trim()).filter(Boolean),
+  ])].sort((a, b) => a.localeCompare(b, "fr"));
+}
+
+function populateSupplierList() {
+  const dl = document.getElementById("supplier-list");
+  if (!dl) return;
+  dl.innerHTML = supplierNamesForCurrentSite().map((name) => `<option value="${escapeHtml(name)}">`).join("");
+}
+
 function setAuthVisible(isAuthenticated) {
   document.getElementById("auth-screen").classList.toggle("hidden", isAuthenticated);
   document.getElementById("app-shell").classList.toggle("hidden", !isAuthenticated);
@@ -1323,13 +1341,24 @@ function submitCasierOrder() {
   setStockSubTab("achats");
   window.requestAnimationFrame(() => {
     openPurchaseForm();
+    document.getElementById("purchase-supplier").value = brasserie;
     if (article) {
       document.getElementById("purchase-article").value = article.article;
       document.getElementById("purchase-cases").value = String(qty);
       document.getElementById("purchase-case-size").value = String(cs);
       if (typeof syncPurchasePriceInput === "function") syncPurchasePriceInput();
+      const price = supplierPriceForArticle(article.article, brasserie);
+      purchaseDraftLines.push({
+        article: article.article,
+        cases: qty,
+        caseSize: cs,
+        pricePerCase: price,
+        amount: Math.round(qty * price),
+        selected: true,
+      });
+      renderPurchaseDraft();
     }
-    showToast(qty + " casier(s) de " + cs + " btl · " + brasserie + " · verifiez et completez le bon de commande.");
+    showToast(qty + " casier(s) de " + cs + " btl · " + brasserie + " · verifiez le prix fournisseur puis enregistrez.");
   });
 }
 
@@ -2332,10 +2361,10 @@ function syncMobileBottomBadges() {
   }
 }
 
-/** Ajoute ou fusionne une ligne au brouillon achat depuis une ligne stock. Retourne false si prix catalogue absent. */
+/** Ajoute ou fusionne une ligne au brouillon achat depuis une ligne stock. Retourne false si prix fournisseur absent. */
 function mergePurchaseDraftLineForStockItem(item) {
   const { cases, caseSize: cs } = suggestPurchaseCases(item);
-  const price = purchasePricePerCaseFromStock(item.article);
+  const price = supplierPriceForArticle(item.article);
   if (!price) return false;
   const existingIdx = purchaseDraftLines.findIndex((l) => String(l.article || "").toLowerCase() === String(item.article || "").toLowerCase());
   const line = { article: item.article, cases, caseSize: cs, pricePerCase: price, amount: Math.round(cases * price), selected: true };
@@ -2677,9 +2706,9 @@ function srSetQty(article, packSize, newQty) {
 }
 
 function srItemCard(item, loc) {
-  const primary = primarySaleFormat(item);
-  const packSz = Math.max(1, Number(primary?.quantite) || Number(item.packSize) || 1);
-  const prix = formatPrice(primary || { prixInterieur: Number(item.prixVenteInt) || 0, prixExterieur: Number(item.prixVenteExt) || 0 }, loc);
+  const format = item._srFormat || primarySaleFormat(item);
+  const packSz = Math.max(1, Number(format?.quantite) || Number(item.packSize) || 1);
+  const prix = formatPrice(format || { prixInterieur: Number(item.prixVenteInt) || 0, prixExterieur: Number(item.prixVenteExt) || 0 }, loc);
   const qtyLoc = srCartQtyForLoc(item.article, packSz, loc);
   const qtyOther = srCartQtyTotal(item.article, packSz) - qtyLoc;
   const stock = stockActuel(item);
@@ -2690,7 +2719,9 @@ function srItemCard(item, loc) {
   const bg = hasQty ? "background:#e3f2fd;" : "background:#fafafa;";
   let html = "<div style='display:flex;align-items:center;justify-content:space-between;padding:10px 12px;" + bg + border + "border-radius:10px;margin-bottom:6px;gap:10px'>";
   html += "<div style='flex:1;min-width:0;overflow:hidden'>";
-  html += "<p style='margin:0 0 2px;font-size:0.92rem;font-weight:600;color:#212121;white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>" + artEsc + (packSz > 1 ? " <small style='background:#fff3e0;color:#e65100;border-radius:3px;padding:1px 4px;font-size:0.7rem'>kit x" + packSz + "</small>" : "") + "</p>";
+  const formatBadge = saleFormatLabel(format);
+  const badgeStyle = packSz > 1 ? "background:#fff3e0;color:#e65100" : "background:#e8f5e9;color:#2e7d32";
+  html += "<p style='margin:0 0 2px;font-size:0.92rem;font-weight:600;color:#212121;white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>" + artEsc + " <small style='" + badgeStyle + ";border-radius:3px;padding:1px 4px;font-size:0.7rem'>" + escapeHtml(formatBadge) + "</small></p>";
   html += "<p style='margin:0;font-size:0.78rem;color:#757575'>" + fmt(prix) + " FCFA · Stock : " + fmt(stock) + (qtyOther > 0 ? " · <b style='color:#1976d2'>" + otherLabel + " x" + qtyOther + "</b>" : "") + "</p>";
   html += "</div>";
   html += "<div style='display:flex;align-items:center;gap:5px;flex-shrink:0'>";
@@ -2716,14 +2747,17 @@ function renderSrMenu(query) {
     container.innerHTML = "<p style='text-align:center;padding:20px;color:#757575'>Aucun produit disponible.</p>";
     return;
   }
+  const loc = srCurrentLoc();
   const byCategory = {};
   products.forEach((item) => {
     const cat = item.cat || "Autres";
     if (!byCategory[cat]) byCategory[cat] = [];
-    byCategory[cat].push(item);
+    const formats = normalizeSaleFormats(item).filter((format) => formatPrice(format, loc) > 0);
+    (formats.length ? formats : [primarySaleFormat(item)]).filter(Boolean).forEach((format) => {
+      byCategory[cat].push({ ...item, _srFormat: format });
+    });
   });
 
-  const loc = srCurrentLoc();
   let html = "";
   Object.entries(byCategory).forEach(([cat, items]) => {
     html += "<div style='margin-bottom:14px'>";
@@ -3953,6 +3987,7 @@ async function persistState(overrides = {}) {
   const _casiers = overrides.casiers ?? state.casiers ?? [];
   const _casierMouvements = overrides.casierMouvements ?? state.casierMouvements ?? [];
   const _consignes = overrides.consignes ?? state.consignes ?? [];
+  const _supplierPrices = overrides.supplierPrices ?? state.supplierPrices ?? [];
   state = await apiRequest(API.state, {
     method: "PUT",
     body: JSON.stringify({
@@ -3967,6 +4002,7 @@ async function persistState(overrides = {}) {
       stockEntrees: overrides.stockEntrees ?? state.stockEntrees ?? [],
       dayBooks: overrides.dayBooks !== undefined ? overrides.dayBooks : (state.dayBooks || []),
       purchaseOrders: overrides.purchaseOrders ?? state.purchaseOrders ?? [],
+      supplierPrices: overrides.supplierPrices ?? state.supplierPrices ?? [],
       creditRecoveries: overrides.creditRecoveries || state.creditRecoveries || [],
       consignes: _consignes,
       categories: overrides.categories || state.categories || CATEGORIES,
@@ -3982,6 +4018,7 @@ async function persistState(overrides = {}) {
   if (!state.casiers?.length && _casiers.length) state.casiers = _casiers;
   if (!state.casierMouvements?.length && _casierMouvements.length) state.casierMouvements = _casierMouvements;
   if (!state.consignes?.length && _consignes.length) state.consignes = _consignes;
+  if (!state.supplierPrices?.length && _supplierPrices.length) state.supplierPrices = _supplierPrices;
   lsSaveCasiers();
   renderTopbar();
 }
@@ -4113,18 +4150,37 @@ function purchaseOrdersForSite() {
   return (state.purchaseOrders || []).filter((p) => rowMatchesSite(p, siteId, multiSite));
 }
 
-function purchasePricePerCaseFromStock(articleName) {
+function purchaseCataloguePricePerCase(articleName) {
   const product = findKnownProduct(String(articleName || "").trim());
   const prix = Number(product?.prixAchat) || 0;
   return Math.max(0, Math.round(prix));
+}
+
+function supplierPriceForArticle(articleName, supplierName = null) {
+  const articleKey = String(articleName || "").trim().toLowerCase();
+  const supplier = String(supplierName ?? document.getElementById("purchase-supplier")?.value ?? "").trim();
+  const supplierNorm = supplierKey(supplier);
+  if (articleKey && supplierNorm) {
+    const row = recordsForSite(state.supplierPrices || []).find((item) =>
+      supplierKey(item.supplier) === supplierNorm
+      && String(item.article || "").trim().toLowerCase() === articleKey
+    );
+    const supplierPrice = Number(row?.pricePerCase) || 0;
+    if (supplierPrice > 0) return Math.max(0, Math.round(supplierPrice));
+  }
+  return purchaseCataloguePricePerCase(articleName);
 }
 
 function syncPurchasePriceInput() {
   const input = document.getElementById("purchase-price");
   if (!input) return;
   const article = document.getElementById("purchase-article")?.value?.trim() || "";
-  const prix = purchasePricePerCaseFromStock(article);
+  const prix = supplierPriceForArticle(article);
   input.value = prix > 0 ? String(prix) : "";
+}
+
+function purchasePriceInputValue() {
+  return Math.max(0, Math.round(Number(document.getElementById("purchase-price")?.value) || 0));
 }
 
 /** Casiers et btl/casier alignés sur la ligne stock + suggestion au seuil (comme depuis « Commander » sur une ligne catalogue). */
@@ -4166,7 +4222,7 @@ function renderPurchaseDraft() {
           <th>Article</th>
           <th style="text-align:right">Casiers</th>
           <th style="text-align:right">Btl/casier</th>
-          <th style="text-align:right">Prix/casier</th>
+          <th style="text-align:right">Prix fournisseur</th>
           <th style="text-align:right">Montant</th>
           <th>Action</th>
         </tr></thead>
@@ -4178,7 +4234,7 @@ function renderPurchaseDraft() {
               <td>${escapeHtml(l.article)}</td>
               <td style="text-align:right"><input type="number" min="0" step="1" value="${escapeHtml(String(l.cases ?? 0))}" data-purchase-cases="${idx}" style="max-width:110px"></td>
               <td style="text-align:right">${fmt(l.caseSize ?? 24)}</td>
-              <td style="text-align:right">${fmt(l.pricePerCase || 0)} FCFA</td>
+              <td style="text-align:right"><input type="number" min="0" step="1" value="${escapeHtml(String(l.pricePerCase ?? 0))}" data-purchase-price="${idx}" style="max-width:130px"></td>
               <td style="text-align:right"><strong>${fmt(l.amount)} FCFA</strong></td>
               <td><button type="button" class="mini-btn" data-purchase-remove-line="${idx}">Retirer</button></td>
             </tr>`;
@@ -4195,7 +4251,7 @@ function recomputePurchaseLine(idx) {
   const cases = Math.max(0, Math.round(Number(line.cases) || 0));
   const stockItem = stockItemForArticle(line.article);
   const caseSizeVal = stockItem ? caseSize(stockItem) : Math.max(1, Math.round(Number(line.caseSize) || 24));
-  const price = Math.max(0, Math.round(Number(line.pricePerCase) || purchasePricePerCaseFromStock(line.article) || 0));
+  const price = Math.max(0, Math.round(Number(line.pricePerCase) || supplierPriceForArticle(line.article) || 0));
   purchaseDraftLines[idx] = {
     ...line,
     cases,
@@ -4210,6 +4266,7 @@ function openPurchaseForm() {
   document.getElementById("purchase-form")?.classList.remove("hidden");
   document.getElementById("purchase-date").value = today();
   document.getElementById("purchase-feedback").textContent = "";
+  populateSupplierList();
   syncPurchaseLineInputsFromStock();
   renderPurchaseDraft();
 }
@@ -4217,16 +4274,15 @@ function openPurchaseForm() {
 function addPurchaseLine() {
   const feedback = document.getElementById("purchase-feedback");
   const article = document.getElementById("purchase-article").value.trim();
-  syncPurchasePriceInput();
   const cases = Number(document.getElementById("purchase-cases").value) || 0;
   const caseSizeVal = Number(document.getElementById("purchase-case-size").value) || 24;
-  const price = purchasePricePerCaseFromStock(article);
+  const price = purchasePriceInputValue() || supplierPriceForArticle(article);
   if (!article || cases <= 0) {
     if (feedback) feedback.textContent = "Article et casiers sont obligatoires. Les casiers se remplissent lorsque l'article existe dans le stock du site.";
     return;
   }
   if (!price) {
-    if (feedback) feedback.textContent = "Prix achat / casier manquant dans le stock pour cet article.";
+    if (feedback) feedback.textContent = "Saisissez le prix fournisseur pour cet article.";
     return;
   }
   const amount = Math.round(cases * price);
@@ -4238,11 +4294,52 @@ function addPurchaseLine() {
   renderPurchaseDraft();
 }
 
+function rememberSupplierPrices(supplier, lines) {
+  const supplierName = String(supplier || "").trim();
+  if (!supplierName) return;
+  state.supplierPrices = state.supplierPrices || [];
+  const siteId = currentSiteId();
+  const now = new Date().toISOString();
+  (lines || []).forEach((line) => {
+    const article = String(line.article || "").trim();
+    const price = Math.max(0, Math.round(Number(line.pricePerCase) || 0));
+    if (!article || price <= 0) return;
+    const existing = state.supplierPrices.find((row) =>
+      rowMatchesSite(row, siteId, multiSiteActive())
+      && supplierKey(row.supplier) === supplierKey(supplierName)
+      && String(row.article || "").trim().toLowerCase() === article.toLowerCase()
+    );
+    if (existing) {
+      existing.pricePerCase = price;
+      existing.updatedAt = now;
+      existing.updatedBy = sessionUser || "system";
+    } else {
+      state.supplierPrices.push({
+        id: `${siteId || "site"}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        siteId,
+        supplier: supplierName,
+        article,
+        pricePerCase: price,
+        createdAt: now,
+        updatedAt: now,
+        updatedBy: sessionUser || "system",
+      });
+    }
+  });
+}
+
 async function savePurchaseOrder() {
   const feedback = document.getElementById("purchase-feedback");
+  purchaseDraftLines.forEach((_, idx) => recomputePurchaseLine(idx));
   const selectedLines = purchaseDraftLines.filter((l) => l.selected !== false);
   if (!selectedLines.length) {
     if (feedback) feedback.textContent = "Cochez au moins une ligne (ou ajoutez une ligne).";
+    return;
+  }
+  const invalidLine = selectedLines.find((l) => (Number(l.cases) || 0) <= 0 || (Number(l.pricePerCase) || 0) <= 0);
+  if (invalidLine) {
+    if (feedback) feedback.textContent = `Renseignez les casiers et le prix fournisseur pour "${invalidLine.article}".`;
+    renderPurchaseDraft();
     return;
   }
   const siteIdSave = currentSiteId();
@@ -4276,6 +4373,7 @@ async function savePurchaseOrder() {
     }),
     total,
   };
+  rememberSupplierPrices(supplier, selectedLines);
   state.purchaseOrders = [po, ...(state.purchaseOrders || [])];
   recordStaffAudit(
     "create",
@@ -4283,9 +4381,10 @@ async function savePurchaseOrder() {
     `Commande fournisseur ${supplier} (#${po.id})`,
     formatPurchaseOrderAuditDetail(po),
   );
-  await persistState({ purchaseOrders: state.purchaseOrders });
+  await persistState({ purchaseOrders: state.purchaseOrders, supplierPrices: state.supplierPrices });
   document.getElementById("purchase-form")?.classList.add("hidden");
   purchaseDraftLines = [];
+  populateSupplierList();
   renderPurchaseOrders();
   refreshCreanciersIfVisible();
   showToast("Commande fournisseur enregistrée.");
@@ -4338,7 +4437,7 @@ async function applyPurchaseReceipt(po, linesReceived, opts = {}) {
     delete po.linesOrderedSnapshot;
   }
 
-  const siteId = currentSiteId();
+  const siteId = po.siteId || currentSiteId();
   const stockItems = state.stock || [];
   const stockEntrees = state.stockEntrees || [];
   if (!state.nextId) state.nextId = {};
@@ -7236,6 +7335,7 @@ async function bootstrapAuthenticatedApp() {
   state = await apiRequest(API.state);
   if (!Array.isArray(state.creditRecoveries)) state.creditRecoveries = [];
   if (!Array.isArray(state.purchaseOrders)) state.purchaseOrders = [];
+  if (!Array.isArray(state.supplierPrices)) state.supplierPrices = [];
   if (!Array.isArray(state.dayBooks)) state.dayBooks = [];
   if (!Array.isArray(state.stockEntrees)) state.stockEntrees = [];
   if (!Array.isArray(state.stockLosses)) state.stockLosses = [];
@@ -7255,6 +7355,7 @@ async function bootstrapAuthenticatedApp() {
   qrAlertCount = 0;
   renderSiteSwitcher();
   populateCategorySelects();
+  populateSupplierList();
   populateSelect("c-cat", CHARGE_CATEGORIES);
   populateSelect("c-pay", CHARGE_PAYMENT_METHODS);
   document.getElementById("v-date").value = pdjCalendarDate();
@@ -7407,7 +7508,7 @@ function attachEvents() {
   document.getElementById("co-submit-btn")?.addEventListener("click", submitCasierOrder);
   document.getElementById("stock-card-casiers")?.addEventListener("click", (e) => {
     const btn = e.target.closest(".co-open-btn");
-    if (btn) openCasierOrderModal("", Number(btn.dataset.coCs) || null);
+    if (btn) openCasierOrderModal(btn.dataset.coBrasserie || "", Number(btn.dataset.coCs) || null);
   });
   document.getElementById("casiers-entree-btn")?.addEventListener("click", () => openCasierMoveModal("entree"));
   document.getElementById("casiers-sortie-btn")?.addEventListener("click", () => openCasierMoveModal("sortie"));
@@ -7747,6 +7848,8 @@ document.getElementById("fab-btn").addEventListener("click", () => {
   });
   document.getElementById("purchase-article")?.addEventListener("input", () => syncPurchaseLineInputsFromStock());
   document.getElementById("purchase-article")?.addEventListener("change", () => syncPurchaseLineInputsFromStock());
+  document.getElementById("purchase-supplier")?.addEventListener("input", syncPurchasePriceInput);
+  document.getElementById("purchase-supplier")?.addEventListener("change", syncPurchasePriceInput);
   document.getElementById("stock-card-achats")?.addEventListener("click", (event) => {
     const rmPoLineBtn = event.target.closest("[data-purchase-remove-line]");
     if (rmPoLineBtn && rmPoLineBtn.dataset.lineIndex !== undefined && rmPoLineBtn.dataset.lineIndex !== "") {
@@ -7789,11 +7892,12 @@ document.getElementById("fab-btn").addEventListener("click", () => {
 
   document.getElementById("stock-card-achats")?.addEventListener("input", (event) => {
     const casesInput = event.target.closest("[data-purchase-cases]");
-    if (!casesInput) return;
-    const idx = Number(casesInput.dataset.purchaseCases);
+    const priceInput = event.target.closest("[data-purchase-price]");
+    if (!casesInput && !priceInput) return;
+    const idx = Number((casesInput || priceInput).dataset.purchaseCases ?? (casesInput || priceInput).dataset.purchasePrice);
     if (!purchaseDraftLines[idx]) return;
-    purchaseDraftLines[idx].cases = Number(casesInput.value) || 0;
-    purchaseDraftLines[idx].pricePerCase = purchasePricePerCaseFromStock(purchaseDraftLines[idx].article);
+    if (casesInput) purchaseDraftLines[idx].cases = Number(casesInput.value) || 0;
+    if (priceInput) purchaseDraftLines[idx].pricePerCase = Number(priceInput.value) || 0;
     recomputePurchaseLine(idx);
     renderPurchaseDraft();
   });

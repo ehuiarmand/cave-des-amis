@@ -177,6 +177,7 @@ DEFAULT_STATE: dict[str, Any] = {
     "stockChecks": [],
     "dayBooks": [],
     "purchaseOrders": [],
+    "supplierPrices": [],
     "casiers": [],
     "casierMouvements": [],
     "creditRecoveries": [],
@@ -276,6 +277,7 @@ def build_default_state() -> dict[str, Any]:
         "stockChecks": [],
         "dayBooks": [],
         "purchaseOrders": [],
+        "supplierPrices": [],
         "casiers": [],
         "casierMouvements": [],
         "creditRecoveries": [],
@@ -340,6 +342,7 @@ def migrate_state(payload: dict[str, Any]) -> dict[str, Any]:
             "charges": [{**item, "siteId": item.get("siteId", site_id)} for item in payload.get("charges", default["charges"])],
             "dayBooks": [{**item, "siteId": item.get("siteId", site_id)} for item in payload.get("dayBooks", [])],
             "purchaseOrders": [{**item, "siteId": item.get("siteId", site_id)} for item in payload.get("purchaseOrders", [])],
+            "supplierPrices": [{**item, "siteId": item.get("siteId", site_id)} for item in payload.get("supplierPrices", [])],
             "casiers": [{**item, "siteId": item.get("siteId", site_id)} for item in payload.get("casiers", [])],
             "casierMouvements": [{**item, "siteId": item.get("siteId", site_id)} for item in payload.get("casierMouvements", [])],
             "staffAuditLog": payload.get("staffAuditLog", []),
@@ -831,6 +834,7 @@ class DataStore:
             merged["charges"] = payload.get("charges", merged["charges"])
             merged["dayBooks"] = payload.get("dayBooks", merged.get("dayBooks", []))
             merged["purchaseOrders"] = payload.get("purchaseOrders", merged.get("purchaseOrders", []))
+            merged["supplierPrices"] = payload.get("supplierPrices", merged.get("supplierPrices", []))
             merged["casiers"] = payload.get("casiers", merged.get("casiers", []))
             merged["casierMouvements"] = payload.get("casierMouvements", merged.get("casierMouvements", []))
             merged["creditRecoveries"] = payload.get("creditRecoveries", merged.get("creditRecoveries", []))
@@ -871,6 +875,7 @@ class DataStore:
         merged["charges"] = payload.get("charges", merged["charges"])
         merged["dayBooks"] = payload.get("dayBooks", merged.get("dayBooks", []))
         merged["purchaseOrders"] = payload.get("purchaseOrders", merged.get("purchaseOrders", []))
+        merged["supplierPrices"] = payload.get("supplierPrices", merged.get("supplierPrices", []))
         merged["casiers"] = payload.get("casiers", merged.get("casiers", []))
         merged["casierMouvements"] = payload.get("casierMouvements", merged.get("casierMouvements", []))
         merged["creditRecoveries"] = payload.get("creditRecoveries", merged.get("creditRecoveries", []))
@@ -964,6 +969,7 @@ class DataStore:
                 "stockLosses": json.loads(json.dumps(self._state.get("stockLosses", []))),
                 "dayBooks": json.loads(json.dumps(self._state.get("dayBooks", []))),
                 "purchaseOrders": json.loads(json.dumps(self._state.get("purchaseOrders", []))),
+                "supplierPrices": json.loads(json.dumps(self._state.get("supplierPrices", []))),
                 "casiers": json.loads(json.dumps(self._state.get("casiers", []))),
                 "casierMouvements": json.loads(json.dumps(self._state.get("casierMouvements", []))),
                 "creditRecoveries": json.loads(json.dumps(self._state.get("creditRecoveries", []))),
@@ -1030,6 +1036,7 @@ class DataStore:
                 "stockLosses": filter_site_rows(self._state.get("stockLosses", [])),
                 "dayBooks": filter_site_rows(self._state.get("dayBooks", [])),
                 "purchaseOrders": filter_site_rows(self._state.get("purchaseOrders", [])),
+                "supplierPrices": filter_site_rows(self._state.get("supplierPrices", [])),
                 "casiers": filter_site_rows(self._state.get("casiers", [])),
                 "casierMouvements": filter_site_rows(self._state.get("casierMouvements", [])),
                 "creditRecoveries": filter_site_rows(self._state.get("creditRecoveries", [])),
@@ -1085,6 +1092,7 @@ class DataStore:
             merged["stockChecks"] = payload.get("stockChecks", merged.get("stockChecks", []))
             merged["dayBooks"] = payload.get("dayBooks", merged.get("dayBooks", []))
             merged["purchaseOrders"] = payload.get("purchaseOrders", merged.get("purchaseOrders", []))
+            merged["supplierPrices"] = payload.get("supplierPrices", merged.get("supplierPrices", []))
             merged["casiers"] = payload.get("casiers", merged.get("casiers", []))
             merged["casierMouvements"] = payload.get("casierMouvements", merged.get("casierMouvements", []))
             merged["creditRecoveries"] = payload.get("creditRecoveries", merged.get("creditRecoveries", []))
@@ -1390,6 +1398,7 @@ class DataStore:
                 current["stockChecks"] = payload.get("stockChecks", current.get("stockChecks", []))
                 current["dayBooks"] = payload.get("dayBooks", current.get("dayBooks", []))
                 current["purchaseOrders"] = payload.get("purchaseOrders", current.get("purchaseOrders", []))
+                current["supplierPrices"] = payload.get("supplierPrices", current.get("supplierPrices", []))
                 current["casiers"] = payload.get("casiers", current.get("casiers", []))
                 current["casierMouvements"] = payload.get("casierMouvements", current.get("casierMouvements", []))
                 current["creditRecoveries"] = payload.get("creditRecoveries", current.get("creditRecoveries", []))
@@ -1462,6 +1471,7 @@ class DataStore:
             current["stockChecks"] = merge_scoped_rows(current.get("stockChecks", []), payload.get("stockChecks", []), allowed, sid_list)
             current["dayBooks"] = merge_scoped_rows(current.get("dayBooks", []), payload.get("dayBooks", []), allowed, sid_list)
             current["purchaseOrders"] = merge_scoped_rows(current.get("purchaseOrders", []), payload.get("purchaseOrders", []), allowed, sid_list)
+            current["supplierPrices"] = merge_scoped_rows(current.get("supplierPrices", []), payload.get("supplierPrices", []), allowed, sid_list)
             current["casiers"] = merge_scoped_rows(current.get("casiers", []), payload.get("casiers", []), allowed, sid_list)
             current["casierMouvements"] = merge_scoped_rows(current.get("casierMouvements", []), payload.get("casierMouvements", []), allowed, sid_list)
             current["creditRecoveries"] = merge_scoped_rows(current.get("creditRecoveries", []), payload.get("creditRecoveries", []), allowed, sid_list)

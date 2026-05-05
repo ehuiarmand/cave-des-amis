@@ -672,7 +672,8 @@
             <div class="form-grid three-cols" style="margin-top:0">
               <div class="form-group">
                 <label for="purchase-supplier">Fournisseur</label>
-                <input id="purchase-supplier" type="text" placeholder="ex: Brasserie / Grossiste">
+                <input id="purchase-supplier" type="text" list="supplier-list" placeholder="ex: Brasserie / Grossiste" autocomplete="off">
+                <datalist id="supplier-list"></datalist>
               </div>
               <div class="form-group">
                 <label for="purchase-date">Date</label>
@@ -706,9 +707,9 @@
                 <p class="muted" style="margin-top:6px;font-size:0.82rem">Valeur du catalogue stock (non modifiable ici).</p>
               </div>
               <div class="form-group">
-                <label for="purchase-price">Prix achat / casier (catalogue)</label>
-                <input id="purchase-price" type="number" min="0" step="1" placeholder="Automatique depuis stock" readonly>
-                <p class="muted" style="margin-top:6px;font-size:0.82rem">Ce prix est celui du catalogue stock et ne peut pas etre modifie ici.</p>
+                <label for="purchase-price">Prix fournisseur / lot</label>
+                <input id="purchase-price" type="number" min="0" step="1" placeholder="Prix propose, modifiable">
+                <p class="muted" style="margin-top:6px;font-size:0.82rem">Prix propre au fournisseur choisi. Il ne modifie pas le catalogue stock.</p>
               </div>
             </div>
             <div class="button-stack" style="grid-template-columns:1fr 1fr;display:grid">
@@ -1916,6 +1917,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=80"></script>
+  <script src="./app-orders.js?v=82"></script>
 </body>
 </html>
