@@ -560,6 +560,86 @@ function brasserieListForCurrentSite() {
     .sort((a, b) => a.localeCompare(b, "fr"));
 }
 
+function casierIsAvailableEmptyForOrder(casier) {
+  if (!casier) return false;
+  if (casier.reservedByPoId) return false;
+  if (casier.returnedAt) return false;
+  return Math.max(0, Number(casier.quantiteActuelle) || 0) === 0;
+}
+
+function availableEmptyCasiersCount(brasserie, cap, siteId = currentSiteId()) {
+  const br = normalizeBrasserieName(brasserie);
+  const c = Math.max(1, Number(cap) || 24);
+  return casiersForSite().filter((x) =>
+    normalizeBrasserieName(x.article || "") === br
+    && Math.max(1, Number(x.capacite) || 24) === c
+    && casierIsAvailableEmptyForOrder(x)
+  ).length;
+}
+
+function draftReservedCasesFor(brasserie, cap) {
+  const br = normalizeBrasserieName(brasserie);
+  const c = Math.max(1, Number(cap) || 24);
+  return (purchaseDraftLines || [])
+    .filter((l) => l.selected !== false)
+    .filter((l) => normalizeBrasserieName(l.brasserie || "") === br && Math.max(1, Number(l.cap) || 24) === c)
+    .reduce((sum, l) => sum + (Number(l.cases) || 0), 0);
+}
+
+function clampDraftCasesToAvailable(brasserie, cap) {
+  const br = normalizeBrasserieName(brasserie);
+  const c = Math.max(1, Number(cap) || 24);
+  const available = availableEmptyCasiersCount(br, c);
+  let remaining = available;
+  // Répartir "budget" de casiers vides sur les lignes dans l'ordre
+  purchaseDraftLines = (purchaseDraftLines || []).map((line) => {
+    if (line.selected === false) return line;
+    if (normalizeBrasserieName(line.brasserie || "") !== br || Math.max(1, Number(line.cap) || 24) !== c) return line;
+    const want = Math.max(0, Math.round(Number(line.cases) || 0));
+    const take = Math.min(want, remaining);
+    remaining -= take;
+    return { ...line, cases: take, amount: Math.round(take * (Number(line.pricePerCase) || 0)) };
+  });
+  return { available };
+}
+
+function reserveEmptyCasiersForPurchaseOrder(po) {
+  if (!po) return;
+  const siteId = po.siteId || currentSiteId();
+  const byCap = {};
+  (po.lines || []).forEach((l) => {
+    const cap = Math.max(1, Number(l.caseSize) || 24);
+    byCap[cap] = (byCap[cap] || 0) + Math.max(0, Number(l.cases) || 0);
+  });
+  Object.entries(byCap).forEach(([capStr, needed]) => {
+    const cap = Math.max(1, Number(capStr) || 24);
+    const br = normalizeBrasserieName(po.supplier || "");
+    const candidates = casiersForSite()
+      .filter((c) => rowMatchesSite(c, siteId, multiSiteActive()))
+      .filter((c) => normalizeBrasserieName(c.article || "") === br)
+      .filter((c) => Math.max(1, Number(c.capacite) || 24) === cap)
+      .filter((c) => casierIsAvailableEmptyForOrder(c))
+      .sort((a, b) => String(a.code || "").localeCompare(String(b.code || ""), "fr"));
+    if (candidates.length < needed) {
+      throw new Error(`Casiers vides insuffisants pour ${br} B${cap}. Disponible: ${candidates.length}, demandé: ${needed}.`);
+    }
+    candidates.slice(0, needed).forEach((c) => {
+      c.reservedByPoId = po.id;
+      c.reservedAt = new Date().toISOString();
+    });
+  });
+}
+
+function releaseReservedCasiersForPurchaseOrder(poId) {
+  const id = Number(poId);
+  (state.casiers || []).forEach((c) => {
+    if (Number(c.reservedByPoId) === id) {
+      delete c.reservedByPoId;
+      delete c.reservedAt;
+    }
+  });
+}
+
 function supplierKey(value) {
   return String(value || "").trim().toLowerCase();
 }
@@ -4442,11 +4522,10 @@ function syncPurchaseQtyFromStock() {
   caseSizeField.value = String(cap);
 
   // Le stock de casiers vides dépend du format (brasserie + capacité), pas de l'article
-  const casiersGroupe = casiersForSite().filter((c) => {
-    const stockIt = stockItemForArticle(c.article);
-    return normalizeBrasserieName(stockIt?.brasserie || c.article || "") === br &&
-      Math.max(1, Number(c.capacite) || 24) === cap;
-  });
+  const casiersGroupe = casiersForSite().filter((c) =>
+    normalizeBrasserieName(c.article || "") === br
+    && Math.max(1, Number(c.capacite) || 24) === cap
+  );
   let nbPleins = 0, nbPartiels = 0, nbVidesC = 0, btlPleines = 0, btlVides = 0;
   casiersGroupe.forEach((c) => {
     const st = String(c.statut || "vide").toLowerCase();
@@ -4456,19 +4535,20 @@ function syncPurchaseQtyFromStock() {
     btlPleines += Math.max(0, Number(c.quantiteActuelle) || 0);
     btlVides += Math.max(0, Number(c.bouteillesVides) || 0);
   });
-  // Dans la logique "casiers physiques par brasserie", un casier vide = quantiteActuelle == 0.
-  // C'est ce nombre qui limite la commande fournisseur (retour de vides).
-  const nbCasiersVidesRetour = casiersGroupe.reduce((n, c) => n + ((Math.max(0, Number(c.quantiteActuelle) || 0) === 0) ? 1 : 0), 0);
+  // Casiers vides réellement disponibles = quantiteActuelle==0 et non réservés par une commande
+  const nbCasiersVidesRetour = casiersGroupe.filter((c) => casierIsAvailableEmptyForOrder(c)).length;
+  const alreadyInDraft = draftReservedCasesFor(br, cap);
+  const maxNow = Math.max(0, nbCasiersVidesRetour - alreadyInDraft);
 
   // Max commandable = casiers vides disponibles pour ce format (brasserie + capacité), toujours fixé
-  casesInput.value = String(nbCasiersVidesRetour);
-  casesInput.max = String(nbCasiersVidesRetour);
+  casesInput.value = String(maxNow);
+  casesInput.max = String(maxNow);
   if (videsBtn) { videsBtn.style.display = nbCasiersVidesRetour > 0 ? "" : "none"; videsBtn.dataset.nbVides = nbCasiersVidesRetour; }
 
   if (limitHint) {
     limitHint.style.display = "";
     if (nbCasiersVidesRetour > 0) {
-      limitHint.innerHTML = `<span style="color:#e65100;font-weight:700">↩ Maximum commandable : ${fmt(nbCasiersVidesRetour)} casier(s) vide(s) disponible(s) pour ${br} ${formatVal}.</span>`;
+      limitHint.innerHTML = `<span style="color:#e65100;font-weight:700">↩ Maximum commandable : ${fmt(maxNow)} casier(s) vide(s) (reste) — total ${fmt(nbCasiersVidesRetour)} vide(s) pour ${br} ${formatVal}.</span>`;
     } else {
       limitHint.innerHTML = `<span style="color:#c62828;font-weight:700">Aucun casier vide disponible pour ce format — commande impossible.</span>`;
     }
@@ -4592,7 +4672,7 @@ function addPurchaseLine() {
     return;
   }
   const amount = Math.round(cases * price);
-  purchaseDraftLines.push({ article, cases, caseSize: caseSizeVal, pricePerCase: price, amount, selected: true });
+  purchaseDraftLines.push({ article, brasserie: br, cap: caseSizeVal, cases, caseSize: caseSizeVal, pricePerCase: price, amount, selected: true });
   // Réinitialiser article-detail
   const detailSel = document.getElementById("purchase-article-detail");
   if (detailSel) detailSel.value = "";
@@ -4681,11 +4761,21 @@ async function savePurchaseOrder() {
     lines: selectedLines.map((l) => {
       const copy = { ...l };
       delete copy.selected;
+      delete copy.brasserie;
+      delete copy.cap;
       return copy;
     }),
     total,
   };
   rememberSupplierPrices(supplier, selectedLines);
+  // Réserver les casiers vides (déduction immédiate). Si insuffisant -> blocage.
+  try {
+    reserveEmptyCasiersForPurchaseOrder(po);
+  } catch (e) {
+    if (feedback) feedback.textContent = e?.message || "Casiers vides insuffisants.";
+    showToast(e?.message || "Casiers vides insuffisants.");
+    return;
+  }
   state.purchaseOrders = [po, ...(state.purchaseOrders || [])];
   recordStaffAudit(
     "create",
@@ -4693,7 +4783,7 @@ async function savePurchaseOrder() {
     `Commande fournisseur ${supplier} (#${po.id})`,
     formatPurchaseOrderAuditDetail(po),
   );
-  await persistState({ purchaseOrders: state.purchaseOrders, supplierPrices: state.supplierPrices });
+  await persistState({ purchaseOrders: state.purchaseOrders, supplierPrices: state.supplierPrices, casiers: state.casiers });
   document.getElementById("purchase-form")?.classList.add("hidden");
   purchaseDraftLines = [];
   populateSupplierList();
@@ -4714,10 +4804,13 @@ async function cancelPurchaseOrder(id) {
   po.status = "Annulée";
   po.cancelledAt = new Date().toISOString();
   po.cancelledBy = sessionUser || "system";
+  // Rendre les casiers vides réservés par cette commande
+  releaseReservedCasiersForPurchaseOrder(po.id);
   recordStaffAudit("update", "achat_fournisseur", `Commande annulee · ${po.supplier}`, formatPurchaseOrderAuditDetail(po));
-  await persistState({ purchaseOrders: state.purchaseOrders });
+  await persistState({ purchaseOrders: state.purchaseOrders, casiers: state.casiers });
   renderPurchaseOrders();
   refreshCreanciersIfVisible();
+  populateSupplierList();
   showToast("Commande annulee.");
 }
 
@@ -8658,6 +8751,11 @@ document.getElementById("fab-btn").addEventListener("click", () => {
     if (casesInput) purchaseDraftLines[idx].cases = Number(casesInput.value) || 0;
     if (priceInput) purchaseDraftLines[idx].pricePerCase = Number(priceInput.value) || 0;
     recomputePurchaseLine(idx);
+    // Clamp global : total lignes ne doit pas dépasser les casiers vides dispo (brasserie + format)
+    const br = normalizeBrasserieName(document.getElementById("purchase-supplier")?.value || "");
+    const formatVal = document.getElementById("purchase-article")?.value?.trim() || "";
+    const capMatch = formatVal.match(/^B(\d+)$/);
+    if (br && capMatch) clampDraftCasesToAvailable(br, Number(capMatch[1]));
     renderPurchaseDraft();
   });
   document.getElementById("ventes-tabs").addEventListener("click", (event) => {
