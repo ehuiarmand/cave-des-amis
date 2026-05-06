@@ -1546,34 +1546,58 @@ function submitCasierOrder() {
   const cs = Number(document.getElementById("co-cs")?.value) || 24;
   const qty = Math.max(1, Number(document.getElementById("co-qty")?.value) || 1);
   if (!brasserie) { showToast("Selectionnez une brasserie."); return; }
-  // Trouver le premier article correspondant pour pre-remplir le bon de commande
-  const article = recordsForSite(state.stock).find((item) => {
-    const b = (item.brasserie || "").trim() || item.cat || "";
-    return b === brasserie && caseSize(item) === cs;
+  const matchingArticles = recordsForSite(state.stock).filter((item) => {
+    const b = (item.brasserie || "").trim();
+    const fallback = b || item.cat || "";
+    return (b === brasserie || fallback === brasserie)
+      && (caseSize(item) || 24) === cs
+      && lotType(item) !== "unite";
   });
+  const article = matchingArticles[0] || null;
+  if (!article) {
+    showToast("Aucun article catalogue pour ce format — verifiez la brasserie et le stock.");
+    return;
+  }
   closeModal("modal-casier-order");
-  navigateTo("stock");
+  navigate("stock");
   setStockSubTab("achats");
   window.requestAnimationFrame(() => {
     openPurchaseForm();
-    document.getElementById("purchase-supplier").value = brasserie;
-    if (article) {
-      document.getElementById("purchase-article").value = article.article;
-      document.getElementById("purchase-cases").value = String(qty);
-      document.getElementById("purchase-case-size").value = String(cs);
-      if (typeof syncPurchasePriceInput === "function") syncPurchasePriceInput();
-      const price = supplierPriceForArticle(article.article, brasserie);
-      purchaseDraftLines.push({
-        article: article.article,
-        cases: qty,
-        caseSize: cs,
-        pricePerCase: price,
-        amount: Math.round(qty * price),
-        selected: true,
-      });
-      renderPurchaseDraft();
+    const supSel = document.getElementById("purchase-supplier");
+    if (supSel) supSel.value = brasserie;
+    populatePurchaseArticlesByBrasserie(brasserie);
+    const fmtSel = document.getElementById("purchase-article");
+    const formatVal = `B${cs}`;
+    if (!fmtSel || ![...fmtSel.options].some((o) => o.value === formatVal)) {
+      showToast(`Format ${formatVal} absent du catalogue pour cette brasserie.`);
+      return;
     }
-    showToast(qty + " casier(s) de " + cs + " btl · " + brasserie + " · verifiez le prix fournisseur puis enregistrez.");
+    fmtSel.value = formatVal;
+    populatePurchaseArticleDetailFromFormat();
+    const detailSel = document.getElementById("purchase-article-detail");
+    if (detailSel) detailSel.value = article.article;
+    syncPurchasePriceInput();
+    const caseSizeField = document.getElementById("purchase-case-size");
+    if (caseSizeField) caseSizeField.value = String(cs);
+    const casesInput = document.getElementById("purchase-cases");
+    if (casesInput) {
+      casesInput.value = String(qty);
+      casesInput.removeAttribute("max");
+    }
+    const price = supplierPriceForArticle(article.article, brasserie)
+      || Math.max(0, Math.round(Number(document.getElementById("purchase-price")?.value) || 0));
+    purchaseDraftLines.push({
+      article: article.article,
+      brasserie: normalizeBrasserieName(brasserie),
+      cap: cs,
+      cases: qty,
+      caseSize: cs,
+      pricePerCase: price,
+      amount: Math.round(qty * price),
+      selected: true,
+    });
+    renderPurchaseDraft();
+    showToast(`${qty} casier(s) de ${cs} btl · ${brasserie} · verifiez le prix fournisseur puis enregistrez.`);
   });
 }
 
