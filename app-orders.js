@@ -616,7 +616,8 @@ function populatePurchaseArticlesByBrasserie(br) {
   const btlVidesByCap = {};
   casiersForSite().forEach((c) => {
     const stockIt = stockItemForArticle(c.article);
-    if (normalizeBrasserieName(stockIt?.brasserie || "") !== br) return;
+    // Casier physique : `c.article` peut être directement la brasserie (et non un article du stock).
+    if (normalizeBrasserieName(stockIt?.brasserie || c.article || "") !== br) return;
     const cap = Math.max(1, Number(c.capacite) || 24);
     if (!btlVidesByCap[cap]) btlVidesByCap[cap] = 0;
     btlVidesByCap[cap] += Math.max(0, Number(c.bouteillesVides) || 0);
@@ -661,7 +662,7 @@ function populatePurchaseArticleDetailFromFormat() {
   let btlVidesTot = 0;
   casiersForSite().forEach((c) => {
     const stockIt = stockItemForArticle(c.article);
-    if (normalizeBrasserieName(stockIt?.brasserie || "") !== br) return;
+    if (normalizeBrasserieName(stockIt?.brasserie || c.article || "") !== br) return;
     if (Math.max(1, Number(c.capacite) || 24) !== cap) return;
     btlVidesTot += Math.max(0, Number(c.bouteillesVides) || 0);
   });
