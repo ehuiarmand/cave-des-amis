@@ -6942,9 +6942,10 @@ function drainArticleCasiers(article, bottles, opts = {}) {
     const cur = Math.max(0, Number(c.quantiteActuelle) || 0);
     const take = Math.min(cur, remaining);
     if (take <= 0) continue;
+    const cap = Math.max(1, Number(c.capacite) || 24);
     c.quantiteActuelle = cur - take;
-    c.bouteillesVides = (Number(c.bouteillesVides) || 0) + take;
     recomputeCasierStatus(c);
+    distributeVidesEnCasiers(c.article, cap, take, now, opts);
     c.lastMoveAt = now;
     c.lastMoveBy = sessionUser || "system";
     state.casierMouvements.unshift({
@@ -6964,6 +6965,74 @@ function drainArticleCasiers(article, bottles, opts = {}) {
       createdAt: now,
     });
     remaining -= take;
+  }
+}
+
+function distributeVidesEnCasiers(article, cap, bottles, now, opts = {}) {
+  if (!article || bottles <= 0) return;
+  const siteId = currentSiteId();
+  state.casiers = state.casiers || [];
+  state.casierMouvements = state.casierMouvements || [];
+  state.nextId = state.nextId || {};
+  if (!state.nextId.casierMouvement) state.nextId.casierMouvement = 1;
+  if (!state.nextId.casier) state.nextId.casier = 1;
+  const artNorm = String(article || "").toLowerCase();
+  const ts = now || new Date().toISOString();
+  let remaining = bottles;
+
+  // Remplir les casiers de collecte existants (vide, même article+format, non retournés), les plus remplis en premier
+  const collectors = state.casiers.filter((c) =>
+    c.siteId === siteId &&
+    String(c.article || "").toLowerCase() === artNorm &&
+    Math.max(1, Number(c.capacite) || 24) === cap &&
+    (Number(c.quantiteActuelle) || 0) === 0 &&
+    String(c.statut || "").toLowerCase() !== "retourne"
+  ).sort((a, b) => (Number(b.bouteillesVides) || 0) - (Number(a.bouteillesVides) || 0));
+
+  for (const c of collectors) {
+    if (remaining <= 0) break;
+    const current = Math.max(0, Number(c.bouteillesVides) || 0);
+    const free = cap - current;
+    if (free <= 0) continue;
+    const add = Math.min(free, remaining);
+    c.bouteillesVides = current + add;
+    recomputeCasierStatus(c);
+    c.lastMoveAt = ts;
+    c.lastMoveBy = sessionUser || "system";
+    state.casierMouvements.unshift({
+      id: state.nextId.casierMouvement++,
+      siteId, casierId: c.id, casierCode: c.code, article: c.article,
+      type: "collecte_vide", quantite: add, source: "",
+      motif: opts.motif || "vente",
+      commentaire: opts.commentaire || `Collecte ${add} btl vide(s) B${cap}`,
+      user: sessionUser || "system", role: currentRole || "-",
+      date: today(), createdAt: ts,
+    });
+    remaining -= add;
+  }
+
+  // Si pas assez de casiers de collecte disponibles → créer un nouveau casier de collecte
+  while (remaining > 0) {
+    const fill = Math.min(cap, remaining);
+    const code = nextCasierCode();
+    const newCasier = {
+      id: state.nextId.casier++, siteId, code, article,
+      capacite: cap, quantiteActuelle: 0, bouteillesVides: fill,
+      emplacement: "À retourner", statut: "vide",
+      createdAt: ts, createdBy: sessionUser || "system",
+      lastMoveAt: ts, lastMoveBy: sessionUser || "system",
+    };
+    state.casiers.push(newCasier);
+    state.casierMouvements.unshift({
+      id: state.nextId.casierMouvement++,
+      siteId, casierId: newCasier.id, casierCode: newCasier.code, article,
+      type: "collecte_vide", quantite: fill, source: "",
+      motif: opts.motif || "vente",
+      commentaire: opts.commentaire || `Nouveau casier collecte B${cap}`,
+      user: sessionUser || "system", role: currentRole || "-",
+      date: today(), createdAt: ts,
+    });
+    remaining -= fill;
   }
 }
 
@@ -7865,21 +7934,35 @@ async function logout() {
 }
 
 function migrateCasiersVidesBouteillesVides() {
-  // Selon le cahier des charges : casier = plastique + X bouteilles vides.
-  // Un casier vide (quantiteActuelle = 0) contient forcément sa capacité en bouteilles vides.
-  // Les casiers créés avant ce fix ont bouteillesVides = 0 → on corrige.
   if (!Array.isArray(state.casiers)) return;
+  const now = new Date().toISOString();
   let changed = false;
+
+  // 1. Casiers vides (qty=0) sans bouteillesVides tracquées → initialiser à capacite
   state.casiers.forEach((c) => {
     const cap = Math.max(1, Number(c.capacite) || 24);
     const qty = Math.max(0, Number(c.quantiteActuelle) || 0);
     const vides = Math.max(0, Number(c.bouteillesVides) || 0);
-    if (qty <= 0 && vides < cap && String(c.statut || "").toLowerCase() !== "retourne") {
+    const statut = String(c.statut || "").toLowerCase();
+    if (qty <= 0 && vides < cap && statut !== "retourne") {
       c.bouteillesVides = cap;
       c.statut = "vide";
       changed = true;
     }
   });
+
+  // 2. Casiers partiels (qty>0) avec bouteillesVides > 0 → déplacer vers casiers de collecte
+  state.casiers.forEach((c) => {
+    const qty = Math.max(0, Number(c.quantiteActuelle) || 0);
+    const vides = Math.max(0, Number(c.bouteillesVides) || 0);
+    if (qty > 0 && vides > 0) {
+      const cap = Math.max(1, Number(c.capacite) || 24);
+      distributeVidesEnCasiers(c.article, cap, vides, now, { motif: "migration" });
+      c.bouteillesVides = 0;
+      changed = true;
+    }
+  });
+
   if (changed) lsSaveCasiers();
 }
 
