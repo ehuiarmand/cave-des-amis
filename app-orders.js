@@ -7507,6 +7507,77 @@ async function casierEntree(casierId, qty, { source = "fournisseur", commentaire
   return true;
 }
 
+/** Articles catalogue alignés avec un casier (SKU direct ou même brasserie + format). */
+function stockCandidatesForCasierFrigoTransfer(casier) {
+  if (!casier) return [];
+  const cap = Math.max(1, Number(casier.capacite) || 24);
+  const label = String(casier.article || "").trim();
+  const directMatch = recordsForSite(state.stock).find((it) =>
+    lotType(it) !== "unite"
+    && String(it.article || "").toLowerCase() === label.toLowerCase()
+  );
+  if (directMatch) return [directMatch];
+  const br = normalizeBrasserieName(label);
+  return recordsForSite(state.stock)
+    .filter((it) => lotType(it) !== "unite"
+      && normalizeBrasserieName(it.brasserie) === br
+      && (caseSize(it) || 24) === cap)
+    .sort((a, b) => stockReserve(b) - stockReserve(a));
+}
+
+/**
+ * Répartition reserve → frigo pour une sortie casier motif frigo (conserve stock total = frigo + reserve).
+ * Retour { ok, msg?, allocations: { itemId, article, take }[] }
+ */
+function buildCasierToFrigoStockPlan(casier, qtyBottles) {
+  const candidates = stockCandidatesForCasierFrigoTransfer(casier);
+  if (!candidates.length) {
+    const capHint = Math.max(1, Number(casier.capacite) || 24);
+    return {
+      ok: false,
+      msg: `Aucun article catalogue lie (${String(casier.article || "?")}, B${capHint}). Pas de mise a jour frigo.`,
+    };
+  }
+  candidates.forEach((it) => normalizePhysicalStock(it));
+  const pool = candidates.reduce((sum, it) => sum + stockReserve(it), 0);
+  const qty = Math.max(0, Math.floor(Number(qtyBottles) || 0));
+  if (pool < qty) {
+    return {
+      ok: false,
+      msg: `Réserve catalogue insuffisante : ${fmt(qty)} btl demandées, ${fmt(pool)} disponible(s). Ajustez frigo/réserve ou diminuez la quantité.`,
+    };
+  }
+  const allocations = [];
+  let remaining = qty;
+  for (const it of candidates) {
+    if (remaining <= 0) break;
+    normalizePhysicalStock(it);
+    const take = Math.min(remaining, stockReserve(it));
+    if (take <= 0) continue;
+    allocations.push({ itemId: it.id, article: it.article, take });
+    remaining -= take;
+  }
+  if (remaining > 0) {
+    return { ok: false, msg: "Impossible de repartir la reserve sur les articles catalogue." };
+  }
+  return { ok: true, allocations };
+}
+
+function applyCasierToFrigoStockPlan(plan) {
+  if (!plan?.ok || !Array.isArray(plan.allocations)) return;
+  const now = new Date().toISOString();
+  const actor = sessionUser || "-";
+  plan.allocations.forEach(({ itemId, take }) => {
+    const item = (state.stock || []).find((i) => Number(i.id) === Number(itemId));
+    if (!item || take <= 0) return;
+    normalizePhysicalStock(item);
+    item.reserve = stockReserve(item) - take;
+    item.frigo = stockFrigo(item) + take;
+    item.lastReapproAt = now;
+    item.lastReapproBy = actor;
+  });
+}
+
 async function casierSortie(casierId, qty, { motif = "autre", commentaire = "" } = {}) {
   if (!canMoveCasier()) { showToast("Connexion requise."); return false; }
   const casier = findCasierById(casierId);
@@ -7517,6 +7588,15 @@ async function casierSortie(casierId, qty, { motif = "autre", commentaire = "" }
   if (q > current) {
     showToast(`Stock insuffisant dans le casier (${current}).`);
     return false;
+  }
+  const motifKey = String(motif || "autre").trim().toLowerCase();
+  let frigoPlan = null;
+  if (motifKey === "frigo") {
+    frigoPlan = buildCasierToFrigoStockPlan(casier, q);
+    if (!frigoPlan.ok) {
+      showToast(frigoPlan.msg || "Transfert frigo impossible.");
+      return false;
+    }
   }
   const before = JSON.parse(JSON.stringify(casier));
 
@@ -7549,7 +7629,19 @@ async function casierSortie(casierId, qty, { motif = "autre", commentaire = "" }
     commentaire,
     entity: "casier_sortie",
   });
-  await persistState({ casiers: state.casiers, casierMouvements: state.casierMouvements, nextId: state.nextId });
+  if (frigoPlan && frigoPlan.ok) {
+    applyCasierToFrigoStockPlan(frigoPlan);
+    const stamp = `${casier.code} · ${fmt(q)} btl`;
+    const detail = frigoPlan.allocations.map((a) =>
+      `${a.article}: ${fmt(a.take)} btl rés. → frigo`).join("\n");
+    recordStaffAudit("update", "frigo", `Casier vers frigo · ${stamp}`, detail || stamp);
+  }
+  await persistState({
+    casiers: state.casiers,
+    casierMouvements: state.casierMouvements,
+    nextId: state.nextId,
+    ...(frigoPlan && frigoPlan.ok ? { stock: state.stock } : {}),
+  });
   return true;
 }
 
