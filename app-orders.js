@@ -814,6 +814,11 @@ function canAnyAdmin() {
   return canSuperAdmin() || canSiteAdmin();
 }
 
+/** Ouverture / cloture journee comptable (PDJ) : tout utilisateur connecte sauf les comptes serveuse. */
+function canManagePdjAccounting() {
+  return Boolean(sessionUser) && String(currentRole || "").trim() !== "serveuse";
+}
+
 /** Date traitee sur le Point du jour : admin et superadmin peuvent choisir une journee anterieure pour corriger les ecarts.
  *  Pour tous les roles, si la journee d'hier est encore ouverte (maquis ouvert la nuit), on reste sur hier. */
 function pdjCalendarDate() {
@@ -1178,7 +1183,7 @@ function renderHero() {
   };
   const copies = {
     home: "Le serveur garde les sessions et l'etat complet de l'application.",
-    pdj: "Ouverture puis fermeture de caisse ; verification stock conforme avant cloture.",
+    pdj: "Ouverture puis fermeture de journee : gerant et administrateurs ; les serveuses consultent uniquement.",
     ventes: "Une commande peut etre modifiee autant de fois que necessaire avant la facture finale.",
     guide: "Sommaire, liens vers le guide imprimable PDF ; meme les comptes serveuse peuvent consulter cette page.",
     stock: "Renseignez prix achat et prix vente pour accelerer la prise de commande.",
@@ -2163,6 +2168,10 @@ function captureOpeningStockSnapshot() {
 }
 
 async function recordCashOpening() {
+  if (!canManagePdjAccounting()) {
+    showToast("Ouverture de journee reservee au gerant ou a un administrateur.");
+    return;
+  }
   const input = document.getElementById("pdj-opening-cash");
   const raw = input?.value;
   if (raw === undefined || raw === null || String(raw).trim() === "") {
@@ -2229,7 +2238,18 @@ function renderCashOpeningPanel() {
   const book = dayBookFor(pdjCalendarDate(), currentSiteId());
   const needs = dayBookNeedsCashOpening(book);
   if (lockBlock) {
-    lockBlock.classList.toggle("pdj-main--locked", needs);
+    lockBlock.classList.toggle("pdj-main--locked", needs && canManagePdjAccounting());
+  }
+  if (!canManagePdjAccounting() && needs) {
+    container.innerHTML = `
+      <div class="pdj-opening-card pdj-opening-card--done" style="border-color:#e0e0e0;background:#fafafa">
+        <p class="eyebrow" style="margin-bottom:4px">Etape gerant</p>
+        <strong>Ouverture de caisse</strong>
+        <p class="muted" style="margin-top:8px">
+          Reserve au <strong>gerant</strong> ou a un <strong>administrateur</strong> (pas aux comptes serveuse).
+        </p>
+      </div>`;
+    return;
   }
   if (!needs && book) {
     container.innerHTML = `
@@ -2341,7 +2361,7 @@ function renderDailyStockCheck() {
 
   const openingBlocked = PDJ_REQUIRE_CASH_OPENING && dayBookNeedsCashOpening(dayBook);
   const isPastDate = dStr !== today();
-  if (openingBlocked && !(isPastDate && canAnyAdmin())) {
+  if (openingBlocked && !(isPastDate && canAnyAdmin()) && canManagePdjAccounting()) {
     container.innerHTML = emptyState(
       "Ouverture de caisse requise",
       "Validez le montant en caisse en haut de cette page avant la verification stock et la cloture.",
@@ -2351,12 +2371,22 @@ function renderDailyStockCheck() {
   }
   button.disabled = false;
 
-  if (closed && !canAnyAdmin()) {
-    const checkItems = closed.items || [];
-    const rows = checkItems.map((ci) => {
-      const ecartColor = ci.ecart === 0 ? "#72d7a9" : "#ff8e82";
-      const ecartLabel = ci.ecart === 0 ? "OK" : (ci.ecart > 0 ? `+${fmt(ci.ecart)}` : fmt(ci.ecart));
-      return `<tr>
+  if (!canManagePdjAccounting()) {
+    button.disabled = true;
+    if (openingBlocked) {
+      container.innerHTML = emptyState(
+        "Ouverture de caisse (gerant)",
+        "En attente de l'ouverture par un gerant ou un administrateur. Les serveuses peuvent consulter le reste du point du jour.",
+      );
+      if (printBtn) printBtn.classList.toggle("hidden", true);
+      return;
+    }
+    if (closed) {
+      const checkItems = closed.items || [];
+      const rows = checkItems.map((ci) => {
+        const ecartColor = ci.ecart === 0 ? "#72d7a9" : "#ff8e82";
+        const ecartLabel = ci.ecart === 0 ? "OK" : (ci.ecart > 0 ? `+${fmt(ci.ecart)}` : fmt(ci.ecart));
+        return `<tr>
         <td>${escapeHtml(ci.article)}</td>
         <td style="text-align:right;color:#1976d2">${fmt(ci.stockAvant ?? ci.expected ?? 0)}</td>
         <td style="text-align:right;color:#ff8e82">${fmt(ci.sortiesToday ?? 0)}</td>
@@ -2366,21 +2396,22 @@ function renderDailyStockCheck() {
         <td style="text-align:right"><strong style="color:#72d7a9">${fmt(ci.stockApres ?? ci.counted ?? 0)}</strong></td>
         <td style="text-align:right;color:${ecartColor}">${ecartLabel}</td>
       </tr>`;
-    }).join("");
-    const hasCash = typeof closed.openingCashFcfa === "number";
-    const cashBlock = hasCash
-      ? `<div class="inline-card" style="margin-bottom:12px;display:grid;gap:10px">
+      }).join("");
+      const hasCash = typeof closed.openingCashFcfa === "number";
+      const cashBlock = hasCash
+        ? `<div class="inline-card" style="margin-bottom:12px;display:grid;gap:10px">
           <strong>Caisse (espèces)</strong>
           <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px"><span class="muted">Fonds à l'ouverture</span><strong>${fmt(closed.openingCashFcfa)} FCFA</strong></div>
           ${typeof closed.closingCashFcfa === "number" ? `<div style="display:flex;justify-content:space-between"><span class="muted">Dénombrement fermeture</span><strong>${fmt(closed.closingCashFcfa)} FCFA</strong></div>` : ""}
           ${typeof closed.expectedEspecesCash === "number" ? `<div style="display:flex;justify-content:space-between"><span class="muted">Théorique caisse espèces</span><strong>${fmt(closed.expectedEspecesCash)} FCFA</strong></div>` : ""}
           ${typeof closed.cashEcartEspeces === "number"
-      ? `<div style="display:flex;justify-content:space-between;color:${closed.cashEcartEspeces === 0 ? "#72d7a9" : "#ff8e82"}"><span>Écart espèces</span><strong>${closed.cashEcartEspeces === 0 ? "OK" : `${closed.cashEcartEspeces > 0 ? "+" : ""}${fmt(closed.cashEcartEspeces)} FCFA`}</strong></div>`
-      : ""}
+          ? `<div style="display:flex;justify-content:space-between;color:${closed.cashEcartEspeces === 0 ? "#72d7a9" : "#ff8e82"}"><span>Écart espèces</span><strong>${closed.cashEcartEspeces === 0 ? "OK" : `${closed.cashEcartEspeces > 0 ? "+" : ""}${fmt(closed.cashEcartEspeces)} FCFA`}</strong></div>`
+          : ""}
         </div>`
-      : "";
-    container.innerHTML = `
+        : "";
+      container.innerHTML = `
       ${cashBlock}
+      <p class="muted" style="margin-bottom:10px;font-size:0.88rem">Lecture seule — verification et cloture reservees au gerant ou a un administrateur.</p>
       <div class="inline-card" style="margin-bottom:12px">
         <span class="muted">Journee cloturee le</span>
         <strong>${escapeHtml(formatDateTimeDdMmYyyy(closed.createdAt))}</strong>
@@ -2398,32 +2429,73 @@ function renderDailyStockCheck() {
         </tr></thead>
         <tbody>${rows}</tbody>
       </table></div>`;
-  } else {
-    const seedFromClose = closed && canAnyAdmin() ? closed : null;
-    const ventesJour = recordsForSite(state.ventes).filter((v) => v.date.slice(0, 10) === dStr);
-    const totauxJourOpen = paymentTotals(ventesJour);
-    const especesVentes = Number(totauxJourOpen["Espèces"]) || 0;
-    const chargesJour = recordsForSite(state.charges).filter((c) => (c.date || "").slice(0, 10) === dStr);
-    const especesCharges = chargesJour.reduce((sum, c) => (
-      normalizePaymentMethodKey(c.paiement) === normalizePaymentMethodKey("Espèces") ? sum + (Number(c.montant) || 0) : sum
-    ), 0);
-    const openingCash = Number(dayBook?.openingCashFcfa) || 0;
-    const expectedEspeces = openingCash + especesVentes - especesCharges;
-    const closingSeed = seedFromClose && typeof seedFromClose.closingCashFcfa === "number"
-      ? Math.round(Number(seedFromClose.closingCashFcfa))
-      : null;
-    const rows = items.map((item) => {
-      const closedCheckItem = closed ? (closed.items || []).find((ci) => Number(ci.id) === Number(item.id)) : null;
-      const stockAtOpen = dStr === today()
-        ? stockActuel(item)
-        : (closedCheckItem?.stockAvant ?? stockActuel(item));
+      if (printBtn) printBtn.classList.toggle("hidden", !closed);
+      return;
+    }
+    const ventesJourRo = recordsForSite(state.ventes).filter((v) => v.date.slice(0, 10) === dStr);
+    const rowsOpen = items.map((item) => {
+      const stockAtOpen = dStr === today() ? stockActuel(item) : stockActuel(item);
       const sortiesToday = todaySortiesBottlesForArticle(item.article, dStr);
-      const remaining = Math.max(0, stockAtOpen - sortiesToday); // restant théorique
-      const seedCi = seedFromClose ? (seedFromClose.items || []).find((ci) => Number(ci.id) === Number(item.id)) : null;
-      const frigoVal = seedCi != null ? Math.max(0, Number(seedCi.frigo) || 0) : stockFrigo(item);
-      const reserveVal = seedCi != null ? Math.max(0, Number(seedCi.reserve) || 0) : stockReserve(item);
+      const remaining = Math.max(0, stockAtOpen - sortiesToday);
+      const frigoVal = stockFrigo(item);
+      const reserveVal = stockReserve(item);
       const gap = (frigoVal + reserveVal) - remaining;
       return `<tr>
+        <td>${escapeHtml(item.article)}</td>
+        <td style="text-align:right;color:#1976d2">${fmt(stockAtOpen)}</td>
+        <td style="text-align:right;color:#ff8e82">${fmt(sortiesToday)}</td>
+        <td style="text-align:right">${fmt(remaining)}</td>
+        <td style="text-align:right">${fmt(frigoVal)}</td>
+        <td style="text-align:right">${fmt(reserveVal)}</td>
+        <td style="text-align:right;color:${gap === 0 ? "#72d7a9" : "#ff8e82"}">${gap === 0 ? "OK" : fmt(gap)}</td>
+      </tr>`;
+    }).join("");
+    container.innerHTML = `
+      <p class="muted" style="margin-bottom:10px;font-size:0.88rem">
+        Lecture seule — la saisie de fermeture et la cloture sont reservees au <strong>gerant</strong> ou a un <strong>administrateur</strong>.
+      </p>
+      <div class="stock-table-wrap"><table class="stock-table">
+        <thead><tr>
+          <th>Article</th>
+          <th class="th-orange" style="text-align:right">Stk (ref.)</th>
+          <th class="th-blue" style="text-align:right">Sorties jour</th>
+          <th style="text-align:right">Theorique</th>
+          <th style="text-align:right">Frigo</th>
+          <th style="text-align:right">Reserve</th>
+          <th style="text-align:right">Ecart</th>
+        </tr></thead>
+        <tbody>${rowsOpen}</tbody>
+      </table></div>
+      <p class="muted" style="margin-top:8px;font-size:0.82rem">${ventesJourRo.length} vente(s) sur cette date — ${fmt(items.length)} ligne(s) stock.</p>`;
+    if (printBtn) printBtn.classList.toggle("hidden", true);
+    return;
+  }
+
+  const seedFromClose = closed && canAnyAdmin() ? closed : null;
+  const ventesJour = recordsForSite(state.ventes).filter((v) => v.date.slice(0, 10) === dStr);
+  const totauxJourOpen = paymentTotals(ventesJour);
+  const especesVentes = Number(totauxJourOpen["Espèces"]) || 0;
+  const chargesJour = recordsForSite(state.charges).filter((c) => (c.date || "").slice(0, 10) === dStr);
+  const especesCharges = chargesJour.reduce((sum, c) => (
+    normalizePaymentMethodKey(c.paiement) === normalizePaymentMethodKey("Espèces") ? sum + (Number(c.montant) || 0) : sum
+  ), 0);
+  const openingCash = Number(dayBook?.openingCashFcfa) || 0;
+  const expectedEspeces = openingCash + especesVentes - especesCharges;
+  const closingSeed = seedFromClose && typeof seedFromClose.closingCashFcfa === "number"
+    ? Math.round(Number(seedFromClose.closingCashFcfa))
+    : null;
+  const rows = items.map((item) => {
+    const closedCheckItem = closed ? (closed.items || []).find((ci) => Number(ci.id) === Number(item.id)) : null;
+    const stockAtOpen = dStr === today()
+      ? stockActuel(item)
+      : (closedCheckItem?.stockAvant ?? stockActuel(item));
+    const sortiesToday = todaySortiesBottlesForArticle(item.article, dStr);
+    const remaining = Math.max(0, stockAtOpen - sortiesToday); // restant théorique
+    const seedCi = seedFromClose ? (seedFromClose.items || []).find((ci) => Number(ci.id) === Number(item.id)) : null;
+    const frigoVal = seedCi != null ? Math.max(0, Number(seedCi.frigo) || 0) : stockFrigo(item);
+    const reserveVal = seedCi != null ? Math.max(0, Number(seedCi.reserve) || 0) : stockReserve(item);
+    const gap = (frigoVal + reserveVal) - remaining;
+    return `<tr>
         <td>${escapeHtml(item.article)}</td>
         <td style="text-align:right;color:#1976d2">${fmt(stockAtOpen)}</td>
         <td style="text-align:right;color:#ff8e82">${fmt(sortiesToday)}</td>
@@ -2432,21 +2504,22 @@ function renderDailyStockCheck() {
         <td><input class="stock-check-input" type="number" min="0" data-check-reserve="${item.id}" value="${reserveVal}"></td>
         <td style="text-align:right;color:${gap === 0 ? "#72d7a9" : "#ff8e82"}">${gap === 0 ? "OK" : fmt(gap)}</td>
       </tr>`;
-    }).join("");
-    const correctionBanner = seedFromClose
-      ? `<div class="inline-card" style="margin-bottom:12px;border-left:3px solid var(--mm-primary, #2196f3)">
-        <strong>Correction de cloture (super administrateur)</strong>
+  }).join("");
+  const correctionBanner = seedFromClose
+    ? `<div class="inline-card" style="margin-bottom:12px;border-left:3px solid var(--mm-primary, #2196f3)">
+        <strong>Correction de cloture (administrateur)</strong>
         <p class="muted" style="margin-top:6px;font-size:0.86rem;line-height:1.45">
           Champs pre-remplis avec la derniere cloture du <strong>${escapeHtml(formatDateDdMmYyyy(dStr))}</strong>.
           Ajustez frigo, reserve et caisse puis validez pour remplacer la fiche (les ecritures de stock seront recalculees).
         </p>
       </div>`
-      : "";
-    container.innerHTML = `
+    : "";
+  const openedLabel = dayBook?.openedAt ? formatDateTimeDdMmYyyy(dayBook.openedAt) : "—";
+  container.innerHTML = `
       ${correctionBanner}
       <div class="inline-card" style="margin-bottom:12px">
         <span class="muted">Référence ouverture</span>
-        <strong>${escapeHtml(formatDateTimeDdMmYyyy(dayBook.openedAt))}</strong>
+        <strong>${escapeHtml(openedLabel)}</strong>
       </div>
       <div class="pdj-closing-cash-panel">
         <strong>Fermeture caisse (espèces)</strong>
@@ -2463,7 +2536,7 @@ function renderDailyStockCheck() {
       </div>
       <p class="muted" style="margin-bottom:10px;font-size:0.88rem">
         Saisissez le stock physique reel (frigo + reserve). L'ecart s'affiche en direct.
-        ${canAnyAdmin() ? `Les ecarts sont autorises et seront enregistres dans le stock.` : `La cloture n'est possible que si chaque ligne affiche <strong>OK</strong>.`}
+        Les ecarts peuvent etre enregistres dans le stock (gerant ou administrateur) ; une confirmation vous sera demandee si besoin.
       </p>
       <div class="stock-table-wrap"><table class="stock-table">
         <thead><tr>
@@ -2477,7 +2550,6 @@ function renderDailyStockCheck() {
         </tr></thead>
         <tbody>${rows}</tbody>
       </table></div>`;
-  }
 }
 
 function renderDashboard() {
@@ -5749,6 +5821,10 @@ function closureCashSnapshot(dStr) {
 }
 
 async function closeAccountingDay() {
+  if (!canManagePdjAccounting()) {
+    showToast("Cloture de journee reservee au gerant ou a un administrateur.");
+    return;
+  }
   const items = recordsForSite(state.stock);
   if (!items.length) {
     showToast("Aucun stock a verifier.");
@@ -8651,6 +8727,10 @@ document.getElementById("fab-btn").addEventListener("click", () => {
     if (currentPage === "ventes") renderVentesPage();
   });
   document.getElementById("close-day-btn").addEventListener("click", () => {
+    if (!canManagePdjAccounting()) {
+      showToast("Cloture reservee au gerant ou a un administrateur.");
+      return;
+    }
     const dWork = pdjCalendarDate();
     const items = recordsForSite(state.stock);
     const hasInputs = items.length && !!document.querySelector(`[data-check-frigo="${items[0].id}"]`);
