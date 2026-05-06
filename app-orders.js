@@ -4384,8 +4384,12 @@ function purchasePriceInputValue() {
  */
 function casierRetournableUnits(c) {
   const cap = Math.max(1, Number(c.capacite) || 24);
+  const statut = String(c.statut || "").toLowerCase();
+  if (statut === "retourne") return 0;
   const vides = Math.max(0, Number(c.bouteillesVides) || 0);
-  return vides >= cap ? Math.floor(vides / cap) : 0;
+  if (vides >= cap) return Math.floor(vides / cap);
+  if (statut === "vide") return 1;
+  return 0;
 }
 
 function emptyCasiersCountForArticle(article) {
@@ -6789,17 +6793,13 @@ function recomputeCasierStatus(casier) {
   if (!casier) return casier;
   const cap = Math.max(1, Number(casier.capacite) || 1);
   const qty = Math.max(0, Number(casier.quantiteActuelle) || 0);
-  if (qty <= 0) {
-    casier.statut = "vide";
-    // Un casier vide = plein de bouteilles vides à retourner.
-    // Si bouteillesVides n'est pas encore tracqué, on l'initialise à cap.
-    if (!casier.bouteillesVides || Number(casier.bouteillesVides) <= 0) {
-      casier.bouteillesVides = cap;
-    }
-  } else if (qty >= cap) {
+  if (qty >= cap) {
     casier.statut = "plein";
-  } else {
+  } else if (qty > 0) {
     casier.statut = "partiel";
+  } else {
+    // qty = 0 : conserver "retourne" si déjà positionné (casier rendu au fournisseur)
+    if (String(casier.statut || "").toLowerCase() !== "retourne") casier.statut = "vide";
   }
   return casier;
 }
@@ -6808,6 +6808,7 @@ function casierStatutBadge(casier) {
   const st = String(casier?.statut || "vide").toLowerCase();
   if (st === "plein") return `<span class="badge badge-green">Plein</span>`;
   if (st === "partiel") return `<span class="badge badge-amber">Partiel</span>`;
+  if (st === "retourne") return `<span class="badge badge-gray">Retourné</span>`;
   return `<span class="badge badge-red">Vide</span>`;
 }
 
@@ -7358,7 +7359,7 @@ async function retourVidesGroupeBrasserie(br, cap, nbCasiers) {
     const cBr = normalizeBrasserieName(stockIt?.brasserie || "");
     return cBr === br &&
       Math.max(1, Number(c.capacite) || 1) === cap &&
-      Math.max(0, Number(c.bouteillesVides) || 0) >= cap;
+      casierRetournableUnits(c) >= 1;
   }).slice(0, nbCasiers);
   return _retourVidesLot(matchingVides, cap, `${br} B${cap}`);
 }
@@ -7373,9 +7374,11 @@ async function _retourVidesLot(matchingVides, cap, label) {
   let processed = 0;
   for (const casier of matchingVides) {
     const vides = Math.max(0, Number(casier.bouteillesVides) || 0);
-    if (vides < cap) continue;
-    casier.bouteillesVides = vides - cap;
-    recomputeCasierStatus(casier);
+    const retournables = casierRetournableUnits(casier);
+    if (retournables < 1) continue;
+    casier.bouteillesVides = Math.max(0, vides - cap);
+    casier.statut = "retourne"; // rendu au fournisseur : plus retournable jusqu'à nouveau remplissage
+    recomputeCasierStatus(casier); // recalcule selon qty mais préserve "retourne"
     casier.lastMoveAt = now;
     casier.lastMoveBy = sessionUser || "system";
     state.casierMouvements.unshift({
@@ -7404,7 +7407,7 @@ async function retourVidesGroupe(article, cap, nbCasiers) {
   const matchingVides = casiersForSite().filter((c) =>
     c.article === article &&
     Math.max(1, Number(c.capacite) || 1) === cap &&
-    Math.max(0, Number(c.bouteillesVides) || 0) >= cap
+    casierRetournableUnits(c) >= 1
   ).slice(0, nbCasiers);
   return _retourVidesLot(matchingVides, cap, `${article} B${cap}`);
 }
@@ -7416,10 +7419,13 @@ async function retourVidesCasier(casierId, qty) {
   const cap = Math.max(1, Number(casier.capacite) || 24);
   const q = Math.max(0, Math.floor(Number(qty) || 0));
   if (q <= 0) { showToast("Quantité invalide."); return false; }
-  const vides = Math.max(0, Number(casier.bouteillesVides) || 0);
+  const statutCasier = String(casier.statut || "").toLowerCase();
+  const rawVides = Math.max(0, Number(casier.bouteillesVides) || 0);
+  const vides = (statutCasier === "vide" && rawVides === 0) ? cap : rawVides;
   if (q > vides) { showToast(`Seulement ${fmt(vides)} bouteille(s) vide(s) dans ce casier.`); return false; }
   const nbCasiers = Math.floor(q / cap);
-  casier.bouteillesVides = vides - q;
+  casier.bouteillesVides = Math.max(0, vides - q);
+  if (casier.bouteillesVides < cap) casier.statut = "retourne";
   recomputeCasierStatus(casier);
   casier.lastMoveAt = new Date().toISOString();
   casier.lastMoveBy = sessionUser || "system";
@@ -7868,7 +7874,7 @@ function migrateCasiersVidesBouteillesVides() {
     const cap = Math.max(1, Number(c.capacite) || 24);
     const qty = Math.max(0, Number(c.quantiteActuelle) || 0);
     const vides = Math.max(0, Number(c.bouteillesVides) || 0);
-    if (qty <= 0 && vides < cap) {
+    if (qty <= 0 && vides < cap && String(c.statut || "").toLowerCase() !== "retourne") {
       c.bouteillesVides = cap;
       c.statut = "vide";
       changed = true;
