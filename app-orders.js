@@ -8144,6 +8144,7 @@ function attachEvents() {
     renderVentesPage();
     renderStock();
     renderCharges();
+    renderCasierPhysique();
     loadParamsForm();
     resetOrderForm();
     persistState().catch(handleApiError);
