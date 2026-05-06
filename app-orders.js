@@ -4387,9 +4387,7 @@ function casierRetournableUnits(c) {
   const statut = String(c.statut || "").toLowerCase();
   if (statut === "retourne") return 0;
   const vides = Math.max(0, Number(c.bouteillesVides) || 0);
-  if (vides >= cap) return Math.floor(vides / cap);
-  if (statut === "vide") return 1;
-  return 0;
+  return Math.floor(vides / cap);
 }
 
 function emptyCasiersCountForArticle(article) {
