@@ -626,7 +626,47 @@ function populatePurchaseArticlesByBrasserie(br) {
     html += `<option value="B${cap}">${escapeHtml(`B${cap}${videsLabel}`)}</option>`;
   }
   sel.innerHTML = html;
-  if (caps.length === 1) { sel.value = `B${caps[0]}`; syncPurchaseLineInputsFromStock(); }
+  // Cacher le détail article tant qu'aucun format n'est sélectionné
+  const detailWrap = document.getElementById("purchase-article-detail-wrap");
+  if (detailWrap) detailWrap.style.display = "none";
+  if (caps.length === 1) { sel.value = `B${caps[0]}`; populatePurchaseArticleDetailFromFormat(); syncPurchaseLineInputsFromStock(); }
+}
+
+function populatePurchaseArticleDetailFromFormat() {
+  const formatVal = document.getElementById("purchase-article")?.value?.trim() || "";
+  const br = normalizeBrasserieName(document.getElementById("purchase-supplier")?.value || "");
+  const wrap = document.getElementById("purchase-article-detail-wrap");
+  const sel = document.getElementById("purchase-article-detail");
+  const hint = document.getElementById("purchase-article-detail-hint");
+  const capMatch = formatVal.match(/^B(\d+)$/);
+  if (!wrap || !sel || !capMatch || !br) {
+    if (wrap) wrap.style.display = "none";
+    return;
+  }
+  const cap = Number(capMatch[1]);
+  const articles = recordsForSite(state.stock).filter((item) =>
+    normalizeBrasserieName(item.brasserie) === br && (caseSize(item) || 24) === cap && lotType(item) !== "unite"
+  );
+  if (!articles.length) { wrap.style.display = "none"; return; }
+  // Casiers vides par article
+  const videsByArticle = {};
+  casiersForSite().forEach((c) => {
+    const stockIt = stockItemForArticle(c.article);
+    if (normalizeBrasserieName(stockIt?.brasserie || "") !== br) return;
+    if (Math.max(1, Number(c.capacite) || 24) !== cap) return;
+    const v = Math.floor(Math.max(0, Number(c.bouteillesVides) || 0) / cap);
+    if (!videsByArticle[c.article]) videsByArticle[c.article] = 0;
+    videsByArticle[c.article] += v;
+  });
+  sel.innerHTML = `<option value="">— Choisir un article —</option>` +
+    articles.map((item) => {
+      const v = videsByArticle[item.article] || 0;
+      const videsLabel = v > 0 ? `  ↩ ${fmt(v)} casier(s) vide(s)` : "";
+      return `<option value="${escapeHtml(item.article)}" data-vides="${v}">${escapeHtml(item.article + videsLabel)}</option>`;
+    }).join("");
+  wrap.style.display = "";
+  if (hint) hint.textContent = "";
+  if (articles.length === 1) { sel.value = articles[0].article; syncPurchaseLineInputsFromStock(); }
 }
 
 function setAuthVisible(isAuthenticated) {
@@ -4319,12 +4359,17 @@ function supplierPriceForArticle(articleName, supplierName = null) {
 function syncPurchasePriceInput() {
   const input = document.getElementById("purchase-price");
   if (!input) return;
+  const articleDetail = document.getElementById("purchase-article-detail")?.value?.trim() || "";
   const formatVal = document.getElementById("purchase-article")?.value?.trim() || "";
   const br = normalizeBrasserieName(document.getElementById("purchase-supplier")?.value || "");
+  if (articleDetail) {
+    const prix = supplierPriceForArticle(articleDetail, br);
+    input.value = prix > 0 ? String(prix) : "";
+    return;
+  }
   const capMatch = formatVal.match(/^B(\d+)$/);
   if (!capMatch || !br) { input.value = ""; return; }
   const cap = Number(capMatch[1]);
-  // Prix depuis le premier article correspondant à cette brasserie+capacité
   const firstArticle = recordsForSite(state.stock).find((item) =>
     normalizeBrasserieName(item.brasserie) === br && (caseSize(item) || 24) === cap
   );
@@ -4352,21 +4397,57 @@ function syncPurchaseQtyFromStock() {
   const caseSizeField = document.getElementById("purchase-case-size");
   if (!casesInput || !caseSizeField) return;
   const formatVal = document.getElementById("purchase-article")?.value?.trim() || "";
+  const articleDetail = document.getElementById("purchase-article-detail")?.value?.trim() || "";
   const br = normalizeBrasserieName(document.getElementById("purchase-supplier")?.value || "");
   const videsBtn = document.getElementById("purchase-from-vides-btn");
   const videsHint = document.getElementById("purchase-vides-hint");
+  const limitHint = document.getElementById("purchase-cases-limit-hint");
   const capMatch = formatVal.match(/^B(\d+)$/);
   if (!capMatch || !br) {
     casesInput.value = "";
     caseSizeField.value = "24";
+    casesInput.removeAttribute("max");
     if (videsBtn) videsBtn.style.display = "none";
     if (videsHint) videsHint.style.display = "none";
+    if (limitHint) limitHint.style.display = "none";
     return;
   }
   const cap = Number(capMatch[1]);
   caseSizeField.value = String(cap);
 
-  // Tous les casiers de cette brasserie + capacité
+  if (articleDetail) {
+    // Article sélectionné : casiers limités aux vides de cet article
+    const casiersArticle = casiersForSite().filter((c) => {
+      const stockIt = stockItemForArticle(c.article);
+      return c.article === articleDetail &&
+        normalizeBrasserieName(stockIt?.brasserie || "") === br &&
+        Math.max(1, Number(c.capacite) || 24) === cap;
+    });
+    let nbVidesRetour = 0, btlVides = 0;
+    casiersArticle.forEach((c) => {
+      const v = Math.max(0, Number(c.bouteillesVides) || 0);
+      btlVides += v;
+      nbVidesRetour += Math.floor(v / cap);
+    });
+    casesInput.value = String(nbVidesRetour);
+    if (nbVidesRetour > 0) casesInput.max = String(nbVidesRetour);
+    else casesInput.removeAttribute("max");
+    if (videsBtn) { videsBtn.style.display = nbVidesRetour > 0 ? "" : "none"; videsBtn.dataset.nbVides = nbVidesRetour; }
+    if (videsHint) videsHint.style.display = "none";
+    if (limitHint) {
+      limitHint.style.display = "";
+      if (nbVidesRetour > 0) {
+        limitHint.innerHTML = `<span style="color:#e65100;font-weight:700">↩ Limité à ${fmt(nbVidesRetour)} casier(s) vide(s) disponible(s) pour cet article.</span>`;
+      } else {
+        limitHint.innerHTML = `<span style="color:#9e9e9e">Aucun casier vide enregistré pour cet article.</span>`;
+      }
+    }
+    return;
+  }
+
+  // Pas d'article sélectionné : vue agrégée par format
+  casesInput.removeAttribute("max");
+  if (limitHint) limitHint.style.display = "none";
   const casiersGroupe = casiersForSite().filter((c) => {
     const stockIt = stockItemForArticle(c.article);
     return normalizeBrasserieName(stockIt?.brasserie || "") === br &&
@@ -4383,15 +4464,12 @@ function syncPurchaseQtyFromStock() {
     btlVides += v;
     nbCasiersVidesRetour += Math.floor(v / cap);
   });
-
-  // Suggestion qty : somme des articles de ce format
   const articlesGroupe = recordsForSite(state.stock).filter((item) =>
     normalizeBrasserieName(item.brasserie) === br && (caseSize(item) || 24) === cap
   );
   let totalCasesSuggeres = 0;
   articlesGroupe.forEach((item) => { const { cases } = suggestPurchaseCases(item); totalCasesSuggeres += cases; });
   casesInput.value = totalCasesSuggeres > 0 ? String(totalCasesSuggeres) : "";
-
   if (videsBtn) { videsBtn.style.display = nbCasiersVidesRetour > 0 ? "" : "none"; videsBtn.dataset.nbVides = nbCasiersVidesRetour; }
   if (videsHint) {
     if (casiersGroupe.length > 0) {
@@ -4488,11 +4566,13 @@ function openPurchaseForm() {
 function addPurchaseLine() {
   const feedback = document.getElementById("purchase-feedback");
   const formatVal = document.getElementById("purchase-article").value.trim();
+  const articleDetail = document.getElementById("purchase-article-detail")?.value?.trim() || "";
   const br = normalizeBrasserieName(document.getElementById("purchase-supplier")?.value || "");
-  const cases = Number(document.getElementById("purchase-cases").value) || 0;
+  const casesInput = document.getElementById("purchase-cases");
+  const cases = Number(casesInput?.value) || 0;
   const caseSizeVal = Number(document.getElementById("purchase-case-size").value) || 24;
   const capMatch = formatVal.match(/^B(\d+)$/);
-  const article = capMatch && br ? `${br} ${formatVal}` : formatVal;
+  const article = articleDetail || (capMatch && br ? `${br} ${formatVal}` : formatVal);
   const price = purchasePriceInputValue() || supplierPriceForArticle(article);
   if (!formatVal || cases <= 0) {
     if (feedback) feedback.textContent = "Sélectionnez un format et indiquez le nombre de casiers.";
@@ -4502,8 +4582,17 @@ function addPurchaseLine() {
     if (feedback) feedback.textContent = "Saisissez le prix fournisseur pour ce format.";
     return;
   }
+  const maxCases = Number(casesInput?.max) || 0;
+  if (maxCases > 0 && cases > maxCases) {
+    if (feedback) feedback.textContent = `Commande limitée à ${fmt(maxCases)} casier(s) vide(s) disponible(s).`;
+    return;
+  }
   const amount = Math.round(cases * price);
   purchaseDraftLines.push({ article, cases, caseSize: caseSizeVal, pricePerCase: price, amount, selected: true });
+  // Réinitialiser article-detail
+  const detailSel = document.getElementById("purchase-article-detail");
+  if (detailSel) detailSel.value = "";
+  casesInput.removeAttribute("max");
   // Re-peupler la liste article filtrée par brasserie courante
   const curBr = document.getElementById("purchase-supplier")?.value || "";
   populatePurchaseArticlesByBrasserie(curBr);
@@ -8342,17 +8431,29 @@ document.getElementById("fab-btn").addEventListener("click", () => {
     const po = (state.purchaseOrders || []).find((p) => p.id === pendingReceivePurchaseId);
     if (po) updateReceivePurchaseModalTotals(po);
   });
-  document.getElementById("purchase-article")?.addEventListener("change", () => syncPurchaseLineInputsFromStock());
+  document.getElementById("purchase-article")?.addEventListener("change", () => {
+    // Format change → repopuler les articles du format puis sync
+    populatePurchaseArticleDetailFromFormat();
+    syncPurchaseLineInputsFromStock();
+  });
+  document.getElementById("purchase-article-detail")?.addEventListener("change", () => syncPurchaseLineInputsFromStock());
   document.getElementById("purchase-supplier")?.addEventListener("change", (e) => {
     const br = e.target.value;
     populatePurchaseArticlesByBrasserie(br);
     syncPurchasePriceInput();
-    // Reset article et casiers
+    // Reset article, article-detail et casiers
     document.getElementById("purchase-cases").value = "";
+    document.getElementById("purchase-cases").removeAttribute("max");
+    const detailSel = document.getElementById("purchase-article-detail");
+    if (detailSel) detailSel.value = "";
+    const detailWrap = document.getElementById("purchase-article-detail-wrap");
+    if (detailWrap) detailWrap.style.display = "none";
     const videsBtn = document.getElementById("purchase-from-vides-btn");
     const videsHint = document.getElementById("purchase-vides-hint");
+    const limitHint = document.getElementById("purchase-cases-limit-hint");
     if (videsBtn) videsBtn.style.display = "none";
     if (videsHint) videsHint.style.display = "none";
+    if (limitHint) limitHint.style.display = "none";
   });
   document.getElementById("stock-card-achats")?.addEventListener("click", (event) => {
     const rmPoLineBtn = event.target.closest("[data-purchase-remove-line]");

@@ -699,6 +699,13 @@
                   <option value="">— Choisir d'abord une brasserie —</option>
                 </select>
               </div>
+              <div class="form-group" id="purchase-article-detail-wrap" style="display:none">
+                <label for="purchase-article-detail">Article</label>
+                <select id="purchase-article-detail">
+                  <option value="">— Choisir un article —</option>
+                </select>
+                <p class="form-hint" id="purchase-article-detail-hint" style="margin-top:4px;font-size:0.82rem"></p>
+              </div>
               <div class="form-group">
                 <label for="purchase-cases">Casiers</label>
                 <div style="display:flex;gap:6px;align-items:center">
@@ -706,7 +713,7 @@
                   <button type="button" id="purchase-from-vides-btn" class="mini-btn" style="display:none;white-space:nowrap;background:rgba(230,81,0,0.12);color:#e65100;font-weight:700;border:1px solid #e65100;padding:4px 10px">↩ Vides</button>
                 </div>
                 <p id="purchase-vides-hint" class="muted" style="margin-top:5px;font-size:0.82rem;display:none"></p>
-                <p class="muted" style="margin-top:4px;font-size:0.79rem">Rempli automatiquement selon le stock reel et le seuil de l&apos;article (vous pouvez ajuster).</p>
+                <p id="purchase-cases-limit-hint" class="muted" style="margin-top:4px;font-size:0.79rem;display:none"></p>
               </div>
               <div class="form-group">
                 <label for="purchase-case-size">Btl / casier</label>
