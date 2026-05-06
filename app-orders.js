@@ -7858,6 +7858,25 @@ async function logout() {
   showToast("Session fermee.");
 }
 
+function migrateCasiersVidesBouteillesVides() {
+  // Selon le cahier des charges : casier = plastique + X bouteilles vides.
+  // Un casier vide (quantiteActuelle = 0) contient forcément sa capacité en bouteilles vides.
+  // Les casiers créés avant ce fix ont bouteillesVides = 0 → on corrige.
+  if (!Array.isArray(state.casiers)) return;
+  let changed = false;
+  state.casiers.forEach((c) => {
+    const cap = Math.max(1, Number(c.capacite) || 24);
+    const qty = Math.max(0, Number(c.quantiteActuelle) || 0);
+    const vides = Math.max(0, Number(c.bouteillesVides) || 0);
+    if (qty <= 0 && vides < cap) {
+      c.bouteillesVides = cap;
+      c.statut = "vide";
+      changed = true;
+    }
+  });
+  if (changed) lsSaveCasiers();
+}
+
 async function bootstrapAuthenticatedApp() {
   state = await apiRequest(API.state);
   if (!Array.isArray(state.creditRecoveries)) state.creditRecoveries = [];
@@ -7877,6 +7896,8 @@ async function bootstrapAuthenticatedApp() {
   if (!state.nextId.casierMouvement || Number.isNaN(Number(state.nextId.casierMouvement))) state.nextId.casierMouvement = 1;
   // Restaurer depuis localStorage si le serveur n'a pas les casiers (champ non persisté côté serveur)
   if (!state.casiers.length) lsRestoreCasiers();
+  // Migration : casiers vides existants sans bouteillesVides tracquées → initialiser à capacite
+  migrateCasiersVidesBouteillesVides();
   if (state.nextId.auditEntry === undefined || state.nextId.auditEntry === null) state.nextId.auditEntry = 0;
   knownQrOrderIds = new Set(qrOrdersForCurrentSite(state).map((item) => item.id));
   qrAlertCount = 0;
