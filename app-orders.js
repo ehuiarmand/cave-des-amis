@@ -7579,14 +7579,19 @@ function renderCasierPhysique() {
     if (!rawBr) return; // ignorer les articles non rattachés à une brasserie
     const cap = Math.max(1, Number(c.capacite) || 24);
     if (!byBr[rawBr]) byBr[rawBr] = {};
-    if (!byBr[rawBr][cap]) byBr[rawBr][cap] = { cap, pleins: 0, partiels: 0, vides: 0, btlPleines: 0, btlVides: 0 };
+    if (!byBr[rawBr][cap]) byBr[rawBr][cap] = { cap, pleins: 0, partiels: 0, vides: 0, btlPleines: 0, btlVides: 0, byArticle: {} };
     const g = byBr[rawBr][cap];
+    const art = c.article || "—";
+    if (!g.byArticle[art]) g.byArticle[art] = { article: art, pleins: 0, partiels: 0, vides: 0, btlPleines: 0, btlVides: 0 };
+    const ag = g.byArticle[art];
     const st = String(c.statut || "vide").toLowerCase();
-    if (st === "plein") g.pleins++;
-    else if (st === "partiel") g.partiels++;
-    else g.vides++;
-    g.btlPleines += Math.max(0, Number(c.quantiteActuelle) || 0);
-    g.btlVides += Math.max(0, Number(c.bouteillesVides) || 0);
+    if (st === "plein") { g.pleins++; ag.pleins++; }
+    else if (st === "partiel") { g.partiels++; ag.partiels++; }
+    else { g.vides++; ag.vides++; }
+    const btlP = Math.max(0, Number(c.quantiteActuelle) || 0);
+    const btlV = Math.max(0, Number(c.bouteillesVides) || 0);
+    g.btlPleines += btlP; ag.btlPleines += btlP;
+    g.btlVides += btlV;   ag.btlVides += btlV;
   });
 
   if (!Object.keys(byBr).length) {
@@ -7632,7 +7637,16 @@ function renderCasierPhysique() {
                 const retourBtn = fullVides >= 1
                   ? `<button type="button" class="mini-btn" data-casier-grp-retour-br="${escapeHtml(br)}" data-casier-grp-retour-cap="${g.cap}" style="background:rgba(230,81,0,0.12);color:#e65100;font-weight:700">↩ ${fmt(fullVides)} casier(s) vide(s)</button>`
                   : g.btlVides > 0 ? `<span style="color:#e65100;font-size:0.75rem;padding:0 4px">${fmt(g.btlVides)} btl vides</span>` : "";
-                return `<tr>
+                const artRows = Object.entries(g.byArticle).sort(([a], [b]) => a.localeCompare(b, "fr")).map(([, ag]) => `<tr style="background:#f5f8ff">
+                  <td style="padding-left:28px;font-size:0.78rem;color:#37474f"><span style="color:#90a4ae;margin-right:4px">↳</span>${escapeHtml(ag.article)}</td>
+                  <td style="text-align:right;font-size:0.78rem;color:#2e7d32">${fmt(ag.pleins)}</td>
+                  <td style="text-align:right;font-size:0.78rem;color:#f57c00">${fmt(ag.partiels)}</td>
+                  <td style="text-align:right;font-size:0.78rem;color:#e53935">${fmt(ag.vides)}</td>
+                  <td style="text-align:right;font-size:0.78rem;color:#1976d2">${fmt(ag.btlPleines)}</td>
+                  <td style="text-align:right;font-size:0.78rem;${ag.btlVides > 0 ? "color:#e65100" : "color:#9e9e9e"}">${fmt(ag.btlVides)}</td>
+                  <td></td>
+                </tr>`).join("");
+                return `<tr style="background:#fff">
                   <td style="text-align:center"><span style="background:#e3f2fd;color:#1565c0;padding:2px 9px;border-radius:5px;font-size:0.8rem;font-weight:700">B${g.cap}</span></td>
                   <td style="text-align:right;font-weight:700;color:#2e7d32">${fmt(g.pleins)}</td>
                   <td style="text-align:right;font-weight:700;color:#f57c00">${fmt(g.partiels)}</td>
@@ -7640,7 +7654,7 @@ function renderCasierPhysique() {
                   <td style="text-align:right;font-weight:700;color:#1976d2">${fmt(g.btlPleines)}</td>
                   <td style="text-align:right;font-weight:700;${g.btlVides > 0 ? "color:#e65100" : "color:#9e9e9e"}">${fmt(g.btlVides)}</td>
                   <td style="white-space:nowrap;text-align:right">${retourBtn}</td>
-                </tr>`;
+                </tr>${artRows}`;
               }).join("")}
             </tbody>
           </table>
