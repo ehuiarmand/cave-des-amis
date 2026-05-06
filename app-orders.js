@@ -582,10 +582,8 @@ function populateSupplierList() {
     const stockIt = stockItemForArticle(c.article);
     const br = normalizeBrasserieName(stockIt?.brasserie || c.article) || "";
     if (!br) return;
-    const cap = Math.max(1, Number(c.capacite) || 24);
-    const fullVides = Math.floor(Math.max(0, Number(c.bouteillesVides) || 0) / cap);
     if (!videsByBr[br]) videsByBr[br] = 0;
-    videsByBr[br] += fullVides;
+    videsByBr[br] += casierRetournableUnits(c);
   });
   const currentVal = sel.value;
   sel.innerHTML = `<option value="">— Choisir une brasserie —</option>` +
@@ -606,15 +604,14 @@ function populatePurchaseArticlesByBrasserie(br) {
   const articles = recordsForSite(state.stock).filter((item) =>
     normalizeBrasserieName(item.brasserie) === br && lotType(item) !== "unite"
   );
-  // Agréger les casiers vides par capacité
+  // Agréger les casiers retournables par capacité
   const videsByCap = {};
   casiersForSite().forEach((c) => {
     const stockIt = stockItemForArticle(c.article);
     if (normalizeBrasserieName(stockIt?.brasserie || "") !== br) return;
     const cap = Math.max(1, Number(c.capacite) || 24);
-    const fullVides = Math.floor(Math.max(0, Number(c.bouteillesVides) || 0) / cap);
     if (!videsByCap[cap]) videsByCap[cap] = 0;
-    videsByCap[cap] += fullVides;
+    videsByCap[cap] += casierRetournableUnits(c);
   });
   // Une option par capacité unique
   const capSet = new Set(articles.map((item) => caseSize(item) || 24));
@@ -648,15 +645,14 @@ function populatePurchaseArticleDetailFromFormat() {
     normalizeBrasserieName(item.brasserie) === br && (caseSize(item) || 24) === cap && lotType(item) !== "unite"
   );
   if (!articles.length) { wrap.style.display = "none"; return; }
-  // Casiers vides par article
+  // Casiers retournables par article
   const videsByArticle = {};
   casiersForSite().forEach((c) => {
     const stockIt = stockItemForArticle(c.article);
     if (normalizeBrasserieName(stockIt?.brasserie || "") !== br) return;
     if (Math.max(1, Number(c.capacite) || 24) !== cap) return;
-    const v = Math.floor(Math.max(0, Number(c.bouteillesVides) || 0) / cap);
     if (!videsByArticle[c.article]) videsByArticle[c.article] = 0;
-    videsByArticle[c.article] += v;
+    videsByArticle[c.article] += casierRetournableUnits(c);
   });
   sel.innerHTML = `<option value="">— Choisir un article —</option>` +
     articles.map((item) => {
@@ -4381,14 +4377,23 @@ function purchasePriceInputValue() {
   return Math.max(0, Math.round(Number(document.getElementById("purchase-price")?.value) || 0));
 }
 
+/**
+ * Un casier est retournable si :
+ *  - bouteillesVides >= capacite (bouteilles vides explicitement tracquées), OU
+ *  - statut === "vide" avec bouteillesVides = 0 (casier vidé par les ventes, vides non tracquées)
+ * Retourne le nombre de casiers complets retournables pour ce casier.
+ */
+function casierRetournableUnits(c) {
+  const cap = Math.max(1, Number(c.capacite) || 24);
+  const vides = Math.max(0, Number(c.bouteillesVides) || 0);
+  if (vides >= cap) return Math.floor(vides / cap);
+  if (String(c.statut || "vide").toLowerCase() === "vide") return 1;
+  return 0;
+}
+
 function emptyCasiersCountForArticle(article) {
   if (!article) return 0;
-  const item = stockItemForArticle(article);
-  const cap = Math.max(1, caseSize(item));
-  return casiersForSite().filter((c) =>
-    c.article === article &&
-    Math.floor(Math.max(0, Number(c.bouteillesVides) || 0) / cap) >= 1
-  ).length;
+  return casiersForSite().filter((c) => c.article === article && casierRetournableUnits(c) >= 1).length;
 }
 
 /** Casiers et btl/casier alignés sur la ligne stock + suggestion au seuil (comme depuis « Commander » sur une ligne catalogue). */
@@ -4427,9 +4432,8 @@ function syncPurchaseQtyFromStock() {
     else if (st === "partiel") nbPartiels++;
     else nbVidesC++;
     btlPleines += Math.max(0, Number(c.quantiteActuelle) || 0);
-    const v = Math.max(0, Number(c.bouteillesVides) || 0);
-    btlVides += v;
-    nbCasiersVidesRetour += Math.floor(v / cap);
+    btlVides += Math.max(0, Number(c.bouteillesVides) || 0);
+    nbCasiersVidesRetour += casierRetournableUnits(c);
   });
 
   // Max commandable = casiers vides disponibles pour ce format (brasserie + capacité), toujours fixé
