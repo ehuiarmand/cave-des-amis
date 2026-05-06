@@ -4378,17 +4378,14 @@ function purchasePriceInputValue() {
 }
 
 /**
- * Un casier est retournable si :
- *  - bouteillesVides >= capacite (bouteilles vides explicitement tracquées), OU
- *  - statut === "vide" avec bouteillesVides = 0 (casier vidé par les ventes, vides non tracquées)
- * Retourne le nombre de casiers complets retournables pour ce casier.
+ * Un casier est retournable quand bouteillesVides >= capacite.
+ * recomputeCasierStatus garantit que bouteillesVides = cap quand statut devient "vide".
+ * Un casier partiel (encore des bouteilles pleines) n'est jamais retournable.
  */
 function casierRetournableUnits(c) {
   const cap = Math.max(1, Number(c.capacite) || 24);
   const vides = Math.max(0, Number(c.bouteillesVides) || 0);
-  if (vides >= cap) return Math.floor(vides / cap);
-  if (String(c.statut || "vide").toLowerCase() === "vide") return 1;
-  return 0;
+  return vides >= cap ? Math.floor(vides / cap) : 0;
 }
 
 function emptyCasiersCountForArticle(article) {
@@ -6792,9 +6789,18 @@ function recomputeCasierStatus(casier) {
   if (!casier) return casier;
   const cap = Math.max(1, Number(casier.capacite) || 1);
   const qty = Math.max(0, Number(casier.quantiteActuelle) || 0);
-  if (qty <= 0) casier.statut = "vide";
-  else if (qty >= cap) casier.statut = "plein";
-  else casier.statut = "partiel";
+  if (qty <= 0) {
+    casier.statut = "vide";
+    // Un casier vide = plein de bouteilles vides à retourner.
+    // Si bouteillesVides n'est pas encore tracqué, on l'initialise à cap.
+    if (!casier.bouteillesVides || Number(casier.bouteillesVides) <= 0) {
+      casier.bouteillesVides = cap;
+    }
+  } else if (qty >= cap) {
+    casier.statut = "plein";
+  } else {
+    casier.statut = "partiel";
+  }
   return casier;
 }
 
