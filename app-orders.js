@@ -4397,7 +4397,6 @@ function syncPurchaseQtyFromStock() {
   const caseSizeField = document.getElementById("purchase-case-size");
   if (!casesInput || !caseSizeField) return;
   const formatVal = document.getElementById("purchase-article")?.value?.trim() || "";
-  const articleDetail = document.getElementById("purchase-article-detail")?.value?.trim() || "";
   const br = normalizeBrasserieName(document.getElementById("purchase-supplier")?.value || "");
   const videsBtn = document.getElementById("purchase-from-vides-btn");
   const videsHint = document.getElementById("purchase-vides-hint");
@@ -4415,39 +4414,7 @@ function syncPurchaseQtyFromStock() {
   const cap = Number(capMatch[1]);
   caseSizeField.value = String(cap);
 
-  if (articleDetail) {
-    // Article sélectionné : casiers limités aux vides de cet article
-    const casiersArticle = casiersForSite().filter((c) => {
-      const stockIt = stockItemForArticle(c.article);
-      return c.article === articleDetail &&
-        normalizeBrasserieName(stockIt?.brasserie || "") === br &&
-        Math.max(1, Number(c.capacite) || 24) === cap;
-    });
-    let nbVidesRetour = 0, btlVides = 0;
-    casiersArticle.forEach((c) => {
-      const v = Math.max(0, Number(c.bouteillesVides) || 0);
-      btlVides += v;
-      nbVidesRetour += Math.floor(v / cap);
-    });
-    casesInput.value = String(nbVidesRetour);
-    if (nbVidesRetour > 0) casesInput.max = String(nbVidesRetour);
-    else casesInput.removeAttribute("max");
-    if (videsBtn) { videsBtn.style.display = nbVidesRetour > 0 ? "" : "none"; videsBtn.dataset.nbVides = nbVidesRetour; }
-    if (videsHint) videsHint.style.display = "none";
-    if (limitHint) {
-      limitHint.style.display = "";
-      if (nbVidesRetour > 0) {
-        limitHint.innerHTML = `<span style="color:#e65100;font-weight:700">↩ Limité à ${fmt(nbVidesRetour)} casier(s) vide(s) disponible(s) pour cet article.</span>`;
-      } else {
-        limitHint.innerHTML = `<span style="color:#9e9e9e">Aucun casier vide enregistré pour cet article.</span>`;
-      }
-    }
-    return;
-  }
-
-  // Pas d'article sélectionné : vue agrégée par format
-  casesInput.removeAttribute("max");
-  if (limitHint) limitHint.style.display = "none";
+  // Le stock de casiers vides dépend du format (brasserie + capacité), pas de l'article
   const casiersGroupe = casiersForSite().filter((c) => {
     const stockIt = stockItemForArticle(c.article);
     return normalizeBrasserieName(stockIt?.brasserie || "") === br &&
@@ -4464,13 +4431,21 @@ function syncPurchaseQtyFromStock() {
     btlVides += v;
     nbCasiersVidesRetour += Math.floor(v / cap);
   });
-  const articlesGroupe = recordsForSite(state.stock).filter((item) =>
-    normalizeBrasserieName(item.brasserie) === br && (caseSize(item) || 24) === cap
-  );
-  let totalCasesSuggeres = 0;
-  articlesGroupe.forEach((item) => { const { cases } = suggestPurchaseCases(item); totalCasesSuggeres += cases; });
-  casesInput.value = totalCasesSuggeres > 0 ? String(totalCasesSuggeres) : "";
+
+  // Max commandable = casiers vides disponibles pour ce format (brasserie + capacité), toujours fixé
+  casesInput.value = String(nbCasiersVidesRetour);
+  casesInput.max = String(nbCasiersVidesRetour);
   if (videsBtn) { videsBtn.style.display = nbCasiersVidesRetour > 0 ? "" : "none"; videsBtn.dataset.nbVides = nbCasiersVidesRetour; }
+
+  if (limitHint) {
+    limitHint.style.display = "";
+    if (nbCasiersVidesRetour > 0) {
+      limitHint.innerHTML = `<span style="color:#e65100;font-weight:700">↩ Maximum commandable : ${fmt(nbCasiersVidesRetour)} casier(s) vide(s) disponible(s) pour ${br} ${formatVal}.</span>`;
+    } else {
+      limitHint.innerHTML = `<span style="color:#c62828;font-weight:700">Aucun casier vide disponible pour ce format — commande impossible.</span>`;
+    }
+  }
+
   if (videsHint) {
     if (casiersGroupe.length > 0) {
       videsHint.style.display = "";
@@ -4479,14 +4454,10 @@ function syncPurchaseQtyFromStock() {
       if (nbPartiels > 0) parts.push(`<span style="color:#f57c00;font-weight:700">${fmt(nbPartiels)} partiel(s)</span>`);
       if (nbVidesC > 0)  parts.push(`<span style="color:#e53935;font-weight:700">${fmt(nbVidesC)} vide(s)</span>`);
       const btlInfo = `${fmt(btlPleines)} btl pleines`;
-      const videsInfo = nbCasiersVidesRetour > 0
-        ? ` · <span style="color:#e65100;font-weight:700">↩ ${fmt(nbCasiersVidesRetour)} casier(s) à retourner (${fmt(btlVides)} btl vides)</span>`
-        : "";
-      videsHint.innerHTML = `Casiers disponibles : ${parts.join(" · ")} · ${btlInfo}${videsInfo}`;
+      videsHint.innerHTML = `Casiers : ${parts.join(" · ")} · ${btlInfo}`;
       videsHint.style.color = "";
     } else {
-      videsHint.style.display = "";
-      videsHint.innerHTML = `<span style="color:#9e9e9e">Aucun casier physique enregistré pour ce format.</span>`;
+      videsHint.style.display = "none";
     }
   }
 }
@@ -4582,9 +4553,14 @@ function addPurchaseLine() {
     if (feedback) feedback.textContent = "Saisissez le prix fournisseur pour ce format.";
     return;
   }
-  const maxCases = Number(casesInput?.max) || 0;
-  if (maxCases > 0 && cases > maxCases) {
-    if (feedback) feedback.textContent = `Commande limitée à ${fmt(maxCases)} casier(s) vide(s) disponible(s).`;
+  const maxAttr = casesInput?.getAttribute("max");
+  const maxCases = maxAttr !== null ? Number(maxAttr) : null;
+  if (maxCases !== null && cases > maxCases) {
+    if (maxCases === 0) {
+      if (feedback) feedback.textContent = `Aucun casier vide disponible pour ${br} ${formatVal} — commande impossible.`;
+    } else {
+      if (feedback) feedback.textContent = `Commande limitée à ${fmt(maxCases)} casier(s) vide(s) disponible(s) pour ${br} ${formatVal}.`;
+    }
     return;
   }
   const amount = Math.round(cases * price);
