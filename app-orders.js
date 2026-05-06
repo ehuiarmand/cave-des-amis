@@ -4444,7 +4444,7 @@ function syncPurchaseQtyFromStock() {
   // Le stock de casiers vides dépend du format (brasserie + capacité), pas de l'article
   const casiersGroupe = casiersForSite().filter((c) => {
     const stockIt = stockItemForArticle(c.article);
-    return normalizeBrasserieName(stockIt?.brasserie || "") === br &&
+    return normalizeBrasserieName(stockIt?.brasserie || c.article || "") === br &&
       Math.max(1, Number(c.capacite) || 24) === cap;
   });
   let nbPleins = 0, nbPartiels = 0, nbVidesC = 0, btlPleines = 0, btlVides = 0;
@@ -4456,7 +4456,9 @@ function syncPurchaseQtyFromStock() {
     btlPleines += Math.max(0, Number(c.quantiteActuelle) || 0);
     btlVides += Math.max(0, Number(c.bouteillesVides) || 0);
   });
-  const nbCasiersVidesRetour = Math.floor(btlVides / cap);
+  // Dans la logique "casiers physiques par brasserie", un casier vide = quantiteActuelle == 0.
+  // C'est ce nombre qui limite la commande fournisseur (retour de vides).
+  const nbCasiersVidesRetour = casiersGroupe.reduce((n, c) => n + ((Math.max(0, Number(c.quantiteActuelle) || 0) === 0) ? 1 : 0), 0);
 
   // Max commandable = casiers vides disponibles pour ce format (brasserie + capacité), toujours fixé
   casesInput.value = String(nbCasiersVidesRetour);
