@@ -17,6 +17,8 @@ const PAYMENT_METHODS = ["Espèces", "Orange Money", "MTN MoMo", "Wave", "Carte"
 /** Modes incluant Credit fournisseur (dettes fournisseurs), uniquement pour les charges / depenses */
 const CHARGE_PAYMENT_METHODS = [...PAYMENT_METHODS, "Credit fournisseur"];
 const CHARGE_CATEGORIES = ["Loyer", "Salaires", "Électricité", "Eau", "Gaz / Charbon", "Achats boissons", "Achats snacks", "Téléphone", "Transport", "Entretien", "Impôts & taxes", "Autres"];
+/** Si false : pas d'étape obligatoire « ouverture de caisse » (ouverture manuelle du jour comptable). */
+const PDJ_REQUIRE_CASH_OPENING = false;
 const COLORS = {
   "Bières": "#2196f3",
   "Sodas & Jus": "#42a5f5",
@@ -2192,9 +2194,16 @@ function renderCashOpeningPanel() {
   const lockBlock = document.getElementById("pdj-locked-block");
   const mainWrap = document.getElementById("pdj-main-wrap");
   if (!container) return;
+  mainWrap?.classList.remove("pdj-main--locked");
+  if (lockBlock) lockBlock.classList.remove("pdj-main--locked");
+  if (!PDJ_REQUIRE_CASH_OPENING) {
+    container.classList.add("hidden");
+    container.innerHTML = "";
+    return;
+  }
+  container.classList.remove("hidden");
   const book = dayBookFor(pdjCalendarDate(), currentSiteId());
   const needs = dayBookNeedsCashOpening(book);
-  mainWrap?.classList.remove("pdj-main--locked");
   if (lockBlock) {
     lockBlock.classList.toggle("pdj-main--locked", needs);
   }
@@ -2306,7 +2315,7 @@ function renderDailyStockCheck() {
     return;
   }
 
-  const openingBlocked = dayBookNeedsCashOpening(dayBook);
+  const openingBlocked = PDJ_REQUIRE_CASH_OPENING && dayBookNeedsCashOpening(dayBook);
   const isPastDate = dStr !== today();
   if (openingBlocked && !(isPastDate && canAnyAdmin())) {
     container.innerHTML = emptyState(
@@ -5728,7 +5737,7 @@ async function closeAccountingDay() {
   }
   const dayBook = dayBookFor(dStr, currentSiteId());
   const isPastDateCorrection = dStr !== today() && canAnyAdmin();
-  if (!isPastDateCorrection && (!dayBook || dayBookNeedsCashOpening(dayBook))) {
+  if (!isPastDateCorrection && PDJ_REQUIRE_CASH_OPENING && (!dayBook || dayBookNeedsCashOpening(dayBook))) {
     showToast(dStr === today()
       ? "Enregistrez d'abord l'ouverture de caisse pour aujourd'hui."
       : "Enregistrez d'abord l'ouverture de caisse pour cette journee.");
