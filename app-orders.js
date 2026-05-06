@@ -7623,10 +7623,11 @@ function renderCasierPhysique() {
         <div class="stock-table-wrap" style="border:1.5px solid #e3f2fd;border-top:none;border-radius:0 0 8px 8px">
           <table class="stock-table" style="width:100%">
             <thead><tr>
-              <th class="th-blue" style="text-align:center">Format</th>
-              <th class="th-blue" style="text-align:right">Pleins</th>
-              <th style="text-align:right;color:#f57c00">Partiels</th>
-              <th style="text-align:right;color:#e53935">Vides</th>
+              <th class="th-blue" style="text-align:center">Format / Article</th>
+              <th class="th-blue" style="text-align:right">Cas. pleins</th>
+              <th style="text-align:right;color:#f57c00">Cas. partiels</th>
+              <th style="text-align:right;color:#e53935">Cas. vides</th>
+              <th style="text-align:right;color:#e65100">Cas. retournables</th>
               <th class="th-blue" style="text-align:right">Btl pleines</th>
               <th class="th-amber" style="text-align:right">Btl vides</th>
               <th></th>
@@ -7634,14 +7635,15 @@ function renderCasierPhysique() {
             <tbody>
               ${entries.map(([, g]) => {
                 const fullVides = Math.floor(g.btlVides / g.cap);
+                const enCoursFmt = g.btlVides % g.cap;
                 const retourBtn = fullVides >= 1
-                  ? `<button type="button" class="mini-btn" data-casier-grp-retour-br="${escapeHtml(br)}" data-casier-grp-retour-cap="${g.cap}" style="background:rgba(230,81,0,0.12);color:#e65100;font-weight:700">↩ ${fmt(fullVides)} casier(s) vide(s)</button>`
-                  : g.btlVides > 0 ? `<span style="color:#e65100;font-size:0.75rem;padding:0 4px">${fmt(g.btlVides)} btl vides</span>` : "";
+                  ? `<button type="button" class="mini-btn" data-casier-grp-retour-br="${escapeHtml(br)}" data-casier-grp-retour-cap="${g.cap}" style="background:rgba(230,81,0,0.12);color:#e65100;font-weight:700">↩ Retourner ${fmt(fullVides)}</button>`
+                  : enCoursFmt > 0 ? `<span style="color:#9e9e9e;font-size:0.75rem">${fmt(enCoursFmt)} btl en cours</span>` : "";
                 const artRows = Object.entries(g.byArticle).sort(([a], [b]) => a.localeCompare(b, "fr")).map(([, ag]) => {
                   const retournables = Math.floor(ag.btlVides / g.cap);
                   const enCours = ag.btlVides % g.cap;
                   const retCell = retournables > 0
-                    ? `<span style="color:#e65100;font-weight:700">↩ ${fmt(retournables)}</span>`
+                    ? `<span style="color:#e65100;font-weight:700">${fmt(retournables)}</span>`
                     : `<span style="color:#9e9e9e">0</span>`;
                   const btlVidesCell = ag.btlVides > 0
                     ? `<span style="color:#e65100">${fmt(ag.btlVides)}</span>${enCours > 0 ? `<span style="color:#9e9e9e;font-size:0.7rem"> (${fmt(enCours)} en cours)</span>` : ""}`
@@ -7650,6 +7652,7 @@ function renderCasierPhysique() {
                   <td style="padding-left:28px;font-size:0.78rem;color:#37474f"><span style="color:#90a4ae;margin-right:4px">↳</span>${escapeHtml(ag.article)}</td>
                   <td style="text-align:right;font-size:0.78rem;color:#2e7d32">${fmt(ag.pleins)}</td>
                   <td style="text-align:right;font-size:0.78rem;color:#f57c00">${fmt(ag.partiels)}</td>
+                  <td style="text-align:right;font-size:0.78rem;color:#e53935">${fmt(ag.vides)}</td>
                   <td style="text-align:right;font-size:0.78rem">${retCell}</td>
                   <td style="text-align:right;font-size:0.78rem;color:#1976d2">${fmt(ag.btlPleines)}</td>
                   <td style="text-align:right;font-size:0.78rem">${btlVidesCell}</td>
@@ -7661,6 +7664,7 @@ function renderCasierPhysique() {
                   <td style="text-align:right;font-weight:700;color:#2e7d32">${fmt(g.pleins)}</td>
                   <td style="text-align:right;font-weight:700;color:#f57c00">${fmt(g.partiels)}</td>
                   <td style="text-align:right;font-weight:700;color:#e53935">${fmt(g.vides)}</td>
+                  <td style="text-align:right;font-weight:700;${fullVides > 0 ? "color:#e65100" : "color:#9e9e9e"}">${fmt(fullVides)}</td>
                   <td style="text-align:right;font-weight:700;color:#1976d2">${fmt(g.btlPleines)}</td>
                   <td style="text-align:right;font-weight:700;${g.btlVides > 0 ? "color:#e65100" : "color:#9e9e9e"}">${fmt(g.btlVides)}</td>
                   <td style="white-space:nowrap;text-align:right">${retourBtn}</td>
