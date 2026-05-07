@@ -1577,7 +1577,7 @@ function renderCasiers() {
     if (!byBrasserie[key][groupKey]) byBrasserie[key][groupKey] = [];
     byBrasserie[key][groupKey].push(item);
   });
-  let totalCasiersTous = 0, nbAlerte = 0, nbEpuise = 0;
+  let totalLotsTous = 0, totalLotsConsignes = 0, nbAlerte = 0, nbEpuise = 0;
   let html = `<div style="display:flex;justify-content:flex-end;margin-bottom:14px">
     <button type="button" class="sync-casiers-btn" style="background:#1565c0;color:#fff;border:none;padding:7px 16px;border-radius:8px;font-size:0.82rem;cursor:pointer;font-weight:600;letter-spacing:0.01em">
       ⟳ Créer casiers depuis stock &amp; ventes
@@ -1613,7 +1613,10 @@ function renderCasiers() {
         const seuil = Number(item.seuilAlerte) || 0;
         const alerte = seuil > 0 && stockBtl > 0 && stockBtl <= seuil;
         const epuise = stockBtl === 0;
-        if (!epuise) totalCasiersTous += casiersFull;
+        if (!epuise) {
+          totalLotsTous += casiersFull;
+          if (lt === "casier") totalLotsConsignes += casiersFull;
+        }
         if (alerte) nbAlerte++;
         if (epuise) nbEpuise++;
         return { item, stockBtl, casiersFull, reste, manquantes, alerte, epuise };
@@ -1650,9 +1653,11 @@ function renderCasiers() {
   });
   container.innerHTML = casiersResume + html;
   const kpiTotal = document.getElementById("casiers-kpi-total");
+  const kpiConsignes = document.getElementById("casiers-kpi-consignes");
   const kpiAlerte = document.getElementById("casiers-kpi-alerte");
   const kpiEpuise = document.getElementById("casiers-kpi-epuise");
-  if (kpiTotal) kpiTotal.textContent = fmt(totalCasiersTous);
+  if (kpiTotal) kpiTotal.textContent = fmt(totalLotsTous);
+  if (kpiConsignes) kpiConsignes.textContent = fmt(totalLotsConsignes);
   if (kpiAlerte) kpiAlerte.textContent = String(nbAlerte);
   if (kpiEpuise) kpiEpuise.textContent = String(nbEpuise);
 }
