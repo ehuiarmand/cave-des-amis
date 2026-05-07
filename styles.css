@@ -1617,6 +1617,11 @@ textarea { font: inherit; }
   gap: 16px;
 }
 
+.qr-two-cols.qr-one-col {
+  grid-template-columns: 1fr;
+  max-width: 440px;
+}
+
 .qr-location-card {
   display: flex;
   flex-direction: column;

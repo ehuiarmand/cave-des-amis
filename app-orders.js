@@ -692,7 +692,7 @@ function populatePurchaseArticlesByBrasserie(br) {
     return;
   }
   const articles = recordsForSite(state.stock).filter((item) =>
-    normalizeBrasserieName(item.brasserie) === br && lotType(item) !== "unite"
+    normalizeBrasserieName(item.brasserie) === br && lotType(item) === "casier"
   );
   // Agréger btlVides par capacité puis diviser → retournables réels
   const btlVidesByCap = {};
@@ -737,7 +737,7 @@ function populatePurchaseArticleDetailFromFormat() {
   }
   const cap = Number(capMatch[1]);
   const articles = recordsForSite(state.stock).filter((item) =>
-    normalizeBrasserieName(item.brasserie) === br && (caseSize(item) || 24) === cap && lotType(item) !== "unite"
+    normalizeBrasserieName(item.brasserie) === br && (caseSize(item) || 24) === cap && lotType(item) === "casier"
   );
   if (!articles.length) { wrap.style.display = "none"; return; }
   // Casiers retournables agrégés par brasserie+format (tous les articles partagent les mêmes)
@@ -1113,6 +1113,50 @@ function renderSiteSwitcher() {
   }
   select.value = currentSiteId() || "";
   select.disabled = availableSites.length <= 1;
+  syncDualZonePricingUi();
+}
+
+/** Maquis avec prix cave / terrasse ou tarif unique (pas de lieu en vente). */
+function siteUsesDualZonePricing(site = currentSite()) {
+  if (!site) return true;
+  return site.dualZonePricing !== false;
+}
+
+/** Affiche ou masque les sélecteurs de lieu selon la config du maquis. */
+function syncDualZonePricingUi() {
+  const dual = siteUsesDualZonePricing();
+  const vWrap = document.getElementById("v-location-wrap");
+  if (vWrap) vWrap.classList.toggle("hidden", !dual);
+  const vLoc = document.getElementById("v-location");
+  if (vLoc && !dual) vLoc.value = "Intérieur";
+
+  const kWrap = document.getElementById("kit-location-wrap");
+  if (kWrap) kWrap.classList.toggle("hidden", !dual);
+  const kLoc = document.getElementById("kit-location");
+  if (kLoc && !dual) kLoc.value = "Intérieur";
+
+  const srWrap = document.getElementById("sr-location-wrap");
+  if (srWrap) srWrap.classList.toggle("hidden", !dual);
+  const srLoc = document.getElementById("sr-location");
+  if (srLoc && !dual) srLoc.value = "Intérieur";
+
+  const printQrExtBtn = document.getElementById("print-qr-ext-btn");
+  if (printQrExtBtn) printQrExtBtn.classList.toggle("hidden", !dual);
+  const qrLegacyCards = document.querySelectorAll("#qr-card-preview > .qr-two-cols > .qr-location-card");
+  if (qrLegacyCards.length >= 2) {
+    qrLegacyCards[1].classList.toggle("hidden", !dual);
+    if (!dual && qrLegacyCards[0]?.parentElement)
+      qrLegacyCards[0].parentElement.style.gridTemplateColumns = "1fr";
+    else if (qrLegacyCards[0]?.parentElement) qrLegacyCards[0].parentElement.style.gridTemplateColumns = "";
+  }
+
+  if (currentPage === "ventes") {
+    const q = document.getElementById("sr-search")?.value || "";
+    renderSrMenu(q);
+    if (document.getElementById("qr-card-preview") && !document.getElementById("qr-card-preview").classList.contains("hidden")) {
+      renderQrPreview();
+    }
+  }
 }
 
 function applyRoleVisibility() {
@@ -1556,7 +1600,7 @@ function submitCasierOrder() {
     const fallback = b || item.cat || "";
     return (b === brasserie || fallback === brasserie)
       && (caseSize(item) || 24) === cs
-      && lotType(item) !== "unite";
+      && lotType(item) === "casier";
   });
   const article = matchingArticles[0] || null;
   if (!article) {
@@ -1792,9 +1836,12 @@ function saleFormatLabel(format) {
   return qty === 1 ? "Unite" : `Kit de ${qty}`;
 }
 
-function formatPrice(format, location) {
+function formatPrice(format, location, siteOverride = undefined) {
   if (!format) return 0;
-  return String(location).startsWith("Ext") ? Number(format.prixExterieur) || 0 : Number(format.prixInterieur) || 0;
+  const site = siteOverride !== undefined ? siteOverride : currentSite();
+  const dual = !site || siteUsesDualZonePricing(site);
+  const loc = dual ? location : "Intérieur";
+  return String(loc).startsWith("Ext") ? Number(format.prixExterieur) || 0 : Number(format.prixInterieur) || 0;
 }
 
 function knownProducts() {
@@ -2621,28 +2668,40 @@ function renderDashboardCasierKpis(stockSiteList) {
   if (!wrap) return;
   const items = (stockSiteList || recordsForSite(state.stock || []))
     .filter((it) => lotType(it) !== "unite")
-    .map((it) => ({ item: it, sug: suggestReapproCasiers(it.article) }))
-    .filter((x) => x.sug.casiers > 0)
-    .sort((a, b) => b.sug.casiers - a.sug.casiers)
+    .map((it) => ({ item: it, sug: suggestReapproLots(it.article) }))
+    .filter((x) => x.sug.lots > 0)
+    .sort((a, b) => b.sug.lots - a.sug.lots)
     .slice(0, 6);
   if (!items.length) {
     wrap.innerHTML = `<p class="muted" style="margin:0;font-size:0.85rem">Aucun produit sous seuil. Le parc est equilibre.</p>`;
     return;
   }
-  wrap.innerHTML = `<p class="muted" style="margin:0 0 8px;font-size:0.82rem">Suggestion de casiers à commander (cible : 2× seuil min).</p>` +
+  wrap.innerHTML = `<p class="muted" style="margin:0 0 8px;font-size:0.82rem">Suggestion de lots à commander (cible : 2× seuil min).</p>` +
     items.map(({ item, sug }) => `<article class="list-item">
       <div style="min-width:0">
         <p class="list-item-title">${escapeHtml(item.article)}</p>
-        <p class="list-item-sub">Stock: ${fmt(stockActuel(item))} btl · Seuil: ${fmt(item.seuilMin || 0)} · ${fmt(caseSize(item))} btl/casier</p>
+        <p class="list-item-sub">Stock: ${fmt(stockActuel(item))} btl · Seuil: ${fmt(item.seuilMin || 0)} · ${fmt(caseSize(item))} btl/${escapeHtml(lotLabel(item))}</p>
       </div>
       <div class="list-side">
         <div>
-          <p class="list-item-amount" style="color:#ffcf79">${fmt(sug.casiers)} casier(s)</p>
+          <p class="list-item-amount" style="color:#ffcf79">${fmt(sug.lots)} ${escapeHtml(lotLabel(item))}(s)</p>
           <p class="list-item-date">${fmt(sug.manque)} btl manquantes</p>
         </div>
         <button type="button" class="mini-btn" data-propose-purchase="${item.id}">Proposer commande</button>
       </div>
     </article>`).join("");
+}
+
+function suggestReapproLots(article) {
+  const item = stockItemForArticle(article);
+  if (!item) return { manque: 0, lots: 0 };
+  if (lotType(item) === "unite") return { manque: 0, lots: 0 };
+  const stock = stockActuel(item);
+  const seuil = Math.max(0, Number(item.seuilMin) || 0);
+  const target = seuil * 2;
+  const manque = Math.max(0, target - stock);
+  const cs = Math.max(1, caseSize(item));
+  return { manque, lots: Math.ceil(manque / cs) };
 }
 
 function suggestPurchaseCases(stockItem) {
@@ -3176,6 +3235,7 @@ function renderSrCart() {
 }
 
 function openSaisieRapide() {
+  syncDualZonePricingUi();
   srCart = [];
   const searchEl = document.getElementById("sr-search");
   if (searchEl) searchEl.value = "";
@@ -3250,6 +3310,7 @@ async function submitSaisieRapide() {
 }
 
 function renderVentesPage() {
+  syncDualZonePricingUi();
   document.getElementById("articles-list").innerHTML = recordsForSite(state.stock).map((item) => `<option value="${escapeHtml(item.article)}">`).join("");
   if (document.getElementById("modal-vente")?.classList.contains("open")) renderVenteArticlePicker();
   renderOrdersManagement();
@@ -3529,16 +3590,6 @@ function qrTableLabels() {
   return Array.from({ length: count }, (_, index) => `${prefix} ${index + 1}`);
 }
 
-function qrRows() {
-  const alias = document.getElementById("qr-alias").value.trim();
-  return qrTableLabels().map((table) => ({
-    table,
-    alias: alias || table,
-    intLink: buildQrOrderLink("IntÃ©rieur", table, alias || table),
-    extLink: buildQrOrderLink("ExtÃ©rieur", table, alias || table),
-  }));
-}
-
 function buildQrOrderLink(location, tableOverride = null, aliasOverride = null) {
   const site = currentSite();
   if (!site) return "";
@@ -3552,53 +3603,14 @@ function buildQrOrderLink(location, tableOverride = null, aliasOverride = null) 
   return url.toString();
 }
 
-function renderQrPreview() {
-  const card = document.getElementById("qr-card-preview");
-  currentQrLinkInt = buildQrOrderLink("Intérieur");
-  currentQrLinkExt = buildQrOrderLink("Extérieur");
-  if (!currentQrLinkInt) {
-    card.classList.add("hidden");
-    return;
-  }
-  const site = currentSite();
-  const table = document.getElementById("qr-table").value.trim() || "Comptoir";
-  const siteName = site?.nom || "Maquis";
-
-  document.getElementById("qr-preview-title-int").textContent = `${siteName} · ${table} · Intérieur`;
-  document.getElementById("qr-preview-link-int").href = currentQrLinkInt;
-  document.getElementById("qr-preview-link-int").textContent = "Ouvrir le menu intérieur";
-  document.getElementById("qr-preview-image-int").src = `https://quickchart.io/qr?size=180&text=${encodeURIComponent(currentQrLinkInt)}`;
-
-  document.getElementById("qr-preview-title-ext").textContent = `${siteName} · ${table} · Extérieur`;
-  document.getElementById("qr-preview-link-ext").href = currentQrLinkExt;
-  document.getElementById("qr-preview-link-ext").textContent = "Ouvrir le menu extérieur";
-  document.getElementById("qr-preview-image-ext").src = `https://quickchart.io/qr?size=180&text=${encodeURIComponent(currentQrLinkExt)}`;
-
-  card.classList.remove("hidden");
-}
-
-function printQrCard(location) {
-  if (!currentQrLinkInt) renderQrPreview();
-  const link = location === "Extérieur" ? currentQrLinkExt : currentQrLinkInt;
-  if (!link) { showToast("Impossible de generer le lien QR."); return; }
-  const site = currentSite();
-  const table = document.getElementById("qr-table").value.trim() || "Comptoir";
-  const locationLabel = location;
-  const qrImage = `https://quickchart.io/qr?size=320&text=${encodeURIComponent(link)}`;
-  const ticketWindow = window.open("", "_blank", "width=800,height=900");
-  if (!ticketWindow) { showToast("Impossible d'ouvrir l'impression."); return; }
-  ticketWindow.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>QR ${escapeHtml(locationLabel)} - ${escapeHtml(table)}</title><style>body{font-family:Arial,sans-serif;padding:32px;text-align:center;color:#111}img{width:320px;height:320px;background:#fff;padding:12px;border-radius:18px}h1,h2,p{margin:0 0 12px}.box{border:2px solid #111;border-radius:22px;padding:24px;max-width:520px;margin:0 auto}.loc{display:inline-block;background:#111;color:#fff;padding:4px 18px;border-radius:20px;font-size:14px;margin-bottom:12px}</style></head><body><div class="box"><h1>${escapeHtml(site?.nom || "Maquis")}</h1><div class="loc">${escapeHtml(locationLabel)}</div><p>Table: ${escapeHtml(table)}</p><img src="${qrImage}" alt="QR commande"><p>Scannez pour voir le menu et commander</p></div><script>window.onload=function(){window.print();}</script></body></html>`);
-  ticketWindow.document.close();
-}
-
 function qrRows() {
   const alias = document.getElementById("qr-alias").value.trim();
-  return qrTableLabels().map((table) => ({
-    table,
-    alias: alias || table,
-    intLink: buildQrOrderLink("Interieur", table, alias || table),
-    extLink: buildQrOrderLink("Exterieur", table, alias || table),
-  }));
+  const dual = siteUsesDualZonePricing();
+  return qrTableLabels().map((table) => {
+    const intLink = buildQrOrderLink("Intérieur", table, alias || table);
+    const extLink = dual ? buildQrOrderLink("Extérieur", table, alias || table) : intLink;
+    return { table, alias: alias || table, intLink, extLink };
+  });
 }
 
 function renderQrPreview() {
@@ -3611,9 +3623,11 @@ function renderQrPreview() {
     return;
   }
   const siteName = currentSite()?.nom || "Maquis";
+  const dual = siteUsesDualZonePricing();
   const list = document.getElementById("qr-table-list");
   const oldPreview = [...card.children].find((child) => child.classList?.contains("qr-two-cols"));
   if (oldPreview) oldPreview.classList.add("hidden");
+  const colsClass = dual ? "qr-two-cols" : "qr-two-cols qr-one-col";
   list.innerHTML = rows.map((row) => `
     <article class="qr-table-card">
       <div class="section-head">
@@ -3623,27 +3637,29 @@ function renderQrPreview() {
         </div>
         <button type="button" class="mini-btn" data-print-qr-table="${escapeHtml(row.table)}">Imprimer cette table</button>
       </div>
-      <div class="qr-two-cols">
+      <div class="${colsClass}">
         <div class="qr-location-card">
-          <div class="qr-location-header">Interieur (cave)</div>
+          <div class="qr-location-header">${dual ? "Intérieur (cave)" : "Tarif unique"}</div>
           <div class="qr-card-box">
-            <img src="https://quickchart.io/qr?size=180&text=${encodeURIComponent(row.intLink)}" alt="QR Interieur ${escapeHtml(row.table)}">
+            <img src="https://quickchart.io/qr?size=180&text=${encodeURIComponent(row.intLink)}" alt="QR ${dual ? "Intérieur" : "menu"} ${escapeHtml(row.table)}">
             <div>
-              <p class="list-item-title">${escapeHtml(row.table)} - Interieur</p>
+              <p class="list-item-title">${escapeHtml(row.table)}${dual ? " - Intérieur" : ""}</p>
               <a class="qr-link" href="${escapeHtml(row.intLink)}" target="_blank" rel="noopener noreferrer">Ouvrir</a>
             </div>
           </div>
         </div>
-        <div class="qr-location-card">
-          <div class="qr-location-header">Exterieur (terrasse)</div>
+        ${dual
+          ? `<div class="qr-location-card">
+          <div class="qr-location-header">Extérieur (terrasse)</div>
           <div class="qr-card-box">
-            <img src="https://quickchart.io/qr?size=180&text=${encodeURIComponent(row.extLink)}" alt="QR Exterieur ${escapeHtml(row.table)}">
+            <img src="https://quickchart.io/qr?size=180&text=${encodeURIComponent(row.extLink)}" alt="QR Extérieur ${escapeHtml(row.table)}">
             <div>
-              <p class="list-item-title">${escapeHtml(row.table)} - Exterieur</p>
+              <p class="list-item-title">${escapeHtml(row.table)} - Extérieur</p>
               <a class="qr-link" href="${escapeHtml(row.extLink)}" target="_blank" rel="noopener noreferrer">Ouvrir</a>
             </div>
           </div>
-        </div>
+        </div>`
+          : ""}
       </div>
     </article>
   `).join("");
@@ -3653,10 +3669,12 @@ function renderQrPreview() {
 function printQrCard(location, tableOverride = null, linkOverride = null) {
   if (!currentQrLinkInt) renderQrPreview();
   const table = tableOverride || qrTableLabels()[0] || "Comptoir";
-  const link = linkOverride || (String(location).startsWith("Ext") ? currentQrLinkExt : currentQrLinkInt);
+  const dualQr = siteUsesDualZonePricing();
+  let link = linkOverride || (dualQr && String(location).startsWith("Ext") ? currentQrLinkExt : currentQrLinkInt);
+  if (!dualQr) link = linkOverride || currentQrLinkInt;
   if (!link) { showToast("Impossible de generer le lien QR."); return; }
   const site = currentSite();
-  const locationLabel = qrLocationLabel(location);
+  const locationLabel = dualQr ? qrLocationLabel(location) : "Tarif unique";
   const qrImage = `https://quickchart.io/qr?size=320&text=${encodeURIComponent(link)}`;
   const ticketWindow = window.open("", "_blank", "width=800,height=900");
   if (!ticketWindow) { showToast("Impossible d'ouvrir l'impression."); return; }
@@ -3674,19 +3692,21 @@ function printAllQrTables(rowsOverride = null) {
   const rows = rowsOverride || qrRows();
   if (!rows.length) { showToast("Aucun QR code a imprimer."); return; }
   const siteName = currentSite()?.nom || "Maquis";
+  const dual = siteUsesDualZonePricing();
   const ticketWindow = window.open("", "_blank", "width=1000,height=900");
   if (!ticketWindow) { showToast("Impossible d'ouvrir l'impression."); return; }
+  const gridTpl = dual ? "1fr 1fr" : "1fr";
   const cards = rows.map((row) => `
     <section class="table-block">
       <h2>${escapeHtml(siteName)} - ${escapeHtml(row.table)}</h2>
-      <div class="grid">
-        <div><strong>Interieur</strong><img src="https://quickchart.io/qr?size=260&text=${encodeURIComponent(row.intLink)}" alt="QR Interieur"></div>
-        <div><strong>Exterieur</strong><img src="https://quickchart.io/qr?size=260&text=${encodeURIComponent(row.extLink)}" alt="QR Exterieur"></div>
+      <div class="grid" style="grid-template-columns:${gridTpl}">
+        <div><strong>${dual ? "Intérieur" : "Tarif unique"}</strong><img src="https://quickchart.io/qr?size=260&text=${encodeURIComponent(row.intLink)}" alt="QR menu"></div>
+        ${dual ? `<div><strong>Extérieur</strong><img src="https://quickchart.io/qr?size=260&text=${encodeURIComponent(row.extLink)}" alt="QR Extérieur"></div>` : ""}
       </div>
       <p>Scannez pour voir le menu et commander.</p>
     </section>
   `).join("");
-  ticketWindow.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>QR codes tables</title><style>body{font-family:Arial,sans-serif;color:#111;padding:22px}.table-block{break-inside:avoid;page-break-inside:avoid;border:2px solid #111;border-radius:18px;padding:18px;margin:0 0 18px;text-align:center}h2{margin:0 0 14px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}img{display:block;width:260px;height:260px;margin:10px auto;background:#fff;padding:8px;border:1px solid #ddd;border-radius:14px}p{margin:8px 0 0}@media print{body{padding:0}.table-block{page-break-inside:avoid}}</style></head><body>${cards}<script>window.onload=function(){window.print();}</script></body></html>`);
+  ticketWindow.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>QR codes tables</title><style>body{font-family:Arial,sans-serif;color:#111;padding:22px}.table-block{break-inside:avoid;page-break-inside:avoid;border:2px solid #111;border-radius:18px;padding:18px;margin:0 0 18px;text-align:center}h2{margin:0 0 14px}.grid{display:grid;gap:18px}img{display:block;width:260px;height:260px;margin:10px auto;background:#fff;padding:8px;border:1px solid #ddd;border-radius:14px}p{margin:8px 0 0}@media print{body{padding:0}.table-block{page-break-inside:avoid}}</style></head><body>${cards}<script>window.onload=function(){window.print();}</script></body></html>`);
   ticketWindow.document.close();
 }
 
@@ -4091,7 +4111,8 @@ async function addSite() {
     showToast(`Un maquis avec l'identifiant "${siteId}" existe deja.`);
     return;
   }
-  const newSite = { id: siteId, nom, ville, pays };
+  const dualZonePricing = Boolean(document.getElementById("new-site-dual-zone")?.checked);
+  const newSite = { id: siteId, nom, ville, pays, dualZonePricing };
   const newSites = [...(state.sites || []), newSite];
   const newUsers = (state.auth?.users || []).map((user) => {
     const currentAllowed = new Set(user.allowedSiteIds || []);
@@ -4108,6 +4129,8 @@ async function addSite() {
   document.getElementById("new-site-id").value = "";
   document.getElementById("new-site-ville").value = "";
   document.getElementById("new-site-pays").value = "";
+  const newDualEl = document.getElementById("new-site-dual-zone");
+  if (newDualEl) newDualEl.checked = true;
   renderSitesList();
   renderSiteSwitcher();
   resetUserForm();
@@ -4149,6 +4172,10 @@ function loadParamsForm() {
   document.getElementById("p-obj").value = site?.objectifCA || 500000;
   document.getElementById("p-seuil").value = site?.seuilStock || 5;
   document.getElementById("p-prefixe").value = site?.prefixeFacture || "";
+  const pSmsQr = document.getElementById("p-sms-qr");
+  if (pSmsQr) pSmsQr.value = site?.smsQrAlert || "";
+  const dualZonePricingEl = document.getElementById("p-dual-zone-pricing");
+  if (dualZonePricingEl) dualZonePricingEl.checked = siteUsesDualZonePricing(site);
   const categoriesField = document.getElementById("p-categories");
   if (categoriesField) {
     const saved = Array.isArray(state?.categories) && state.categories.length ? state.categories : CATEGORIES;
@@ -4172,6 +4199,7 @@ function currentOrder() {
 }
 
 function openOrderEditor(orderId = null, lineId = null) {
+  syncDualZonePricingUi();
   activeOrderId = orderId;
   editingLineId = lineId;
   const order = orderId ? recordsForSite(state.commandes).find((item) => item.id === orderId) : null;
@@ -4984,7 +5012,7 @@ async function applyPurchaseReceipt(po, linesReceived, opts = {}) {
       user: sessionUser || "system",
     });
 
-    if (rangerCasiers && lotType(item) !== "unite") {
+    if (rangerCasiers && lotType(item) === "casier") {
       let remaining = bottles;
       const partials = (state.casiers || [])
         .filter((c) => c.siteId === siteId && String(c.article || "").toLowerCase() === String(item.article || "").toLowerCase())
@@ -6004,6 +6032,7 @@ async function saveCharge() {
 
 async function saveParams() {
   const site = currentSite();
+  const dualPricingChecked = Boolean(document.getElementById("p-dual-zone-pricing")?.checked);
   const categories = (document.getElementById("p-categories")?.value || "")
     .split(/\r?\n|,/)
     .map((value) => value.trim())
@@ -6018,6 +6047,8 @@ async function saveParams() {
     objectifCA: Number(document.getElementById("p-obj").value) || 500000,
     seuilStock: Number(document.getElementById("p-seuil").value) || 5,
     prefixeFacture: (document.getElementById("p-prefixe").value.trim() || item.prefixeFacture || "FAC").toUpperCase(),
+    dualZonePricing: dualPricingChecked,
+    smsQrAlert: (document.getElementById("p-sms-qr")?.value || "").trim(),
   } : item);
   await persistState({ sites: updatedSites, categories: cleanCategories });
   populateCategorySelects();
@@ -7311,7 +7342,7 @@ function logCasierAudit(verb, casier, before, item, beforeStock, qty, opts = {})
 async function syncCasiersFromStockEtVentes() {
   if (!canAnyAdmin()) { showToast("Réservé aux administrateurs."); return; }
   const siteId = currentSiteId();
-  const eligible = recordsForSite(state.stock).filter((item) => lotType(item) !== "unite");
+  const eligible = recordsForSite(state.stock).filter((item) => lotType(item) === "casier");
   if (!eligible.length) { showToast("Aucun article en stock pour initialiser les casiers."); return; }
 
   let previewPleins = 0, previewVides = 0;

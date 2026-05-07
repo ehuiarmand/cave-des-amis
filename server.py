@@ -17,7 +17,9 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, urlparse
+from urllib.error import HTTPError, URLError
+from urllib.parse import parse_qs, urlparse, urlencode
+from urllib.request import Request, urlopen
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -238,6 +240,7 @@ def make_site(
     objectif_ca: int,
     seuil_stock: int,
     prefixe_facture: str = "FAC",
+    dual_zone_pricing: bool = True,
 ) -> dict[str, Any]:
     return {
         "id": site_id,
@@ -248,7 +251,109 @@ def make_site(
         "objectifCA": objectif_ca,
         "seuilStock": seuil_stock,
         "prefixeFacture": prefixe_facture,
+        "dualZonePricing": dual_zone_pricing,
     }
+
+
+def site_uses_dual_zone_pricing(site: dict[str, Any] | None) -> bool:
+    """False = tarif unique (prix catalogue intérieur partout). Defaut historique True."""
+    if not site:
+        return True
+    return site.get("dualZonePricing") is not False
+
+
+def _qr_order_total_fcfa(order: dict[str, Any]) -> float:
+    return sum(float(line.get("prix") or 0) * float(line.get("qty") or 0) for line in order.get("lignes") or [])
+
+
+def _qr_order_alert_message(site: dict[str, Any], order: dict[str, Any]) -> str:
+    nom = str(site.get("nom") or "Maquis")
+    tid = order.get("id")
+    tbl = str(order.get("table") or "")
+    cli = str(order.get("client") or "")
+    nlines = len(order.get("lignes") or [])
+    total_int = int(round(_qr_order_total_fcfa(order)))
+    total_txt = f"{total_int:,}".replace(",", " ")
+    return f"[QR] {nom} — Cmd #{tid} Table {tbl} Client {cli} — {nlines} ligne(s), {total_txt} FCFA"
+
+
+def _normalize_international_phone(raw: str) -> str:
+    s = "".join(str(raw).split())
+    if not s:
+        return ""
+    if s.startswith("+") or not s.replace("+", "").isdigit():
+        return s if s.startswith("+") else ""
+    digits = "+" + s.replace("+", "")
+    return digits
+
+
+def _alert_phone_for_qr_orders(site: dict[str, Any]) -> str:
+    a = _normalize_international_phone(str(site.get("smsQrAlert") or "").strip())
+    b = _normalize_international_phone(os.environ.get("GESTION_CAVE_QR_ALERT_SMS_TO", "").strip())
+    return a or b
+
+
+def _post_qr_alert_webhook(url: str, site: dict[str, Any], order: dict[str, Any], body: str, alert_phone: str) -> None:
+    payload = {
+        "event": "qr_order",
+        "siteId": site.get("id"),
+        "siteName": site.get("nom"),
+        "orderId": order.get("id"),
+        "table": order.get("table"),
+        "client": order.get("client"),
+        "message": body,
+        "alertPhone": alert_phone or None,
+        "totalFcfa": _qr_order_total_fcfa(order),
+    }
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    req = Request(url, data=data, method="POST", headers={"Content-Type": "application/json; charset=utf-8"})
+    urlopen(req, timeout=18)  # nosec - URL from operator-controlled env
+
+
+def _twilio_send_sms(to_e164: str, body: str) -> None:
+    sid = os.environ.get("TWILIO_ACCOUNT_SID", "").strip()
+    token = os.environ.get("TWILIO_AUTH_TOKEN", "").strip()
+    frm = os.environ.get("TWILIO_FROM_NUMBER", "").strip()
+    if not (sid and token and frm):
+        return
+    to_clean = _normalize_international_phone(to_e164.strip())
+    if not to_clean:
+        raise ValueError("Numero destinataire SMS invalide (utilisez le format international +225…).")
+    auth_b64 = base64.b64encode(f"{sid}:{token}".encode("utf-8")).decode("ascii")
+    encoded = urlencode({"To": to_clean, "From": frm, "Body": body[:1500]}).encode("utf-8")
+    req = Request(
+        f"https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json",
+        data=encoded,
+        method="POST",
+        headers={
+            "Authorization": f"Basic {auth_b64}",
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
+    )
+    urlopen(req, timeout=18)  # nosec — Twilio HTTPS
+
+
+def notify_qr_order_created_async(site: dict[str, Any], order: dict[str, Any]) -> None:
+    """Alertes SMS / webhook après commande cliente (QR). Ne bloque pas l'HTTP : thread daemon."""
+
+    def run() -> None:
+        alert_phone = _alert_phone_for_qr_orders(site)
+        msg = _qr_order_alert_message(site, order)
+        webhook_url = os.environ.get("GESTION_CAVE_QR_ALERT_WEBHOOK", "").strip()
+        if webhook_url:
+            try:
+                _post_qr_alert_webhook(webhook_url, site, order, msg, alert_phone)
+            except (OSError, HTTPError, URLError, ValueError) as ex:
+                audit_log("qr_order_webhook_alert_failed", {"error": str(ex), "siteId": site.get("id"), "orderId": order.get("id")})
+
+        twilio_sid = os.environ.get("TWILIO_ACCOUNT_SID", "").strip()
+        if twilio_sid and alert_phone:
+            try:
+                _twilio_send_sms(alert_phone, msg)
+            except (OSError, HTTPError, URLError, ValueError) as ex:
+                audit_log("qr_order_twilio_sms_failed", {"error": str(ex), "siteId": site.get("id"), "orderId": order.get("id")})
+
+    threading.Thread(target=run, daemon=True).start()
 
 
 def build_default_state() -> dict[str, Any]:
@@ -843,6 +948,7 @@ class DataStore:
             merged["stockLosses"] = payload.get("stockLosses", merged.get("stockLosses", []))
             for index, site in enumerate(merged["sites"], start=1):
                 site.setdefault("prefixeFacture", f"SITE{index}")
+                site.setdefault("dualZonePricing", True)
             normalize_auth_users(merged)
             merged["_meta"] = payload.get("_meta") or {"rev": 1, "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
             # Ensure DB has normalized payload
@@ -884,6 +990,7 @@ class DataStore:
         merged["stockLosses"] = payload.get("stockLosses", merged.get("stockLosses", []))
         for index, site in enumerate(merged["sites"], start=1):
             site.setdefault("prefixeFacture", f"SITE{index}")
+            site.setdefault("dualZonePricing", True)
         normalize_auth_users(merged)
         merged["_meta"] = payload.get("_meta") or {"rev": 1, "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
         self._write(merged)
@@ -1103,6 +1210,7 @@ class DataStore:
             merged["charges"] = payload.get("charges", merged["charges"])
             for index, site in enumerate(merged["sites"], start=1):
                 site.setdefault("prefixeFacture", f"SITE{index}")
+                site.setdefault("dualZonePricing", True)
             normalize_auth_users(merged)
             self._state = merged
             self._write(self._state)
@@ -1113,6 +1221,7 @@ class DataStore:
             site = next((item for item in self._state["sites"] if item.get("id") == site_id), None)
             if not site:
                 return None
+            eff_location = location if site_uses_dual_zone_pricing(site) else "Intérieur"
             reserved = reserved_bottles_for_site(site_id, self._state.get("commandes", []) or [])
             stock_by_article = stock_total_by_article(site_id, self._state.get("stock", []) or [])
             available_by_article = {
@@ -1130,7 +1239,7 @@ class DataStore:
                 if not article_key:
                     continue
                 for format_data in sale_formats(item):
-                    prix = price_for_format(format_data, location)
+                    prix = price_for_format(format_data, eff_location)
                     if prix <= 0:
                         continue
                     pack_size = max(1, int(format_data["quantite"]))
@@ -1155,7 +1264,7 @@ class DataStore:
 
             menu = list(by_key.values())
             menu.sort(key=lambda item: (item["cat"], item["article"], int(item.get("packSize") or 1)))
-            return {"site": json.loads(json.dumps(site)), "menu": menu, "location": location}
+            return {"site": json.loads(json.dumps(site)), "menu": menu, "location": eff_location}
 
     def create_public_order(
         self,
@@ -1202,7 +1311,8 @@ class DataStore:
                 if available < bottles:
                     raise ValueError(f"Stock insuffisant pour {stock_item.get('article', article)}. Disponible: {available}.")
                 requested[key] = requested.get(key, 0) + bottles
-                prix = price_for_format(selected_format, location)
+                eff_location = location if site_uses_dual_zone_pricing(site) else "Intérieur"
+                prix = price_for_format(selected_format, eff_location)
                 if prix <= 0:
                     continue
                 lignes.append({
@@ -1210,7 +1320,7 @@ class DataStore:
                     "date": time.strftime("%Y-%m-%d"),
                     "article": stock_item.get("article", article),
                     "cat": stock_item.get("cat", "Autres"),
-                    "location": location,
+                    "location": eff_location,
                     "formatQuantite": int(selected_format["quantite"]),
                     "prix": prix,
                     "qty": qty,
@@ -1260,7 +1370,9 @@ class DataStore:
                 if note.strip():
                     existing_order["note"] = f"{existing_order.get('note', '')} | {note.strip()}".strip(" |")
                 self._write(self._state)
-                return json.loads(json.dumps(existing_order))
+                merged_snap = json.loads(json.dumps(existing_order))
+                notify_qr_order_created_async(site, merged_snap)
+                return merged_snap
 
             order_id = self._state["nextId"]["commande"]
             self._state["nextId"]["commande"] += 1
@@ -1280,7 +1392,9 @@ class DataStore:
             }
             self._state["commandes"].insert(0, order)
             self._write(self._state)
-            return json.loads(json.dumps(order))
+            new_snap = json.loads(json.dumps(order))
+            notify_qr_order_created_async(site, new_snap)
+            return new_snap
 
     def public_orders(self, site_id: str, table_label: str, client: str = "") -> dict[str, Any]:
         with self._lock:

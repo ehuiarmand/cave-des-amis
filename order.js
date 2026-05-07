@@ -377,11 +377,18 @@ async function initCustomer() {
       customerState.table || customerState.alias || "Comptoir";
     document.getElementById("customer-table").value = customerState.table || customerState.alias || "";
 
-    const locLabel = customerState.location;
-    document.getElementById("order-location-label").textContent = locLabel;
-    document.getElementById("order-location-badge").style.display = "";
-    document.getElementById("menu-location-tag").textContent =
-      `Prix ${locLabel === "Extérieur" ? "terrasse" : "cave"}`;
+    const dualPricing = payload.site?.dualZonePricing !== false;
+    const badge = document.getElementById("order-location-badge");
+    if (dualPricing) {
+      const locLabel = payload.location || customerState.location;
+      document.getElementById("order-location-label").textContent = locLabel;
+      badge.style.display = "";
+      document.getElementById("menu-location-tag").textContent =
+        `Prix ${String(locLabel).startsWith("Ext") ? "terrasse" : "cave"}`;
+    } else {
+      badge.style.display = "none";
+      document.getElementById("menu-location-tag").textContent = "Tarif unique";
+    }
 
     applySavedNameUI();
 

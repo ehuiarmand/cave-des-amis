@@ -959,6 +959,20 @@
                 <label for="p-prefixe">Prefixe facture</label>
                 <input id="p-prefixe" type="text" placeholder="MBCM">
               </div>
+              <div class="form-group" style="grid-column:1/-1">
+                <label for="p-sms-qr">SMS — telephone alerte commande QR (optionnel)</label>
+                <input id="p-sms-qr" type="tel" placeholder="+2250701020304 ou +337..." autocomplete="tel">
+                <p class="muted" style="font-size:0.82rem;margin-top:6px">
+                  Numeros au format international (E.164). Configurez cote serveur un <strong>webhook</strong> et/ou <strong>Twilio</strong>
+                  (<code>GESTION_CAVE_QR_ALERT_WEBHOOK</code>, variables <code>TWILIO_*</code>). Voir commentaire dans le code serveur.</p>
+              </div>
+              <div class="form-group" style="grid-column:1/-1">
+                <label class="checkbox-label" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer">
+                  <input id="p-dual-zone-pricing" type="checkbox" checked style="margin-top:3px;width:auto">
+                  <span>Tarifs differents selon la zone (cave / terrasse)</span>
+                </label>
+                <p class="muted" style="font-size:0.82rem;margin:6px 0 0 28px">Decoche pour un tarif unique sur tout le maquis.</p>
+              </div>
             </div>
             <div class="button-stack">
               <button id="save-params-btn" class="btn btn-primary" type="button">Enregistrer les parametres</button>
@@ -1056,6 +1070,13 @@
               <div class="form-group">
                 <label for="new-site-pays">Pays</label>
                 <input id="new-site-pays" type="text" placeholder="ex: Cote d'Ivoire">
+              </div>
+              <div class="form-group" style="grid-column:1/-1">
+                <label class="checkbox-label" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer">
+                  <input id="new-site-dual-zone" type="checkbox" checked style="margin-top:3px;width:auto">
+                  <span>Tarifs differents cave / terrasse (deux zones de prix)</span>
+                </label>
+                <p class="muted" style="font-size:0.8rem;margin:6px 0 0 28px">Decochez si un seul tarif s’applique partout (plus de choix « lieu » en vente et un seul QR par table).</p>
               </div>
             </div>
             <div class="button-stack">
@@ -1217,7 +1238,7 @@
         <p id="v-kit-info" class="form-hint hidden"></p>
         <div id="v-stock-info" class="form-hint hidden"></div>
       </div>
-      <div class="form-group">
+      <div class="form-group" id="v-location-wrap">
         <label for="v-location">Lieu de consommation</label>
         <select id="v-location">
           <option value="Intérieur">Intérieur (cave)</option>
@@ -1271,7 +1292,7 @@
             <input id="kit-price" type="number" min="0" placeholder="ex: 1500">
           </div>
         </div>
-        <div class="form-group">
+        <div class="form-group" id="kit-location-wrap">
           <label for="kit-location">Lieu</label>
           <select id="kit-location">
             <option value="Intérieur">Intérieur (cave)</option>
@@ -1378,7 +1399,7 @@
       </div>
       <div style="padding-bottom:8px">
         <div class="form-grid two-cols" style="margin-bottom:6px">
-          <div class="form-group form-group--zero">
+          <div class="form-group form-group--zero" id="sr-location-wrap">
             <label for="sr-location">Lieu de consommation</label>
             <select id="sr-location">
               <option value="Intérieur">Intérieur (cave)</option>
@@ -1945,6 +1966,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=89"></script>
+  <script src="./app-orders.js?v=91"></script>
 </body>
 </html>
