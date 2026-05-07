@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import sqlite3
 import secrets
 import socket
@@ -33,6 +34,11 @@ PASSWORD_ALGO = "pbkdf2_sha256"
 PASSWORD_ITERATIONS = 260_000
 
 STORAGE_MODE = (os.environ.get("TDB_BAR_STORAGE", "json") or "json").strip().lower()
+# Nombre de fichiers data-*.json ou app-*.sqlite3 conserves dans backups/ (3–100).
+try:
+    BACKUP_KEEP_COUNT = max(3, min(100, int(os.environ.get("TDB_BAR_BACKUP_KEEP", "30"))))
+except ValueError:
+    BACKUP_KEEP_COUNT = 30
 
 # ---------------------------------------------------------------------------
 # TOTP (RFC 6238) — no third-party deps, Python stdlib only
@@ -500,6 +506,37 @@ def _zero_stock_row_quantities(row: dict[str, Any]) -> None:
     row["reserve"] = 0
     row.pop("lastReapproAt", None)
     row.pop("lastReapproBy", None)
+
+
+def _safe_backup_filename(name_raw: str) -> str:
+    name = Path(name_raw).name.strip()
+    if not name or "/" in name or "\\" in name or ".." in name:
+        raise ValueError("Nom de fichier invalide.")
+    resolved_dir = BACKUP_DIR.resolve()
+    target = (BACKUP_DIR / name).resolve()
+    if target.parent != resolved_dir:
+        raise ValueError("Chemin refuse.")
+    return name
+
+
+def load_backup_state_payload(backup_filename: str) -> dict[str, Any]:
+    """Charge et migre un etat complet depuis backups/ (snapshot JSON ou copie SQLite)."""
+    name = _safe_backup_filename(backup_filename)
+    path = BACKUP_DIR / name
+    if not path.is_file():
+        raise ValueError("Fichier de sauvegarde introuvable.")
+    if re.fullmatch(r"data-\d{8}-\d{6}\.json", name):
+        return migrate_state(json.loads(path.read_text(encoding="utf-8")))
+    if re.fullmatch(r"app-\d{8}-\d{6}\.sqlite3", name):
+        conn = sqlite3.connect(str(path))
+        try:
+            row = conn.execute("SELECT v FROM kv WHERE k = ?", ("state",)).fetchone()
+        finally:
+            conn.close()
+        if not row or not row[0]:
+            raise ValueError("Sauvegarde SQLite sans etat.")
+        return migrate_state(json.loads(row[0]))
+    raise ValueError("Formats acceptes : data-AAAAMMJJ-HHMMSS.json ou app-AAAAMMJJ-HHMMSS.sqlite3.")
 
 
 def session_is_superadmin(session: dict[str, Any] | None) -> bool:
@@ -1043,7 +1080,7 @@ class DataStore:
                 if self._sqlite_path.exists():
                     backup_path.write_bytes(self._sqlite_path.read_bytes())
                 backups = sorted(BACKUP_DIR.glob("app-*.sqlite3"), key=lambda p: p.name, reverse=True)
-                for old in backups[10:]:
+                for old in backups[BACKUP_KEEP_COUNT:]:
                     try:
                         old.unlink()
                     except OSError:
@@ -1071,7 +1108,7 @@ class DataStore:
             backup_path = BACKUP_DIR / f"data-{stamp}.json"
             backup_path.write_text(body, encoding="utf-8")
             backups = sorted(BACKUP_DIR.glob("data-*.json"), key=lambda p: p.name, reverse=True)
-            for old in backups[10:]:
+            for old in backups[BACKUP_KEEP_COUNT:]:
                 try:
                     old.unlink()
                 except OSError:
@@ -1702,6 +1739,79 @@ class DataStore:
             self._write(self._state)
             return self.public_state()
 
+    def list_backups(self) -> dict[str, Any]:
+        BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+        json_rows: list[dict[str, Any]] = []
+        sqlite_rows: list[dict[str, Any]] = []
+        for p in sorted(BACKUP_DIR.glob("data-*.json"), key=lambda x: x.name, reverse=True):
+            try:
+                st = p.stat()
+                json_rows.append({"name": p.name, "size": st.st_size, "mtimeIso": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(st.st_mtime))})
+            except OSError:
+                continue
+        for p in sorted(BACKUP_DIR.glob("app-*.sqlite3"), key=lambda x: x.name, reverse=True):
+            try:
+                st = p.stat()
+                sqlite_rows.append({"name": p.name, "size": st.st_size, "mtimeIso": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(st.st_mtime))})
+            except OSError:
+                continue
+        return {
+            "storageMode": "sqlite" if self._sqlite_enabled else "json",
+            "keepCount": BACKUP_KEEP_COUNT,
+            "jsonBackups": json_rows,
+            "sqliteBackups": sqlite_rows,
+            "autoNote": "Chaque enregistrement sur le serveur cree une copie dans backups/ (nombre limite configurable : TDB_BAR_BACKUP_KEEP).",
+        }
+
+    def restore_site_from_backup(self, backup_filename: str, site_id: str) -> dict[str, Any]:
+        """Pour un maquis existant : remplace toutes ses donnees listees par celles du snapshot (autres maquis inchanges)."""
+        backup = load_backup_state_payload(backup_filename)
+        sid = str(site_id or "").strip()
+        if not sid:
+            raise ValueError("Maquis invalide.")
+
+        def row_site(r: Any) -> str | None:
+            if not isinstance(r, dict):
+                return None
+            v = r.get("siteId")
+            if v is None or v == "":
+                return None
+            return str(v).strip()
+
+        with self._lock:
+            current = self._state
+            site_ids = [str(s.get("id")) for s in current.get("sites", []) if s.get("id")]
+            if sid not in site_ids:
+                raise ValueError("Ce maquis n'existe pas dans la base actuelle. Creez-le d'abord dans la liste des sites.")
+
+            for key in _SITE_SCOPED_ROW_KEYS:
+                cur_list = list(current.get(key) or [])
+                bu_list = list(backup.get(key) or [])
+                cur_kept: list[Any] = []
+                for r in cur_list:
+                    if isinstance(r, dict) and row_site(r) == sid:
+                        continue
+                    cur_kept.append(r)
+                from_bu = [json.loads(json.dumps(r)) for r in bu_list if isinstance(r, dict) and row_site(r) == sid]
+                current[key] = cur_kept + from_bu
+
+            bu_sites = backup.get("sites") or []
+            bu_site = next((s for s in bu_sites if isinstance(s, dict) and str(s.get("id")) == sid), None)
+            if bu_site:
+                fresh = json.loads(json.dumps(bu_site))
+                new_sites = []
+                for s in current["sites"]:
+                    if isinstance(s, dict) and str(s.get("id")) == sid:
+                        new_sites.append(fresh)
+                    else:
+                        new_sites.append(s)
+                current["sites"] = new_sites
+
+            current["nextId"] = merge_next_id_dict(current.get("nextId") or {}, backup.get("nextId") or {})
+            normalize_auth_users(current)
+            self._write(current)
+            return self.public_state()
+
 
 store = DataStore(DATA_FILE)
 sessions = SessionManager(SESSION_TTL_SECONDS)
@@ -1764,6 +1874,17 @@ class AppHandler(BaseHTTPRequestHandler):
                 },
             )
             return
+        if parsed.path == "/api/admin/backups":
+            session = self.require_session()
+            if session is None:
+                return
+            if not session_is_superadmin(session):
+                self.send_json(HTTPStatus.FORBIDDEN, {"error": "Acces refuse."})
+                return
+            with store._lock:
+                payload = store.list_backups()
+            self.send_json(HTTPStatus.OK, payload, cache_control="no-store")
+            return
         if parsed.path == "/api/changes":
             session = self.require_session()
             if session is None:
@@ -1806,6 +1927,27 @@ class AppHandler(BaseHTTPRequestHandler):
                 return
             audit_log("restore_from_json", {"ip": self.client_ip(), "username": session.get("username", "")})
             self.send_json(HTTPStatus.OK, restored, cache_control="no-store")
+            return
+        if post_path == "/api/admin/restore-site-from-backup":
+            session = self.require_session()
+            if session is None:
+                return
+            if not session_is_superadmin(session):
+                self.send_json(HTTPStatus.FORBIDDEN, {"error": "Acces refuse."})
+                return
+            body = self.read_json()
+            bf = str((body or {}).get("backupFile", "")).strip()
+            site_raw = str((body or {}).get("siteId", "")).strip()
+            try:
+                restored_site = store.restore_site_from_backup(bf, site_raw)
+            except ValueError as error:
+                self.send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+                return
+            audit_log(
+                "restore_site_from_backup",
+                {"ip": self.client_ip(), "username": session.get("username", ""), "backupFile": bf, "siteId": site_raw},
+            )
+            self.send_json(HTTPStatus.OK, restored_site, cache_control="no-store")
             return
         if post_path == "/api/public/order":
             payload = self.read_json()
@@ -2204,6 +2346,7 @@ def main() -> None:
 
     print(f"TDB Bar server running on http://127.0.0.1:{bound_port}")
     print(f"Storage mode: {STORAGE_MODE}")
+    print(f"Sauvegardes automatiques dans {BACKUP_DIR} (garder jusqu'a {BACKUP_KEEP_COUNT} fichiers par type)")
     try:
         hostname = socket.gethostname()
         lan_ip = socket.gethostbyname(hostname)

@@ -7,6 +7,8 @@ const API = {
   reset: "/api/reset",
   purgeMaquis: "/api/purge-maquis",
   restoreFromJson: "/api/admin/restore-from-json",
+  adminBackups: "/api/admin/backups",
+  restoreSiteFromBackup: "/api/admin/restore-site-from-backup",
   twoFaVerify: "/api/2fa/verify",
   twoFaSetup: "/api/2fa/setup",
   twoFaEnable: "/api/2fa/enable",
@@ -4398,6 +4400,7 @@ function loadParamsForm() {
   renderUsersList();
   renderUserSiteCheckboxes();
   renderSitesList();
+  refreshRestoreBackupUi().catch(() => {});
   renderStaffAuditLog();
 }
 
@@ -6357,11 +6360,100 @@ async function restoreFromJson() {
     renderStock();
     renderCharges();
     renderSitesList();
+    populatePurgeMaquisSelect();
+    await refreshRestoreBackupUi().catch(() => {});
     resetUserForm();
     renderUsersList();
     showToast("Restauration terminee. Rechargez la page si besoin.");
   } catch (error) {
     showToast(error.message || "Echec restauration.");
+  }
+}
+
+async function refreshRestoreBackupUi() {
+  const infoEl = document.getElementById("restore-backup-info");
+  const fileSel = document.getElementById("restore-backup-file");
+  const siteSel = document.getElementById("restore-backup-site");
+  if (!fileSel || !siteSel) return;
+  if (!canSuperAdmin()) {
+    if (infoEl) infoEl.textContent = "";
+    return;
+  }
+  const prevBackup = fileSel.value || "";
+  const prevSite = siteSel.value || "";
+  try {
+    const data = await apiRequest(API.adminBackups);
+    if (infoEl) {
+      const mode = escapeHtml(data.storageMode || "?");
+      const k = escapeHtml(String(data.keepCount ?? 30));
+      const note = escapeHtml(data.autoNote || "");
+      infoEl.innerHTML = `${note}<br><strong>Stockage serveur&nbsp;:</strong> ${mode} · jusqu&apos;a <strong>${k}</strong> fichiers <code>data-*.json</code> et <code>app-*.sqlite3</code> conserves.<br>Pour plus de gardes&nbsp;: variable <code>TDB_BAR_BACKUP_KEEP</code> (3-100).`;
+    }
+    const jsonBk = Array.isArray(data.jsonBackups) ? data.jsonBackups : [];
+    const sqlBk = Array.isArray(data.sqliteBackups) ? data.sqliteBackups : [];
+    const parts = [];
+    if (jsonBk.length) {
+      parts.push(
+        `<optgroup label="Snapshots JSON">${jsonBk.map((b) => `<option value="${escapeHtml(b.name)}">${escapeHtml(b.name)} · ${escapeHtml(b.mtimeIso || "")}</option>`).join("")}</optgroup>`,
+      );
+    }
+    if (sqlBk.length) {
+      parts.push(
+        `<optgroup label="Copies SQLite">${sqlBk.map((b) => `<option value="${escapeHtml(b.name)}">${escapeHtml(b.name)} · ${escapeHtml(b.mtimeIso || "")}</option>`).join("")}</optgroup>`,
+      );
+    }
+    fileSel.innerHTML =
+      parts.length
+        ? parts.join("")
+        : `<option value="">Aucun fichier dans backups/</option>`;
+    if ([...fileSel.options].some((o) => o.value === prevBackup)) fileSel.value = prevBackup;
+  } catch (error) {
+    if (infoEl) infoEl.textContent = "Liste des sauvegardes inaccessible (serveur a jour ?).";
+    console.error(error);
+  }
+  const sites = state?.sites || [];
+  siteSel.innerHTML = sites.length
+    ? sites.map((s) => `<option value="${escapeHtml(s.id)}">${escapeHtml(s.nom)} (${escapeHtml(s.id)})</option>`).join("")
+    : `<option value="">—</option>`;
+  const cur = currentSiteId();
+  if (prevSite && sites.some((s) => String(s.id) === prevSite)) siteSel.value = prevSite;
+  else if (cur && sites.some((s) => String(s.id) === String(cur))) siteSel.value = String(cur);
+}
+
+async function restoreSelectedSiteFromBackup() {
+  if (!canSuperAdmin()) {
+    showToast("Reserve au super administrateur.");
+    return;
+  }
+  const backupFile = document.getElementById("restore-backup-file")?.value?.trim();
+  const siteId = document.getElementById("restore-backup-site")?.value?.trim();
+  const site = (state?.sites || []).find((s) => String(s.id) === siteId);
+  if (!backupFile) {
+    showToast("Choisissez un fichier de sauvegarde.");
+    return;
+  }
+  if (!siteId || !site) {
+    showToast("Choisissez un maquis.");
+    return;
+  }
+  if (
+    !window.confirm(
+      `Remplacer toutes les donnees operationnelles du maquis "${site.nom}" (${site.id})\n`
+      + `par la version contenue dans la sauvegarde "${backupFile}" pour ce meme maquis ?\n`
+      + "Les autres maquis restent inchanges.",
+    )
+  ) {
+    return;
+  }
+  try {
+    await apiRequest(API.restoreSiteFromBackup, { method: "POST", body: JSON.stringify({ backupFile, siteId }) });
+    activeOrderId = null;
+    editingLineId = null;
+    await bootstrapAuthenticatedApp({ skipCasierLsRestore: true });
+    lsSaveCasiers();
+    showToast(`Maquis "${site.nom}" restaure depuis ${backupFile}.`);
+  } catch (error) {
+    handleApiError(error);
   }
 }
 
@@ -8743,6 +8835,7 @@ async function bootstrapAuthenticatedApp(opts = {}) {
   renderCharges();
   loadParamsForm();
   populatePurgeMaquisSelect();
+  await refreshRestoreBackupUi().catch(() => {});
   resetOrderForm();
   applyRoleVisibility();
   navigate(currentPage);
@@ -9230,6 +9323,8 @@ document.getElementById("fab-btn").addEventListener("click", () => {
   }
   const restoreBtn = document.getElementById("restore-json-btn");
   if (restoreBtn) restoreBtn.addEventListener("click", () => restoreFromJson());
+  document.getElementById("restore-backup-refresh-btn")?.addEventListener("click", () => refreshRestoreBackupUi().catch(handleApiError));
+  document.getElementById("restore-site-backup-btn")?.addEventListener("click", () => restoreSelectedSiteFromBackup().catch(handleApiError));
   document.querySelectorAll(".nav-btn").forEach((button) => button.addEventListener("click", () => handleNavButtonClick(button)));
   bindMobileMoreSheet();
   document.getElementById("page-pdj")?.addEventListener("click", (event) => {

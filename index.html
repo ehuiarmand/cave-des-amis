@@ -1066,8 +1066,23 @@
               <h3>Multi-maquis</h3>
               <span class="section-meta">Sites</span>
             </div>
+            <p class="muted" id="restore-backup-info" style="font-size:0.85rem;margin-bottom:10px;line-height:1.45"></p>
+            <div class="form-grid" style="margin-bottom:12px">
+              <div class="form-group">
+                <label for="restore-backup-file">Sauvegarde (auto. dans dossier backups/)</label>
+                <select id="restore-backup-file" style="width:100%;margin-top:4px;padding:12px;border-radius:12px;border:1px solid var(--line)"></select>
+              </div>
+              <div class="form-group">
+                <label for="restore-backup-site">Maquis a restaurer</label>
+                <select id="restore-backup-site" style="width:100%;margin-top:4px;padding:12px;border-radius:12px;border:1px solid var(--line)"></select>
+              </div>
+            </div>
+            <div class="button-stack" style="margin-bottom:14px">
+              <button id="restore-site-backup-btn" class="btn btn-primary" type="button">Restaurer ce maquis depuis la sauvegarde choisie</button>
+              <button id="restore-backup-refresh-btn" class="btn btn-outline" type="button">Actualiser la liste</button>
+            </div>
             <div class="button-stack" style="margin-top:12px">
-              <button id="restore-json-btn" class="btn btn-danger" type="button">Restaurer depuis data.json (secours)</button>
+              <button id="restore-json-btn" class="btn btn-danger" type="button">Restaurer tout depuis data.json (secours)</button>
             </div>
             <div id="sites-list" class="stack-list"></div>
             <div class="form-grid" style="margin-top:16px">
@@ -2006,6 +2021,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=103"></script>
+  <script src="./app-orders.js?v=104"></script>
 </body>
 </html>
