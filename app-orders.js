@@ -555,6 +555,8 @@ function populateCategorySelects() {
 const DEFAULT_BRASSERIES = ["Brassivoire", "Carré d'or", "Solibra"];
 
 function brasserieListForCurrentSite() {
+  const only = siteSingleBreweryName();
+  if (only) return [only];
   const fromCatalogue = recordsForSite(state.stock)
     .map((item) => String(item.brasserie || "").trim())
     .filter(Boolean);
@@ -657,6 +659,7 @@ function supplierNamesForCurrentSite() {
 function populateSupplierList() {
   const sel = document.getElementById("purchase-supplier");
   if (!sel) return;
+  const only = siteSingleBreweryName();
   const brasseries = brasserieListForCurrentSite();
   // Calculer le nombre de casiers vides par brasserie
   // Agréger btlVides par brasserie+format, puis diviser → retournables réels
@@ -682,6 +685,12 @@ function populateSupplierList() {
       const label = v > 0 ? `${br}  (${fmt(v)} casier(s) vide(s))` : br;
       return `<option value="${escapeHtml(br)}" ${currentVal === br ? "selected" : ""}>${escapeHtml(label)}</option>`;
     }).join("");
+  if (only) {
+    sel.value = only;
+    sel.setAttribute("disabled", "disabled");
+  } else {
+    sel.removeAttribute("disabled");
+  }
 }
 
 function populatePurchaseArticlesByBrasserie(br) {
@@ -1061,7 +1070,89 @@ function renderStaffAuditLog() {
     container.innerHTML = emptyState("Aucune trace", "Les actions du gerant et des serveuses apparaitront ici.");
     return;
   }
+  // Filtres (stateful sans dépendre d'HTML fixe)
+  window.__staffAuditUi = window.__staffAuditUi || {
+    q: "",
+    role: "all",
+    actor: "all",
+    entity: "all",
+    verb: "all",
+    page: 0,
+    pageSize: 80,
+  };
+  const ui = window.__staffAuditUi;
+
+  const uniq = (arr) => [...new Set(arr)].filter(Boolean);
+  const roles = uniq(log.map((r) => String(r.role || "").trim())).sort((a, b) => a.localeCompare(b, "fr"));
+  const actors = uniq(log.map((r) => String(r.actor || "").trim())).sort((a, b) => a.localeCompare(b, "fr"));
+  const entities = uniq(log.map((r) => String(r.entity || "").trim())).sort((a, b) => a.localeCompare(b, "fr"));
+  const verbs = uniq(log.map((r) => String(r.verb || "").trim())).sort((a, b) => a.localeCompare(b, "fr"));
+
+  const q = String(ui.q || "").trim().toLowerCase();
+  const filtered = log.filter((row) => {
+    if (ui.role !== "all" && String(row.role || "") !== ui.role) return false;
+    if (ui.actor !== "all" && String(row.actor || "") !== ui.actor) return false;
+    if (ui.entity !== "all" && String(row.entity || "") !== ui.entity) return false;
+    if (ui.verb !== "all" && String(row.verb || "") !== ui.verb) return false;
+    if (!q) return true;
+    const hay = `${row.at || ""} ${row.siteNom || ""} ${row.siteId || ""} ${row.actor || ""} ${row.role || ""} ${row.verb || ""} ${row.entity || ""} ${row.summary || ""} ${row.detail || ""}`.toLowerCase();
+    return hay.includes(q);
+  });
+
+  const total = filtered.length;
+  const maxPage = Math.max(0, Math.ceil(total / ui.pageSize) - 1);
+  ui.page = Math.min(Math.max(0, ui.page), maxPage);
+  const start = ui.page * ui.pageSize;
+  const pageRows = filtered.slice(start, start + ui.pageSize);
+
+  const opt = (value, label, current) => `<option value="${escapeHtml(value)}" ${String(current) === String(value) ? "selected" : ""}>${escapeHtml(label)}</option>`;
+
   container.innerHTML = `
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin:6px 0 12px">
+      <div class="form-group form-group--zero" style="min-width:220px;flex:1">
+        <label for="audit-q">Recherche</label>
+        <input id="audit-q" type="search" placeholder="client, article, action, utilisateur..." value="${escapeHtml(ui.q || "")}">
+      </div>
+      <div class="form-group form-group--zero" style="min-width:160px">
+        <label for="audit-role">Role</label>
+        <select id="audit-role">
+          ${opt("all", "Tous", ui.role)}
+          ${roles.map((r) => opt(r, r, ui.role)).join("")}
+        </select>
+      </div>
+      <div class="form-group form-group--zero" style="min-width:190px">
+        <label for="audit-actor">Utilisateur</label>
+        <select id="audit-actor">
+          ${opt("all", "Tous", ui.actor)}
+          ${actors.map((a) => opt(a, a, ui.actor)).join("")}
+        </select>
+      </div>
+      <div class="form-group form-group--zero" style="min-width:180px">
+        <label for="audit-verb">Action</label>
+        <select id="audit-verb">
+          ${opt("all", "Toutes", ui.verb)}
+          ${verbs.map((v) => opt(v, staffAuditVerbLabel(v), ui.verb)).join("")}
+        </select>
+      </div>
+      <div class="form-group form-group--zero" style="min-width:200px">
+        <label for="audit-entity">Type</label>
+        <select id="audit-entity">
+          ${opt("all", "Tous", ui.entity)}
+          ${entities.map((e) => opt(e, staffAuditEntityLabel(e), ui.entity)).join("")}
+        </select>
+      </div>
+      <div class="form-group form-group--zero" style="min-width:120px">
+        <label for="audit-size">Taille page</label>
+        <select id="audit-size">
+          ${[40, 80, 150, 300].map((n) => opt(String(n), `${n}`, String(ui.pageSize))).join("")}
+        </select>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;margin-left:auto">
+        <button type="button" class="mini-btn" id="audit-prev" ${ui.page <= 0 ? "disabled" : ""}>◀</button>
+        <span class="muted" style="font-size:0.82rem">${fmt(start + 1)}–${fmt(Math.min(start + ui.pageSize, total))} / ${fmt(total)}</span>
+        <button type="button" class="mini-btn" id="audit-next" ${ui.page >= maxPage ? "disabled" : ""}>▶</button>
+      </div>
+    </div>
     <div class="stock-table-wrap" style="margin-top:8px">
       <table class="stock-table" style="min-width:920px">
         <thead><tr>
@@ -1075,7 +1166,7 @@ function renderStaffAuditLog() {
           <th>Detail</th>
         </tr></thead>
         <tbody>
-          ${log.map((row) => `<tr>
+          ${pageRows.map((row) => `<tr>
             <td>${escapeHtml(formatDateTimeDdMmYyyy(row.at))}</td>
             <td>${escapeHtml(row.siteNom || row.siteId || "")}</td>
             <td>${escapeHtml(row.actor || "")}</td>
@@ -1092,6 +1183,18 @@ function renderStaffAuditLog() {
         </tbody>
       </table>
     </div>`;
+
+  // Handlers (idempotent: DOM replaced each render)
+  const bind = (id, fn) => { const el = document.getElementById(id); if (el) el.addEventListener("change", fn); };
+  const bindInput = (id, fn) => { const el = document.getElementById(id); if (el) el.addEventListener("input", fn); };
+  bindInput("audit-q", (e) => { ui.q = e.target.value; ui.page = 0; renderStaffAuditLog(); });
+  bind("audit-role", (e) => { ui.role = e.target.value; ui.page = 0; renderStaffAuditLog(); });
+  bind("audit-actor", (e) => { ui.actor = e.target.value; ui.page = 0; renderStaffAuditLog(); });
+  bind("audit-verb", (e) => { ui.verb = e.target.value; ui.page = 0; renderStaffAuditLog(); });
+  bind("audit-entity", (e) => { ui.entity = e.target.value; ui.page = 0; renderStaffAuditLog(); });
+  bind("audit-size", (e) => { ui.pageSize = Math.max(20, Number(e.target.value) || 80); ui.page = 0; renderStaffAuditLog(); });
+  document.getElementById("audit-prev")?.addEventListener("click", () => { ui.page = Math.max(0, ui.page - 1); renderStaffAuditLog(); });
+  document.getElementById("audit-next")?.addEventListener("click", () => { ui.page = Math.min(maxPage, ui.page + 1); renderStaffAuditLog(); });
 }
 
 function canManage() {
@@ -1114,12 +1217,66 @@ function renderSiteSwitcher() {
   select.value = currentSiteId() || "";
   select.disabled = availableSites.length <= 1;
   syncDualZonePricingUi();
+  syncSingleBreweryUi();
 }
 
 /** Maquis avec prix cave / terrasse ou tarif unique (pas de lieu en vente). */
 function siteUsesDualZonePricing(site = currentSite()) {
   if (!site) return true;
   return site.dualZonePricing !== false;
+}
+
+function siteSingleBreweryName(site = currentSite()) {
+  if (!site) return "";
+  const enabled = site.singleBreweryOnly === true;
+  if (!enabled) return "";
+  return String(site.singleBreweryName || "").trim();
+}
+
+function siteIsSingleBrewery(site = currentSite()) {
+  return Boolean(siteSingleBreweryName(site));
+}
+
+function syncSingleBreweryUi() {
+  const site = currentSite();
+  const enabled = Boolean(site?.singleBreweryOnly);
+  const brName = String(site?.singleBreweryName || "").trim();
+
+  // Create site UI
+  const createEnabledEl = document.getElementById("new-site-single-br-enabled");
+  const createWrap = document.getElementById("new-site-single-br-wrap");
+  if (createEnabledEl && createWrap) {
+    createWrap.classList.toggle("hidden", !createEnabledEl.checked);
+  }
+
+  // Params UI
+  const pEnabledEl = document.getElementById("p-single-br-enabled");
+  const pWrap = document.getElementById("p-single-br-wrap");
+  if (pEnabledEl && pWrap) {
+    pWrap.classList.toggle("hidden", !pEnabledEl.checked);
+  }
+
+  // Stock modal: force brasserie
+  const stockBrEl = document.getElementById("s-brasserie");
+  if (stockBrEl) {
+    if (enabled && brName) {
+      stockBrEl.value = brName;
+      stockBrEl.setAttribute("disabled", "disabled");
+    } else {
+      stockBrEl.removeAttribute("disabled");
+    }
+  }
+
+  // Purchase form: force supplier
+  const purchaseSupplier = document.getElementById("purchase-supplier");
+  if (purchaseSupplier) {
+    if (enabled && brName) {
+      purchaseSupplier.value = brName;
+      purchaseSupplier.setAttribute("disabled", "disabled");
+    } else {
+      purchaseSupplier.removeAttribute("disabled");
+    }
+  }
 }
 
 /** Affiche ou masque les sélecteurs de lieu selon la config du maquis. */
@@ -4112,7 +4269,10 @@ async function addSite() {
     return;
   }
   const dualZonePricing = Boolean(document.getElementById("new-site-dual-zone")?.checked);
-  const newSite = { id: siteId, nom, ville, pays, dualZonePricing };
+  const singleBreweryOnly = Boolean(document.getElementById("new-site-single-br-enabled")?.checked);
+  const singleBreweryName = String(document.getElementById("new-site-single-br-name")?.value || "").trim();
+  if (singleBreweryOnly && !singleBreweryName) { showToast("Saisissez la brasserie unique."); return; }
+  const newSite = { id: siteId, nom, ville, pays, dualZonePricing, singleBreweryOnly, singleBreweryName };
   const newSites = [...(state.sites || []), newSite];
   const newUsers = (state.auth?.users || []).map((user) => {
     const currentAllowed = new Set(user.allowedSiteIds || []);
@@ -4131,6 +4291,11 @@ async function addSite() {
   document.getElementById("new-site-pays").value = "";
   const newDualEl = document.getElementById("new-site-dual-zone");
   if (newDualEl) newDualEl.checked = true;
+  const newBrEnabled = document.getElementById("new-site-single-br-enabled");
+  const newBrName = document.getElementById("new-site-single-br-name");
+  if (newBrEnabled) newBrEnabled.checked = false;
+  if (newBrName) newBrName.value = "";
+  syncSingleBreweryUi();
   renderSitesList();
   renderSiteSwitcher();
   resetUserForm();
@@ -4174,6 +4339,10 @@ function loadParamsForm() {
   document.getElementById("p-prefixe").value = site?.prefixeFacture || "";
   const pSmsQr = document.getElementById("p-sms-qr");
   if (pSmsQr) pSmsQr.value = site?.smsQrAlert || "";
+  const pSingleEnabled = document.getElementById("p-single-br-enabled");
+  const pSingleName = document.getElementById("p-single-br-name");
+  if (pSingleEnabled) pSingleEnabled.checked = Boolean(site?.singleBreweryOnly);
+  if (pSingleName) pSingleName.value = site?.singleBreweryName || "";
   const dualZonePricingEl = document.getElementById("p-dual-zone-pricing");
   if (dualZonePricingEl) dualZonePricingEl.checked = siteUsesDualZonePricing(site);
   const categoriesField = document.getElementById("p-categories");
@@ -4181,6 +4350,7 @@ function loadParamsForm() {
     const saved = Array.isArray(state?.categories) && state.categories.length ? state.categories : CATEGORIES;
     categoriesField.value = saved.map((cat) => String(cat || "").trim()).filter(Boolean).join("\n");
   }
+  syncSingleBreweryUi();
   renderUsersList();
   renderUserSiteCheckboxes();
   renderSitesList();
@@ -4769,8 +4939,10 @@ function openPurchaseForm() {
   document.getElementById("purchase-date").value = today();
   document.getElementById("purchase-feedback").textContent = "";
   populateSupplierList();
+  syncSingleBreweryUi();
   // Réinitialiser le select article (aucune brasserie sélectionnée au départ)
-  populatePurchaseArticlesByBrasserie("");
+  const forcedBr = siteSingleBreweryName();
+  populatePurchaseArticlesByBrasserie(forcedBr || "");
   syncPurchaseLineInputsFromStock();
   renderPurchaseDraft();
 }
@@ -5608,10 +5780,11 @@ function resetStockForm() {
   document.getElementById("s-prix-kit-ext").value = "";
   document.getElementById("s-price-location").value = "int";
   document.getElementById("s-price-location-value").value = "";
-  const bEl = document.getElementById("s-brasserie"); if (bEl) bEl.value = "";
+  const bEl = document.getElementById("s-brasserie"); if (bEl) bEl.value = siteSingleBreweryName() || "";
   renderStockSaleFormats();
   document.getElementById("stock-modal-title").textContent = "Nouvel article en stock";
   document.getElementById("save-stock-btn").textContent = "Enregistrer l'article";
+  syncSingleBreweryUi();
 }
 
 function openEditStock(itemId) {
@@ -5632,7 +5805,7 @@ function openEditStock(itemId) {
   document.getElementById("s-frigo").value = String(stockFrigo(item));
   document.getElementById("s-reserve").value = String(stockReserve(item));
   document.getElementById("s-prix").value = String(item.prixAchat || "");
-  const bEditEl = document.getElementById("s-brasserie"); if (bEditEl) bEditEl.value = item.brasserie || "";
+  const bEditEl = document.getElementById("s-brasserie"); if (bEditEl) bEditEl.value = siteSingleBreweryName() || item.brasserie || "";
   document.getElementById("s-prix-kit-int").value = String(item.prixVenteInt || item.prixKitInt || item.prixBouteille || item.prixVente || "");
   document.getElementById("s-prix-kit-ext").value = String(item.prixVenteExt || item.prixKitExt || item.prixBouteille || item.prixVente || "");
   document.getElementById("s-price-location").value = "int";
@@ -5640,6 +5813,7 @@ function openEditStock(itemId) {
   updateStockPriceInput();
   document.getElementById("stock-modal-title").textContent = `Modifier : ${item.article}`;
   document.getElementById("save-stock-btn").textContent = "Enregistrer les modifications";
+  syncSingleBreweryUi();
   openModal("modal-stock");
 }
 
@@ -5655,16 +5829,18 @@ async function saveStock() {
     showToast("Nom de l'article obligatoire.");
     return;
   }
+  const forcedBrasserie = siteSingleBreweryName();
   const fields = {
     caseSize: (VALID_CASE_SIZES.includes(Number(document.getElementById("s-case-size").value)) ? Number(document.getElementById("s-case-size").value) : 24),
     lotType: String(document.getElementById("s-lot-type")?.value || "casier"),
     article: articleName,
     cat: document.getElementById("s-cat").value,
-    brasserie: (document.getElementById("s-brasserie")?.value || "").trim(),
+    brasserie: forcedBrasserie || (document.getElementById("s-brasserie")?.value || "").trim(),
     initCases: Number(document.getElementById("s-init").value) || 0,
     seuilMin: Number(document.getElementById("s-seuil").value) || 5,
     prixAchat: Number(document.getElementById("s-prix").value) || 0,
   };
+  if (siteIsSingleBrewery() && !fields.brasserie) { showToast("Brasserie unique manquante dans les paramètres du maquis."); return; }
   fields.formatsVente = readStockSaleFormats();
   const primaryFormat = fields.formatsVente.find((format) => format.quantite === 1) || fields.formatsVente[0];
   fields.packSize = Math.max(1, Number(primaryFormat?.quantite) || Number(document.getElementById("s-pack").value) || 1);
@@ -6033,6 +6209,9 @@ async function saveCharge() {
 async function saveParams() {
   const site = currentSite();
   const dualPricingChecked = Boolean(document.getElementById("p-dual-zone-pricing")?.checked);
+  const singleBreweryOnly = Boolean(document.getElementById("p-single-br-enabled")?.checked);
+  const singleBreweryName = String(document.getElementById("p-single-br-name")?.value || "").trim();
+  if (singleBreweryOnly && !singleBreweryName) { showToast("Saisissez la brasserie unique."); return; }
   const categories = (document.getElementById("p-categories")?.value || "")
     .split(/\r?\n|,/)
     .map((value) => value.trim())
@@ -6049,6 +6228,8 @@ async function saveParams() {
     prefixeFacture: (document.getElementById("p-prefixe").value.trim() || item.prefixeFacture || "FAC").toUpperCase(),
     dualZonePricing: dualPricingChecked,
     smsQrAlert: (document.getElementById("p-sms-qr")?.value || "").trim(),
+    singleBreweryOnly,
+    singleBreweryName: singleBreweryOnly ? singleBreweryName : "",
   } : item);
   await persistState({ sites: updatedSites, categories: cleanCategories });
   populateCategorySelects();
@@ -8696,6 +8877,8 @@ function attachEvents() {
   document.getElementById("print-all-qr-btn").addEventListener("click", () => printAllQrTables());
   document.getElementById("print-qr-int-btn").addEventListener("click", () => printQrCard("Intérieur"));
   document.getElementById("print-qr-ext-btn").addEventListener("click", () => printQrCard("Extérieur"));
+  document.getElementById("new-site-single-br-enabled")?.addEventListener("change", syncSingleBreweryUi);
+  document.getElementById("p-single-br-enabled")?.addEventListener("change", syncSingleBreweryUi);
 document.getElementById("fab-btn").addEventListener("click", () => {
     if (currentPage === "ventes") {
       if (ventesSubTab === "consignes") {
@@ -8930,6 +9113,7 @@ document.getElementById("fab-btn").addEventListener("click", () => {
   });
   document.getElementById("purchase-article-detail")?.addEventListener("change", () => syncPurchaseLineInputsFromStock());
   document.getElementById("purchase-supplier")?.addEventListener("change", (e) => {
+    if (siteIsSingleBrewery()) return;
     const br = e.target.value;
     populatePurchaseArticlesByBrasserie(br);
     syncPurchasePriceInput();

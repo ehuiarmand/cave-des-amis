@@ -968,6 +968,16 @@
               </div>
               <div class="form-group" style="grid-column:1/-1">
                 <label class="checkbox-label" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer">
+                  <input id="p-single-br-enabled" type="checkbox" style="margin-top:3px;width:auto">
+                  <span>Vente limitée à une seule brasserie</span>
+                </label>
+              </div>
+              <div class="form-group hidden" id="p-single-br-wrap" style="grid-column:1/-1">
+                <label for="p-single-br-name">Brasserie unique</label>
+                <input id="p-single-br-name" type="text" placeholder="ex: Solibra" list="brasserie-list">
+              </div>
+              <div class="form-group" style="grid-column:1/-1">
+                <label class="checkbox-label" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer">
                   <input id="p-dual-zone-pricing" type="checkbox" checked style="margin-top:3px;width:auto">
                   <span>Tarifs differents selon la zone (cave / terrasse)</span>
                 </label>
@@ -1077,6 +1087,17 @@
                   <span>Tarifs differents cave / terrasse (deux zones de prix)</span>
                 </label>
                 <p class="muted" style="font-size:0.8rem;margin:6px 0 0 28px">Decochez si un seul tarif s’applique partout (plus de choix « lieu » en vente et un seul QR par table).</p>
+              </div>
+              <div class="form-group" style="grid-column:1/-1">
+                <label class="checkbox-label" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer">
+                  <input id="new-site-single-br-enabled" type="checkbox" style="margin-top:3px;width:auto">
+                  <span>Ce maquis vend uniquement une brasserie</span>
+                </label>
+                <p class="muted" style="font-size:0.8rem;margin:6px 0 0 28px">Quand activé, l'application force la brasserie dans le catalogue/achats et filtre les listes.</p>
+              </div>
+              <div class="form-group hidden" id="new-site-single-br-wrap" style="grid-column:1/-1">
+                <label for="new-site-single-br-name">Brasserie unique</label>
+                <input id="new-site-single-br-name" type="text" placeholder="ex: Solibra" list="brasserie-list">
               </div>
             </div>
             <div class="button-stack">
@@ -1966,6 +1987,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=91"></script>
+  <script src="./app-orders.js?v=93"></script>
 </body>
 </html>
