@@ -7246,10 +7246,14 @@ function casiersConsignesForSite(sourceState = state) {
 
     // Certains casiers physiques stockent la "brasserie" directement (pas un article du stock).
     // Si on ne trouve aucun article catalogue correspondant, on conserve.
-    const matches = (state.stock || []).filter((it) => String(it.article || "").trim().toLowerCase() === key);
+    const siteId = currentSiteId();
+    const multi = multiSiteActive();
+    const matches = (state.stock || []).filter((it) =>
+      rowMatchesSite(it, siteId, multi) && String(it.article || "").trim().toLowerCase() === key
+    );
     if (!matches.length) return true;
 
-    // Si au moins un match est un "casier", on conserve (consigné).
+    // Si au moins un match du site courant est un "casier", on conserve (consigné).
     if (matches.some((it) => lotType(it) === "casier")) return true;
 
     // Sinon (carton / unité), ce casier ne doit pas apparaître dans "casiers physiques".
@@ -7270,7 +7274,9 @@ async function cleanupCartonCasiers({ confirmFirst = true } = {}) {
   const isWrong = (c) => {
     const key = String(c.article || "").trim().toLowerCase();
     if (!key) return false;
-    const matches = (state.stock || []).filter((it) => String(it.article || "").trim().toLowerCase() === key);
+    const matches = (state.stock || []).filter((it) =>
+      rowMatchesSite(it, siteId, multi) && String(it.article || "").trim().toLowerCase() === key
+    );
     if (!matches.length) return false; // casier par brasserie ou article absent → ne pas supprimer
     return !matches.some((it) => lotType(it) === "casier");
   };
