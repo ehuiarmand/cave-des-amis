@@ -442,7 +442,13 @@ function lineQtyPriceLabel(line, stockItem = null) {
 }
 
 function stockItemForArticle(article, siteId = currentSiteId()) {
-  return (state.stock || []).find((item) => item.siteId === siteId && item.article.toLowerCase() === String(article || "").toLowerCase()) || null;
+  const site = siteId ?? currentSiteId();
+  const multi = multiSiteActive();
+  const target = String(article || "").toLowerCase();
+  return (state.stock || []).find((item) =>
+    rowMatchesSite(item, site, multi)
+    && String(item.article || "").toLowerCase() === target
+  ) || null;
 }
 
 function reservedBottlesForOpenOrders(article, excludeOrderId = null, excludeLineId = null, siteId = currentSiteId()) {
