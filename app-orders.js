@@ -2650,7 +2650,7 @@ function renderDashboard() {
 }
 
 function renderDashboardCasierKpis(stockSiteList) {
-  const all = casiersForSite();
+  const all = casiersConsignesForSite();
   const k = { total: all.length, plein: 0, partiel: 0, vide: 0 };
   all.forEach((c) => {
     const st = String(c.statut || "vide").toLowerCase();
@@ -7040,6 +7040,15 @@ function casiersForSite(sourceState = state) {
   return list.filter((c) => rowMatchesSite(c, currentSiteId(), multiSiteActive()));
 }
 
+function casiersConsignesForSite(sourceState = state) {
+  return casiersForSite(sourceState).filter((c) => {
+    const stockIt = stockItemForArticle(c.article);
+    // Certains casiers physiques stockent la "brasserie" directement (pas un article du stock).
+    if (!stockIt) return true;
+    return lotType(stockIt) === "casier";
+  });
+}
+
 function casierMouvementsForSite(sourceState = state) {
   const list = Array.isArray(sourceState?.casierMouvements) ? sourceState.casierMouvements : [];
   return list.filter((c) => rowMatchesSite(c, currentSiteId(), multiSiteActive()));
@@ -7901,7 +7910,7 @@ function setCasierViewMode(mode) {
 function renderCasierPhysique() {
   const list = document.getElementById("casier-phys-list");
   if (!list) return;
-  const all = casiersForSite();
+  const all = casiersConsignesForSite();
   const fArticle = String(casierPhysFilters.article || "").trim().toLowerCase();
   const fEmplacement = String(casierPhysFilters.emplacement || "").trim().toLowerCase();
   const fStatut = String(casierPhysFilters.statut || "all").toLowerCase();
