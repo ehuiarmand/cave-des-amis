@@ -491,6 +491,17 @@ _SITE_SCOPED_ROW_KEYS: tuple[str, ...] = (
 )
 
 
+def _zero_stock_row_quantities(row: dict[str, Any]) -> None:
+    """Conserve ligne catalogue stock ; positions et historique mouvemente a zero."""
+    row["init"] = 0
+    row["entrees"] = 0
+    row["sorties"] = 0
+    row["frigo"] = 0
+    row["reserve"] = 0
+    row.pop("lastReapproAt", None)
+    row.pop("lastReapproBy", None)
+
+
 def session_is_superadmin(session: dict[str, Any] | None) -> bool:
     if session is None:
         return True
@@ -1636,8 +1647,12 @@ class DataStore:
             self._write(self._state)
             return self.public_state()
 
-    def purge_maquis_data(self, site_id: str) -> dict[str, Any]:
-        """Efface tout l'historique operationnel lie a un maquis ; conserve la fiche dans ``sites`` et les parametres globaux."""
+    def purge_maquis_data(self, site_id: str, *, keep_stock_catalog: bool = False) -> dict[str, Any]:
+        """Efface l'historique operationnel lie a un maquis ; conserve la fiche dans ``sites``.
+
+        Si ``keep_stock_catalog`` est True : les lignes ``stock`` de ce maquis sont conservees mais les
+        quantites (init, entrees, sorties, frigo, reserve) sont remises a zero.
+        """
         sid = str(site_id or "").strip()
         if not sid:
             raise ValueError("Identifiant maquis invalide.")
@@ -1645,6 +1660,14 @@ class DataStore:
             site_ids = [str(s.get("id")) for s in self._state.get("sites", []) if s.get("id")]
             if sid not in site_ids:
                 raise ValueError("Maquis introuvable.")
+
+            def belongs_site(row: Any) -> bool:
+                if not isinstance(row, dict):
+                    return False
+                raw_sid = row.get("siteId")
+                if raw_sid is None or raw_sid == "":
+                    return False
+                return str(raw_sid).strip() == sid
 
             def keep_row(row: Any) -> bool:
                 if not isinstance(row, dict):
@@ -1656,7 +1679,24 @@ class DataStore:
 
             for key in _SITE_SCOPED_ROW_KEYS:
                 rows = self._state.get(key)
-                if isinstance(rows, list):
+                if not isinstance(rows, list):
+                    continue
+                if key == "stock" and keep_stock_catalog:
+                    new_stock: list[Any] = []
+                    for r in rows:
+                        if not isinstance(r, dict):
+                            new_stock.append(r)
+                            continue
+                        if not belongs_site(r):
+                            new_stock.append(r)
+                            continue
+                        copy_row = json.loads(json.dumps(r))
+                        _zero_stock_row_quantities(copy_row)
+                        new_stock.append(copy_row)
+                    self._state[key] = new_stock
+                elif keep_stock_catalog and key == "supplierPrices":
+                    continue
+                else:
                     self._state[key] = [r for r in rows if keep_row(r)]
 
             self._write(self._state)
@@ -1959,8 +1999,9 @@ class AppHandler(BaseHTTPRequestHandler):
                 return
             body = self.read_json()
             target = str((body or {}).get("siteId", "")).strip()
+            keep_cat = bool((body or {}).get("keepStockCatalog"))
             try:
-                payload = store.purge_maquis_data(target)
+                payload = store.purge_maquis_data(target, keep_stock_catalog=keep_cat)
             except ValueError as error:
                 self.send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
                 return

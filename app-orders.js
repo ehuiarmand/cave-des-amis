@@ -4610,13 +4610,32 @@ const PURGE_MAQUIS_ROW_KEYS = [
   "creditRecoveries", "charges", "staffAuditLog",
 ];
 
-async function purgeMaquisDataViaStatePut(siteId) {
+async function purgeMaquisDataViaStatePut(siteId, keepStockCatalog) {
   if (!canSuperAdmin()) throw new Error("Reserve au super administrateur.");
   const sid = String(siteId || "").trim();
   const keep = (row) => !(row && typeof row === "object" && String(row.siteId || "").trim() === sid);
   const overrides = {};
   PURGE_MAQUIS_ROW_KEYS.forEach((key) => {
     const list = Array.isArray(state[key]) ? state[key] : [];
+    if (key === "stock" && keepStockCatalog) {
+      overrides.stock = list.map((row) => {
+        if (!row || typeof row !== "object" || String(row.siteId || "").trim() !== sid) return row;
+        const c = { ...row };
+        c.init = 0;
+        c.entrees = 0;
+        c.sorties = 0;
+        c.frigo = 0;
+        c.reserve = 0;
+        delete c.lastReapproAt;
+        delete c.lastReapproBy;
+        return c;
+      });
+      return;
+    }
+    if (keepStockCatalog && key === "supplierPrices") {
+      overrides.supplierPrices = list.slice();
+      return;
+    }
     overrides[key] = list.filter(keep);
   });
   await persistState(overrides);
@@ -9163,22 +9182,25 @@ document.getElementById("fab-btn").addEventListener("click", () => {
       showToast("Selectionnez un maquis.");
       return;
     }
+    const keepCat = Boolean(document.getElementById("purge-maquis-keep-catalog")?.checked);
     const msg =
-      `Effacer pour de bon tout l'historique de "${site.nom}" (${site.id}) sur le serveur ?\n`
-      + "Les parametres de ce maquis (nom, ville, prefixes...) sont conserves.";
+      (keepCat
+        ? `Remettre a zero les quantites et effacer tout l'historique de "${site.nom}" (${site.id}) tout en conservant les articles du catalogue ?\n`
+        : `EFFACER aussi le catalogue articles (stock) pour "${site.nom}" (${site.id}) avec tout le reste ?\n`)
+      + "Les parametres maquis dans la liste (nom, ville...) sont toujours conserves.";
     if (!window.confirm(msg)) return;
     if (!window.confirm("Confirmation finale : suppression irreversible pour ce maquis ?")) return;
     try {
       let compatPut = false;
       try {
-        await apiRequest(API.purgeMaquis, { method: "POST", body: JSON.stringify({ siteId }) });
+        await apiRequest(API.purgeMaquis, { method: "POST", body: JSON.stringify({ siteId, keepStockCatalog: keepCat }) });
       } catch (first) {
         const st = first?.status;
-        const msg = typeof first?.message === "string" ? first.message : "";
+        const apiMsg = typeof first?.message === "string" ? first.message : "";
         const unknownRoute =
-          st === 404 || msg.includes("Route API introuvable") || msg.includes("NOT_FOUND") || /\b404\b/.test(msg);
+          st === 404 || apiMsg.includes("Route API introuvable") || apiMsg.includes("NOT_FOUND") || /\b404\b/.test(apiMsg);
         if (!canSuperAdmin() || !unknownRoute) throw first;
-        await purgeMaquisDataViaStatePut(siteId);
+        await purgeMaquisDataViaStatePut(siteId, keepCat);
         compatPut = true;
       }
       activeOrderId = null;

@@ -1119,7 +1119,13 @@
             <div class="form-group" style="margin-bottom:12px">
               <label for="purge-maquis-select">Reinitialiser un maquis</label>
               <select id="purge-maquis-select" style="width:100%;margin-top:4px;padding:12px;border-radius:12px;border:1px solid var(--line)"></select>
-              <p class="muted" style="font-size:0.8rem;margin:6px 0 0">Supprime tout l&apos;historique de ce maquis (ventes, stock, commandes, PDJ, achats, casiers suivis serveur...) mais conserve ses parametres dans la liste des maquis.</p>
+              <label class="checkbox-label" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;margin-top:12px">
+                <input id="purge-maquis-keep-catalog" type="checkbox" checked style="margin-top:3px;width:auto">
+                <span><strong>Garder le catalogue articles</strong> (noms, prix, formats) — seules les quantites passent a zero et l&apos;historique ventes/commandes/etc. est supprime.</span>
+              </label>
+              <p class="muted" style="font-size:0.8rem;margin:10px 0 0">
+                Sans cette case &nbsp;: les lignes <strong>stock</strong> (articles) pour ce maquis sont aussi effacees. Pour recuperer apres erreur utilisez une copie locale <code>backups/data-*.json</code> ou votre export Excel stock.
+              </p>
             </div>
             <button id="purge-maquis-btn" class="btn btn-danger" style="margin-bottom:10px" type="button">Effacer les donnees du maquis selectionne</button>
             <hr style="border:none;border-top:1px solid var(--line);margin:14px 0">
@@ -2000,6 +2006,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=102"></script>
+  <script src="./app-orders.js?v=103"></script>
 </body>
 </html>
