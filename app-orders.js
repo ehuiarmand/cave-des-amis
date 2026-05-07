@@ -6381,13 +6381,39 @@ async function refreshRestoreBackupUi() {
   }
   const prevBackup = fileSel.value || "";
   const prevSite = siteSel.value || "";
+  let data = null;
+  let fallbackFromState = false;
   try {
-    const data = await apiRequest(API.adminBackups, { cache: "no-store" });
+    data = await apiRequest(API.adminBackups, { cache: "no-store" });
+  } catch (fetchErr) {
+    try {
+      state = await apiRequest(API.state, { cache: "no-store" });
+      data = state.adminBackups;
+      if (data) fallbackFromState = true;
+    } catch (_) {
+      data = null;
+    }
+    if (!data && infoEl) {
+      const st = fetchErr?.status != null ? ` (${fetchErr.status})` : "";
+      const raw = String(fetchErr?.message || fetchErr || "erreur");
+      const msg = escapeHtml(raw);
+      infoEl.innerHTML =
+        `<span style="color:#c62828"><strong>Liste des sauvegardes inaccessible${st}</strong><br>${msg}</span><br>`
+        + `<span class="muted">Apres mise a jour : redemarrez le serveur (objet <code>adminBackups</code> dans GET /api/state). Si le probleme persiste, verifiez proxy / URL du serveur.</span>`;
+    }
+    console.error(fetchErr);
+  }
+
+  if (data) {
     if (infoEl) {
       const mode = escapeHtml(data.storageMode || "?");
       const k = escapeHtml(String(data.keepCount ?? 30));
       const note = escapeHtml(data.autoNote || "");
-      infoEl.innerHTML = `${note}<br><strong>Stockage serveur&nbsp;:</strong> ${mode} · jusqu&apos;a <strong>${k}</strong> fichiers <code>data-*.json</code> et <code>app-*.sqlite3</code> conserves.<br>Pour plus de gardes&nbsp;: variable <code>TDB_BAR_BACKUP_KEEP</code> (3-100).`;
+      const via = fallbackFromState
+        ? `<p class="muted" style="margin:0 0 8px">Liste obtenue via <code>/api/state</code> (<code>/api/admin/backups</code> non disponible sur ce deploiement).</p>`
+        : "";
+      infoEl.innerHTML =
+        `${via}${note}<br><strong>Stockage serveur&nbsp;:</strong> ${mode} · jusqu&apos;a <strong>${k}</strong> fichiers <code>data-*.json</code> et <code>app-*.sqlite3</code> conserves.<br>Pour plus de gardes&nbsp;: variable <code>TDB_BAR_BACKUP_KEEP</code> (3-100).`;
     }
     const jsonBk = Array.isArray(data.jsonBackups) ? data.jsonBackups : [];
     const sqlBk = Array.isArray(data.sqliteBackups) ? data.sqliteBackups : [];
@@ -6407,17 +6433,8 @@ async function refreshRestoreBackupUi() {
         ? parts.join("")
         : `<option value="">Aucun fichier dans backups/</option>`;
     if ([...fileSel.options].some((o) => o.value === prevBackup)) fileSel.value = prevBackup;
-  } catch (error) {
-    if (infoEl) {
-      const st = error?.status != null ? ` (${error.status})` : "";
-      const raw = String(error?.message || error || "erreur");
-      const msg = escapeHtml(raw);
-      infoEl.innerHTML =
-        `<span style="color:#c62828"><strong>Liste des sauvegardes inaccessible${st}</strong><br>${msg}</span><br>`
-        + `<span class="muted">Solutions frequences : redemarrer <code>server.py</code> avec la derniere version ; verifier d’etre connecte en super administrateur ; verifier qu’aucun proxy ne bloque <code>GET /api/admin/backups</code>.</span>`;
-    }
-    console.error(error);
   }
+
   const sites = state?.sites || [];
   siteSel.innerHTML = sites.length
     ? sites.map((s) => `<option value="${escapeHtml(s.id)}">${escapeHtml(s.nom)} (${escapeHtml(s.id)})</option>`).join("")

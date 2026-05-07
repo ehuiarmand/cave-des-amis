@@ -1167,7 +1167,9 @@ class DataStore:
         with self._lock:
             full = self.public_state()
             if session_is_superadmin(session):
-                return full
+                payload = dict(full)
+                payload["adminBackups"] = json.loads(json.dumps(self.list_backups()))
+                return payload
             site_ids = [str(s["id"]) for s in self._state["sites"] if s.get("id")]
             allowed = session_allowed_sites(session, site_ids)
             if not allowed and site_ids:
