@@ -5949,10 +5949,26 @@ function stockMovements() {
     const itemEntrees = (state.stockEntrees || []).filter((e) => rowMatchesSite(e, siteId, multiSite) && e.article === item.article);
     if (itemEntrees.length > 0) {
       itemEntrees.forEach((e) => {
-        movements.push({ date: e.date, article: e.article, type: "entree", qty: e.qty, unit: "Bouteille", reason: `Achat (${fmt(e.cases)} casier(s) x ${fmt(e.caseSize)} btl)`, user: e.user });
+        movements.push({
+          date: e.date,
+          article: e.article,
+          type: "entree",
+          qty: e.qty,
+          unit: "Bouteille",
+          reason: `Achat (${fmt(e.cases)} casier(s) x ${fmt(e.caseSize)} btl)`,
+          user: e.user || e.createdBy || item.lastReapproBy || item.createdBy || "-",
+        });
       });
     } else if (Number(item.entrees) > 0) {
-      movements.push({ date: item.lastReapproAt || today(), article: item.article, type: "entree", qty: Number(item.entrees) || 0, unit: "Bouteille", reason: "Approvisionnement (historique)", user: item.lastReapproBy || "-" });
+      movements.push({
+        date: item.lastReapproAt || today(),
+        article: item.article,
+        type: "entree",
+        qty: Number(item.entrees) || 0,
+        unit: "Bouteille",
+        reason: "Approvisionnement (historique)",
+        user: item.lastReapproBy || item.createdBy || "Historique",
+      });
     }
     // item.sorties is a cumulative accounting counter — individual ventes are already listed below
   });
