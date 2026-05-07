@@ -802,6 +802,11 @@
               <button id="casier-phys-move-in-btn" class="btn btn-outline" type="button">+ Entrée</button>
               <button id="casier-phys-move-out-btn" class="btn btn-outline" type="button">- Sortie</button>
             </div>
+            <div class="button-stack any-admin" style="grid-template-columns:1fr;display:grid;margin:-6px 0 14px">
+              <button id="casier-phys-clean-cartons-btn" class="btn btn-outline" type="button" style="border-color:#c54f41;color:#983428">
+                Nettoyer les casiers "carton" (supprimer erreurs anciennes)
+              </button>
+            </div>
             <div id="casier-phys-kpi-bar" class="stock-kpi-bar" style="margin-bottom:16px">
               <div class="stock-kpi"><span class="stock-kpi-label">Casiers totaux</span><strong id="casier-phys-kpi-total" class="stock-kpi-val">0</strong></div>
               <div class="stock-kpi"><span class="stock-kpi-label">Pleins</span><strong id="casier-phys-kpi-plein" class="stock-kpi-val">0</strong></div>
@@ -1987,6 +1992,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=93"></script>
+  <script src="./app-orders.js?v=94"></script>
 </body>
 </html>

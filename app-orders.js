@@ -7241,11 +7241,59 @@ function casiersForSite(sourceState = state) {
 
 function casiersConsignesForSite(sourceState = state) {
   return casiersForSite(sourceState).filter((c) => {
-    const stockIt = stockItemForArticle(c.article);
+    const key = String(c.article || "").trim().toLowerCase();
+    if (!key) return true;
+
     // Certains casiers physiques stockent la "brasserie" directement (pas un article du stock).
-    if (!stockIt) return true;
-    return lotType(stockIt) === "casier";
+    // Si on ne trouve aucun article catalogue correspondant, on conserve.
+    const matches = (state.stock || []).filter((it) => String(it.article || "").trim().toLowerCase() === key);
+    if (!matches.length) return true;
+
+    // Si au moins un match est un "casier", on conserve (consigné).
+    if (matches.some((it) => lotType(it) === "casier")) return true;
+
+    // Sinon (carton / unité), ce casier ne doit pas apparaître dans "casiers physiques".
+    return false;
   });
+}
+
+async function cleanupCartonCasiers({ confirmFirst = true } = {}) {
+  if (!canAnyAdmin()) { showToast("Reserve aux administrateurs."); return; }
+  const before = Array.isArray(state.casiers) ? state.casiers.slice() : [];
+  if (!before.length) { showToast("Aucun casier a nettoyer."); return; }
+  const siteId = currentSiteId();
+  const multi = multiSiteActive();
+  const isForSite = (c) => rowMatchesSite(c, siteId, multi);
+  const siteRows = before.filter(isForSite);
+
+  // Un casier est "carton" si son article existe dans le catalogue et qu'aucune occurrence n'est lotType=casier.
+  const isWrong = (c) => {
+    const key = String(c.article || "").trim().toLowerCase();
+    if (!key) return false;
+    const matches = (state.stock || []).filter((it) => String(it.article || "").trim().toLowerCase() === key);
+    if (!matches.length) return false; // casier par brasserie ou article absent → ne pas supprimer
+    return !matches.some((it) => lotType(it) === "casier");
+  };
+
+  const toRemove = siteRows.filter(isWrong);
+  if (!toRemove.length) { showToast("Aucun casier 'carton' detecte."); return; }
+
+  if (confirmFirst) {
+    const sample = toRemove.slice(0, 8).map((c) => `${c.code || "CAS-?"} · ${c.article || "—"}`).join("\n");
+    if (!window.confirm(
+      `Supprimer ${toRemove.length} casier(s) lies a des articles en CARTON/UNITE ?\n\n` +
+      `Exemples:\n${sample}${toRemove.length > 8 ? "\n…" : ""}\n\n` +
+      `Cette action nettoie les erreurs anciennes (stocke localement).`
+    )) return;
+  }
+
+  const removeIds = new Set(toRemove.map((c) => String(c.id)));
+  state.casiers = before.filter((c) => !isForSite(c) || !removeIds.has(String(c.id)));
+  lsSaveCasiers();
+  try { await persistState({ casiers: state.casiers }); } catch {}
+  renderCasierPhysique();
+  renderDashboard();
+  showToast(`${toRemove.length} casier(s) 'carton' supprime(s).`);
 }
 
 function casierMouvementsForSite(sourceState = state) {
@@ -8755,6 +8803,7 @@ function attachEvents() {
   document.getElementById("casier-phys-new-btn")?.addEventListener("click", openCasierEditModal);
   document.getElementById("casier-phys-move-in-btn")?.addEventListener("click", () => openCasierPhysMoveModal("entree"));
   document.getElementById("casier-phys-move-out-btn")?.addEventListener("click", () => openCasierPhysMoveModal("sortie"));
+  document.getElementById("casier-phys-clean-cartons-btn")?.addEventListener("click", () => cleanupCartonCasiers().catch(handleApiError));
   // Modal Nouveau casier
   document.getElementById("casier-edit-article")?.addEventListener("change", syncCasierEditFromArticle);
   document.getElementById("casier-edit-submit")?.addEventListener("click", () => submitCasierEdit().catch(handleApiError));
