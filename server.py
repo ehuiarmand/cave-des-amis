@@ -1751,8 +1751,8 @@ class AppHandler(BaseHTTPRequestHandler):
         self.serve_static(parsed.path)
 
     def do_POST(self) -> None:
-        parsed = urlparse(self.path)
-        if parsed.path == "/api/admin/restore-from-json":
+        post_path = (urlparse(self.path).path or "/").rstrip("/") or "/"
+        if post_path == "/api/admin/restore-from-json":
             session = self.require_session()
             if session is None:
                 return
@@ -1767,7 +1767,7 @@ class AppHandler(BaseHTTPRequestHandler):
             audit_log("restore_from_json", {"ip": self.client_ip(), "username": session.get("username", "")})
             self.send_json(HTTPStatus.OK, restored, cache_control="no-store")
             return
-        if parsed.path == "/api/public/order":
+        if post_path == "/api/public/order":
             payload = self.read_json()
             try:
                 order = store.create_public_order(
@@ -1784,7 +1784,7 @@ class AppHandler(BaseHTTPRequestHandler):
             self.send_json(HTTPStatus.OK, {"ok": True, "order": order})
             return
 
-        if parsed.path == "/api/login":
+        if post_path == "/api/login":
             payload = self.read_json()
             username = str(payload.get("username", "")).strip()
             password = str(payload.get("password", ""))
@@ -1821,7 +1821,7 @@ class AppHandler(BaseHTTPRequestHandler):
             )
             return
 
-        if parsed.path == "/api/2fa/verify":
+        if post_path == "/api/2fa/verify":
             payload = self.read_json()
             pre_auth_token = str(payload.get("preAuthToken", "")).strip()
             code = str(payload.get("code", "")).strip()
@@ -1854,7 +1854,7 @@ class AppHandler(BaseHTTPRequestHandler):
             self.send_json(HTTPStatus.OK, {"authenticated": True, "username": username, "role": role, "allowedSiteIds": allowed}, cookie=token)
             return
 
-        if parsed.path == "/api/2fa/setup":
+        if post_path == "/api/2fa/setup":
             session = self.require_session()
             if session is None:
                 return
@@ -1879,7 +1879,7 @@ class AppHandler(BaseHTTPRequestHandler):
             self.send_json(HTTPStatus.OK, {"secret": secret, "otpauthUrl": otp_url})
             return
 
-        if parsed.path == "/api/2fa/enable":
+        if post_path == "/api/2fa/enable":
             session = self.require_session()
             if session is None:
                 return
@@ -1910,7 +1910,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 self.send_json(HTTPStatus.NOT_FOUND, {"error": "Utilisateur introuvable."})
             return
 
-        if parsed.path == "/api/2fa/disable":
+        if post_path == "/api/2fa/disable":
             session = self.require_session()
             if session is None:
                 return
@@ -1933,13 +1933,13 @@ class AppHandler(BaseHTTPRequestHandler):
                 self.send_json(HTTPStatus.NOT_FOUND, {"error": "Utilisateur introuvable."})
             return
 
-        if parsed.path == "/api/logout":
+        if post_path == "/api/logout":
             token = self.session_token()
             sessions.clear(token)
             self.send_json(HTTPStatus.OK, {"authenticated": False}, clear_cookie=True)
             return
 
-        if parsed.path == "/api/reset":
+        if post_path == "/api/reset":
             session = self.require_session()
             if session is None:
                 return
@@ -1950,7 +1950,7 @@ class AppHandler(BaseHTTPRequestHandler):
             self.send_json(HTTPStatus.OK, payload)
             return
 
-        if parsed.path == "/api/purge-maquis":
+        if post_path == "/api/purge-maquis":
             session = self.require_session()
             if session is None:
                 return
@@ -1967,7 +1967,7 @@ class AppHandler(BaseHTTPRequestHandler):
             self.send_json(HTTPStatus.OK, payload)
             return
 
-        if parsed.path.startswith("/api/"):
+        if post_path.startswith("/api"):
             self.send_json(HTTPStatus.NOT_FOUND, {"error": "Route API introuvable. Verifiez que la derniere version du serveur est deployee."})
             return
         self.send_error(HTTPStatus.NOT_FOUND)

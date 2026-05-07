@@ -4603,6 +4603,25 @@ async function syncStateSilently() {
   }
 }
 
+/** Liste alignee avec server.py (_SITE_SCOPED_ROW_KEYS) — secours purge maquis via PUT si route POST absente (vieux serveur). */
+const PURGE_MAQUIS_ROW_KEYS = [
+  "ventes", "stock", "commandes", "stockChecks", "stockEntrees", "stockLosses",
+  "dayBooks", "purchaseOrders", "supplierPrices", "casiers", "casierMouvements",
+  "creditRecoveries", "charges", "staffAuditLog",
+];
+
+async function purgeMaquisDataViaStatePut(siteId) {
+  if (!canSuperAdmin()) throw new Error("Reserve au super administrateur.");
+  const sid = String(siteId || "").trim();
+  const keep = (row) => !(row && typeof row === "object" && String(row.siteId || "").trim() === sid);
+  const overrides = {};
+  PURGE_MAQUIS_ROW_KEYS.forEach((key) => {
+    const list = Array.isArray(state[key]) ? state[key] : [];
+    overrides[key] = list.filter(keep);
+  });
+  await persistState(overrides);
+}
+
 async function persistState(overrides = {}) {
   const _casiers = overrides.casiers ?? state.casiers ?? [];
   const _casierMouvements = overrides.casierMouvements ?? state.casierMouvements ?? [];
@@ -9150,12 +9169,27 @@ document.getElementById("fab-btn").addEventListener("click", () => {
     if (!window.confirm(msg)) return;
     if (!window.confirm("Confirmation finale : suppression irreversible pour ce maquis ?")) return;
     try {
-      await apiRequest(API.purgeMaquis, { method: "POST", body: JSON.stringify({ siteId }) });
+      let compatPut = false;
+      try {
+        await apiRequest(API.purgeMaquis, { method: "POST", body: JSON.stringify({ siteId }) });
+      } catch (first) {
+        const st = first?.status;
+        const msg = typeof first?.message === "string" ? first.message : "";
+        const unknownRoute =
+          st === 404 || msg.includes("Route API introuvable") || msg.includes("NOT_FOUND") || /\b404\b/.test(msg);
+        if (!canSuperAdmin() || !unknownRoute) throw first;
+        await purgeMaquisDataViaStatePut(siteId);
+        compatPut = true;
+      }
       activeOrderId = null;
       editingLineId = null;
       await bootstrapAuthenticatedApp({ skipCasierLsRestore: true });
       lsSaveCasiers();
-      showToast(`Donnees du maquis "${site.nom}" effacees sur le serveur.`);
+      showToast(
+        compatPut
+          ? `Donnees du maquis "${site.nom}" effacees (serveur sans /api/purge-maquis ; redemarrez avec la derniere version de server.py).`
+          : `Donnees du maquis "${site.nom}" effacees sur le serveur.`,
+      );
     } catch (error) {
       handleApiError(error);
     }
