@@ -1836,7 +1836,8 @@ class AppHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query)
-        if parsed.path == "/api/public/menu":
+        get_path = (parsed.path or "/").rstrip("/") or "/"
+        if get_path == "/api/public/menu":
             site_id = str((query.get("siteId") or [""])[0]).strip()
             location = str((query.get("location") or ["Intérieur"])[0]).strip()
             payload = store.public_menu(site_id, location)
@@ -1845,13 +1846,13 @@ class AppHandler(BaseHTTPRequestHandler):
                 return
             self.send_json(HTTPStatus.OK, payload)
             return
-        if parsed.path == "/api/public/orders":
+        if get_path == "/api/public/orders":
             site_id = str((query.get("siteId") or [""])[0]).strip()
             table = str((query.get("table") or [""])[0]).strip()
             client = str((query.get("client") or [""])[0]).strip()
             self.send_json(HTTPStatus.OK, store.public_orders(site_id, table, client))
             return
-        if parsed.path == "/api/session":
+        if get_path == "/api/session":
             session = self.require_session()
             if session is None:
                 return
@@ -1874,7 +1875,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 },
             )
             return
-        if parsed.path == "/api/admin/backups":
+        if get_path == "/api/admin/backups":
             session = self.require_session()
             if session is None:
                 return
@@ -1885,7 +1886,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 payload = store.list_backups()
             self.send_json(HTTPStatus.OK, payload, cache_control="no-store")
             return
-        if parsed.path == "/api/changes":
+        if get_path == "/api/changes":
             session = self.require_session()
             if session is None:
                 return
@@ -1896,7 +1897,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 return
             self.send_json(HTTPStatus.OK, store.changes(since=since, site_id=site_id), cache_control="no-store")
             return
-        if parsed.path == "/api/state":
+        if get_path == "/api/state":
             session = self.require_session()
             if session is None:
                 return
@@ -1906,7 +1907,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 return
             self.send_json(HTTPStatus.OK, store.public_state_for_session(session), etag=etag, cache_control="no-cache")
             return
-        if parsed.path == "/api/public/order":
+        if get_path == "/api/public/order":
             self.send_error(HTTPStatus.METHOD_NOT_ALLOWED)
             return
         self.serve_static(parsed.path)

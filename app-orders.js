@@ -6382,7 +6382,7 @@ async function refreshRestoreBackupUi() {
   const prevBackup = fileSel.value || "";
   const prevSite = siteSel.value || "";
   try {
-    const data = await apiRequest(API.adminBackups);
+    const data = await apiRequest(API.adminBackups, { cache: "no-store" });
     if (infoEl) {
       const mode = escapeHtml(data.storageMode || "?");
       const k = escapeHtml(String(data.keepCount ?? 30));
@@ -6408,7 +6408,14 @@ async function refreshRestoreBackupUi() {
         : `<option value="">Aucun fichier dans backups/</option>`;
     if ([...fileSel.options].some((o) => o.value === prevBackup)) fileSel.value = prevBackup;
   } catch (error) {
-    if (infoEl) infoEl.textContent = "Liste des sauvegardes inaccessible (serveur a jour ?).";
+    if (infoEl) {
+      const st = error?.status != null ? ` (${error.status})` : "";
+      const raw = String(error?.message || error || "erreur");
+      const msg = escapeHtml(raw);
+      infoEl.innerHTML =
+        `<span style="color:#c62828"><strong>Liste des sauvegardes inaccessible${st}</strong><br>${msg}</span><br>`
+        + `<span class="muted">Solutions frequences : redemarrer <code>server.py</code> avec la derniere version ; verifier d’etre connecte en super administrateur ; verifier qu’aucun proxy ne bloque <code>GET /api/admin/backups</code>.</span>`;
+    }
     console.error(error);
   }
   const sites = state?.sites || [];
