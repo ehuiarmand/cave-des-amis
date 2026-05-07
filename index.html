@@ -1116,8 +1116,15 @@
               <h3>Zone sensible</h3>
               <span class="section-meta">Danger</span>
             </div>
-            <p class="muted" style="margin-bottom:12px">Efface toutes les donnees locales serveur et repart sur une base vide.</p>
-            <button id="reset-btn" class="btn btn-danger" type="button">Reinitialiser l'application</button>
+            <div class="form-group" style="margin-bottom:12px">
+              <label for="purge-maquis-select">Reinitialiser un maquis</label>
+              <select id="purge-maquis-select" style="width:100%;margin-top:4px;padding:12px;border-radius:12px;border:1px solid var(--line)"></select>
+              <p class="muted" style="font-size:0.8rem;margin:6px 0 0">Supprime tout l&apos;historique de ce maquis (ventes, stock, commandes, PDJ, achats, casiers suivis serveur...) mais conserve ses parametres dans la liste des maquis.</p>
+            </div>
+            <button id="purge-maquis-btn" class="btn btn-danger" style="margin-bottom:10px" type="button">Effacer les donnees du maquis selectionne</button>
+            <hr style="border:none;border-top:1px solid var(--line);margin:14px 0">
+            <p class="muted" style="margin-bottom:12px">Efface toutes les donnees locales serveur et repart sur une base vide (tous les maquis inclus).</p>
+            <button id="reset-btn" class="btn btn-danger" type="button">Reinitialiser l&apos;application entiere</button>
           </article>
         </div>
 
@@ -1993,6 +2000,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=100"></script>
+  <script src="./app-orders.js?v=101"></script>
 </body>
 </html>

@@ -5,6 +5,7 @@ const API = {
   state: "/api/state",
   changes: "/api/changes",
   reset: "/api/reset",
+  purgeMaquis: "/api/purge-maquis",
   restoreFromJson: "/api/admin/restore-from-json",
   twoFaVerify: "/api/2fa/verify",
   twoFaSetup: "/api/2fa/setup",
@@ -4258,16 +4259,31 @@ async function deleteUser(username) {
   showToast(`Utilisateur "${username}" supprime.`);
 }
 
+function populatePurgeMaquisSelect() {
+  const sel = document.getElementById("purge-maquis-select");
+  if (!sel || !canSuperAdmin() || !state) return;
+  const sites = state.sites || [];
+  const prev = sel.value || "";
+  sel.innerHTML = sites.length
+    ? sites.map((s) => `<option value="${escapeHtml(s.id)}">${escapeHtml(s.nom)} (${escapeHtml(s.id)})</option>`).join("")
+    : `<option value="">— Aucun maquis —</option>`;
+  const cur = currentSiteId();
+  if (sites.some((s) => String(s.id) === String(prev))) sel.value = prev;
+  else if (sites.some((s) => String(s.id) === String(cur))) sel.value = String(cur);
+}
+
 function renderSitesList() {
   const container = document.getElementById("sites-list");
   if (!container) return;
   if (!canSuperAdmin()) {
     container.innerHTML = "";
+    populatePurgeMaquisSelect();
     return;
   }
   const sites = state.sites || [];
   if (!sites.length) {
     container.innerHTML = `<p class="muted" style="text-align:center;padding:12px 0">Aucun maquis enregistre.</p>`;
+    populatePurgeMaquisSelect();
     return;
   }
   container.innerHTML = sites.map((site) => `
@@ -4278,6 +4294,7 @@ function renderSitesList() {
       </div>
       <button type="button" class="btn btn-danger btn-sm" data-delete-site="${escapeHtml(site.id)}">Supprimer</button>
     </article>`).join("");
+  populatePurgeMaquisSelect();
 }
 
 async function addSite() {
@@ -8641,7 +8658,8 @@ function migrateCasiersVidesBouteillesVides() {
   if (changed) lsSaveCasiers();
 }
 
-async function bootstrapAuthenticatedApp() {
+async function bootstrapAuthenticatedApp(opts = {}) {
+  const skipCasierLsRestore = Boolean(opts.skipCasierLsRestore);
   state = await apiRequest(API.state);
   if (!Array.isArray(state.creditRecoveries)) state.creditRecoveries = [];
   if (!Array.isArray(state.purchaseOrders)) state.purchaseOrders = [];
@@ -8658,8 +8676,8 @@ async function bootstrapAuthenticatedApp() {
   if (!state.nextId.creditRecovery) state.nextId.creditRecovery = 100;
   if (!state.nextId.casier || Number.isNaN(Number(state.nextId.casier))) state.nextId.casier = 1;
   if (!state.nextId.casierMouvement || Number.isNaN(Number(state.nextId.casierMouvement))) state.nextId.casierMouvement = 1;
-  // Restaurer depuis localStorage si le serveur n'a pas les casiers (champ non persisté côté serveur)
-  if (!state.casiers.length) lsRestoreCasiers();
+  // Restaurer depuis localStorage si le serveur n'a pas les casiers (éviter après purge / reset : cache local obsolète)
+  if (!skipCasierLsRestore && !state.casiers.length) lsRestoreCasiers();
   // Migration : casiers vides existants sans bouteillesVides tracquées → initialiser à capacite
   migrateCasiersVidesBouteillesVides();
   if (state.nextId.auditEntry === undefined || state.nextId.auditEntry === null) state.nextId.auditEntry = 0;
@@ -8686,6 +8704,7 @@ async function bootstrapAuthenticatedApp() {
   renderStock();
   renderCharges();
   loadParamsForm();
+  populatePurgeMaquisSelect();
   resetOrderForm();
   applyRoleVisibility();
   navigate(currentPage);
@@ -9106,8 +9125,37 @@ document.getElementById("fab-btn").addEventListener("click", () => {
       state = await apiRequest(API.reset, { method: "POST", body: JSON.stringify({}) });
       activeOrderId = null;
       editingLineId = null;
-      await bootstrapAuthenticatedApp();
+      await bootstrapAuthenticatedApp({ skipCasierLsRestore: true });
+      lsSaveCasiers();
       showToast("Application reinitialisee.");
+    } catch (error) {
+      handleApiError(error);
+    }
+  });
+  document.getElementById("purge-maquis-btn")?.addEventListener("click", async () => {
+    if (!canSuperAdmin()) {
+      showToast("Seul le super administrateur peut purger un maquis.");
+      return;
+    }
+    const sel = document.getElementById("purge-maquis-select");
+    const siteId = sel?.value?.trim();
+    const site = (state?.sites || []).find((s) => String(s.id) === siteId);
+    if (!site) {
+      showToast("Selectionnez un maquis.");
+      return;
+    }
+    const msg =
+      `Effacer pour de bon tout l'historique de "${site.nom}" (${site.id}) sur le serveur ?\n`
+      + "Les parametres de ce maquis (nom, ville, prefixes...) sont conserves.";
+    if (!window.confirm(msg)) return;
+    if (!window.confirm("Confirmation finale : suppression irreversible pour ce maquis ?")) return;
+    try {
+      await apiRequest(API.purgeMaquis, { method: "POST", body: JSON.stringify({ siteId }) });
+      activeOrderId = null;
+      editingLineId = null;
+      await bootstrapAuthenticatedApp({ skipCasierLsRestore: true });
+      lsSaveCasiers();
+      showToast(`Donnees du maquis "${site.nom}" effacees sur le serveur.`);
     } catch (error) {
       handleApiError(error);
     }

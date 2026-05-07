@@ -472,6 +472,24 @@ def migrate_state(payload: dict[str, Any]) -> dict[str, Any]:
 
 VALID_USER_ROLES = ("superadmin", "admin", "manager", "serveuse")
 
+# Listes filtrees par maquis (siteId). Les lignes sans siteId ne sont pas supprimees lors d'une purge (donnees ambiguës anciennes migrations).
+_SITE_SCOPED_ROW_KEYS: tuple[str, ...] = (
+    "ventes",
+    "stock",
+    "commandes",
+    "stockChecks",
+    "stockEntrees",
+    "stockLosses",
+    "dayBooks",
+    "purchaseOrders",
+    "supplierPrices",
+    "casiers",
+    "casierMouvements",
+    "creditRecoveries",
+    "charges",
+    "staffAuditLog",
+)
+
 
 def session_is_superadmin(session: dict[str, Any] | None) -> bool:
     if session is None:
@@ -1618,6 +1636,32 @@ class DataStore:
             self._write(self._state)
             return self.public_state()
 
+    def purge_maquis_data(self, site_id: str) -> dict[str, Any]:
+        """Efface tout l'historique operationnel lie a un maquis ; conserve la fiche dans ``sites`` et les parametres globaux."""
+        sid = str(site_id or "").strip()
+        if not sid:
+            raise ValueError("Identifiant maquis invalide.")
+        with self._lock:
+            site_ids = [str(s.get("id")) for s in self._state.get("sites", []) if s.get("id")]
+            if sid not in site_ids:
+                raise ValueError("Maquis introuvable.")
+
+            def keep_row(row: Any) -> bool:
+                if not isinstance(row, dict):
+                    return True
+                raw_sid = row.get("siteId")
+                if raw_sid is None or raw_sid == "":
+                    return True
+                return str(raw_sid).strip() != sid
+
+            for key in _SITE_SCOPED_ROW_KEYS:
+                rows = self._state.get(key)
+                if isinstance(rows, list):
+                    self._state[key] = [r for r in rows if keep_row(r)]
+
+            self._write(self._state)
+            return self.public_state()
+
 
 store = DataStore(DATA_FILE)
 sessions = SessionManager(SESSION_TTL_SECONDS)
@@ -1903,6 +1947,23 @@ class AppHandler(BaseHTTPRequestHandler):
                 self.send_json(HTTPStatus.FORBIDDEN, {"error": "Seul le super administrateur peut reinitialiser l'application."})
                 return
             payload = store.reset()
+            self.send_json(HTTPStatus.OK, payload)
+            return
+
+        if parsed.path == "/api/purge-maquis":
+            session = self.require_session()
+            if session is None:
+                return
+            if not session_is_superadmin(session):
+                self.send_json(HTTPStatus.FORBIDDEN, {"error": "Seul le super administrateur peut purger un maquis."})
+                return
+            body = self.read_json()
+            target = str((body or {}).get("siteId", "")).strip()
+            try:
+                payload = store.purge_maquis_data(target)
+            except ValueError as error:
+                self.send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+                return
             self.send_json(HTTPStatus.OK, payload)
             return
 
