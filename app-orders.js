@@ -445,10 +445,22 @@ function stockItemForArticle(article, siteId = currentSiteId()) {
   const site = siteId ?? currentSiteId();
   const multi = multiSiteActive();
   const target = String(article || "").toLowerCase();
-  return (state.stock || []).find((item) =>
+  const scoped = (state.stock || []).find((item) =>
     rowMatchesSite(item, site, multi)
     && String(item.article || "").toLowerCase() === target
   ) || null;
+  if (scoped) return scoped;
+
+  // Fallback compat: anciennes lignes sans siteId quand le multi-maquis est actif.
+  // Si l'article est unique dans le catalogue global, on le prend.
+  const allMatches = (state.stock || []).filter((item) =>
+    String(item.article || "").toLowerCase() === target
+  );
+  if (allMatches.length === 1) return allMatches[0];
+
+  // Si plusieurs, tenter de prioriser un match explicite siteId (même si rowMatchesSite a échoué).
+  const direct = allMatches.find((it) => String(it.siteId || "") === String(site || ""));
+  return direct || null;
 }
 
 function reservedBottlesForOpenOrders(article, excludeOrderId = null, excludeLineId = null, siteId = currentSiteId()) {
