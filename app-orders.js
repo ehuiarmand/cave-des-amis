@@ -8398,7 +8398,7 @@ function openCasierPhysMoveModal(type, prefilledCasierId = null) {
 
   const sel = document.getElementById("casier-phys-move-casier");
   if (sel) {
-    const all = casiersForSite().slice().sort((a, b) => String(a.code || "").localeCompare(String(b.code || "")));
+    const all = casiersConsignesForSite().slice().sort((a, b) => String(a.code || "").localeCompare(String(b.code || "")));
     sel.innerHTML = all.length
       ? all.map((c) => `<option value="${c.id}">${escapeHtml(c.code)} · ${escapeHtml(c.article || "-")} · ${fmt(c.quantiteActuelle || 0)}/${fmt(c.capacite || 0)}</option>`).join("")
       : `<option value="">— Aucun casier —</option>`;
