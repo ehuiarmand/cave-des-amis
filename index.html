@@ -1853,13 +1853,13 @@
           <input id="casier-edit-capacite" type="number" min="1" step="1" value="24" placeholder="ex: 24">
         </div>
         <div class="form-group">
-          <label for="casier-edit-vides">Bouteilles vides</label>
-          <input id="casier-edit-vides" type="number" min="0" step="1" value="0" placeholder="0">
-          <p class="form-hint">Nombre de bouteilles vides à retourner au fournisseur.</p>
+          <label for="casier-edit-qty">Nombre de casiers à créer</label>
+          <input id="casier-edit-qty" type="number" min="1" step="1" value="1" placeholder="ex: 10">
+          <p class="form-hint">Crée plusieurs casiers vides (CAS-xxxx) d'un coup.</p>
         </div>
       </div>
       <div class="button-stack">
-        <button id="casier-edit-submit" class="btn btn-primary" type="button">Créer le casier vide</button>
+        <button id="casier-edit-submit" class="btn btn-primary" type="button">Créer les casiers</button>
         <button class="btn btn-outline close-modal" data-close="modal-casier-edit" type="button">Annuler</button>
       </div>
     </div>
@@ -1993,6 +1993,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=98"></script>
+  <script src="./app-orders.js?v=100"></script>
 </body>
 </html>

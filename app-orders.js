@@ -4238,6 +4238,10 @@ async function addUser() {
 }
 
 async function deleteUser(username) {
+  if (String(username || "").trim().toLowerCase() === "admin") {
+    showToast('Impossible de supprimer le compte "admin" (super administrateur).');
+    return;
+  }
   const users = state.auth.users || [];
   const target = users.find((u) => u.username === username);
   if (currentRole === "manager" && target?.role !== "serveuse") {
@@ -8373,8 +8377,8 @@ function openCasierEditModal() {
   syncCasierEditFromArticle();
   const empEl = document.getElementById("casier-edit-emplacement");
   if (empEl) empEl.value = "À retourner";
-  const videsEl = document.getElementById("casier-edit-vides");
-  if (videsEl) videsEl.value = "0";
+  const qtyEl = document.getElementById("casier-edit-qty");
+  if (qtyEl) qtyEl.value = "1";
   openModal("modal-casier-edit");
 }
 
@@ -8393,14 +8397,20 @@ async function submitCasierEdit() {
   const article = document.getElementById("casier-edit-article")?.value || "";
   const capacite = Math.max(1, Math.floor(Number(document.getElementById("casier-edit-capacite")?.value) || 0));
   const emplacement = String(document.getElementById("casier-edit-emplacement")?.value || "À retourner").trim();
-  const vides0 = Math.max(0, Math.floor(Number(document.getElementById("casier-edit-vides")?.value) || 0));
-  const created = await createCasier({ article, capacite, emplacement, quantiteActuelle: 0, bouteillesVides: vides0 });
-  if (!created) return;
+  const qty = Math.max(1, Math.floor(Number(document.getElementById("casier-edit-qty")?.value) || 1));
+  if (!normalizeBrasserieName(article)) { showToast("Saisissez la brasserie."); return; }
+  if (capacite <= 0) { showToast("Capacite invalide."); return; }
+  let createdCount = 0;
+  for (let i = 0; i < qty; i++) {
+    const created = await createCasier({ article, capacite, emplacement, quantiteActuelle: 0, bouteillesVides: 0 });
+    if (created) createdCount++;
+  }
+  if (!createdCount) return;
   closeModal("modal-casier-edit");
   renderCasierPhysique();
   renderStock();
   renderDashboard();
-  showToast(`Casier ${created.code} créé (${vides0} btl vides).`);
+  showToast(`${createdCount} casier(s) créé(s).`);
 }
 
 /* -----------------------------------------------------------
