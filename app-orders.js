@@ -5816,11 +5816,11 @@ function renderStockSaleFormats(formats = [{ quantite: 1, prixInterieur: "", pri
         <input class="stock-format-qty" type="number" min="1" value="${escapeHtml(format.quantite || 1)}" placeholder="1">
       </div>
       <div class="form-group">
-        <label>Prix interieur</label>
+        <label>Prix cave</label>
         <input class="stock-format-int" type="number" min="0" value="${escapeHtml(format.prixInterieur || "")}" placeholder="ex: 700">
       </div>
       <div class="form-group">
-        <label>Prix exterieur</label>
+        <label>Prix maquis</label>
         <input class="stock-format-ext" type="number" min="0" value="${escapeHtml(format.prixExterieur || "")}" placeholder="ex: 600">
       </div>
       <button type="button" class="mini-btn" data-remove-sale-format="${index}" ${rows.length <= 1 ? "disabled" : ""}>Retirer</button>
@@ -5943,7 +5943,7 @@ async function saveStock() {
   fields.prixKitInt = fields.packSize > 1 ? fields.prixVenteInt : 0;
   fields.prixKitExt = fields.packSize > 1 ? fields.prixVenteExt : 0;
   if (fields.prixAchat <= 0 || !fields.formatsVente.length || fields.prixVenteInt <= 0) {
-    showToast("Prix achat et au moins un format avec prix interieur obligatoires.");
+    showToast("Prix achat et au moins un format avec prix cave obligatoires.");
     return;
   }
   if (fields.prixVenteExt <= 0) {

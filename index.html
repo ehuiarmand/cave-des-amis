@@ -1680,7 +1680,7 @@
         <div class="section-head compact-head">
           <div>
             <label>Formats de vente</label>
-            <p class="form-hint">Un format = quantite de bouteilles vendues ensemble avec son prix interieur/exterieur.</p>
+            <p class="form-hint">Un format = quantite de bouteilles vendues ensemble avec son prix cave et prix maquis.</p>
           </div>
           <button id="add-sale-format-btn" class="mini-btn" type="button">+ Format</button>
         </div>
@@ -1694,17 +1694,17 @@
         <div class="form-group">
           <label for="s-price-location">Ancien lieu du prix</label>
           <select id="s-price-location">
-            <option value="int">Interieur</option>
-            <option value="ext">Exterieur</option>
+            <option value="int">Cave</option>
+            <option value="ext">Maquis</option>
           </select>
           <input id="s-price-location-value" type="number" placeholder="ex: 700">
         </div>
         <div class="form-group">
-          <label for="s-prix-kit-int">Prix vente — Interieur (FCFA)</label>
+          <label for="s-prix-kit-int">Prix vente — cave (FCFA)</label>
           <input id="s-prix-kit-int" type="number" placeholder="ex: 700">
         </div>
         <div class="form-group">
-          <label for="s-prix-kit-ext">Prix vente — Exterieur (FCFA)</label>
+          <label for="s-prix-kit-ext">Prix vente — maquis (FCFA)</label>
           <input id="s-prix-kit-ext" type="number" placeholder="ex: 800">
         </div>
       </div>
@@ -2021,6 +2021,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=106"></script>
+  <script src="./app-orders.js?v=107"></script>
 </body>
 </html>
