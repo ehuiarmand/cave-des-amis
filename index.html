@@ -672,8 +672,9 @@
             <div class="form-grid three-cols" style="margin-top:0">
               <div class="form-group">
                 <label for="purchase-supplier">Brasserie / fournisseur</label>
-                <input id="purchase-supplier" type="text" list="purchase-brasserie-list" placeholder="ex: Brassivoire, Solibra, Castel..." autocomplete="off">
-                <datalist id="purchase-brasserie-list"></datalist>
+                <select id="purchase-supplier" aria-label="Brasserie ou fournisseur">
+                  <option value="">ex: Brassivoire, Solibra, Castel…</option>
+                </select>
               </div>
               <div class="form-group">
                 <label for="purchase-date">Date</label>
@@ -2020,6 +2021,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=109"></script>
+  <script src="./app-orders.js?v=110"></script>
 </body>
 </html>

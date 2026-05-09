@@ -689,7 +689,7 @@ function supplierKey(value) {
 /** Sentinelle interne pour les articles sans brasserie catalogue (champ commande fournisseur). */
 const PURCHASE_NO_BRASSERIE_VALUE = "__sans_brasserie__";
 
-/** Libellé affiché / option datalist — ne pas utiliser comme clé brasserie catalogue. */
+/** Libellé affiché (option select, nom sur la commande) — la valeur technique est PURCHASE_NO_BRASSERIE_VALUE. */
 const PURCHASE_SANS_BRASSERIE_LABEL = "Sans brasserie (cartons et autres)";
 
 /** Noms à ne jamais proposer comme brasserie (erreurs catalogue, ex. type de lot saisi comme brasserie). */
@@ -805,42 +805,66 @@ function supplierNamesForCurrentSite() {
 }
 
 function populateSupplierList() {
-  const inp = document.getElementById("purchase-supplier");
-  const dl = document.getElementById("purchase-brasserie-list");
-  if (!inp || !dl) return;
+  const sel = document.getElementById("purchase-supplier");
+  if (!sel) return;
   const only = siteSingleBreweryName();
   const brasseries = brasserieListForCurrentSite();
   const hasSansBrasserie = !only && recordsForSite(state.stock).some((item) =>
     !normalizeBrasserieName(item.brasserie) && (lotType(item) === "casier" || lotType(item) === "carton")
   );
-  const currentRaw = inp.value;
-  const currentCanon = purchaseSupplierInputToCanonical(currentRaw);
-  const options = [];
-  if (hasSansBrasserie) {
-    options.push(`<option value="${escapeHtml(PURCHASE_SANS_BRASSERIE_LABEL)}">`);
-  }
-  brasseries.forEach((br) => {
-    options.push(`<option value="${escapeHtml(br)}">`);
+  /** Agréger les casiers vides affichés en suffixe — uniquement si consigne brasserie catalogue. */
+  const btlVidesBrFormat = {};
+  casiersForSite().forEach((c) => {
+    if (!physicalCasierCountsForPurchaseVides(c)) return;
+    const stockIt = stockItemForArticle(c.article);
+    const br = normalizeBrasserieName(stockIt?.brasserie || c.article) || "";
+    if (!br || !catalogueHasCasierConsigneForPurchaseBr(br)) return;
+    const cap = Math.max(1, Number(c.capacite) || 24);
+    const key = `${br}::${cap}`;
+    if (!btlVidesBrFormat[key]) btlVidesBrFormat[key] = { br, cap, btlVides: 0 };
+    btlVidesBrFormat[key].btlVides += Math.max(0, Number(c.bouteillesVides) || 0);
   });
-  dl.innerHTML = options.join("");
+  const videsByBr = {};
+  Object.values(btlVidesBrFormat).forEach(({ br, cap, btlVides }) => {
+    if (!videsByBr[br]) videsByBr[br] = 0;
+    videsByBr[br] += Math.floor(btlVides / cap);
+  });
+  const currentVal = sel.value;
+  const currentCanon = purchaseSupplierInputToCanonical(currentVal);
+  let opts = `<option value="">${escapeHtml("ex: Brassivoire, Solibra, Castel…")}</option>`;
+  if (hasSansBrasserie) {
+    opts += `<option value="${escapeHtml(PURCHASE_NO_BRASSERIE_VALUE)}">${escapeHtml(PURCHASE_SANS_BRASSERIE_LABEL)}</option>`;
+  }
+  opts += brasseries.map((br) => {
+    const showVides = purchaseSupplierCountsEmptyCratesHints(br);
+    const v = showVides ? (videsByBr[normalizeBrasserieName(br)] || 0) : 0;
+    const label = showVides && v > 0 ? `${br}  (${fmt(v)} casier(s) vide(s))` : br;
+    return `<option value="${escapeHtml(br)}">${escapeHtml(label)}</option>`;
+  }).join("");
+  sel.innerHTML = opts;
   if (only) {
-    inp.value = only;
-    inp.setAttribute("disabled", "disabled");
+    sel.value = only;
+    sel.setAttribute("disabled", "disabled");
     return;
   }
-  inp.removeAttribute("disabled");
+  sel.removeAttribute("disabled");
   if (currentCanon === PURCHASE_NO_BRASSERIE_VALUE && hasSansBrasserie) {
-    inp.value = PURCHASE_SANS_BRASSERIE_LABEL;
-  } else if (currentCanon && supplierKey(currentCanon) !== supplierKey(PURCHASE_NO_BRASSERIE_VALUE)) {
-    if (isExcludedBrasserieSuggestion(currentCanon)) {
-      inp.value = "";
-    } else {
-      const base = brasseries.find((b) => normalizeBrasserieName(b) === normalizeBrasserieName(currentCanon));
-      inp.value = base || (isExcludedBrasserieSuggestion(currentCanon) ? "" : stripPurchaseSupplierVidesSuffix(currentRaw));
-    }
-  } else if (!currentCanon) {
-    inp.value = "";
+    sel.value = PURCHASE_NO_BRASSERIE_VALUE;
+    return;
   }
+  const keep =
+    currentCanon && !isExcludedBrasserieSuggestion(currentCanon)
+    && [...sel.options].some(
+      (o) => o.value && normalizeBrasserieName(o.value) === normalizeBrasserieName(currentCanon),
+    );
+  if (keep) {
+    const m = [...sel.options].find(
+      (o) => o.value && normalizeBrasserieName(o.value) === normalizeBrasserieName(currentCanon),
+    );
+    sel.value = m ? m.value : "";
+    return;
+  }
+  sel.value = "";
 }
 
 function populatePurchaseArticlesByBrasserie(br) {
