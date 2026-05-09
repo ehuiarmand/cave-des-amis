@@ -566,11 +566,15 @@ function populateSelect(id, values, firstLabel = null) {
 
 function populateCategorySelects() {
   populateSelect("s-cat", categoryList());
-  const dl = document.getElementById("brasserie-list");
-  if (dl) {
-    const brasseries = brasserieListForCurrentSite();
-    dl.innerHTML = brasseries.map((b) => `<option value="${escapeHtml(b)}">`).join("");
-  }
+  const preserve = (id) => String(document.getElementById(id)?.value ?? "").trim();
+  populateBrasserieFournisseurSelect(document.getElementById("s-brasserie"), { mode: "catalog", preservedValue: preserve("s-brasserie") });
+  populateBrasserieFournisseurSelect(document.getElementById("brasserie-attach-name"), { mode: "catalog", preservedValue: preserve("brasserie-attach-name") });
+  populateBrasserieFournisseurSelect(document.getElementById("p-single-br-name"), { mode: "catalog", preservedValue: preserve("p-single-br-name") });
+  populateBrasserieFournisseurSelect(document.getElementById("new-site-single-br-name"), {
+    mode: "catalog",
+    preservedValue: preserve("new-site-single-br-name"),
+  });
+  syncSingleBreweryUi();
 }
 
 const DEFAULT_BRASSERIES = ["Brassivoire", "Carré d'or", "Solibra"];
@@ -692,6 +696,9 @@ const PURCHASE_NO_BRASSERIE_VALUE = "__sans_brasserie__";
 /** Libellé affiché (option select, nom sur la commande) — la valeur technique est PURCHASE_NO_BRASSERIE_VALUE. */
 const PURCHASE_SANS_BRASSERIE_LABEL = "Sans brasserie (cartons et autres)";
 
+/** Première ligne des listes Brasserie / fournisseur (`<select>`) — valeur vide. */
+const BRASSERIE_FOURNISSEUR_PLACEHOLDER_LABEL = "ex: Brassivoire, Solibra, Castel…";
+
 /** Noms à ne jamais proposer comme brasserie (erreurs catalogue, ex. type de lot saisi comme brasserie). */
 function isExcludedBrasserieSuggestion(name) {
   const k = supplierKey(String(name || "").trim());
@@ -804,15 +811,7 @@ function supplierNamesForCurrentSite() {
   ])].sort((a, b) => a.localeCompare(b, "fr"));
 }
 
-function populateSupplierList() {
-  const sel = document.getElementById("purchase-supplier");
-  if (!sel) return;
-  const only = siteSingleBreweryName();
-  const brasseries = brasserieListForCurrentSite();
-  const hasSansBrasserie = !only && recordsForSite(state.stock).some((item) =>
-    !normalizeBrasserieName(item.brasserie) && (lotType(item) === "casier" || lotType(item) === "carton")
-  );
-  /** Agréger les casiers vides affichés en suffixe — uniquement si consigne brasserie catalogue. */
+function computeVidesByBrForPurchaseHints() {
   const btlVidesBrFormat = {};
   casiersForSite().forEach((c) => {
     if (!physicalCasierCountsForPurchaseVides(c)) return;
@@ -829,42 +828,105 @@ function populateSupplierList() {
     if (!videsByBr[br]) videsByBr[br] = 0;
     videsByBr[br] += Math.floor(btlVides / cap);
   });
-  const currentVal = sel.value;
-  const currentCanon = purchaseSupplierInputToCanonical(currentVal);
-  let opts = `<option value="">${escapeHtml("ex: Brassivoire, Solibra, Castel…")}</option>`;
-  if (hasSansBrasserie) {
-    opts += `<option value="${escapeHtml(PURCHASE_NO_BRASSERIE_VALUE)}">${escapeHtml(PURCHASE_SANS_BRASSERIE_LABEL)}</option>`;
+  return videsByBr;
+}
+
+/** Remplit tout `<select>` « Brasserie / fournisseur » (commande achat ou catalogue/paramètres). */
+function populateBrasserieFournisseurSelect(sel, options = {}) {
+  if (!sel) return;
+  const mode = options.mode === "purchase" ? "purchase" : "catalog";
+  const only = siteSingleBreweryName();
+  const preservedArg = options.preservedValue !== undefined ? options.preservedValue : sel.value;
+  const preserveStr = String(preservedArg ?? "").trim();
+
+  let brasseries = brasserieListForCurrentSite();
+  if (mode === "catalog" && preserveStr && !isExcludedBrasserieSuggestion(preserveStr)) {
+    const n = normalizeBrasserieName(preserveStr);
+    if (n && !brasseries.some((b) => normalizeBrasserieName(b) === n)) {
+      brasseries = [...brasseries, preserveStr].sort((a, b) => a.localeCompare(b, "fr"));
+    }
   }
-  opts += brasseries.map((br) => {
-    const showVides = purchaseSupplierCountsEmptyCratesHints(br);
-    const v = showVides ? (videsByBr[normalizeBrasserieName(br)] || 0) : 0;
-    const label = showVides && v > 0 ? `${br}  (${fmt(v)} casier(s) vide(s))` : br;
-    return `<option value="${escapeHtml(br)}">${escapeHtml(label)}</option>`;
-  }).join("");
-  sel.innerHTML = opts;
-  if (only) {
+
+  const hasSansBrasserie =
+    mode === "purchase"
+    && !only
+    && recordsForSite(state.stock).some((item) =>
+      !normalizeBrasserieName(item.brasserie) && (lotType(item) === "casier" || lotType(item) === "carton"),
+    );
+
+  const videsByBr = mode === "purchase" ? computeVidesByBrForPurchaseHints() : null;
+
+  let html;
+  if (!brasseries.length && mode !== "purchase") {
+    html = `<option value="">${escapeHtml("Aucune brasserie dans le catalogue")}</option>`;
+  } else {
+    html = `<option value="">${escapeHtml(BRASSERIE_FOURNISSEUR_PLACEHOLDER_LABEL)}</option>`;
+    if (hasSansBrasserie) {
+      html += `<option value="${escapeHtml(PURCHASE_NO_BRASSERIE_VALUE)}">${escapeHtml(PURCHASE_SANS_BRASSERIE_LABEL)}</option>`;
+    }
+    html += brasseries
+      .map((br) => {
+        if (mode === "purchase") {
+          const showVides = purchaseSupplierCountsEmptyCratesHints(br);
+          const v = showVides ? (videsByBr[normalizeBrasserieName(br)] || 0) : 0;
+          const label = showVides && v > 0 ? `${br}  (${fmt(v)} casier(s) vide(s))` : br;
+          return `<option value="${escapeHtml(br)}">${escapeHtml(label)}</option>`;
+        }
+        return `<option value="${escapeHtml(br)}">${escapeHtml(br)}</option>`;
+      })
+      .join("");
+  }
+
+  sel.innerHTML = html;
+
+  if (mode === "purchase" && only) {
     sel.value = only;
     sel.setAttribute("disabled", "disabled");
     return;
   }
+  if (mode === "purchase") {
+    sel.removeAttribute("disabled");
+    const currentCanon = purchaseSupplierInputToCanonical(preserveStr);
+    if (currentCanon === PURCHASE_NO_BRASSERIE_VALUE && hasSansBrasserie) {
+      sel.value = PURCHASE_NO_BRASSERIE_VALUE;
+      return;
+    }
+    const keep =
+      currentCanon
+      && !isExcludedBrasserieSuggestion(currentCanon)
+      && [...sel.options].some(
+        (o) => o.value && normalizeBrasserieName(o.value) === normalizeBrasserieName(currentCanon),
+      );
+    if (keep) {
+      const m = [...sel.options].find(
+        (o) => o.value && normalizeBrasserieName(o.value) === normalizeBrasserieName(currentCanon),
+      );
+      sel.value = m ? m.value : "";
+      return;
+    }
+    sel.value = "";
+    return;
+  }
+
   sel.removeAttribute("disabled");
-  if (currentCanon === PURCHASE_NO_BRASSERIE_VALUE && hasSansBrasserie) {
-    sel.value = PURCHASE_NO_BRASSERIE_VALUE;
+  if (!preserveStr) {
+    sel.value = "";
     return;
   }
-  const keep =
-    currentCanon && !isExcludedBrasserieSuggestion(currentCanon)
-    && [...sel.options].some(
-      (o) => o.value && normalizeBrasserieName(o.value) === normalizeBrasserieName(currentCanon),
-    );
-  if (keep) {
-    const m = [...sel.options].find(
-      (o) => o.value && normalizeBrasserieName(o.value) === normalizeBrasserieName(currentCanon),
-    );
-    sel.value = m ? m.value : "";
+  if (isExcludedBrasserieSuggestion(preserveStr)) {
+    sel.value = "";
     return;
   }
-  sel.value = "";
+  const stripped = stripPurchaseSupplierVidesSuffix(preserveStr);
+  const match = [...sel.options].find(
+    (o) => o.value && normalizeBrasserieName(o.value) === normalizeBrasserieName(stripped),
+  );
+  sel.value = match ? match.value : "";
+}
+
+function populateSupplierList() {
+  const sel = document.getElementById("purchase-supplier");
+  populateBrasserieFournisseurSelect(sel, { mode: "purchase", preservedValue: sel?.value });
 }
 
 function populatePurchaseArticlesByBrasserie(br) {
@@ -1900,11 +1962,8 @@ function openCasierOrderModal(brasserie, cs) {
   const videsEl = document.getElementById("co-vides");
   const qtyEl = document.getElementById("co-qty");
   const preview = document.getElementById("co-preview");
-  // Remplir la liste des brasseries
   if (brassEl) {
-    const brasseries = brasserieListForCurrentSite();
-    brassEl.innerHTML = brasseries.map((b) => `<option value="${escapeHtml(b)}"${b === brasserie ? " selected" : ""}>${escapeHtml(b)}</option>`).join("");
-    if (!brasseries.length) brassEl.innerHTML = `<option value="">Aucune brasserie configuree</option>`;
+    populateBrasserieFournisseurSelect(brassEl, { mode: "catalog", preservedValue: brasserie || "" });
   }
   if (csEl && cs) csEl.value = String(cs);
   if (videsEl) videsEl.value = "0";
@@ -4559,7 +4618,9 @@ function loadParamsForm() {
   const pSingleEnabled = document.getElementById("p-single-br-enabled");
   const pSingleName = document.getElementById("p-single-br-name");
   if (pSingleEnabled) pSingleEnabled.checked = Boolean(site?.singleBreweryOnly);
-  if (pSingleName) pSingleName.value = site?.singleBreweryName || "";
+  if (pSingleName) {
+    populateBrasserieFournisseurSelect(pSingleName, { mode: "catalog", preservedValue: site?.singleBreweryName || "" });
+  }
   const dualZonePricingEl = document.getElementById("p-dual-zone-pricing");
   if (dualZonePricingEl) dualZonePricingEl.checked = siteUsesDualZonePricing(site);
   const categoriesField = document.getElementById("p-categories");
@@ -6089,7 +6150,10 @@ function resetStockForm() {
   document.getElementById("s-prix-kit-ext").value = "";
   document.getElementById("s-price-location").value = "int";
   document.getElementById("s-price-location-value").value = "";
-  const bEl = document.getElementById("s-brasserie"); if (bEl) bEl.value = siteSingleBreweryName() || "";
+  populateBrasserieFournisseurSelect(document.getElementById("s-brasserie"), {
+    mode: "catalog",
+    preservedValue: siteSingleBreweryName() || "",
+  });
   renderStockSaleFormats();
   document.getElementById("stock-modal-title").textContent = "Nouvel article en stock";
   document.getElementById("save-stock-btn").textContent = "Enregistrer l'article";
@@ -6114,7 +6178,10 @@ function openEditStock(itemId) {
   document.getElementById("s-frigo").value = String(stockFrigo(item));
   document.getElementById("s-reserve").value = String(stockReserve(item));
   document.getElementById("s-prix").value = String(item.prixAchat || "");
-  const bEditEl = document.getElementById("s-brasserie"); if (bEditEl) bEditEl.value = siteSingleBreweryName() || item.brasserie || "";
+  populateBrasserieFournisseurSelect(document.getElementById("s-brasserie"), {
+    mode: "catalog",
+    preservedValue: siteSingleBreweryName() || item.brasserie || "",
+  });
   document.getElementById("s-prix-kit-int").value = String(item.prixVenteInt || item.prixKitInt || item.prixBouteille || item.prixVente || "");
   document.getElementById("s-prix-kit-ext").value = String(item.prixVenteExt || item.prixKitExt || item.prixBouteille || item.prixVente || "");
   document.getElementById("s-price-location").value = "int";
@@ -6611,7 +6678,9 @@ async function refreshRestoreBackupUi() {
     data = await apiRequest(API.adminBackups, { cache: "no-store" });
   } catch (fetchErr) {
     try {
-      state = await apiRequest(API.state, { cache: "no-store" });
+      /** Repli : superadmin reçoit <code>adminBackups</code> dans l'état complet. Param anti-cache pour éviter un 304 sans corps. */
+      const stateUrl = `${API.state}?_=${Date.now()}`;
+      state = await apiRequest(stateUrl, { cache: "no-store" });
       data = state.adminBackups;
       if (data) fallbackFromState = true;
     } catch (_) {
@@ -6621,9 +6690,13 @@ async function refreshRestoreBackupUi() {
       const st = fetchErr?.status != null ? ` (${fetchErr.status})` : "";
       const raw = String(fetchErr?.message || fetchErr || "erreur");
       const msg = escapeHtml(raw);
+      const is404 = Number(fetchErr?.status) === 404;
+      const hint404 = is404
+        ? `<span class="muted">Un <strong>404</strong> signifie en général que le <strong>serveur Python</strong> ne connaît pas encore la route <code>GET /api/admin/backups</code> (version ancienne de <code>server.py</code>, ou page ouverte sans passer par ce serveur). <strong>Déployez la dernière version</strong> du dépôt et <strong>redémarrez</strong> le processus serveur.</span><br><br>`
+        : "";
       infoEl.innerHTML =
-        `<span style="color:#c62828"><strong>Liste des sauvegardes inaccessible${st}</strong><br>${msg}</span><br>`
-        + `<span class="muted">Apres mise a jour : redemarrez le serveur (objet <code>adminBackups</code> dans GET /api/state). Si le probleme persiste, verifiez proxy / URL du serveur.</span>`;
+        `${hint404}<span style="color:#c62828"><strong>Liste des sauvegardes inaccessible${st}</strong><br>${msg}</span><br>`
+        + `<span class="muted">Les copies dans <code>backups/</code> sont créées <strong>à chaque enregistrement</strong> par le serveur (fichiers <code>data-*.json</code> ou <code>app-*.sqlite3</code>). Si la liste reste vide après mise à jour du serveur, vérifiez que le dossier <code>backups</code> existe à côté de <code>server.py</code> et les droits disque.</span>`;
     }
     console.error(fetchErr);
   }
@@ -8767,8 +8840,7 @@ function openCasierEditModal() {
   }
   const codeEl = document.getElementById("casier-edit-code");
   if (codeEl) codeEl.value = `CAS-${String(Number(state?.nextId?.casier) || 1).padStart(4, "0")}`;
-  const sel = document.getElementById("casier-edit-article");
-  if (sel && !String(sel.value || "").trim()) sel.value = "";
+  populateBrasserieFournisseurSelect(document.getElementById("casier-edit-article"), { mode: "catalog", preservedValue: "" });
   syncCasierEditFromArticle();
   const empEl = document.getElementById("casier-edit-emplacement");
   if (empEl) empEl.value = "À retourner";

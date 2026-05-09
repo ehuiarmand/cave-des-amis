@@ -852,7 +852,9 @@
             <div class="form-grid two-cols" style="margin-top:10px">
               <div class="form-group">
                 <label for="brasserie-attach-name">Brasserie / fournisseur</label>
-                <input id="brasserie-attach-name" type="text" list="brasserie-list" placeholder="ex: Solibra, Brassivoire, Castel..." autocomplete="off">
+                <select id="brasserie-attach-name" autocomplete="off" aria-label="Brasserie pour rattachement">
+                  <option value="">ex: Brassivoire, Solibra, Castel…</option>
+                </select>
               </div>
               <div class="form-group">
                 <label for="brasserie-attach-filter">Filtrer les articles</label>
@@ -979,8 +981,10 @@
                 </label>
               </div>
               <div class="form-group hidden" id="p-single-br-wrap" style="grid-column:1/-1">
-                <label for="p-single-br-name">Brasserie unique</label>
-                <input id="p-single-br-name" type="text" placeholder="ex: Solibra" list="brasserie-list">
+                <label for="p-single-br-name">Brasserie / fournisseur</label>
+                <select id="p-single-br-name" autocomplete="off" aria-label="Brasserie unique du maquis">
+                  <option value="">ex: Brassivoire, Solibra, Castel…</option>
+                </select>
               </div>
               <div class="form-group" style="grid-column:1/-1">
                 <label class="checkbox-label" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer">
@@ -1117,8 +1121,10 @@
                 <p class="muted" style="font-size:0.8rem;margin:6px 0 0 28px">Quand activé, l'application force la brasserie dans le catalogue/achats et filtre les listes.</p>
               </div>
               <div class="form-group hidden" id="new-site-single-br-wrap" style="grid-column:1/-1">
-                <label for="new-site-single-br-name">Brasserie unique</label>
-                <input id="new-site-single-br-name" type="text" placeholder="ex: Solibra" list="brasserie-list">
+                <label for="new-site-single-br-name">Brasserie / fournisseur</label>
+                <select id="new-site-single-br-name" autocomplete="off" aria-label="Brasserie du nouveau maquis">
+                  <option value="">ex: Brassivoire, Solibra, Castel…</option>
+                </select>
               </div>
             </div>
             <div class="button-stack">
@@ -1378,7 +1384,9 @@
       </p>
       <div class="form-group">
         <label for="co-brasserie">Brasserie / fournisseur</label>
-        <select id="co-brasserie"></select>
+        <select id="co-brasserie" aria-label="Brasserie commande casier vide">
+          <option value="">ex: Brassivoire, Solibra, Castel…</option>
+        </select>
       </div>
       <div class="form-grid two-cols">
         <div class="form-group form-group--zero">
@@ -1626,8 +1634,9 @@
       </div>
       <div class="form-group">
         <label for="s-brasserie">Brasserie / fournisseur</label>
-        <input id="s-brasserie" type="text" list="brasserie-list" placeholder="ex: Brassivoire, Solibra, Castel..." autocomplete="off">
-        <datalist id="brasserie-list"></datalist>
+        <select id="s-brasserie" autocomplete="off" aria-label="Brasserie catalogue article">
+          <option value="">ex: Brassivoire, Solibra, Castel…</option>
+        </select>
       </div>
       <div class="form-group">
         <label for="s-lot-type">Type de lot</label>
@@ -1871,8 +1880,10 @@
         </div>
       </div>
       <div class="form-group">
-        <label for="casier-edit-article">Brasserie</label>
-        <input id="casier-edit-article" type="text" list="brasserie-list" placeholder="ex: Solibra, Brassivoire, Castel..." autocomplete="off">
+        <label for="casier-edit-article">Brasserie / fournisseur</label>
+        <select id="casier-edit-article" autocomplete="off" aria-label="Brasserie du casier">
+          <option value="">ex: Brassivoire, Solibra, Castel…</option>
+        </select>
         <p class="form-hint" id="casier-edit-article-info"></p>
       </div>
       <div class="form-grid two-cols">
@@ -2021,6 +2032,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=110"></script>
+  <script src="./app-orders.js?v=112"></script>
 </body>
 </html>
