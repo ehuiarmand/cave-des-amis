@@ -159,6 +159,23 @@ function fmt(value) {
   return new Intl.NumberFormat("fr-FR").format(Math.round(Number(value) || 0));
 }
 
+/** Affichage quantité « casiers » commande (y compris demi-casier, tous types de lots). */
+function fmtPurchaseCases(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "0";
+  const rounded = Math.round(n * 100) / 100;
+  if (Math.abs(rounded - Math.round(rounded)) < 1e-6) {
+    return new Intl.NumberFormat("fr-FR").format(Math.round(rounded));
+  }
+  return new Intl.NumberFormat("fr-FR", { minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(rounded);
+}
+
+/** Quantité de lots normalisée : jusqu'à 2 décimales (ex. 0,5) — y compris casiers consignés bière (réservation casiers vides = plafond par somme, arrondi supérieur au total). */
+function roundPurchaseCasesFromRaw(lineLike, raw) {
+  const n = Math.max(0, Number(raw) || 0);
+  return Math.round(n * 100) / 100;
+}
+
 /** Extrait les chiffres d'une saisie montant (espaces / séparateurs retirés). */
 function digitsOnlyFcfaString(str) {
   return String(str || "")
@@ -579,6 +596,16 @@ function populateCategorySelects() {
 
 const DEFAULT_BRASSERIES = ["Brassivoire", "Carré d'or", "Solibra"];
 
+/** Clé de comparaison brasserie / fournisseur : casse + accents (ex. Carré d'or ≈ Carre d'or). */
+function brasserieMatchKey(name) {
+  return String(name ?? "")
+    .trim()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/\u2019/g, "'")
+    .toLowerCase();
+}
+
 function brasserieListForCurrentSite() {
   const only = siteSingleBreweryName();
   if (only) return [only];
@@ -586,9 +613,16 @@ function brasserieListForCurrentSite() {
     .map((item) => String(item.brasserie || "").trim())
     .filter(Boolean)
     .filter((b) => !isExcludedBrasserieSuggestion(b));
-  return [...new Set([...DEFAULT_BRASSERIES, ...fromCatalogue])]
-    .filter((b) => !isExcludedBrasserieSuggestion(b))
-    .sort((a, b) => a.localeCompare(b, "fr"));
+  const merged = [...DEFAULT_BRASSERIES, ...fromCatalogue].filter((b) => !isExcludedBrasserieSuggestion(b));
+  const seen = new Set();
+  const out = [];
+  for (const b of merged) {
+    const k = brasserieMatchKey(b);
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    out.push(b);
+  }
+  return out.sort((a, b) => a.localeCompare(b, "fr"));
 }
 
 function casierIsAvailableEmptyForOrder(casier) {
@@ -599,34 +633,34 @@ function casierIsAvailableEmptyForOrder(casier) {
 }
 
 function availableEmptyCasiersCount(brasserie, cap, siteId = currentSiteId()) {
-  const br = normalizeBrasserieName(brasserie);
+  const brK = brasserieMatchKey(brasserie);
   const c = Math.max(1, Number(cap) || 24);
   return casiersForSite().filter((x) =>
-    normalizeBrasserieName(x.article || "") === br
+    brasserieMatchKey(x.article || "") === brK
     && Math.max(1, Number(x.capacite) || 24) === c
     && casierIsAvailableEmptyForOrder(x)
   ).length;
 }
 
 function draftReservedCasesFor(brasserie, cap) {
-  const br = normalizeBrasserieName(brasserie);
+  const brK = brasserieMatchKey(brasserie);
   const c = Math.max(1, Number(cap) || 24);
   return (purchaseDraftLines || [])
     .filter((l) => l.selected !== false)
     .filter((l) => {
       const it = stockItemForArticle(l.article);
       return purchaseLineNeedsConsigneReservation(it)
-        && normalizeBrasserieName(it.brasserie || l.brasserie || "") === br
+        && brasserieMatchKey(it.brasserie || l.brasserie || "") === brK
         && Math.max(1, Number(l.cap) || Number(l.caseSize) || caseSize(it) || 24) === c;
     })
     .reduce((sum, l) => sum + (Number(l.cases) || 0), 0);
 }
 
 function clampDraftCasesToAvailable(brasserie, cap) {
-  const br = normalizeBrasserieName(brasserie);
+  const brK = brasserieMatchKey(brasserie);
   const c = Math.max(1, Number(cap) || 24);
-  const totalAvail = availableEmptyCasiersCount(br, c);
-  if (!catalogueHasCasierConsigneForPurchaseBr(br)) {
+  const totalAvail = availableEmptyCasiersCount(brasserie, c);
+  if (!catalogueHasCasierConsigneForPurchaseBr(brasserie)) {
     return { available: totalAvail };
   }
   let remaining = totalAvail;
@@ -634,10 +668,10 @@ function clampDraftCasesToAvailable(brasserie, cap) {
     if (line.selected === false) return line;
     const it = stockItemForArticle(line.article);
     if (!purchaseLineNeedsConsigneReservation(it)) return line;
-    if (normalizeBrasserieName(it.brasserie || line.brasserie || "") !== br || Math.max(1, Number(line.cap) || Number(line.caseSize) || caseSize(it) || 24) !== c) return line;
-    const want = Math.max(0, Math.round(Number(line.cases) || 0));
+    if (brasserieMatchKey(it.brasserie || line.brasserie || "") !== brK || Math.max(1, Number(line.cap) || Number(line.caseSize) || caseSize(it) || 24) !== c) return line;
+    const want = Math.max(0, Math.round((Number(line.cases) || 0) * 100) / 100);
     const take = Math.min(want, remaining);
-    remaining -= take;
+    remaining = Math.round((remaining - take) * 100) / 100;
     return { ...line, cases: take, amount: Math.round(take * (Number(line.pricePerCase) || 0)) };
   });
   return { available: remaining };
@@ -648,26 +682,30 @@ function reserveEmptyCasiersForPurchaseOrder(po) {
   const siteId = po.siteId || currentSiteId();
   /** besoin cumulé par ``brasserietarifaire::cap`` (uniquement lignes catalogue casier-consigne). */
   const buckets = {};
+  const bucketLabel = {};
   for (const l of po.lines || []) {
     const it = stockItemForArticle(l.article);
     if (!purchaseLineNeedsConsigneReservation(it)) continue;
     const br = normalizeBrasserieName(it.brasserie || po.supplier || "");
     const cap = Math.max(1, Number(l.caseSize) || caseSize(it) || 24);
-    const k = `${br}::${cap}`;
+    const k = `${brasserieMatchKey(br)}::${cap}`;
     buckets[k] = (buckets[k] || 0) + Math.max(0, Number(l.cases) || 0);
+    bucketLabel[k] = br;
   }
-  Object.entries(buckets).forEach(([k, needed]) => {
+  Object.entries(buckets).forEach(([k, neededRaw]) => {
     const sep = k.lastIndexOf("::");
-    const br = sep >= 0 ? k.slice(0, sep) : k;
+    const brK = sep >= 0 ? k.slice(0, sep) : k;
     const cap = sep >= 0 ? Math.max(1, Number(k.slice(sep + 2)) || 24) : 24;
+    const needed = Math.max(0, Math.ceil((Number(neededRaw) || 0) - 1e-9));
     const candidates = casiersForSite()
       .filter((c) => rowMatchesSite(c, siteId, multiSiteActive()))
-      .filter((c) => normalizeBrasserieName(c.article || "") === br)
+      .filter((c) => brasserieMatchKey(c.article || "") === brK)
       .filter((c) => Math.max(1, Number(c.capacite) || 24) === cap)
       .filter((c) => casierIsAvailableEmptyForOrder(c))
       .sort((a, b) => String(a.code || "").localeCompare(String(b.code || ""), "fr"));
     if (candidates.length < needed) {
-      throw new Error(`Casiers vides insuffisants pour ${br} B${cap}. Disponible: ${candidates.length}, demandé: ${needed}.`);
+      const brShow = bucketLabel[k] || brK;
+      throw new Error(`Casiers vides insuffisants pour ${brShow} B${cap}. Disponible: ${candidates.length}, demandé: ${needed} casier(s) vide(s).`);
     }
     candidates.slice(0, needed).forEach((c) => {
       c.reservedByPoId = po.id;
@@ -740,10 +778,10 @@ function getPurchaseSupplierDisplayName() {
 }
 
 function catalogueHasCasierConsigneForPurchaseBr(br) {
-  const b = normalizeBrasserieName(br);
-  if (!b) return false;
+  const bKey = brasserieMatchKey(br);
+  if (!bKey) return false;
   return recordsForSite(state.stock || []).some((item) =>
-    normalizeBrasserieName(item.brasserie) === b && lotType(item) === "casier"
+    brasserieMatchKey(item.brasserie) === bKey && lotType(item) === "casier"
   );
 }
 
@@ -764,7 +802,7 @@ function brasserieMatchesPurchaseSelect(selValue, item) {
   if (!v || supplierKey(v) === supplierKey(PURCHASE_NO_BRASSERIE_VALUE)) {
     return !normalizeBrasserieName(item.brasserie);
   }
-  return normalizeBrasserieName(item.brasserie) === normalizeBrasserieName(v);
+  return brasserieMatchKey(item.brasserie) === brasserieMatchKey(v);
 }
 
 function purchaseSupplierCountsEmptyCratesHints(supplierValue) {
@@ -825,8 +863,9 @@ function computeVidesByBrForPurchaseHints() {
   });
   const videsByBr = {};
   Object.values(btlVidesBrFormat).forEach(({ br, cap, btlVides }) => {
-    if (!videsByBr[br]) videsByBr[br] = 0;
-    videsByBr[br] += Math.floor(btlVides / cap);
+    const k = brasserieMatchKey(br);
+    if (!k) return;
+    videsByBr[k] = (videsByBr[k] || 0) + Math.floor(btlVides / cap);
   });
   return videsByBr;
 }
@@ -842,17 +881,13 @@ function populateBrasserieFournisseurSelect(sel, options = {}) {
   let brasseries = brasserieListForCurrentSite();
   if (mode === "catalog" && preserveStr && !isExcludedBrasserieSuggestion(preserveStr)) {
     const n = normalizeBrasserieName(preserveStr);
-    if (n && !brasseries.some((b) => normalizeBrasserieName(b) === n)) {
+    if (n && !brasseries.some((b) => brasserieMatchKey(b) === brasserieMatchKey(n))) {
       brasseries = [...brasseries, preserveStr].sort((a, b) => a.localeCompare(b, "fr"));
     }
   }
 
-  const hasSansBrasserie =
-    mode === "purchase"
-    && !only
-    && recordsForSite(state.stock).some((item) =>
-      !normalizeBrasserieName(item.brasserie) && (lotType(item) === "casier" || lotType(item) === "carton"),
-    );
+  /** Toujours proposer en commande fournisseur (multi-brasseries) pour commander cartons / articles sans brasserie. */
+  const hasSansBrasserie = mode === "purchase" && !only;
 
   const videsByBr = mode === "purchase" ? computeVidesByBrForPurchaseHints() : null;
 
@@ -868,7 +903,7 @@ function populateBrasserieFournisseurSelect(sel, options = {}) {
       .map((br) => {
         if (mode === "purchase") {
           const showVides = purchaseSupplierCountsEmptyCratesHints(br);
-          const v = showVides ? (videsByBr[normalizeBrasserieName(br)] || 0) : 0;
+          const v = showVides ? (videsByBr[brasserieMatchKey(br)] || 0) : 0;
           const label = showVides && v > 0 ? `${br}  (${fmt(v)} casier(s) vide(s))` : br;
           return `<option value="${escapeHtml(br)}">${escapeHtml(label)}</option>`;
         }
@@ -893,13 +928,14 @@ function populateBrasserieFournisseurSelect(sel, options = {}) {
     }
     const keep =
       currentCanon
+      && supplierKey(currentCanon) !== supplierKey(PURCHASE_NO_BRASSERIE_VALUE)
       && !isExcludedBrasserieSuggestion(currentCanon)
       && [...sel.options].some(
-        (o) => o.value && normalizeBrasserieName(o.value) === normalizeBrasserieName(currentCanon),
+        (o) => o.value && brasserieMatchKey(o.value) === brasserieMatchKey(currentCanon),
       );
     if (keep) {
       const m = [...sel.options].find(
-        (o) => o.value && normalizeBrasserieName(o.value) === normalizeBrasserieName(currentCanon),
+        (o) => o.value && brasserieMatchKey(o.value) === brasserieMatchKey(currentCanon),
       );
       sel.value = m ? m.value : "";
       return;
@@ -919,7 +955,7 @@ function populateBrasserieFournisseurSelect(sel, options = {}) {
   }
   const stripped = stripPurchaseSupplierVidesSuffix(preserveStr);
   const match = [...sel.options].find(
-    (o) => o.value && normalizeBrasserieName(o.value) === normalizeBrasserieName(stripped),
+    (o) => o.value && brasserieMatchKey(o.value) === brasserieMatchKey(stripped),
   );
   sel.value = match ? match.value : "";
 }
@@ -952,7 +988,7 @@ function populatePurchaseArticlesByBrasserie(br) {
       if (!physicalCasierCountsForPurchaseVides(c)) return;
       const stockIt = stockItemForArticle(c.article);
       const cBr = normalizeBrasserieName(stockIt?.brasserie || c.article || "");
-      if (!cBr || cBr !== brNorm || !catalogueHasCasierConsigneForPurchaseBr(cBr)) return;
+      if (!cBr || brasserieMatchKey(cBr) !== brasserieMatchKey(brNorm) || !catalogueHasCasierConsigneForPurchaseBr(cBr)) return;
       const cap = Math.max(1, Number(c.capacite) || 24);
       if (!btlVidesByCap[cap]) btlVidesByCap[cap] = 0;
       btlVidesByCap[cap] += Math.max(0, Number(c.bouteillesVides) || 0);
@@ -1005,7 +1041,7 @@ function populatePurchaseArticleDetailFromFormat() {
     casiersForSite().forEach((c) => {
       if (!physicalCasierCountsForPurchaseVides(c)) return;
       const stockIt = stockItemForArticle(c.article);
-      if (normalizeBrasserieName(stockIt?.brasserie || c.article || "") !== brTarif) return;
+      if (brasserieMatchKey(stockIt?.brasserie || c.article || "") !== brasserieMatchKey(brTarif)) return;
       if (Math.max(1, Number(c.capacite) || 24) !== cap) return;
       btlVidesTot += Math.max(0, Number(c.bouteillesVides) || 0);
     });
@@ -1164,7 +1200,7 @@ function formatPurchaseOrderAuditDetail(po) {
   if (!lines.length) return `${fmt(po.total || 0)} FCFA · aucune ligne`;
   const body = lines.map((l, i) => {
     const art = l.article || "?";
-    const cases = fmt(l.cases);
+    const cases = fmtPurchaseCases(l.cases);
     const cs = l.caseSize != null ? fmt(l.caseSize) : "";
     const ppc = fmt(l.pricePerCase || 0);
     const amt = fmt(l.amount || 0);
@@ -5053,10 +5089,10 @@ function supplierPriceForArticle(articleName, supplierName = null) {
   const articleKey = String(articleName || "").trim().toLowerCase();
   const raw = supplierName != null ? String(supplierName).trim() : purchaseSupplierRawFromDom();
   const c = purchaseSupplierInputToCanonical(raw);
-  const supplierNorm = supplierKey(c === PURCHASE_NO_BRASSERIE_VALUE ? "" : c);
+  const supplierNorm = c === PURCHASE_NO_BRASSERIE_VALUE ? "" : brasserieMatchKey(raw);
   if (articleKey && supplierNorm) {
     const row = recordsForSite(state.supplierPrices || []).find((item) =>
-      supplierKey(item.supplier) === supplierNorm
+      brasserieMatchKey(item.supplier) === supplierNorm
       && String(item.article || "").trim().toLowerCase() === articleKey
     );
     const supplierPrice = Number(row?.pricePerCase) || 0;
@@ -5081,7 +5117,7 @@ function syncPurchasePriceInput() {
   if (!capMatch || !br) { input.value = ""; return; }
   const cap = Number(capMatch[1]);
   const firstArticle = recordsForSite(state.stock).find((item) =>
-    normalizeBrasserieName(item.brasserie) === br && (caseSize(item) || 24) === cap
+    brasserieMatchKey(item.brasserie) === brasserieMatchKey(br) && (caseSize(item) || 24) === cap
   );
   const prix = firstArticle ? supplierPriceForArticle(firstArticle.article, br) : 0;
   input.value = prix > 0 ? String(prix) : "";
@@ -5113,7 +5149,7 @@ function emptyCasiersCountForArticle(article) {
   let btlVides = 0;
   casiersForSite().forEach((c) => {
     const cBr = normalizeBrasserieName(stockItemForArticle(c.article)?.brasserie || "");
-    if (cBr === br && Math.max(1, Number(c.capacite) || 24) === cap) {
+    if (brasserieMatchKey(cBr) === brasserieMatchKey(br) && Math.max(1, Number(c.capacite) || 24) === cap) {
       btlVides += Math.max(0, Number(c.bouteillesVides) || 0);
     }
   });
@@ -5183,7 +5219,7 @@ function syncPurchaseQtyFromStock() {
   }
 
   const casiersGroupe = casiersForSite().filter((c) =>
-    normalizeBrasserieName(c.article || "") === brGrp
+    brasserieMatchKey(c.article || "") === brasserieMatchKey(brGrp)
     && Math.max(1, Number(c.capacite) || 24) === cap
     && physicalCasierCountsForPurchaseVides(c),
   );
@@ -5198,17 +5234,18 @@ function syncPurchaseQtyFromStock() {
   });
   const nbCasiersVidesRetour = casiersGroupe.filter((c) => casierIsAvailableEmptyForOrder(c)).length;
   const alreadyInDraft = draftReservedCasesFor(brGrp, cap);
-  const maxNow = Math.max(0, nbCasiersVidesRetour - alreadyInDraft);
+  const maxNow = Math.max(0, Math.round((nbCasiersVidesRetour - alreadyInDraft) * 100) / 100);
 
   casesInput.value = String(maxNow);
   casesInput.max = String(maxNow);
+  casesInput.step = "0.5";
   casesInput.placeholder = "Depuis stock";
   if (videsBtn) { videsBtn.style.display = nbCasiersVidesRetour > 0 ? "" : "none"; videsBtn.dataset.nbVides = nbCasiersVidesRetour; }
 
   if (limitHint) {
     limitHint.style.display = "";
     if (nbCasiersVidesRetour > 0) {
-      limitHint.innerHTML = `<span style="color:#e65100;font-weight:700">↩ Maximum commandable : ${fmt(maxNow)} casier(s) vide(s) (reste) — total ${fmt(nbCasiersVidesRetour)} vide(s) pour ${escapeHtml(brGrp)} ${escapeHtml(formatVal)}.</span>`;
+      limitHint.innerHTML = `<span style="color:#e65100;font-weight:700">↩ Maximum commandable : ${fmtPurchaseCases(maxNow)} casier(s) (reste sur casiers vides) — ${fmt(nbCasiersVidesRetour)} vide(s) pour ${escapeHtml(brGrp)} ${escapeHtml(formatVal)}. Demi-casier possible : la réservation de casiers vides utilise la somme des quantités, arrondie au casier entier au-dessus.</span>`;
     } else {
       limitHint.innerHTML =
         `<span style="color:#c62828;font-weight:700">Aucun casier vide disponible pour ce format (consigne ${escapeHtml(brGrp)}) — augmentez ou choisissez un autre format.</span>`;
@@ -5262,7 +5299,7 @@ function renderPurchaseDraft() {
             return `<tr>
               <td style="text-align:center"><input type="checkbox" data-purchase-select="${idx}" ${selected ? "checked" : ""} aria-label="Sélection ligne"></td>
               <td>${escapeHtml(l.article)}</td>
-              <td style="text-align:right"><input type="number" min="0" step="1" value="${escapeHtml(String(l.cases ?? 0))}" data-purchase-cases="${idx}" style="max-width:110px"></td>
+              <td style="text-align:right"><input type="number" min="0" step="0.5" value="${escapeHtml(String(l.cases ?? 0))}" data-purchase-cases="${idx}" style="max-width:110px"></td>
               <td style="text-align:right">${fmt(l.caseSize ?? 24)}</td>
               <td style="text-align:right"><input type="number" min="0" step="1" value="${escapeHtml(String(l.pricePerCase ?? 0))}" data-purchase-price="${idx}" style="max-width:130px"></td>
               <td style="text-align:right"><strong>${fmt(l.amount)} FCFA</strong></td>
@@ -5278,7 +5315,7 @@ function renderPurchaseDraft() {
 function recomputePurchaseLine(idx) {
   const line = purchaseDraftLines[idx];
   if (!line) return;
-  const cases = Math.max(0, Math.round(Number(line.cases) || 0));
+  const cases = roundPurchaseCasesFromRaw(line, line.cases);
   const stockItem = stockItemForArticle(line.article);
   const caseSizeVal = stockItem ? caseSize(stockItem) : Math.max(1, Math.round(Number(line.caseSize) || 24));
   const price = Math.max(0, Math.round(Number(line.pricePerCase) || supplierPriceForArticle(line.article) || 0));
@@ -5312,13 +5349,18 @@ function addPurchaseLine() {
   const brCanon = getPurchaseSupplierCanonical();
   const br = supplierKey(brCanon) === supplierKey(PURCHASE_NO_BRASSERIE_VALUE) ? "" : normalizeBrasserieName(brCanon);
   const casesInput = document.getElementById("purchase-cases");
-  const cases = Number(casesInput?.value) || 0;
+  const casesRaw = Number(casesInput?.value);
   const caseSizeVal = Number(document.getElementById("purchase-case-size").value) || 24;
   const capMatch = formatVal.match(/^B(\d+)$/);
   const article = articleDetail || (capMatch && br ? `${br} ${formatVal}` : formatVal);
   const stockForLine = stockItemForArticle(article);
   const price = purchasePriceInputValue() || supplierPriceForArticle(article);
-  if (!formatVal || cases <= 0) {
+  if (!formatVal || !Number.isFinite(casesRaw) || casesRaw <= 0) {
+    if (feedback) feedback.textContent = "Sélectionnez un format et indiquez le nombre de casiers (ex. 0,5 pour un demi-casier).";
+    return;
+  }
+  const cases = roundPurchaseCasesFromRaw({ article }, casesRaw);
+  if (cases <= 0) {
     if (feedback) feedback.textContent = "Sélectionnez un format et indiquez le nombre de casiers.";
     return;
   }
@@ -5328,7 +5370,7 @@ function addPurchaseLine() {
   }
   const maxAttr = casesInput?.getAttribute("max");
   const maxCases = maxAttr !== null && purchaseLineNeedsConsigneReservation(stockForLine) ? Number(maxAttr) : null;
-  if (maxCases !== null && Number.isFinite(maxCases) && cases > maxCases) {
+  if (maxCases !== null && Number.isFinite(maxCases) && cases > maxCases + 1e-6) {
     if (maxCases === 0) {
       if (feedback) feedback.textContent = `Aucun casier vide disponible pour ${br} ${formatVal} — commande impossible.`;
     } else {
@@ -5494,14 +5536,14 @@ function purchaseReceiptNeedsSnapshot(originalLines, receivedLines) {
     [...(lines || [])]
       .map((l) => ({
         article: String(l.article || "").toLowerCase().trim(),
-        cases: Number(l.cases) || 0,
+        cases: Math.round((Number(l.cases) || 0) * 100) / 100,
       }))
       .sort((a, b) => a.article.localeCompare(b.article));
   const o = norm(originalLines);
   const r = norm(receivedLines);
   if (o.length !== r.length) return true;
   for (let i = 0; i < o.length; i++) {
-    if (o[i].article !== r[i].article || o[i].cases !== r[i].cases) return true;
+    if (o[i].article !== r[i].article || Math.abs(o[i].cases - r[i].cases) > 1e-4) return true;
   }
   return false;
 }
@@ -5538,7 +5580,7 @@ async function applyPurchaseReceipt(po, linesReceived, opts = {}) {
     const item = stockItems.find((s) => s.siteId === siteId && String(s.article || "").toLowerCase() === String(line.article || "").toLowerCase());
     if (!item) return;
     const cs = Number(line.caseSize) || caseSize(item);
-    const bottles = cases * cs;
+    const bottles = Math.round(cases * cs);
     item.entrees = (Number(item.entrees) || 0) + bottles;
     item.reserve = Math.max(0, Number(item.reserve) || 0) + bottles;
     item.lastReapproAt = new Date().toISOString();
@@ -5671,7 +5713,8 @@ function updateReceivePurchaseModalTotals(po) {
   let sum = 0;
   (po.lines || []).forEach((line, idx) => {
     const inp = document.getElementById(`recv-cases-${idx}`);
-    const delivered = Math.max(0, Math.round(Number(inp?.value) || 0));
+    const raw = Number(inp?.value);
+    const delivered = roundPurchaseCasesFromRaw(line, raw);
     const price = Number(line.pricePerCase) || 0;
     const amt = Math.round(delivered * price);
     sum += amt;
@@ -5693,16 +5736,17 @@ function openReceivePurchaseModal(poId) {
     .map((l, idx) => {
       const orderedCases = Number(l.cases) || 0;
       const price = Number(l.pricePerCase) || 0;
+      const recvStep = "0.5";
       return `
     <div class="purchase-receive-row" style="border-bottom:1px solid rgba(255,255,255,0.06);padding:12px 0">
       <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;justify-content:space-between">
         <div style="flex:1;min-width:160px">
           <strong>${escapeHtml(l.article)}</strong>
-          <p class="muted" style="margin:4px 0 0;font-size:0.82rem">Commande : ${fmt(orderedCases)} casier(s) × ${fmt(l.caseSize)} btl · ${fmt(price)} FCFA/cas.</p>
+          <p class="muted" style="margin:4px 0 0;font-size:0.82rem">Commande : ${fmtPurchaseCases(orderedCases)} casier(s) × ${fmt(l.caseSize)} btl · ${fmt(price)} FCFA/cas.</p>
         </div>
         <div class="form-group" style="margin:0;min-width:120px">
           <label for="recv-cases-${idx}">Casiers livres</label>
-          <input type="number" min="0" step="1" class="recv-cases-input" id="recv-cases-${idx}" data-recv-idx="${idx}" value="${orderedCases}">
+          <input type="number" min="0" step="${recvStep}" class="recv-cases-input" id="recv-cases-${idx}" data-recv-idx="${idx}" value="${escapeHtml(String(orderedCases))}">
         </div>
         <div style="min-width:100px;text-align:right">
           <span class="muted" style="font-size:0.78rem">Montant</span>
@@ -5730,7 +5774,7 @@ async function confirmReceivePurchaseOrder() {
   const linesReceived = [];
   (po.lines || []).forEach((line, idx) => {
     const inp = document.getElementById(`recv-cases-${idx}`);
-    const delivered = Math.max(0, Math.round(Number(inp?.value) || 0));
+    const delivered = roundPurchaseCasesFromRaw(line, inp?.value);
     if (delivered <= 0) return;
     const price = Number(line.pricePerCase) || 0;
     const caseSizeVal = Math.max(1, Number(line.caseSize) || 24);
@@ -5825,7 +5869,7 @@ function renderPurchaseOrders() {
       </div>
       <div class="customer-order-lines" style="min-width:0">
         ${(po.lines || []).map((l, idx) => `<div class="customer-order-line" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
-          <span>${escapeHtml(l.article)} · ${fmt(l.cases)} cas × ${fmt(l.caseSize)} btl</span>
+          <span>${escapeHtml(l.article)} · ${fmtPurchaseCases(l.cases)} cas × ${fmt(l.caseSize)} btl</span>
           <span style="display:flex;align-items:center;gap:10px">
             <strong>${fmt(l.amount)} FCFA</strong>
             ${pending ? `<button type="button" class="mini-btn" data-purchase-remove-line="${po.id}" data-line-index="${idx}">Retirer</button>` : ""}
@@ -6308,7 +6352,7 @@ function stockMovements() {
           type: "entree",
           qty: e.qty,
           unit: "Bouteille",
-          reason: `Achat (${fmt(e.cases)} casier(s) x ${fmt(e.caseSize)} btl)`,
+          reason: `Achat (${fmtPurchaseCases(e.cases)} casier(s) x ${fmt(e.caseSize)} btl)`,
           user: e.user || e.createdBy || item.lastReapproBy || item.createdBy || "-",
         });
       });
