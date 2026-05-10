@@ -3833,6 +3833,91 @@ function consigneCouleurStatut(c) {
 
 const CONSIGNE_FACTURE_SELECT_LIMIT = 120;
 
+function consigneMergeNoteFacture(noteBase, factureNumber) {
+  const ref = String(factureNumber || "").trim();
+  const b = String(noteBase || "").trim();
+  if (!ref) return b;
+  if (b.includes(ref)) return b;
+  return b ? `${b} · Fact. ${ref}` : `Fact. ${ref}`;
+}
+
+/** Lit les quantités « reliquat » saisies sur les lignes de facture (plusieurs articles possibles). */
+function readConsigneFactureReliquatInputs() {
+  const tbody = document.getElementById("consigne-facture-lines");
+  if (!tbody) return [];
+  const out = [];
+  let clamped = false;
+  tbody.querySelectorAll("input.consigne-facture-reliquat-qty").forEach((inp) => {
+    const vente = consigneFindVenteById(inp.dataset.venteId);
+    if (!vente) return;
+    const si = stockItemForArticle(vente.article);
+    const maxB = Math.max(1, lineBottleQty(vente, si));
+    let q = Math.floor(Number(inp.value) || 0);
+    if (q <= 0) return;
+    if (q > maxB) {
+      q = maxB;
+      clamped = true;
+      inp.value = String(maxB);
+    }
+    out.push({ vente, qty: q });
+  });
+  if (clamped) showToast("Quantités plafonnées à ce qui a été facturé sur chaque ligne.");
+  return out;
+}
+
+async function saveConsignesMultiFromFacture(entries) {
+  const client = (document.getElementById("consigne-client")?.value || "").trim();
+  if (!client) {
+    showToast("Saisissez le nom du client.");
+    return;
+  }
+  const date = document.getElementById("consigne-date")?.value || pdjCalendarDate();
+  const noteBase = (document.getElementById("consigne-note")?.value || "").trim();
+  const reliquatProchaineVisite = Boolean(document.getElementById("consigne-reliquat-prochaine-visite")?.checked);
+  const fact0 = String(entries[0]?.vente?.factureNumber || "").trim();
+  const note = consigneMergeNoteFacture(noteBase, fact0);
+
+  state.consignes = state.consignes || [];
+  state.nextId = state.nextId || {};
+  const now = new Date().toISOString();
+  const siteId = currentSiteId();
+  for (const { vente, qty } of entries) {
+    const si = stockItemForArticle(vente.article);
+    const maxB = Math.max(1, lineBottleQty(vente, si));
+    const q = Math.min(Math.max(1, qty), maxB);
+    const montantUnitaire = venteUnitPricePerBottle(vente);
+    state.nextId.consigne = (Number(state.nextId.consigne) || 0) + 1;
+    const fn = String(vente.factureNumber || "").trim();
+    state.consignes.unshift({
+      id: state.nextId.consigne,
+      siteId,
+      date,
+      client,
+      article: String(vente.article || "").trim(),
+      qty: q,
+      montantUnitaire,
+      total: q * montantUnitaire,
+      note,
+      statut: reliquatProchaineVisite ? CONSIGNE_STATUT_CONSERVE : CONSIGNE_STATUT_EN_COURS,
+      factureNumber: fn || undefined,
+      sourceVenteId: Number(vente.id) || vente.id,
+      createdBy: sessionUser || "-",
+      createdAt: now,
+    });
+  }
+  const localConsignes = [...state.consignes];
+  const localNextId = { ...state.nextId };
+  await persistState({ consignes: localConsignes, nextId: localNextId });
+  if (!state.consignes?.length) state.consignes = localConsignes;
+  if (!state.nextId?.consigne) state.nextId = { ...state.nextId, ...localNextId };
+  document.getElementById("consigne-form-wrap")?.classList.add("hidden");
+  resetConsigneForm();
+  renderConsignes();
+  showToast(
+    `${entries.length} consigne(s) enregistrée(s) — mélange d'articles pour la même facture / client.`,
+  );
+}
+
 function consigneFindVenteById(id) {
   return (state.ventes || []).find((v) => String(v.id) === String(id));
 }
@@ -3881,12 +3966,17 @@ function renderConsigneFactureLinesForOrder(orderId) {
     const qtyLab = escapeHtml(lineQtyLabel(vente, si));
     const unit = venteUnitPricePerBottle(vente);
     const net = fmt(calcNet(vente));
+    const maxB = Math.max(1, lineBottleQty(vente, si));
+    const vid = String(vente.id);
     return `<tr>
       <td>${escapeHtml(vente.article || "-")}</td>
       <td>${qtyLab}</td>
       <td style="text-align:right">${fmt(unit)} FCFA</td>
       <td style="text-align:right">${net} FCFA</td>
-      <td style="white-space:nowrap"><button type="button" class="mini-btn" data-pick-vente-line="${escapeHtml(String(vente.id))}">Choisir</button></td>
+      <td style="text-align:center">
+        <input type="number" class="consigne-facture-reliquat-qty" data-vente-id="${escapeHtml(vid)}" min="0" max="${maxB}" value="0" style="width:3.25rem;text-align:center;padding:4px 2px" title="Bouteilles laissées pour ce produit">
+      </td>
+      <td style="white-space:nowrap"><button type="button" class="mini-btn" data-pick-vente-line="${escapeHtml(vid)}" title="Ajouter 1 bouteille à cette ligne">+1</button></td>
     </tr>`;
   }).join("");
 }
@@ -3904,21 +3994,17 @@ function applyVenteLineToConsigneForm(venteId) {
     showToast("Ligne de facture introuvable.");
     return;
   }
-  const si = stockItemForArticle(vente.article);
-  const hid = document.getElementById("consigne-source-vente-id");
-  if (hid) hid.value = String(vente.id);
-  const art = document.getElementById("consigne-article");
-  if (art) art.value = String(vente.article || "").trim();
-  const qtyEl = document.getElementById("consigne-qty");
-  if (qtyEl) {
-    qtyEl.min = "1";
-    const maxB = Math.max(1, lineBottleQty(vente, si));
-    qtyEl.max = String(maxB);
-    qtyEl.value = "1";
+  const tbody = document.getElementById("consigne-facture-lines");
+  const inp = tbody?.querySelector(`input.consigne-facture-reliquat-qty[data-vente-id="${String(vente.id)}"]`);
+  if (!inp) {
+    showToast("Sélectionnez d'abord la facture dans la liste.");
+    return;
   }
-  const mEl = document.getElementById("consigne-montant");
-  const perB = venteUnitPricePerBottle(vente);
-  if (mEl) mEl.value = perB > 0 ? String(perB) : "";
+  const maxB = Math.max(1, Number(inp.max) || 1);
+  const cur = Math.floor(Number(inp.value) || 0);
+  inp.value = String(Math.min(maxB, cur + 1));
+  const hid = document.getElementById("consigne-source-vente-id");
+  if (hid) hid.value = "";
   const cli = document.getElementById("consigne-client");
   if (cli && !String(cli.value || "").trim()) cli.value = String(vente.client || vente.table || "").trim();
   const dEl = document.getElementById("consigne-date");
@@ -3926,15 +4012,12 @@ function applyVenteLineToConsigneForm(venteId) {
   const noteEl = document.getElementById("consigne-note");
   const ref = String(vente.factureNumber || "").trim();
   if (noteEl && ref) {
-    const cur = String(noteEl.value || "");
-    if (!cur.includes(ref)) noteEl.value = cur.trim() ? `${cur.trim()} · Fact. ${ref}` : `Fact. ${ref}`;
+    const curN = String(noteEl.value || "");
+    if (!curN.includes(ref)) noteEl.value = curN.trim() ? `${curN.trim()} · Fact. ${ref}` : `Fact. ${ref}`;
   }
-  const qFocus = document.getElementById("consigne-qty");
-  if (qFocus) {
-    qFocus.focus();
-    if (typeof qFocus.select === "function") qFocus.select();
-  }
-  showToast("Ligne choisie : indiquez combien de bouteilles le client laisse en reliquat.");
+  inp.focus();
+  if (typeof inp.select === "function") inp.select();
+  showToast("Ajoutez des quantités sur d'autres lignes si besoin, puis Enregistrer.");
 }
 
 function consignesForSite() {
@@ -3986,6 +4069,12 @@ function renderConsignes() {
 }
 
 async function saveConsigne() {
+  const multi = readConsigneFactureReliquatInputs();
+  if (multi.length) {
+    await saveConsignesMultiFromFacture(multi);
+    return;
+  }
+
   const client = (document.getElementById("consigne-client")?.value || "").trim();
   const article = (document.getElementById("consigne-article")?.value || "").trim();
   const qty = Math.max(1, Number(document.getElementById("consigne-qty")?.value) || 1);

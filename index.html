@@ -435,17 +435,17 @@
               <select id="consigne-facture-select">
                 <option value="">— Saisie manuelle (sans facture) —</option>
               </select>
-              <p class="muted" style="margin:6px 0 0;font-size:0.82rem">Sélectionnez une facture encaissée, puis une ligne ci‑dessous pour préremplir boisson, quantité max et prix.</p>
+              <p class="muted" style="margin:6px 0 0;font-size:0.82rem">Pour un <strong>mélange</strong> : indiquez le nombre de bouteilles laissées par <strong>ligne</strong> (colonne « Reliquat »), puis <strong>Enregistrer</strong> — une consigne est créée par article. Le bouton « +1 » préremplit une ligne.</p>
             </div>
-            <div id="consigne-facture-lines-wrap" class="hidden" style="margin-bottom:12px;border:1px solid var(--border);border-radius:8px;padding:10px;max-height:220px;overflow:auto">
+            <div id="consigne-facture-lines-wrap" class="hidden" style="margin-bottom:12px;border:1px solid var(--border);border-radius:8px;padding:10px;max-height:240px;overflow:auto">
               <p class="eyebrow" style="margin:0 0 8px;font-size:0.75rem">Lignes de la facture</p>
               <table class="data-table" style="width:100%;font-size:0.88rem">
-                <thead><tr><th>Article</th><th>Qté facturée</th><th style="text-align:right">Prix u.</th><th style="text-align:right">Total</th><th></th></tr></thead>
+                <thead><tr><th>Article</th><th>Qté fact.</th><th style="text-align:right">Prix / btl</th><th style="text-align:right">Total</th><th style="text-align:center">Reliquat (btl)</th><th></th></tr></thead>
                 <tbody id="consigne-facture-lines"></tbody>
               </table>
             </div>
             <div class="form-group">
-              <label for="consigne-article">Boisson / article</label>
+              <label for="consigne-article">Boisson / article (saisie manuelle ou hors facture)</label>
               <input id="consigne-article" type="text" list="articles-list" placeholder="ex: Castel 65cl — quantité = bouteilles restantes" autocomplete="off">
             </div>
             <div class="form-grid two-cols">
@@ -2052,6 +2052,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=118"></script>
+  <script src="./app-orders.js?v=119"></script>
 </body>
 </html>
