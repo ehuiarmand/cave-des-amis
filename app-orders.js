@@ -461,6 +461,18 @@ function lineQtyPriceLabel(line, stockItem = null) {
   return `${lineQtyLabel(line, stockItem)} x ${price} FCFA`;
 }
 
+/** Prix moyen par bouteille sur une ligne de vente (pour préremplir reliquat / consigne). */
+function venteUnitPricePerBottle(vente) {
+  if (!vente) return 0;
+  const si = stockItemForArticle(vente.article);
+  const bottles = Math.max(1, lineBottleQty(vente, si));
+  const net = calcNet(vente);
+  if (net > 0) return Math.round(net / bottles);
+  const pack = linePackSize(vente, si);
+  const p = Number(vente.prix) || 0;
+  return pack > 1 ? Math.round(p / pack) : Math.round(p);
+}
+
 function stockItemForArticle(article, siteId = currentSiteId()) {
   const site = siteId ?? currentSiteId();
   const multi = multiSiteActive();
@@ -3772,6 +3784,159 @@ function renderVentesPage() {
 
 // ─── CONSIGNES ────────────────────────────────────────────────────────────────
 
+const CONSIGNE_STATUT_EN_COURS = "En cours";
+const CONSIGNE_STATUT_CONSERVE = "Conservé réutilisation";
+const CONSIGNE_STATUT_RENDU = "Rendu";
+const CONSIGNE_STATUT_REUTILISE = "Réutilisé";
+
+function consigneStatutBrut(c) {
+  const s = String(c?.statut ?? "").trim();
+  if (!s) return CONSIGNE_STATUT_EN_COURS;
+  return s;
+}
+
+function consigneEstEnCoursRetour(c) {
+  return consigneStatutBrut(c) === CONSIGNE_STATUT_EN_COURS;
+}
+
+function consigneEstConserveReuse(c) {
+  return consigneStatutBrut(c) === CONSIGNE_STATUT_CONSERVE;
+}
+
+function consigneEstRendu(c) {
+  return consigneStatutBrut(c) === CONSIGNE_STATUT_RENDU;
+}
+
+function consigneEstReutilise(c) {
+  return consigneStatutBrut(c) === CONSIGNE_STATUT_REUTILISE;
+}
+
+function consigneLabelStatut(c) {
+  if (consigneEstRendu(c)) {
+    const dr = formatDateDdMmYyyy(c.dateRetour || "");
+    return dr ? `Clôturé (${dr})` : "Clôturé";
+  }
+  if (consigneEstReutilise(c)) {
+    const du = formatDateDdMmYyyy(c.dateReutilisation || "");
+    return du ? `Reliquat servi (${du})` : "Reliquat servi";
+  }
+  if (consigneEstConserveReuse(c)) return "À servir plus tard (déjà payé)";
+  return "Bouteille — retour physique attendu";
+}
+
+function consigneCouleurStatut(c) {
+  if (consigneEstRendu(c)) return "#72d7a9";
+  if (consigneEstReutilise(c)) return "var(--muted)";
+  if (consigneEstConserveReuse(c)) return "#7ec8e3";
+  return "#ffb347";
+}
+
+const CONSIGNE_FACTURE_SELECT_LIMIT = 120;
+
+function consigneFindVenteById(id) {
+  return (state.ventes || []).find((v) => String(v.id) === String(id));
+}
+
+function populateConsigneFactureSelect() {
+  const sel = document.getElementById("consigne-facture-select");
+  if (!sel) return;
+  const prev = sel.value;
+  const ts = (o) => String(o.lignes?.[0]?.soldAt || o.lignes?.[0]?.createdAt || o.createdAt || `${o.date || ""}T23:59:59`);
+  const orders = paidOrdersFromSales()
+    .slice()
+    .sort((a, b) => ts(b).localeCompare(ts(a)))
+    .slice(0, CONSIGNE_FACTURE_SELECT_LIMIT);
+  const opts = [`<option value="">— Saisie manuelle (sans facture) —</option>`];
+  for (const o of orders) {
+    const idVal = escapeHtml(String(o.id));
+    const num = escapeHtml(String(o.factureNumber || o.id));
+    const cli = escapeHtml(String(o.client || o.table || "Client").slice(0, 44));
+    const d = escapeHtml(formatDateDdMmYyyy(o.date));
+    const tot = fmt(orderTotal(o));
+    opts.push(`<option value="${idVal}">${num} · ${cli} · ${d} · ${tot} FCFA</option>`);
+  }
+  sel.innerHTML = opts.join("");
+  if (prev && orders.some((o) => String(o.id) === prev)) sel.value = prev;
+  else sel.value = "";
+}
+
+function renderConsigneFactureLinesForOrder(orderId) {
+  const wrap = document.getElementById("consigne-facture-lines-wrap");
+  const tbody = document.getElementById("consigne-facture-lines");
+  if (!wrap || !tbody) return;
+  if (!orderId) {
+    wrap.classList.add("hidden");
+    tbody.innerHTML = "";
+    return;
+  }
+  const order = paidOrdersFromSales().find((o) => String(o.id) === String(orderId));
+  if (!order?.lignes?.length) {
+    wrap.classList.add("hidden");
+    tbody.innerHTML = "";
+    return;
+  }
+  wrap.classList.remove("hidden");
+  tbody.innerHTML = order.lignes.map((vente) => {
+    const si = stockItemForArticle(vente.article);
+    const qtyLab = escapeHtml(lineQtyLabel(vente, si));
+    const unit = venteUnitPricePerBottle(vente);
+    const net = fmt(calcNet(vente));
+    return `<tr>
+      <td>${escapeHtml(vente.article || "-")}</td>
+      <td>${qtyLab}</td>
+      <td style="text-align:right">${fmt(unit)} FCFA</td>
+      <td style="text-align:right">${net} FCFA</td>
+      <td style="white-space:nowrap"><button type="button" class="mini-btn" data-pick-vente-line="${escapeHtml(String(vente.id))}">Choisir</button></td>
+    </tr>`;
+  }).join("");
+}
+
+function onConsigneFactureSelectChange() {
+  const sel = document.getElementById("consigne-facture-select");
+  const hid = document.getElementById("consigne-source-vente-id");
+  if (hid) hid.value = "";
+  renderConsigneFactureLinesForOrder(sel?.value || "");
+}
+
+function applyVenteLineToConsigneForm(venteId) {
+  const vente = consigneFindVenteById(venteId);
+  if (!vente) {
+    showToast("Ligne de facture introuvable.");
+    return;
+  }
+  const si = stockItemForArticle(vente.article);
+  const hid = document.getElementById("consigne-source-vente-id");
+  if (hid) hid.value = String(vente.id);
+  const art = document.getElementById("consigne-article");
+  if (art) art.value = String(vente.article || "").trim();
+  const qtyEl = document.getElementById("consigne-qty");
+  if (qtyEl) {
+    qtyEl.min = "1";
+    const maxB = Math.max(1, lineBottleQty(vente, si));
+    qtyEl.max = String(maxB);
+    qtyEl.value = "1";
+  }
+  const mEl = document.getElementById("consigne-montant");
+  const perB = venteUnitPricePerBottle(vente);
+  if (mEl) mEl.value = perB > 0 ? String(perB) : "";
+  const cli = document.getElementById("consigne-client");
+  if (cli && !String(cli.value || "").trim()) cli.value = String(vente.client || vente.table || "").trim();
+  const dEl = document.getElementById("consigne-date");
+  if (dEl && vente.date) dEl.value = saleDateValue(vente);
+  const noteEl = document.getElementById("consigne-note");
+  const ref = String(vente.factureNumber || "").trim();
+  if (noteEl && ref) {
+    const cur = String(noteEl.value || "");
+    if (!cur.includes(ref)) noteEl.value = cur.trim() ? `${cur.trim()} · Fact. ${ref}` : `Fact. ${ref}`;
+  }
+  const qFocus = document.getElementById("consigne-qty");
+  if (qFocus) {
+    qFocus.focus();
+    if (typeof qFocus.select === "function") qFocus.select();
+  }
+  showToast("Ligne choisie : indiquez combien de bouteilles le client laisse en reliquat.");
+}
+
 function consignesForSite() {
   return (state.consignes || []).filter((c) => c.siteId === currentSiteId());
 }
@@ -3780,32 +3945,41 @@ function renderConsignes() {
   const list = document.getElementById("consigne-list");
   if (!list) return;
   const all = consignesForSite().slice().sort((a, b) => String(b.date).localeCompare(String(a.date)));
-  const enCours = all.filter((c) => c.statut !== "Rendu");
-  const rendues = all.filter((c) => c.statut === "Rendu");
-  const montantEnCours = enCours.reduce((s, c) => s + (Number(c.total) || 0), 0);
+  const nbEnCoursRetour = all.filter(consigneEstEnCoursRetour).length;
+  const nbConserves = all.filter(consigneEstConserveReuse).length;
+  const rendues = all.filter(consigneEstRendu);
+  const montantARestituer = all
+    .filter(consigneEstEnCoursRetour)
+    .reduce((s, c) => s + (Number(c.total) || 0), 0);
   const kpiE = document.getElementById("consigne-kpi-encours");
+  const kpiC = document.getElementById("consigne-kpi-conserve");
   const kpiR = document.getElementById("consigne-kpi-rendues");
   const kpiM = document.getElementById("consigne-kpi-montant");
-  if (kpiE) kpiE.textContent = String(enCours.length);
+  if (kpiE) kpiE.textContent = String(nbEnCoursRetour);
+  if (kpiC) kpiC.textContent = String(nbConserves);
   if (kpiR) kpiR.textContent = String(rendues.length);
-  if (kpiM) kpiM.textContent = `${fmt(montantEnCours)} FCFA`;
+  if (kpiM) kpiM.textContent = `${fmt(montantARestituer)} FCFA`;
   list.innerHTML = all.length
     ? all.map((c) => {
-      const isEnCours = c.statut !== "Rendu";
+      const actions = [];
+      if (consigneEstEnCoursRetour(c)) {
+        actions.push(`<button class="mini-btn" data-return-consigne="${c.id}">Bouteille rendue</button>`);
+        actions.push(`<button class="mini-btn" data-conserve-consigne="${c.id}">Reliquat payé (prochaine visite)</button>`);
+      } else if (consigneEstConserveReuse(c)) {
+        actions.push(`<button class="mini-btn" data-return-consigne="${c.id}">Remboursé / annulé</button>`);
+        actions.push(`<button class="mini-btn" data-reutilise-consigne="${c.id}">Reliquat servi</button>`);
+      }
+      actions.push(`<button class="mini-btn" data-delete-consigne="${c.id}">Suppr.</button>`);
+      const fac = c.factureNumber ? ` <span class="muted" style="font-size:0.78rem">(${escapeHtml(c.factureNumber)})</span>` : "";
       return `<tr>
-        <td>${escapeHtml(formatDateDdMmYyyy(c.date))}</td>
+        <td>${escapeHtml(formatDateDdMmYyyy(c.date))}${fac}</td>
         <td>${escapeHtml(c.client || "-")}</td>
         <td>${escapeHtml(c.article || "-")}</td>
         <td style="text-align:right">${fmt(c.qty)}</td>
         <td style="text-align:right">${fmt(c.montantUnitaire)} FCFA</td>
         <td style="text-align:right"><strong>${fmt(c.total)} FCFA</strong></td>
-        <td><span style="color:${isEnCours ? "#ffb347" : "#72d7a9"}">${isEnCours ? "En cours" : `Rendu ${formatDateDdMmYyyy(c.dateRetour || "")}`}</span></td>
-        <td>
-          ${isEnCours
-            ? `<button class="mini-btn" data-return-consigne="${c.id}">Marquer rendu</button>`
-            : ""}
-          <button class="mini-btn" data-delete-consigne="${c.id}">Suppr.</button>
-        </td>
+        <td><span style="color:${consigneCouleurStatut(c)}">${escapeHtml(consigneLabelStatut(c))}</span></td>
+        <td>${actions.join(" ")}</td>
       </tr>`;
     }).join("")
     : `<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:32px">Aucune consigne enregistree</td></tr>`;
@@ -3818,11 +3992,16 @@ async function saveConsigne() {
   const montantUnitaire = Math.max(0, Number(document.getElementById("consigne-montant")?.value) || 0);
   const date = document.getElementById("consigne-date")?.value || pdjCalendarDate();
   const note = (document.getElementById("consigne-note")?.value || "").trim();
-  if (!article) { showToast("Saisissez le nom de l'article consigne."); return; }
+  const reliquatProchaineVisite = Boolean(document.getElementById("consigne-reliquat-prochaine-visite")?.checked);
+  const sourceVenteRaw = String(document.getElementById("consigne-source-vente-id")?.value || "").trim();
+  const sourceVente = sourceVenteRaw ? consigneFindVenteById(sourceVenteRaw) : null;
+  const factureRef = String(sourceVente?.factureNumber || "").trim();
+  if (!article) { showToast("Saisissez l'article ou la boisson (ex. bière)."); return; }
   if (!client) { showToast("Saisissez le nom du client."); return; }
   state.consignes = state.consignes || [];
   state.nextId = state.nextId || {};
   state.nextId.consigne = (Number(state.nextId.consigne) || 0) + 1;
+  const sourceVenteId = sourceVenteRaw && sourceVente ? (Number(sourceVente.id) || sourceVente.id) : undefined;
   state.consignes.unshift({
     id: state.nextId.consigne,
     siteId: currentSiteId(),
@@ -3833,7 +4012,9 @@ async function saveConsigne() {
     montantUnitaire,
     total: qty * montantUnitaire,
     note,
-    statut: "En cours",
+    statut: reliquatProchaineVisite ? CONSIGNE_STATUT_CONSERVE : CONSIGNE_STATUT_EN_COURS,
+    factureNumber: factureRef || undefined,
+    sourceVenteId,
     createdBy: sessionUser || "-",
     createdAt: new Date().toISOString(),
   });
@@ -3845,17 +4026,45 @@ async function saveConsigne() {
   document.getElementById("consigne-form-wrap")?.classList.add("hidden");
   resetConsigneForm();
   renderConsignes();
-  showToast("Consigne enregistree.");
+  showToast(
+    reliquatProchaineVisite
+      ? "Reliquat enregistré : le client pourra consommer le reste à une prochaine visite."
+      : "Consigne bouteille (dépôt) enregistrée — retour physique à suivre.",
+  );
 }
 
 async function returnConsigne(id) {
   const c = (state.consignes || []).find((x) => x.id === Number(id) || x.id === id);
   if (!c) return;
-  c.statut = "Rendu";
+  const etaitReliquat = consigneEstConserveReuse(c);
+  c.statut = CONSIGNE_STATUT_RENDU;
   c.dateRetour = pdjCalendarDate();
   await persistState({ consignes: state.consignes });
   renderConsignes();
-  showToast(`Consigne de ${c.client} marquee comme rendue.`);
+  showToast(
+    etaitReliquat
+      ? `Ligne clôturée pour ${c.client} (remboursement, annulation ou autre).`
+      : `Bouteille / dépôt marqué rendu pour ${c.client}.`,
+  );
+}
+
+async function conserveConsignePourReuse(id) {
+  const c = (state.consignes || []).find((x) => x.id === Number(id) || x.id === id);
+  if (!c || !consigneEstEnCoursRetour(c)) return;
+  c.statut = CONSIGNE_STATUT_CONSERVE;
+  await persistState({ consignes: state.consignes });
+  renderConsignes();
+  showToast("Passage en reliquat : quantité à honorer quand le client revient.");
+}
+
+async function reutiliseConsigne(id) {
+  const c = (state.consignes || []).find((x) => x.id === Number(id) || x.id === id);
+  if (!c || !consigneEstConserveReuse(c)) return;
+  c.statut = CONSIGNE_STATUT_REUTILISE;
+  c.dateReutilisation = pdjCalendarDate();
+  await persistState({ consignes: state.consignes });
+  renderConsignes();
+  showToast("Reliquat servi : la quantité due a été consommée (ou servie) lors d'une visite ultérieure.");
 }
 
 async function deleteConsigne(id) {
@@ -3865,16 +4074,27 @@ async function deleteConsigne(id) {
 }
 
 function resetConsigneForm() {
+  const hid = document.getElementById("consigne-source-vente-id");
+  if (hid) hid.value = "";
+  const sel = document.getElementById("consigne-facture-select");
+  if (sel) sel.value = "";
+  renderConsigneFactureLinesForOrder("");
   ["consigne-client", "consigne-article", "consigne-note"].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.value = "";
   });
   const qtyEl = document.getElementById("consigne-qty");
-  if (qtyEl) qtyEl.value = "1";
+  if (qtyEl) {
+    qtyEl.value = "1";
+    qtyEl.removeAttribute("max");
+  }
   const mEl = document.getElementById("consigne-montant");
   if (mEl) mEl.value = "";
   const dEl = document.getElementById("consigne-date");
   if (dEl) dEl.value = pdjCalendarDate();
+  const reliquatEl = document.getElementById("consigne-reliquat-prochaine-visite");
+  if (reliquatEl) reliquatEl.checked = true;
+  populateConsigneFactureSelect();
 }
 
 // ─── KIT (sélection multi-produits même prix) ─────────────────────────────────
@@ -9324,6 +9544,11 @@ function attachEvents() {
     wrap.classList.remove("hidden");
     document.getElementById("consigne-client")?.focus();
   });
+  document.getElementById("consigne-facture-select")?.addEventListener("change", onConsigneFactureSelectChange);
+  document.getElementById("consigne-form-wrap")?.addEventListener("click", (ev) => {
+    const pick = ev.target.closest("[data-pick-vente-line]");
+    if (pick?.dataset?.pickVenteLine) applyVenteLineToConsigneForm(pick.dataset.pickVenteLine);
+  });
   document.getElementById("save-consigne-btn")?.addEventListener("click", () => saveConsigne().catch(handleApiError));
   document.getElementById("cancel-consigne-btn")?.addEventListener("click", () => {
     document.getElementById("consigne-form-wrap")?.classList.add("hidden");
@@ -9941,6 +10166,16 @@ document.getElementById("fab-btn").addEventListener("click", () => {
     const returnConsigneBtn = event.target.closest("[data-return-consigne]");
     if (returnConsigneBtn) {
       returnConsigne(returnConsigneBtn.dataset.returnConsigne).catch(handleApiError);
+      return;
+    }
+    const conserveConsigneBtn = event.target.closest("[data-conserve-consigne]");
+    if (conserveConsigneBtn) {
+      conserveConsignePourReuse(conserveConsigneBtn.dataset.conserveConsigne).catch(handleApiError);
+      return;
+    }
+    const reutiliseConsigneBtn = event.target.closest("[data-reutilise-consigne]");
+    if (reutiliseConsigneBtn) {
+      reutiliseConsigne(reutiliseConsigneBtn.dataset.reutiliseConsigne).catch(handleApiError);
       return;
     }
     const deleteConsigneBtn = event.target.closest("[data-delete-consigne]");

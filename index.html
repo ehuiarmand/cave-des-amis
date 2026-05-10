@@ -407,17 +407,19 @@
           <div class="section-head">
             <div>
               <h3>Consignes</h3>
-              <p class="muted">Bouteilles vendues avec depot, a rendre ulterieurement</p>
+              <p class="muted">Cas fréquent : la facture est payée mais le client n'a pas tout bu — la serveuse enregistre le <strong>reliquat</strong> (quantité / boisson) pour qu'il revienne consommer plus tard. L'autre cas est la <strong>consigne bouteille</strong> (dépôt, retour physique).</p>
             </div>
             <button id="new-consigne-btn" class="icon-btn" type="button">+ Nouvelle consigne</button>
           </div>
-          <div class="pdj-kpis" style="margin-bottom:12px">
-            <div class="pdj-kpi"><span class="kpi-label">En cours</span><strong id="consigne-kpi-encours" class="pdj-val amber">0</strong></div>
-            <div class="pdj-kpi"><span class="kpi-label">Rendues</span><strong id="consigne-kpi-rendues" class="pdj-val green">0</strong></div>
-            <div class="pdj-kpi"><span class="kpi-label">Depot en cours</span><strong id="consigne-kpi-montant" class="pdj-val">0 FCFA</strong></div>
+          <div class="pdj-kpis" style="margin-bottom:12px;flex-wrap:wrap">
+            <div class="pdj-kpi"><span class="kpi-label">Bouteilles — retour</span><strong id="consigne-kpi-encours" class="pdj-val amber">0</strong></div>
+            <div class="pdj-kpi"><span class="kpi-label">Reliquats à servir</span><strong id="consigne-kpi-conserve" class="pdj-val blue">0</strong></div>
+            <div class="pdj-kpi"><span class="kpi-label">Clôturées</span><strong id="consigne-kpi-rendues" class="pdj-val green">0</strong></div>
+            <div class="pdj-kpi"><span class="kpi-label">Dépôt bouteille dû</span><strong id="consigne-kpi-montant" class="pdj-val">0 FCFA</strong></div>
           </div>
           <div id="consigne-form-wrap" class="hidden" style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:14px">
-            <p class="eyebrow" style="margin-bottom:8px">Nouvelle consigne</p>
+            <p class="eyebrow" style="margin-bottom:8px">Reliquat payé ou consigne bouteille</p>
+            <input type="hidden" id="consigne-source-vente-id" value="">
             <div class="form-grid two-cols">
               <div class="form-group form-group--zero">
                 <label for="consigne-client">Client</label>
@@ -429,22 +431,40 @@
               </div>
             </div>
             <div class="form-group">
-              <label for="consigne-article">Bouteille / article consigne</label>
-              <input id="consigne-article" type="text" list="articles-list" placeholder="ex: Castel Beer 65cl (verre)" autocomplete="off">
+              <label for="consigne-facture-select">Facture concernée</label>
+              <select id="consigne-facture-select">
+                <option value="">— Saisie manuelle (sans facture) —</option>
+              </select>
+              <p class="muted" style="margin:6px 0 0;font-size:0.82rem">Sélectionnez une facture encaissée, puis une ligne ci‑dessous pour préremplir boisson, quantité max et prix.</p>
+            </div>
+            <div id="consigne-facture-lines-wrap" class="hidden" style="margin-bottom:12px;border:1px solid var(--border);border-radius:8px;padding:10px;max-height:220px;overflow:auto">
+              <p class="eyebrow" style="margin:0 0 8px;font-size:0.75rem">Lignes de la facture</p>
+              <table class="data-table" style="width:100%;font-size:0.88rem">
+                <thead><tr><th>Article</th><th>Qté facturée</th><th style="text-align:right">Prix u.</th><th style="text-align:right">Total</th><th></th></tr></thead>
+                <tbody id="consigne-facture-lines"></tbody>
+              </table>
+            </div>
+            <div class="form-group">
+              <label for="consigne-article">Boisson / article</label>
+              <input id="consigne-article" type="text" list="articles-list" placeholder="ex: Castel 65cl — quantité = bouteilles restantes" autocomplete="off">
             </div>
             <div class="form-grid two-cols">
               <div class="form-group form-group--zero">
-                <label for="consigne-qty">Quantite</label>
+                <label for="consigne-qty">Quantité (ex. bouteilles non bues)</label>
                 <input id="consigne-qty" type="number" value="1" min="1">
               </div>
               <div class="form-group form-group--zero">
-                <label for="consigne-montant">Depot unitaire (FCFA)</label>
-                <input id="consigne-montant" type="number" min="0" placeholder="ex: 200">
+                <label for="consigne-montant">Prix unitaire (FCFA)</label>
+                <input id="consigne-montant" type="number" min="0" placeholder="prix vente d'une unité — optionnel">
               </div>
             </div>
             <div class="form-group">
-              <label for="consigne-note">Note</label>
-              <input id="consigne-note" type="text" placeholder="ex: client habitue, bouteille brune">
+              <label for="consigne-note">Note (table, serveuse…)</label>
+              <input id="consigne-note" type="text" placeholder="ex: table 4, note sur la facture">
+            </div>
+            <div class="form-group" style="display:flex;align-items:flex-start;gap:10px;margin-top:4px">
+              <input id="consigne-reliquat-prochaine-visite" type="checkbox" checked style="margin-top:4px">
+              <label for="consigne-reliquat-prochaine-visite" style="margin:0;font-weight:500;cursor:pointer">Reliquat payé : le client reviendra boire ce qui reste (décochez seulement pour une consigne <em>bouteille</em> avec dépôt et retour physique)</label>
             </div>
             <div class="button-stack" style="flex-direction:row;gap:8px">
               <button id="save-consigne-btn" class="btn btn-primary" type="button">Enregistrer</button>
@@ -456,8 +476,8 @@
               <thead><tr>
                 <th>Date</th><th>Client</th><th>Article</th>
                 <th style="text-align:right">Qte</th>
-                <th style="text-align:right">Depot/u</th>
-                <th style="text-align:right">Total</th>
+                <th style="text-align:right">Prix/u</th>
+                <th style="text-align:right">Total (réf.)</th>
                 <th>Statut</th><th>Actions</th>
               </tr></thead>
               <tbody id="consigne-list"></tbody>
@@ -2032,6 +2052,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=115"></script>
+  <script src="./app-orders.js?v=118"></script>
 </body>
 </html>

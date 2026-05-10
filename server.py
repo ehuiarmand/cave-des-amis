@@ -189,6 +189,7 @@ DEFAULT_STATE: dict[str, Any] = {
     "casiers": [],
     "casierMouvements": [],
     "creditRecoveries": [],
+    "consignes": [],
     "categories": ["Bières", "Sodas & Jus", "Eaux", "Vins & Spiritueux", "Cocktails", "Snacks", "Autres"],
     "charges": [
         {"id": 1, "date": "2026-04-21", "lib": "Loyer mensuel", "cat": "Loyer", "montant": 150000, "paiement": "Espèces"},
@@ -209,6 +210,7 @@ DEFAULT_STATE: dict[str, Any] = {
         "auditEntry": 0,
         "casier": 1,
         "casierMouvement": 1,
+        "consigne": 0,
     },
 }
 
@@ -392,6 +394,7 @@ def build_default_state() -> dict[str, Any]:
         "casiers": [],
         "casierMouvements": [],
         "creditRecoveries": [],
+        "consignes": [],
         "categories": legacy.get("categories", DEFAULT_STATE["categories"]),
         "charges": [
             {**item, "siteId": item.get("siteId", "maquis-1")} for item in legacy["charges"]
@@ -409,6 +412,7 @@ def build_default_state() -> dict[str, Any]:
             "auditEntry": legacy.get("nextId", {}).get("auditEntry", 0),
             "casier": legacy.get("nextId", {}).get("casier", 1),
             "casierMouvement": legacy.get("nextId", {}).get("casierMouvement", 1),
+            "consigne": legacy.get("nextId", {}).get("consigne", 0),
         },
     }
 
@@ -449,6 +453,7 @@ def migrate_state(payload: dict[str, Any]) -> dict[str, Any]:
             "commandes": [{**item, "siteId": item.get("siteId", site_id)} for item in payload.get("commandes", [])],
             "stockChecks": [{**item, "siteId": item.get("siteId", site_id)} for item in payload.get("stockChecks", [])],
             "creditRecoveries": [{**item, "siteId": item.get("siteId", site_id)} for item in payload.get("creditRecoveries", [])],
+            "consignes": [{**item, "siteId": item.get("siteId", site_id)} for item in payload.get("consignes", [])],
             "categories": payload.get("categories", default["categories"]),
             "charges": [{**item, "siteId": item.get("siteId", site_id)} for item in payload.get("charges", default["charges"])],
             "dayBooks": [{**item, "siteId": item.get("siteId", site_id)} for item in payload.get("dayBooks", [])],
@@ -492,6 +497,7 @@ _SITE_SCOPED_ROW_KEYS: tuple[str, ...] = (
     "casiers",
     "casierMouvements",
     "creditRecoveries",
+    "consignes",
     "charges",
     "staffAuditLog",
 )
@@ -1009,6 +1015,7 @@ class DataStore:
             merged["casiers"] = payload.get("casiers", merged.get("casiers", []))
             merged["casierMouvements"] = payload.get("casierMouvements", merged.get("casierMouvements", []))
             merged["creditRecoveries"] = payload.get("creditRecoveries", merged.get("creditRecoveries", []))
+            merged["consignes"] = payload.get("consignes", merged.get("consignes", []))
             merged["staffAuditLog"] = payload.get("staffAuditLog", merged.get("staffAuditLog", []))
             merged["stockEntrees"] = payload.get("stockEntrees", merged.get("stockEntrees", []))
             merged["stockLosses"] = payload.get("stockLosses", merged.get("stockLosses", []))
@@ -1051,6 +1058,7 @@ class DataStore:
         merged["casiers"] = payload.get("casiers", merged.get("casiers", []))
         merged["casierMouvements"] = payload.get("casierMouvements", merged.get("casierMouvements", []))
         merged["creditRecoveries"] = payload.get("creditRecoveries", merged.get("creditRecoveries", []))
+        merged["consignes"] = payload.get("consignes", merged.get("consignes", []))
         merged["staffAuditLog"] = payload.get("staffAuditLog", merged.get("staffAuditLog", []))
         merged["stockEntrees"] = payload.get("stockEntrees", merged.get("stockEntrees", []))
         merged["stockLosses"] = payload.get("stockLosses", merged.get("stockLosses", []))
@@ -1146,6 +1154,7 @@ class DataStore:
                 "casiers": json.loads(json.dumps(self._state.get("casiers", []))),
                 "casierMouvements": json.loads(json.dumps(self._state.get("casierMouvements", []))),
                 "creditRecoveries": json.loads(json.dumps(self._state.get("creditRecoveries", []))),
+                "consignes": json.loads(json.dumps(self._state.get("consignes", []))),
                 "categories": json.loads(json.dumps(self._state.get("categories", DEFAULT_STATE["categories"]))),
                 "charges": json.loads(json.dumps(self._state["charges"])),
                 "nextId": json.loads(json.dumps(self._state["nextId"])),
@@ -1215,6 +1224,7 @@ class DataStore:
                 "casiers": filter_site_rows(self._state.get("casiers", [])),
                 "casierMouvements": filter_site_rows(self._state.get("casierMouvements", [])),
                 "creditRecoveries": filter_site_rows(self._state.get("creditRecoveries", [])),
+                "consignes": filter_site_rows(self._state.get("consignes", [])),
                 "categories": full["categories"],
                 "charges": filter_site_rows(self._state.get("charges", [])),
                 "nextId": full["nextId"],
@@ -1271,6 +1281,7 @@ class DataStore:
             merged["casiers"] = payload.get("casiers", merged.get("casiers", []))
             merged["casierMouvements"] = payload.get("casierMouvements", merged.get("casierMouvements", []))
             merged["creditRecoveries"] = payload.get("creditRecoveries", merged.get("creditRecoveries", []))
+            merged["consignes"] = payload.get("consignes", merged.get("consignes", []))
             merged["staffAuditLog"] = payload.get("staffAuditLog", merged.get("staffAuditLog", []))
             merged["stockEntrees"] = payload.get("stockEntrees", merged.get("stockEntrees", []))
             merged["stockLosses"] = payload.get("stockLosses", merged.get("stockLosses", []))
@@ -1584,6 +1595,7 @@ class DataStore:
                 current["casiers"] = payload.get("casiers", current.get("casiers", []))
                 current["casierMouvements"] = payload.get("casierMouvements", current.get("casierMouvements", []))
                 current["creditRecoveries"] = payload.get("creditRecoveries", current.get("creditRecoveries", []))
+                current["consignes"] = payload.get("consignes", current.get("consignes", []))
                 current["categories"] = payload.get("categories", current.get("categories", DEFAULT_STATE["categories"]))
                 current["charges"] = payload.get("charges", current["charges"])
                 current["nextId"] = payload.get("nextId", current["nextId"])
@@ -1657,6 +1669,7 @@ class DataStore:
             current["casiers"] = merge_scoped_rows(current.get("casiers", []), payload.get("casiers", []), allowed, sid_list)
             current["casierMouvements"] = merge_scoped_rows(current.get("casierMouvements", []), payload.get("casierMouvements", []), allowed, sid_list)
             current["creditRecoveries"] = merge_scoped_rows(current.get("creditRecoveries", []), payload.get("creditRecoveries", []), allowed, sid_list)
+            current["consignes"] = merge_scoped_rows(current.get("consignes", []), payload.get("consignes", []), allowed, sid_list)
             current["charges"] = merge_scoped_rows(current.get("charges", []), payload.get("charges", []), allowed, sid_list)
             current["staffAuditLog"] = merge_scoped_rows(current.get("staffAuditLog", []), payload.get("staffAuditLog", []), allowed, sid_list)
             current["stockEntrees"] = merge_scoped_rows(current.get("stockEntrees", []), payload.get("stockEntrees", []), allowed, sid_list)

@@ -1929,6 +1929,8 @@ textarea { font: inherit; }
 
 .pdj-val.amber { color: var(--mm-primary-dark); }
 .pdj-val.red { color: #ff8e82; }
+.pdj-val.green { color: #72d7a9; }
+.pdj-val.blue { color: #7ec8e3; }
 
 .pdj-detail-head { margin-top: 18px; margin-bottom: 10px; }
 .pdj-detail-title { font-size: 1rem; }
