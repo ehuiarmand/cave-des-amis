@@ -63,6 +63,8 @@ let flashingQrOrderIds = new Set();
 let pendingPreAuthToken = null;
 let pendingReceivePurchaseId = null;
 let purchaseDraftLines = [];
+/** Après fermeture du modal « nouveau casier » sans enregistrer, on annule la reprise commande achat. */
+let pendingPurchaseCasierResume = false;
 
 function creditRecoveriesForSite(sourceState = state) {
   const siteId = sourceState?.activeSiteId || currentSiteId();
@@ -5601,8 +5603,11 @@ function syncPurchaseQtyFromStock() {
     if (nbCasiersVidesRetour > 0) {
       limitHint.innerHTML = `<span style="color:#e65100;font-weight:700">↩ Maximum commandable : ${fmtPurchaseCases(maxNow)} casier(s) (reste sur casiers vides) — ${fmt(nbCasiersVidesRetour)} vide(s) pour ${escapeHtml(brGrp)} ${escapeHtml(formatVal)}. Demi-casier possible : la réservation de casiers vides utilise la somme des quantités, arrondie au casier entier au-dessus.</span>`;
     } else {
+      const quickBtn = canManageCasier()
+        ? `<button type="button" class="mini-btn" style="margin-left:8px;vertical-align:middle" data-purchase-quick-casier data-pqc-br="${escapeHtml(brGrp)}" data-pqc-cap="${cap}">Créer des casiers vides…</button>`
+        : `<span class="muted" style="margin-left:8px;font-weight:500"> (Création rapide : gérant / admin.)</span>`;
       limitHint.innerHTML =
-        `<span style="color:#c62828;font-weight:700">Aucun casier vide disponible pour ce format (consigne ${escapeHtml(brGrp)}) — augmentez ou choisissez un autre format.</span>`;
+        `<span style="color:#c62828;font-weight:700">Aucun casier vide pour ce format (consigne ${escapeHtml(brGrp)}) — créez des casiers ou changez de format.</span>${quickBtn}`;
     }
   }
 
@@ -5725,10 +5730,15 @@ function addPurchaseLine() {
   const maxAttr = casesInput?.getAttribute("max");
   const maxCases = maxAttr !== null && purchaseLineNeedsConsigneReservation(stockForLine) ? Number(maxAttr) : null;
   if (maxCases !== null && Number.isFinite(maxCases) && cases > maxCases + 1e-6) {
-    if (maxCases === 0) {
-      if (feedback) feedback.textContent = `Aucun casier vide disponible pour ${br} ${formatVal} — commande impossible.`;
-    } else {
-      if (feedback) feedback.textContent = `Commande limitée à ${fmt(maxCases)} casier(s) vide(s) disponible(s) pour ${br} ${formatVal}.`;
+    if (feedback) {
+      if (maxCases === 0 && capMatch && br && canManageCasier()) {
+        const capN = Number(capMatch[1]) || 24;
+        feedback.innerHTML = `<span>${escapeHtml(`Aucun casier vide pour ${br} ${formatVal}.`)}</span> <button type="button" class="mini-btn" style="margin-left:8px" data-purchase-quick-casier data-pqc-br="${escapeHtml(br)}" data-pqc-cap="${escapeHtml(String(capN))}">Créer des casiers vides…</button>`;
+      } else if (maxCases === 0) {
+        feedback.textContent = `Aucun casier vide disponible pour ${br} ${formatVal} — commande impossible (gérant : créer des casiers dans Stock → Gestion casiers).`;
+      } else {
+        feedback.textContent = `Commande limitée à ${fmt(maxCases)} casier(s) vide(s) disponible(s) pour ${br} ${formatVal}.`;
+      }
     }
     return;
   }
@@ -7702,6 +7712,7 @@ function closeModal(id) {
   if (id === "modal-purchase-receive") pendingReceivePurchaseId = null;
   if (id === "modal-finalize") resetFinalizeModalUi();
   if (id === "modal-saisie-rapide") { srCart = []; }
+  if (id === "modal-casier-edit") pendingPurchaseCasierResume = false;
 }
 
 async function removeOrderLine(orderId, lineId) {
@@ -9231,20 +9242,61 @@ function renderCasierPhysique() {
  * Modal "Nouveau casier"
  * ----------------------------------------------------------- */
 
-function openCasierEditModal() {
+function openCasierEditModal(opts = {}) {
   if (!canManageCasier()) {
     showToast("Reserve au gerant ou administrateur.");
     return;
   }
+  const o = opts && typeof opts === "object" ? opts : {};
+  pendingPurchaseCasierResume = Boolean(o.resumePurchase);
+
+  const title = document.getElementById("casier-edit-title");
+  if (title) {
+    title.textContent = pendingPurchaseCasierResume
+      ? "Nouveau casier vide (commande fournisseur)"
+      : "Nouveau casier vide";
+  }
+
   const codeEl = document.getElementById("casier-edit-code");
   if (codeEl) codeEl.value = `CAS-${String(Number(state?.nextId?.casier) || 1).padStart(4, "0")}`;
-  populateBrasserieFournisseurSelect(document.getElementById("casier-edit-article"), { mode: "catalog", preservedValue: "" });
+  const preservedBr = o.brasserie ? normalizeBrasserieName(String(o.brasserie).trim()) : "";
+  populateBrasserieFournisseurSelect(document.getElementById("casier-edit-article"), {
+    mode: "catalog",
+    preservedValue: preservedBr,
+  });
   syncCasierEditFromArticle();
+  if (o.capacite) {
+    const capEl = document.getElementById("casier-edit-capacite");
+    if (capEl) capEl.value = String(Math.max(1, Math.floor(Number(o.capacite))));
+  }
+
   const empEl = document.getElementById("casier-edit-emplacement");
   if (empEl) empEl.value = "À retourner";
   const qtyEl = document.getElementById("casier-edit-qty");
-  if (qtyEl) qtyEl.value = "1";
+  if (qtyEl) {
+    const def = Math.max(1, Math.floor(Number(o.qtySuggest) || 0));
+    qtyEl.value = String(def > 0 ? def : 1);
+  }
   openModal("modal-casier-edit");
+}
+
+function resumePurchaseAfterCasiersCreated() {
+  const form = document.getElementById("purchase-form");
+  if (form?.classList.contains("hidden")) return;
+  syncPurchaseLineInputsFromStock();
+  renderPurchaseDraft();
+  const fb = document.getElementById("purchase-feedback");
+  if (fb) fb.textContent = "";
+  const casesEl = document.getElementById("purchase-cases");
+  if (casesEl) {
+    casesEl.focus();
+    try { casesEl.select(); } catch (_) { /* noop */ }
+  }
+  try {
+    form?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  } catch (_) {
+    form?.scrollIntoView();
+  }
 }
 
 function syncCasierEditFromArticle() {
@@ -9265,17 +9317,26 @@ async function submitCasierEdit() {
   const qty = Math.max(1, Math.floor(Number(document.getElementById("casier-edit-qty")?.value) || 1));
   if (!normalizeBrasserieName(article)) { showToast("Saisissez la brasserie."); return; }
   if (capacite <= 0) { showToast("Capacite invalide."); return; }
+  const resumePurchase = pendingPurchaseCasierResume;
   let createdCount = 0;
   for (let i = 0; i < qty; i++) {
     const created = await createCasier({ article, capacite, emplacement, quantiteActuelle: 0, bouteillesVides: 0 });
     if (created) createdCount++;
   }
   if (!createdCount) return;
+
+  pendingPurchaseCasierResume = false;
   closeModal("modal-casier-edit");
   renderCasierPhysique();
   renderStock();
   renderDashboard();
-  showToast(`${createdCount} casier(s) créé(s).`);
+  populateSupplierList();
+  if (resumePurchase) resumePurchaseAfterCasiersCreated();
+  showToast(
+    resumePurchase
+      ? `${createdCount} casier(s) créé(s). Plafond mis à jour — poursuivez la commande ci-dessous.`
+      : `${createdCount} casier(s) créé(s).`,
+  );
 }
 
 /* -----------------------------------------------------------
@@ -10085,6 +10146,13 @@ document.getElementById("fab-btn").addEventListener("click", () => {
     }
   });
   document.getElementById("page-stock").addEventListener("click", (event) => {
+    const quickCasier = event.target.closest("[data-purchase-quick-casier]");
+    if (quickCasier) {
+      const br = quickCasier.getAttribute("data-pqc-br") || "";
+      const cap = Math.max(1, Math.floor(Number(quickCasier.getAttribute("data-pqc-cap")) || 24));
+      openCasierEditModal({ brasserie: br, capacite: cap, resumePurchase: true, qtySuggest: 2 });
+      return;
+    }
     const btn = event.target.closest("[data-subtab-stock]");
     if (btn) setStockSubTab(btn.dataset.subtabStock);
     const removeFormatBtn = event.target.closest("[data-remove-sale-format]");
