@@ -884,6 +884,24 @@ textarea { font: inherit; }
   cursor: pointer;
 }
 
+/* Commande fournisseur : création rapide de casiers vides (visibilité) */
+.mini-btn.mini-btn-quick-casier {
+  background: #1565c0;
+  color: #fff;
+  border-color: #0d47a1;
+  font-weight: 700;
+  box-shadow: 0 1px 3px rgba(13, 71, 161, 0.35);
+}
+.mini-btn.mini-btn-quick-casier:hover {
+  background: #1976d2;
+  border-color: #1565c0;
+  color: #fff;
+}
+.mini-btn.mini-btn-quick-casier:focus-visible {
+  outline: 2px solid #64b5f6;
+  outline-offset: 2px;
+}
+
 .order-total {
   font-family: Roboto, system-ui, sans-serif;
   font-size: 1.15rem;

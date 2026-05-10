@@ -5603,7 +5603,7 @@ function syncPurchaseQtyFromStock() {
     limitHint.style.display = "";
     const quickBtnCasierHtml = () => (
       canManageCasier()
-        ? `<button type="button" class="mini-btn" style="margin-top:8px;display:inline-flex;align-items:center" data-purchase-quick-casier data-pqc-br="${escapeHtml(brGrp)}" data-pqc-cap="${escapeHtml(String(cap))}">Créer des casiers vides…</button>`
+        ? `<button type="button" class="mini-btn mini-btn-quick-casier" style="margin-top:8px;display:inline-flex;align-items:center" data-purchase-quick-casier data-pqc-br="${escapeHtml(brGrp)}" data-pqc-cap="${escapeHtml(String(cap))}">Créer des casiers vides…</button>`
         : `<span class="muted" style="display:inline-block;margin-top:8px">Création de casiers : gérant / admin.</span>`
     );
     if (nbCasiersVidesRetour > 0) {
@@ -5751,7 +5751,7 @@ function addPurchaseLine() {
     if (feedback) {
       if (maxCases === 0 && capMatch && br && canManageCasier()) {
         const capN = Number(capMatch[1]) || 24;
-        feedback.innerHTML = `<span>${escapeHtml(`Aucun casier vide pour ${br} ${formatVal}.`)}</span> <button type="button" class="mini-btn" style="margin-left:8px" data-purchase-quick-casier data-pqc-br="${escapeHtml(br)}" data-pqc-cap="${escapeHtml(String(capN))}">Créer des casiers vides…</button>`;
+        feedback.innerHTML = `<span>${escapeHtml(`Aucun casier vide pour ${br} ${formatVal}.`)}</span> <button type="button" class="mini-btn mini-btn-quick-casier" style="margin-left:8px" data-purchase-quick-casier data-pqc-br="${escapeHtml(br)}" data-pqc-cap="${escapeHtml(String(capN))}">Créer des casiers vides…</button>`;
       } else if (maxCases === 0) {
         feedback.textContent = `Aucun casier vide disponible pour ${br} ${formatVal} — commande impossible (gérant : créer des casiers dans Stock → Gestion casiers).`;
       } else {
