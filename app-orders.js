@@ -351,6 +351,43 @@ function creditRecoveriesGroupedByDebtor(sourceState = state) {
   return map;
 }
 
+/** Table HTML : tous les versements enregistrés (historique recouvrement), du plus récent au plus ancien. */
+function buildCreditRecoveryHistoryHtml() {
+  const payments = creditRecoveriesForSite()
+    .slice()
+    .sort((a, b) => String(b.paidAt || b.createdAt || "").localeCompare(String(a.paidAt || a.createdAt || "")));
+  if (!payments.length) {
+    return `<div class="credit-history-section" style="margin-top:18px">
+      <p class="eyebrow" style="margin-bottom:8px">Historique des paiements</p>
+      <p class="muted" style="font-size:0.9rem">Aucun versement enregistré pour ce maquis. Après « Enregistrer le versement », chaque paiement apparaît ici avec date, montant et mode.</p>
+    </div>`;
+  }
+  const rows = payments.map((p) => `
+    <tr>
+      <td>${escapeHtml(formatCreditPaidAt(p))}</td>
+      <td><strong>${escapeHtml(debtorDisplayKey(p.debiteur))}</strong></td>
+      <td style="text-align:right;color:#72d7a9;font-weight:600">${fmt(p.montant)} FCFA</td>
+      <td>${escapeHtml(p.paiement || "—")}</td>
+      <td class="muted" style="font-size:0.88rem;max-width:240px">${escapeHtml(p.note || "—")}</td>
+    </tr>
+  `).join("");
+  return `<div class="credit-history-section" style="margin-top:18px">
+    <p class="eyebrow" style="margin-bottom:10px">Historique des paiements (${payments.length})</p>
+    <div class="stock-table-wrap">
+      <table class="stock-table" style="min-width:720px">
+        <thead><tr>
+          <th>Date et heure</th>
+          <th>Client (débiteur)</th>
+          <th style="text-align:right">Montant versé</th>
+          <th>Mode</th>
+          <th>Note</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
 function calcNet(item) {
   return (Number(item.prix) || 0) * (Number(item.qty) || 0) - (Number(item.remise) || 0);
 }
@@ -5285,8 +5322,14 @@ function renderCreditRecovery() {
     datalist.innerHTML = names.map((n) => `<option value="${escapeHtml(n)}"></option>`).join("");
   }
 
+  const historyHtml = buildCreditRecoveryHistoryHtml();
+
   if (!entries.length) {
-    list.innerHTML = emptyState("Aucun crédit en cours", "Les crédits clients apparaîtront ici (paiement : Crédit client).");
+    list.innerHTML = `
+      <div class="muted" style="margin-bottom:14px;padding:12px;border:1px solid var(--border);border-radius:8px;font-size:0.92rem">
+        <strong>Aucun solde débiteur actif</strong> — soit tous les crédits sont soldés, soit aucune vente n’a été encaissée en « Crédit client » pour ce maquis. Le tableau ci‑dessous liste quand même <strong>tous les versements déjà enregistrés</strong>.
+      </div>
+      ${historyHtml}`;
     return;
   }
 
@@ -5319,6 +5362,7 @@ function renderCreditRecovery() {
 
   list.innerHTML = `
     <div class="stock-table-wrap" style="margin-top:10px">
+      <p class="eyebrow" style="margin-bottom:8px">Crédits en cours (reste à payer)</p>
       <table class="stock-table" style="min-width:880px">
         <thead><tr>
           <th>Débiteur</th>
@@ -5329,6 +5373,7 @@ function renderCreditRecovery() {
         <tbody>${rowsHtml}</tbody>
       </table>
     </div>
+    ${historyHtml}
   `;
 }
 
