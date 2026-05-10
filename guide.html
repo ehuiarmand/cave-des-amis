@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
-  <title>Guide d'utilisation — TDB Bar Secure</title>
+  <title>Guide d'utilisation — Maquis Manager</title>
   <style>
     :root {
       --ink: #1a130a;
@@ -60,7 +60,11 @@
       margin: 32px 0 12px;
       scroll-margin-top: 16px;
     }
-    h3 { font-size: 1.05rem; margin: 20px 0 8px; }
+    h3 {
+      font-size: 1.05rem;
+      margin: 20px 0 8px;
+      scroll-margin-top: 14px;
+    }
     p { margin: 0 0 12px; }
     ul { margin: 0 0 14px; padding-left: 1.35rem; }
     li { margin-bottom: 6px; }
@@ -124,18 +128,22 @@
       <button type="button" id="btn-back">Fermer cet onglet</button>
     </div>
 
-    <h1>Guide d'utilisation — TDB Bar Secure</h1>
-    <p class="lead">Application locale : ventes, stock, achats fournisseurs, charges et paramètres multi-sites.</p>
+    <h1>Guide d'utilisation — Maquis Manager</h1>
+    <p class="lead">Application locale : ventes, stock, achats fournisseurs, casiers physiques, charges et paramètres multi-sites. Les ancres (<code>#consignes</code>, etc.) servent aux liens depuis la page <strong>Guide</strong> de l'application.</p>
 
     <nav class="toc no-print" aria-label="Sommaire">
       <h2 style="margin-top:0">Sommaire</h2>
       <ol>
         <li><a href="#connexion">Première connexion</a></li>
         <li><a href="#navigation">Navigation générale</a></li>
+        <li><a href="#guide-app">Guide dans l'application</a></li>
         <li><a href="#tableau-de-bord">Tableau de bord</a></li>
         <li><a href="#point-du-jour">Point du jour</a></li>
+        <li><a href="#pdj-cloture">Clôture et vérification stock</a></li>
         <li><a href="#ventes">Ventes</a></li>
+        <li><a href="#consignes">Consignes</a></li>
         <li><a href="#stock">Stock</a></li>
+        <li><a href="#casiers">Gestion casiers</a></li>
         <li><a href="#charges">Charges</a></li>
         <li><a href="#parametres">Paramètres</a></li>
         <li><a href="#telephone">Téléphone</a></li>
@@ -151,27 +159,31 @@
       <li>Si la <strong>2FA</strong> est activée, entrez le <strong>code à 6 chiffres</strong> (Google Authenticator, Authy, etc.).</li>
       <li>Validez pour accéder au <strong>tableau de bord</strong>.</li>
     </ol>
-    <p><strong>Déconnexion</strong> : barre latérale sur bureau ; navigation du bas puis Paramètres sur mobile.</p>
+    <p><strong>Déconnexion</strong> : bouton <strong>Déconnexion</strong> dans la barre latérale sur bureau ; sur mobile, selon l'écran, la zone session ou les <strong>Paramètres</strong>.</p>
 
     <h2 id="navigation">2. Navigation générale</h2>
+    <p id="guide-app">Le menu <strong>Guide</strong> dans la barre latérale (ou le menu du bas sur mobile) ouvre une page sommaire dans l'application avec des liens vers ce document pour lecture ou impression PDF.</p>
     <table>
       <thead>
         <tr><th>Zone</th><th>Contenu principal</th></tr>
       </thead>
       <tbody>
-        <tr><td><strong>Tableau de bord</strong></td><td>Indicateurs, alertes stock, ventes / paiements</td></tr>
-        <tr><td><strong>Point du jour</strong></td><td>Synthèse journalière (CA, créances, remises, etc.)</td></tr>
-        <tr><td><strong>Ventes</strong></td><td>Commandes, caisse &amp; crédits, QR codes</td></tr>
-        <tr><td><strong>Stock</strong></td><td>Catalogue, mouvements, achats fournisseurs, créanciers, pertes</td></tr>
+        <tr><td><strong>Tableau de bord</strong></td><td>Indicateurs, alertes stock, <strong>casiers physiques</strong> (parc), ventes / paiements</td></tr>
+        <tr><td><strong>Point du jour</strong></td><td>Synthèse journalière, vérification stock avant clôture</td></tr>
+        <tr><td><strong>Ventes</strong></td><td>Commandes, <strong>Caisse &amp; Paiement</strong>, <strong>Consignes</strong>, QR codes</td></tr>
+        <tr><td><strong>Stock</strong></td><td>Catalogue, mouvements, achats fournisseurs, créanciers, <strong>Gestion casiers</strong></td></tr>
         <tr><td><strong>Charges</strong></td><td>Dépenses</td></tr>
-        <tr><td><strong>Paramètres</strong></td><td>Établissement, catégories, accès, administration</td></tr>
+        <tr><td><strong>Guide</strong></td><td>Liens vers ce guide imprimable et PDF</td></tr>
+        <tr><td><strong>Paramètres</strong></td><td>Profil, catégories, accès, administration</td></tr>
       </tbody>
     </table>
     <p>En haut à droite : <strong>sélecteur de site</strong> pour le multi-établissements. Sur <strong>téléphone</strong>, menu principal en <strong>barre du bas</strong>.</p>
+    <p><strong>Rôles</strong> (aperçu) : serveuse, gérant, manager, administrateur, super administrateur. Réouverture d'une journée clôturée, choix de la date de journée à traiter et certaines options d'administration sont réservés aux profils autorisés.</p>
 
     <h2 id="tableau-de-bord">3. Tableau de bord</h2>
     <ul>
       <li>CA, charges, bénéfice indicatif, nombre de ventes ; graphiques par catégorie et par paiement.</li>
+      <li><strong>Casiers physiques</strong> : carte récapitulative du parc (total, pleins, partiels, vides) et <strong>suggestions</strong> pour le réapprovisionnement (aligné avec Stock &gt; Gestion casiers).</li>
       <li><strong>Alertes stock</strong> : articles au seuil ou en dessous.</li>
       <li><strong>Proposer commande</strong> : ouvre Achats avec une ligne pré-remplie.</li>
       <li><strong>Toutes les alertes</strong> : envoie tous les articles en alerte dans le brouillon commande.</li>
@@ -180,54 +192,66 @@
     </ul>
 
     <h2 id="point-du-jour">4. Point du jour</h2>
-    <p>Vue pour la clôture ou le bilan quotidien : CA encaissé, « à régler », transactions, remises, paiements et détail des boissons vendues.</p>
+    <p>Vue pour la clôture ou le bilan quotidien : CA encaissé, « à régler », transactions, remises, paiements, détail des boissons vendues et détail des ventes sur la période affichée.</p>
+
+    <h3 id="pdj-cloture">Clôture, vérification stock et administrateurs</h3>
+    <ul>
+      <li><strong>Ouverture de caisse</strong> : si votre installation l'utilise, enregistrez l'ouverture du jour dans la zone prévue en haut de page.</li>
+      <li><strong>Vérifier avant clôture</strong> : lance la vérification de stock de fermeture ; <strong>Imprimer le rapport de cloture</strong> peut être proposé ensuite.</li>
+      <li><strong>Journées clôturées (réouverture)</strong> : réservé aux <strong>administrateurs</strong> — supprime la fiche de clôture et annule les écritures de stock associées. Les quantités frigo / réserve actuelles ne sont pas recalculées automatiquement : vérifiez le stock physique si besoin.</li>
+      <li><strong>Super administrateur</strong> : si un bloc « journée à traiter » avec une <strong>date</strong> apparaît, appliquez cette date pour corriger ou contrôler une journée précise, puis reclôturez selon votre procédure.</li>
+    </ul>
 
     <h2 id="ventes">5. Ventes</h2>
+    <p>Quatre sous-onglets : <strong>Commandes</strong>, <strong>Caisse &amp; Paiement</strong>, <strong>Consignes</strong>, <strong>QR Codes</strong>.</p>
     <h3>Commandes</h3>
-    <p>Nouvelle commande ou reprise ; lignes avec article, format, quantité, lieu intérieur/extérieur selon configuration. Stock frigo/réserve pris en compte. Validation, ticket, facture, annulations selon les droits.</p>
-    <h3>Caisse et crédit client</h3>
-    <p>Encaissements, soldes clients, versements sur crédit.</p>
+    <p>Nouvelle commande ou reprise ; lignes avec article, format (bouteille, pack, casier, etc.), quantité, lieu Intérieur / Extérieur si les tarifs diffèrent. Stock frigo/réserve pris en compte. Validation, ticket, facture, annulations selon les droits.</p>
+    <h3>Caisse &amp; Paiement</h3>
+    <p><strong>Historique ventes</strong> : ventes finalisées sur une période (Du / Au), impression possible. <strong>Recouvrement crédits</strong> : tableau « Crédits en cours (reste à payer) », bouton <strong>Encaisser</strong>, enregistrement des versements. La section <strong>Historique des paiements</strong> liste tous les versements (y compris lorsqu'il n'y a plus de solde actif).</p>
+    <h3 id="consignes">Consignes</h3>
+    <p>Deux cas fréquents : <strong>Reliquat payé</strong> (facture payée, client n'a pas tout bu — quantité à honorer à une prochaine visite) et <strong>consigne bouteille</strong> (dépôt avec retour physique — décochez « Reliquat payé : le client reviendra boire… »).</p>
+    <p>Indicateurs : Bouteilles — retour, Reliquats à servir, Clôturées, Dépôt bouteille dû. <strong>+ Nouvelle consigne</strong> : client, date, facture concernée ; pour un mélange sur une facture, colonne <strong>Reliquat (btl)</strong> par ligne puis <strong>Enregistrer</strong>. Actions possibles : Bouteille rendue, Reliquat payé (prochaine visite), Reliquat servi, Remboursé / annulé, Suppr.</p>
     <h3>QR codes</h3>
     <p>Génération / impression pour tables ou espaces.</p>
-    <p>Le bouton flottant <strong>+</strong> sur Ventes ouvre l'éditeur de commande.</p>
+    <p>Le bouton flottant <strong>+</strong> sur Ventes ouvre l'éditeur de <strong>commande</strong> lorsque l'onglet Commandes est pertinent.</p>
 
     <h2 id="stock">6. Stock</h2>
     <h3>Catalogue</h3>
-    <p>Articles, frigo, réserve, seuils, prix d'achat, formats de vente. Recherche, tableau compact/détaillé. Nouvel article ou modification via <strong>+</strong> ou actions ligne.</p>
+    <p>Articles, frigo, réserve, seuils, prix d'achat, formats de vente. Recherche, tableau compact/détaillé. Nouvel article ou modification via <strong>+</strong> (catalogue actif) ou actions ligne. Bouton <strong>Perte</strong> : sortie hors vente (casse, etc.) — ce n'est pas un onglet séparé.</p>
     <h3>Mouvements</h3>
     <p>Historique des entrées et mouvements.</p>
     <h3>Achats fournisseurs</h3>
-    <p>Commande (fournisseur, date, paiement dont crédit fournisseur). Lignes : article présent au stock ; prix et btl/casier depuis le catalogue ; casiers suggérés selon stock et seuil. <strong>Réceptionner</strong> : saisir les <strong>casiers livrés</strong> réels par ligne ; mise à jour stock et charge « Approvisionnement ». Sur téléphone, le <strong>+</strong> sur l'onglet Achats ouvre ce formulaire.</p>
+    <p>Commande (fournisseur, date, paiement dont crédit fournisseur). Lignes : article au stock ; prix et btl/casier depuis le catalogue ; quantités en casiers suggérées. Si le parc l'exige : bouton <strong>Créer des casiers vides…</strong> pour créer rapidement un casier puis reprendre la commande. <strong>Réceptionner</strong> : fenêtre avec casiers livrés par ligne ; case <strong>Ranger dans des casiers physiques</strong> (cochée par défaut) — répartition sur casiers partiels ou nouveaux casiers ; stock catalogue et onglet Gestion casiers mis à jour ; charge « Approvisionnement ». Sur téléphone, le <strong>+</strong> sur Achats ouvre ce formulaire.</p>
     <h3>Créanciers</h3>
     <p>Dettes fournisseurs ; dépense en crédit fournisseur selon configuration.</p>
-    <h3>Pertes</h3>
-    <p>Sorties hors vente (casse, etc.).</p>
+    <h3 id="casiers">Gestion casiers</h3>
+    <p>Parc de casiers physiques : codes, articles, capacités, statuts (vide, partiel, plein), mouvements. Cohérent avec le tableau de bord. Les casiers vides disponibles peuvent limiter certaines commandes fournisseur : utilisez la création rapide proposée si besoin.</p>
     <h3>Excel</h3>
-    <p><strong>Exporter</strong> le stock du site. <strong>Importer</strong> : création/mise à jour ; colonnes Frigo, Réserve, Entrées, Sorties, Stock actuel prises en compte si présentes.</p>
+    <p><strong>Exporter</strong> le stock du site. <strong>Importer</strong> : création/mise à jour ; colonnes Frigo, Réserve, Entrées, Sorties, Stock actuel si présentes.</p>
 
     <h2 id="charges">7. Charges</h2>
     <p>Dépenses : date, libellé, catégorie, montant, paiement (dont crédit fournisseur). Le <strong>+</strong> sur la page Charges ouvre une nouvelle dépense.</p>
 
     <h2 id="parametres">8. Paramètres</h2>
     <ul>
-      <li><strong>Profil</strong> : nom du bar, objectif CA, seuil, préfixe factures.</li>
-      <li><strong>Catégories</strong> : liste des catégories boissons.</li>
+      <li><strong>Profil</strong> : nom du bar, objectif CA, seuil, préfixe factures, options (brasserie unique, tarifs zone, etc.).</li>
+      <li><strong>Catégories</strong> : catégories boissons (selon droits).</li>
       <li><strong>Accès</strong> : utilisateurs, rôles, sites, 2FA.</li>
-      <li><strong>Administration</strong> : options réservées admin (audit, données, etc.).</li>
+      <li><strong>Administration</strong> : export JSON, sauvegardes, options avancées.</li>
     </ul>
     <p>Les menus masqués selon le <strong>rôle</strong> ne sont pas accessibles.</p>
 
     <h2 id="telephone">9. Utilisation sur téléphone</h2>
     <ul>
       <li>Navigation basse, boutons plus grands, listes empilées, modales défilables.</li>
-      <li>Tableaux larges : défiler <strong>horizontalement</strong>.</li>
+      <li>Tableaux larges : défiler <strong>horizontalement</strong> (stock, recouvrement).</li>
       <li>Champs dimensionnés pour limiter le zoom intempestif.</li>
     </ul>
 
     <h2 id="bonnes-pratiques">10. Bonnes pratiques</h2>
     <ol>
       <li>Tenir le <strong>stock</strong> à jour avant ventes et commandes.</li>
-      <li>Réceptionner avec les <strong>quantités livrées réelles</strong>.</li>
+      <li>Réceptionner avec les <strong>quantités livrées réelles</strong> et adapter <strong>Ranger dans des casiers physiques</strong> à votre processus cave.</li>
       <li>Vérifier le <strong>site actif</strong> en multi-maquis.</li>
       <li><strong>Exporter</strong> régulièrement (Excel ou JSON).</li>
       <li>Garder le <strong>serveur</strong> actif ; données en JSON et/ou SQLite selon installation.</li>
@@ -238,11 +262,12 @@
       <li><strong>Session expirée</strong> : reconnectez-vous.</li>
       <li><strong>Action refusée</strong> : rôle ou site.</li>
       <li><strong>Import Excel</strong> : en-têtes alignés sur l'export ; article obligatoire ; prix achat requis pour les propositions commande.</li>
+      <li><strong>Casiers vides insuffisants</strong> : créez des casiers vides via le bouton proposé ou ajustez le brouillon de commande.</li>
       <li>Après mise à jour des fichiers : <strong>Ctrl+F5</strong> pour recharger les scripts.</li>
     </ul>
 
     <footer>
-      <p>TDB Bar Secure — guide imprimable. Dans l’application, ouvrez la page <strong>Guide</strong> (menu principal, accessible à tous les rôles). Fichier Markdown : <code>GUIDE_UTILISATION.md</code>.</p>
+      <p><strong>Maquis Manager</strong> — guide imprimable. Dans l'application, menu <strong>Guide</strong> (tous les rôles). Source Markdown : <code>GUIDE_UTILISATION.md</code>.</p>
     </footer>
   </div>
 
