@@ -1,6 +1,6 @@
 Param(
   [string]$ProjectDir = (Split-Path -Parent $MyInvocation.MyCommand.Path),
-  [string]$BackupFolderName = "TDB-Bar-Backups",
+  [string]$BackupFolderName = "Maquis-Manager-Backups",
   [int]$Keep = 30
 )
 

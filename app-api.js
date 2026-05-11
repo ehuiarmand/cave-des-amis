@@ -490,7 +490,7 @@ function exportData() {
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   const link = document.createElement("a");
   link.href = URL.createObjectURL(blob);
-  link.download = `tdb_bar_${today()}.json`;
+  link.download = `maquis_manager_${today()}.json`;
   link.click();
   URL.revokeObjectURL(link.href);
 }

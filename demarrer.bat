@@ -1,10 +1,10 @@
 @echo off
-title TDB Bar - Demarrage
+title Maquis Manager - Demarrage
 color 0A
 
 echo.
 echo  ================================================
-echo   TDB Bar - Gestion Cave
+echo   Maquis Manager - Gestion maquis / cave
 echo  ================================================
 echo.
 

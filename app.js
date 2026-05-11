@@ -1,4 +1,5 @@
-const STORAGE_KEY = "tdb_bar_app_v2";
+const STORAGE_KEY = "maquis_manager_app_v2";
+const STORAGE_KEY_LEGACY = "tdb_bar_app_v2";
 
 const CATEGORIES = [
   "Bières",
@@ -109,12 +110,17 @@ let currentFilter = "all";
 function loadState() {
   const fallback = createDefaultState();
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    let raw = localStorage.getItem(STORAGE_KEY);
+    let fromLegacy = false;
+    if (!raw) {
+      raw = localStorage.getItem(STORAGE_KEY_LEGACY);
+      fromLegacy = Boolean(raw);
+    }
     if (!raw) {
       return fallback;
     }
     const parsed = JSON.parse(raw);
-    return {
+    const result = {
       ...fallback,
       ...parsed,
       auth: { ...fallback.auth, ...(parsed.auth || {}) },
@@ -124,6 +130,15 @@ function loadState() {
       stock: Array.isArray(parsed.stock) ? parsed.stock : fallback.stock,
       charges: Array.isArray(parsed.charges) ? parsed.charges : fallback.charges,
     };
+    if (fromLegacy) {
+      try {
+        localStorage.setItem(STORAGE_KEY, raw);
+        localStorage.removeItem(STORAGE_KEY_LEGACY);
+      } catch {
+        /* ignore */
+      }
+    }
+    return result;
   } catch (error) {
     return fallback;
   }
@@ -483,7 +498,7 @@ function exportData() {
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   const link = document.createElement("a");
   link.href = URL.createObjectURL(blob);
-  link.download = `tdb_bar_${today()}.json`;
+  link.download = `maquis_manager_${today()}.json`;
   link.click();
   URL.revokeObjectURL(link.href);
 }

@@ -7137,7 +7137,7 @@ async function refreshRestoreBackupUi() {
         ? `<p class="muted" style="margin:0 0 8px">Liste obtenue via <code>/api/state</code> (<code>/api/admin/backups</code> non disponible sur ce deploiement).</p>`
         : "";
       infoEl.innerHTML =
-        `${via}${note}<br><strong>Stockage serveur&nbsp;:</strong> ${mode} · jusqu&apos;a <strong>${k}</strong> fichiers <code>data-*.json</code> et <code>app-*.sqlite3</code> conserves.<br>Pour plus de gardes&nbsp;: variable <code>TDB_BAR_BACKUP_KEEP</code> (3-100).`;
+        `${via}${note}<br><strong>Stockage serveur&nbsp;:</strong> ${mode} · jusqu&apos;a <strong>${k}</strong> fichiers <code>data-*.json</code> et <code>app-*.sqlite3</code> conserves.<br>Pour plus de gardes&nbsp;: <code>MAQUIS_MANAGER_BACKUP_KEEP</code> (3-100), ou <code>TDB_BAR_BACKUP_KEEP</code> (ancien nom, encore accepte).`;
     }
     const jsonBk = Array.isArray(data.jsonBackups) ? data.jsonBackups : [];
     const sqlBk = Array.isArray(data.sqliteBackups) ? data.sqliteBackups : [];
@@ -7371,7 +7371,7 @@ function exportData() {
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   const link = document.createElement("a");
   link.href = URL.createObjectURL(blob);
-  link.download = `tdb_bar_${today()}.json`;
+  link.download = `maquis_manager_${today()}.json`;
   link.click();
   URL.revokeObjectURL(link.href);
 }
@@ -7561,7 +7561,7 @@ function printDayClosure() {
 
   <div class="header">
     <div>
-      <h1>${escapeHtml(site?.nom || "TDB Bar")}</h1>
+      <h1>${escapeHtml(site?.nom || "Maquis Manager")}</h1>
       <div style="font-size:10px;margin-top:2px">FICHE DE CONTROLE — ${dateLabel}</div>
     </div>
     <div class="meta">Cloture : ${generatedAt}<br>Gerant : ${escapeHtml(sessionUser || "-")}<br>Ecarts stock : ${gaps}${cashHeaderExtra}</div>
@@ -7629,7 +7629,7 @@ function printDayClosure() {
     </div>
   </div>
 
-  <div class="footer">${escapeHtml(site?.nom || "TDB Bar")} &mdash; Fiche de cloture generee automatiquement &mdash; ${escapeHtml(formatDateDdMmYyyy(reportDateStr))}</div>
+  <div class="footer">${escapeHtml(site?.nom || "Maquis Manager")} &mdash; Fiche de cloture generee automatiquement &mdash; ${escapeHtml(formatDateDdMmYyyy(reportDateStr))}</div>
   <script>window.onload = () => window.print();<\/script>
   </body></html>`;
 

@@ -1,10 +1,14 @@
 #!/bin/bash
-# Script d'installation automatique - TDB Bar
+# Script d'installation automatique - Maquis Manager
 set -e
+
+APP_DIR="/opt/maquis-manager"
+SERVICE_APP="maquis-manager"
+SERVICE_TUNNEL="maquis-manager-tunnel"
 
 echo ""
 echo "================================================"
-echo "  Installation TDB Bar sur VPS"
+echo "  Installation Maquis Manager sur VPS"
 echo "================================================"
 echo ""
 
@@ -23,22 +27,22 @@ dpkg -i cloudflared.deb
 rm cloudflared.deb
 
 # Creation du dossier de l'application
-echo "[4/6] Creation du dossier /opt/tdb-bar..."
-mkdir -p /opt/tdb-bar
+echo "[4/6] Creation du dossier ${APP_DIR}..."
+mkdir -p "${APP_DIR}"
 mkdir -p /root/.cloudflared
 
 # Service systemd pour le serveur Python
-echo "[5/6] Creation du service TDB Bar..."
-cat > /etc/systemd/system/tdb-bar.service << 'EOF'
+echo "[5/6] Creation du service Maquis Manager..."
+cat > /etc/systemd/system/${SERVICE_APP}.service << EOF
 [Unit]
-Description=TDB Bar - Gestion Cave
+Description=Maquis Manager - Gestion maquis / cave
 After=network.target
 
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/opt/tdb-bar
-Environment=TDB_BAR_PORT=8000
+WorkingDirectory=${APP_DIR}
+Environment=MAQUIS_MANAGER_PORT=8000
 ExecStart=/usr/bin/python3 server.py
 Restart=always
 RestartSec=5
@@ -49,15 +53,15 @@ EOF
 
 # Service systemd pour cloudflared
 echo "[6/6] Creation du service Cloudflare Tunnel..."
-cat > /etc/systemd/system/tdb-tunnel.service << 'EOF'
+cat > /etc/systemd/system/${SERVICE_TUNNEL}.service << EOF
 [Unit]
-Description=TDB Bar - Cloudflare Tunnel
-After=network.target tdb-bar.service
+Description=Maquis Manager - Cloudflare Tunnel
+After=network.target ${SERVICE_APP}.service
 
 [Service]
 Type=simple
 User=root
-ExecStart=/usr/bin/cloudflared tunnel --config /opt/tdb-bar/cloudflared-vps.yml run tdb-bar
+ExecStart=/usr/bin/cloudflared tunnel --config ${APP_DIR}/cloudflared-vps.yml run maquis-manager
 Restart=always
 RestartSec=10
 
@@ -66,13 +70,13 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable tdb-bar
-systemctl enable tdb-tunnel
+systemctl enable "${SERVICE_APP}"
+systemctl enable "${SERVICE_TUNNEL}"
 
 echo ""
 echo "================================================"
 echo "  Installation terminee !"
-echo "  Copiez maintenant vos fichiers puis lancez :"
-echo "  systemctl start tdb-bar tdb-tunnel"
+echo "  Creez un tunnel Cloudflare nomme \"maquis-manager\" puis copiez vos fichiers dans ${APP_DIR}"
+echo "  Lancez : systemctl start ${SERVICE_APP} ${SERVICE_TUNNEL}"
 echo "================================================"
 echo ""

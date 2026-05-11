@@ -6,7 +6,7 @@ import os
 import time
 
 TUNNEL_UUID = "b35163c4-614c-4479-ba61-27aff1f69c8e"
-TUNNEL_NAME = "tdb-bar"
+TUNNEL_NAME = "maquis-manager"
 HOSTNAME = "app.cave-des-amis.com"
 CREDENTIALS_FILE = os.path.join(os.path.expanduser("~"), ".cloudflared", f"{TUNNEL_UUID}.json")
 CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".cloudflared", "config.yml")
@@ -29,7 +29,7 @@ os.chdir(script_dir)
 env = os.environ.copy()
 env["PYTHONUNBUFFERED"] = "1"
 
-print("Demarrage du serveur TDB Bar...")
+print("Demarrage du serveur Maquis Manager...")
 server = subprocess.Popen(
     [sys.executable, "-u", "server.py"],
     stdout=subprocess.PIPE,

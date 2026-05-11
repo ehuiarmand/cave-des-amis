@@ -1,4 +1,4 @@
-const CACHE_NAME = "tdb-bar-static-v10";
+const CACHE_NAME = "maquis-manager-static-v11";
 const STATIC_ASSETS = ["./manifest.json", "./icon.svg"];
 
 self.addEventListener("install", (event) => {

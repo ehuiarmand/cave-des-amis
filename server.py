@@ -29,14 +29,37 @@ BACKUP_DIR = BASE_DIR / "backups"
 AUDIT_LOG_FILE = BASE_DIR / "audit.log.jsonl"
 SQLITE_FILE = BASE_DIR / "app.sqlite3"
 SESSION_TTL_SECONDS = 60 * 60 * 8
-SESSION_COOKIE = "tdb_bar_session"
+SESSION_COOKIE = "maquis_manager_session"
 PASSWORD_ALGO = "pbkdf2_sha256"
 PASSWORD_ITERATIONS = 260_000
 
-STORAGE_MODE = (os.environ.get("TDB_BAR_STORAGE", "json") or "json").strip().lower()
+
+def _env_first(*names: str, default: str = "") -> str:
+    """Premiere variable d'environnement non vide parmi `names` (ordre de priorite)."""
+    for name in names:
+        raw = os.environ.get(name)
+        if raw is not None and str(raw).strip() != "":
+            return str(raw).strip()
+    return default
+
+
+def _env_int_first(default: int, *names: str) -> int:
+    for name in names:
+        raw = os.environ.get(name)
+        if raw is None or str(raw).strip() == "":
+            continue
+        try:
+            return int(str(raw).strip())
+        except ValueError:
+            continue
+    return default
+
+
+# Stockage : MAQUIS_MANAGER_* en priorite, ancien nom TDB_BAR_* encore accepte.
+STORAGE_MODE = (_env_first("MAQUIS_MANAGER_STORAGE", "TDB_BAR_STORAGE", default="json") or "json").strip().lower()
 # Nombre de fichiers data-*.json ou app-*.sqlite3 conserves dans backups/ (3–100).
 try:
-    BACKUP_KEEP_COUNT = max(3, min(100, int(os.environ.get("TDB_BAR_BACKUP_KEEP", "30"))))
+    BACKUP_KEEP_COUNT = max(3, min(100, _env_int_first(30, "MAQUIS_MANAGER_BACKUP_KEEP", "TDB_BAR_BACKUP_KEEP")))
 except ValueError:
     BACKUP_KEEP_COUNT = 30
 
@@ -1775,7 +1798,7 @@ class DataStore:
             "keepCount": BACKUP_KEEP_COUNT,
             "jsonBackups": json_rows,
             "sqliteBackups": sqlite_rows,
-            "autoNote": "Chaque enregistrement sur le serveur cree une copie dans backups/ (nombre limite configurable : TDB_BAR_BACKUP_KEEP).",
+            "autoNote": "Chaque enregistrement sur le serveur cree une copie dans backups/ (nombre limite configurable : MAQUIS_MANAGER_BACKUP_KEEP, ou TDB_BAR_BACKUP_KEEP pour compatibilite).",
         }
 
     def restore_site_from_backup(self, backup_filename: str, site_id: str) -> dict[str, Any]:
@@ -1833,7 +1856,7 @@ sessions = SessionManager(SESSION_TTL_SECONDS)
 
 
 class AppHandler(BaseHTTPRequestHandler):
-    server_version = "TDBBarServer/1.0"
+    server_version = "MaquisManagerServer/1.0"
 
     def _send_security_headers(self) -> None:
         self.send_header("X-Content-Type-Options", "nosniff")
@@ -2073,7 +2096,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 else:
                     self.send_json(HTTPStatus.NOT_FOUND, {"error": "Utilisateur introuvable."})
                     return
-            otp_url = f"otpauth://totp/TDB%20Bar:{target}?secret={secret}&issuer=TDB%20Bar&algorithm=SHA1&digits=6&period=30"
+            otp_url = f"otpauth://totp/Maquis%20Manager:{target}?secret={secret}&issuer=Maquis%20Manager&algorithm=SHA1&digits=6&period=30"
             self.send_json(HTTPStatus.OK, {"secret": secret, "otpauthUrl": otp_url})
             return
 
@@ -2334,8 +2357,8 @@ class AppHandler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    host = os.environ.get("TDB_BAR_HOST", "0.0.0.0")
-    requested_port = int(os.environ.get("TDB_BAR_PORT", "8000"))
+    host = _env_first("MAQUIS_MANAGER_HOST", "TDB_BAR_HOST", default="0.0.0.0")
+    requested_port = int(_env_first("MAQUIS_MANAGER_PORT", "TDB_BAR_PORT", default="8000"))
     candidate_ports = []
     for port in (requested_port, 8001, 8080, 8765):
         if port not in candidate_ports:
@@ -2360,7 +2383,7 @@ def main() -> None:
             message += f" Derniere erreur: {last_error}"
         raise OSError(message)
 
-    print(f"TDB Bar server running on http://127.0.0.1:{bound_port}")
+    print(f"Maquis Manager server running on http://127.0.0.1:{bound_port}")
     print(f"Storage mode: {STORAGE_MODE}")
     print(f"Sauvegardes automatiques dans {BACKUP_DIR} (garder jusqu'a {BACKUP_KEEP_COUNT} fichiers par type)")
     try:

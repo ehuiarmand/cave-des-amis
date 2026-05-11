@@ -1,4 +1,4 @@
-# Améliorations robustesse & performance (TDB Bar)
+# Améliorations robustesse & performance (Maquis Manager)
 
 ## 1) Réduire la charge réseau (live sync)
 
@@ -20,7 +20,8 @@ Pour activer SQLite (plus robuste quand les données grossissent) :
 
 ```powershell
 cd "C:\COURS INPHB IC 2026\gestion cave"
-$env:TDB_BAR_STORAGE="sqlite"
+$env:MAQUIS_MANAGER_STORAGE="sqlite"
+# Ancien nom encore accepte par le serveur : $env:TDB_BAR_STORAGE="sqlite"
 python server.py
 ```
 

@@ -75,13 +75,15 @@ function getParams() {
 function clientStorageKey() {
   // Prefer a per-site key so the client's name follows them across scans/tables.
   // (Older versions used a per-table key; we keep it as fallback in loadSavedClientName.)
-  return `tdb_client_${customerState.siteId}`;
+  return `mm_client_${customerState.siteId}`;
 }
 
 function loadSavedClientName() {
   try {
     const direct = localStorage.getItem(clientStorageKey()) || "";
     if (direct) return direct;
+    const legacySite = localStorage.getItem(`tdb_client_${customerState.siteId}`) || "";
+    if (legacySite) return legacySite;
     // Backward compatibility: try per-table key used previously.
     const t = customerState.table || customerState.alias || "Comptoir";
     return localStorage.getItem(`tdb_client_${customerState.siteId}_${t}`) || "";
@@ -96,7 +98,12 @@ function saveClientName(name) {
 }
 
 function clearSavedClientName() {
-  try { localStorage.removeItem(clientStorageKey()); } catch {}
+  try {
+    localStorage.removeItem(clientStorageKey());
+    localStorage.removeItem(`tdb_client_${customerState.siteId}`);
+    const t = customerState.table || customerState.alias || "Comptoir";
+    localStorage.removeItem(`tdb_client_${customerState.siteId}_${t}`);
+  } catch {}
 }
 
 function applySavedNameUI() {
