@@ -46,6 +46,7 @@ Sur **téléphone**, la navigation principale est en **barre du bas** ; sur gran
 - Consultez le **chiffre d’affaires**, les **charges**, le **bénéfice** indicatif et le **nombre de ventes**.
 - Les graphiques résument les ventes par **catégorie** et par **mode de paiement**.
 - **Casiers physiques** : carte récapitulative du parc (**total**, **pleins**, **partiels**, **vides**) et **suggestions** pour le réapprovisionnement (cohérent avec l’onglet Stock **Gestion casiers**).
+- **Plus / moins vendues** : classement des boissons par **quantité (bouteilles)** sur **l’historique du site** — les plus vendues et (si au moins six références différentes ont été vendues au cumul) les moins vendues parmi les articles ayant eu au moins une vente.
 - **Alertes stock** : articles dont le stock réel est au niveau du seuil ou en dessous.
   - **Proposer commande** : ouvre l’onglet Achats avec une ligne pré-remplie (quantité suggérée selon le seuil).
   - **Toutes les alertes** : ajoute tous les articles en alerte au **brouillon** de commande fournisseur.
@@ -57,6 +58,8 @@ Sur **téléphone**, la navigation principale est en **barre du bas** ; sur gran
 ## 4. Point du jour
 
 Vue pensée pour la **clôture ou le bilan quotidien** : CA encaissé, montants « à régler », nombre de transactions, remises, répartition des paiements, détail des boissons vendues et **détail des ventes** sur la période affichée.
+
+Sous **Boissons vendues (par jour)** : résumé **plus / moins vendues** ce jour-là (quantité en bouteilles), puis tableau détaillé trié par **CA net**. Si peu de références différentes dans la journée, le bloc « moins vendues » peut être masqué pour éviter la redondance avec « plus vendues ».
 
 <h3 id="pdj-cloture">Vérification stock, clôture et administrateurs</h3>
 

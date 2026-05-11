@@ -2830,12 +2830,13 @@ function renderCashOpeningPanel() {
     </div>`;
 }
 
-function renderSalesByProduct(ventesJour) {
-  const container = document.getElementById("pdj-sales-by-product");
-  const countNode = document.getElementById("pdj-sales-count");
-  if (!container) return;
+const PRODUCT_RANK_TOP_N = 5;
+const PRODUCT_RANK_BOTTOM_N = 5;
+
+/** Agrège les lignes de vente par article (quantité en bouteilles + CA net). */
+function aggregateVentesByArticle(ventes) {
   const byArticle = {};
-  (ventesJour || []).forEach((v) => {
+  (ventes || []).forEach((v) => {
     const stockItem = recordsForSite(state.stock).find((s) => s.article === v.article);
     const packSize = Math.max(1, Number(v.formatQuantite) || Number(v.packSize) || Number(stockItem?.packSize) || 1);
     const key = v.article;
@@ -2843,13 +2844,67 @@ function renderSalesByProduct(ventesJour) {
     byArticle[key].bouteilles += (Number(v.qty) || 0) * packSize;
     byArticle[key].ca += calcNet(v);
   });
-  const rows = Object.values(byArticle).sort((a, b) => b.ca - a.ca);
+  return Object.values(byArticle);
+}
+
+/**
+ * Top / flop par quantité (bouteilles). Si peu d'articles distincts, le flop peut être omis (showFlop=false).
+ */
+function topBottomByBottles(rows, { topN = PRODUCT_RANK_TOP_N, bottomN = PRODUCT_RANK_BOTTOM_N, hideFlopWhenSmall = false } = {}) {
+  if (!rows.length) return { top: [], bottom: [], showFlop: false };
+  const byDesc = [...rows].sort((a, b) => b.bouteilles - a.bouteilles || b.ca - a.ca);
+  const byAsc = [...rows].sort((a, b) => a.bouteilles - b.bouteilles || a.ca - b.ca);
+  const top = byDesc.slice(0, Math.min(topN, rows.length));
+  let showFlop = rows.length >= 2;
+  if (hideFlopWhenSmall && rows.length <= topN) showFlop = false;
+  if (rows.length <= 1) showFlop = false;
+  const bottom = showFlop ? byAsc.slice(0, Math.min(bottomN, rows.length)) : [];
+  return { top, bottom, showFlop };
+}
+
+function htmlProductRankLists(top, bottom, showFlop, { flopHint } = {}) {
+  const rowHtml = (r, rankStyle) => `<article class="list-item" style="padding:10px 12px;margin:0">
+    <div style="min-width:0">
+      <p class="list-item-title" style="margin:0;font-size:0.92rem">${escapeHtml(r.article)}</p>
+      <p class="list-item-sub" style="margin:2px 0 0;font-size:0.78rem">${escapeHtml(r.cat)}</p>
+    </div>
+    <div class="list-side">
+      <p class="list-item-amount" style="margin:0;${rankStyle || ""}">${fmt(r.bouteilles)} btl</p>
+      <p class="list-item-date" style="margin:0">${fmt(r.ca)} FCFA</p>
+    </div>
+  </article>`;
+  const topBlock = `
+    <div class="product-rank-col">
+      <p class="eyebrow" style="margin:0 0 8px;color:#1565c0">Les plus vendues (qté)</p>
+      <div style="display:flex;flex-direction:column;gap:8px">${top.map((r) => rowHtml(r, "color:#1565c0")).join("")}</div>
+    </div>`;
+  if (!showFlop || !bottom.length) return `<div class="product-rank-grid">${topBlock}</div>`;
+  return `
+    <div class="product-rank-grid">
+      ${topBlock}
+      <div class="product-rank-col">
+        <p class="eyebrow" style="margin:0 0 8px;color:#c62828">Les moins vendues${flopHint ? ` <span class="muted" style="font-weight:400;font-size:0.78rem">(${escapeHtml(flopHint)})</span>` : ""}</p>
+        <div style="display:flex;flex-direction:column;gap:8px">${bottom.map((r) => rowHtml(r, "color:#c62828")).join("")}</div>
+      </div>
+    </div>`;
+}
+
+function renderSalesByProduct(ventesJour) {
+  const container = document.getElementById("pdj-sales-by-product");
+  const countNode = document.getElementById("pdj-sales-count");
+  if (!container) return;
+  const aggregated = aggregateVentesByArticle(ventesJour);
+  const rows = aggregated.sort((a, b) => b.ca - a.ca);
   if (countNode) countNode.textContent = `${rows.length} article(s)`;
   if (!rows.length) {
     container.innerHTML = emptyState("Aucune vente", "Les boissons vendues aujourd'hui apparaîtront ici.");
     return;
   }
+  const { top, bottom, showFlop } = topBottomByBottles(aggregated, { hideFlopWhenSmall: true });
+  const rankHtml = htmlProductRankLists(top, bottom, showFlop, { flopHint: "ce jour" });
   container.innerHTML = `
+    ${rankHtml}
+    <p class="muted" style="margin:16px 0 10px;font-size:0.82rem">Detail par article (tri CA net)</p>
     <div class="stock-table-wrap">
       <table class="stock-table" style="min-width:620px">
         <thead>
@@ -3148,7 +3203,21 @@ function renderDashboard() {
     : emptyState("Tout va bien", "Aucune alerte stock critique pour le moment.");
   renderBreakdown("pay-chart", paymentTotals(ventes), caTotal, "Aucun paiement disponible.");
   renderDashboardCasierKpis(stock);
+  renderDashboardProductRank(ventes);
   syncMobileBottomBadges();
+}
+
+function renderDashboardProductRank(ventesSite) {
+  const host = document.getElementById("dashboard-product-rank");
+  if (!host) return;
+  const aggregated = aggregateVentesByArticle(ventesSite || []);
+  if (!aggregated.length) {
+    host.innerHTML = `<p class="muted" style="margin:0;font-size:0.88rem">Aucune vente enregistrée pour ce maquis — les classements apparaîtront après des ventes finalisées.</p>`;
+    return;
+  }
+  const { top, bottom, showFlop } = topBottomByBottles(aggregated, { hideFlopWhenSmall: true });
+  const intro = `<p class="muted" style="margin:0 0 12px;font-size:0.82rem;line-height:1.4">Cumul toutes périodes — tri sur la <strong>quantité (bouteilles)</strong> par article.</p>`;
+  host.innerHTML = intro + htmlProductRankLists(top, bottom, showFlop, { flopHint: "historique site" });
 }
 
 function renderDashboardCasierKpis(stockSiteList) {
