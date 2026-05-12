@@ -63,6 +63,36 @@ try:
 except ValueError:
     BACKUP_KEEP_COUNT = 30
 
+SESSION_ABSOLUTE_SECONDS = _env_int_first(
+    SESSION_TTL_SECONDS,
+    "MAQUIS_MANAGER_SESSION_ABSOLUTE_SECONDS",
+    "MAQUIS_MANAGER_SESSION_TTL",
+    "TDB_BAR_SESSION_TTL_SECONDS",
+)
+SESSION_IDLE_SECONDS = _env_int_first(
+    30 * 60,
+    "MAQUIS_MANAGER_SESSION_IDLE_SECONDS",
+    "TDB_BAR_SESSION_IDLE_SECONDS",
+)
+REQUIRE_2FA_FOR_PRIVILEGED = _env_first(
+    "MAQUIS_MANAGER_REQUIRE_2FA_ADMINS",
+    default="0",
+).lower() in ("1", "true", "yes", "on")
+
+
+def privileged_role_requires_2fa_policy(role: str) -> bool:
+    r = str(role or "").strip().lower()
+    return r in ("superadmin", "admin")
+
+
+def session_timing_fields(sess: dict[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for key in ("sessionCreatedAt", "sessionDeadlineUnix", "sessionAbsoluteSeconds", "sessionIdleSeconds"):
+        if key in sess:
+            out[key] = sess[key]
+    return out
+
+
 # ---------------------------------------------------------------------------
 # TOTP (RFC 6238) — no third-party deps, Python stdlib only
 # ---------------------------------------------------------------------------
@@ -918,35 +948,67 @@ def stock_total_by_article(site_id: str, stock_rows: list[dict[str, Any]]) -> di
 
 
 class SessionManager:
-    def __init__(self, ttl_seconds: int) -> None:
-        self.ttl_seconds = ttl_seconds
+    """Sessions avec limite absolue et fenetre d'inactivite (idle)."""
+
+    def __init__(self, *, absolute_seconds: int, idle_seconds: int) -> None:
+        self.absolute_seconds = max(300, int(absolute_seconds or SESSION_TTL_SECONDS))
+        self.idle_seconds = max(0, int(idle_seconds or 0))
         self._sessions: dict[str, dict[str, Any]] = {}
         self._lock = threading.Lock()
 
     def create(self, username: str, role: str, allowed_site_ids: list[str]) -> str:
         token = secrets.token_urlsafe(32)
-        expires_at = int(time.time()) + self.ttl_seconds
+        now = int(time.time())
         with self._lock:
             self._sessions[token] = {
                 "username": username,
                 "role": role,
-                "allowedSiteIds": allowed_site_ids,
-                "expiresAt": expires_at,
+                "allowedSiteIds": list(allowed_site_ids or []),
+                "createdAt": now,
+                "lastActivityAt": now,
             }
         return token
+
+    def _session_public_view(self, sess: dict[str, Any]) -> dict[str, Any]:
+        now = int(time.time())
+        created = int(sess.get("createdAt") or now)
+        last = int(sess.get("lastActivityAt") or now)
+        abs_end = created + self.absolute_seconds
+        if self.idle_seconds:
+            idle_end = last + self.idle_seconds
+            deadline = min(abs_end, idle_end)
+        else:
+            deadline = abs_end
+        return {
+            "username": sess["username"],
+            "role": sess["role"],
+            "allowedSiteIds": list(sess.get("allowedSiteIds") or []),
+            "sessionCreatedAt": created,
+            "sessionDeadlineUnix": deadline,
+            "sessionAbsoluteSeconds": self.absolute_seconds,
+            "sessionIdleSeconds": self.idle_seconds,
+        }
 
     def get(self, token: str | None) -> dict[str, Any] | None:
         if not token:
             return None
+        now = int(time.time())
         with self._lock:
             session = self._sessions.get(token)
             if not session:
                 return None
-            if session["expiresAt"] < time.time():
+            created = int(session.get("createdAt") or now)
+            last = int(session.get("lastActivityAt") or now)
+            if now >= created + self.absolute_seconds:
                 self._sessions.pop(token, None)
+                audit_log("session_expired_absolute", {"username": str(session.get("username", ""))})
                 return None
-            session["expiresAt"] = int(time.time()) + self.ttl_seconds
-            return dict(session)
+            if self.idle_seconds and now - last >= self.idle_seconds:
+                self._sessions.pop(token, None)
+                audit_log("session_expired_idle", {"username": str(session.get("username", ""))})
+                return None
+            session["lastActivityAt"] = now
+            return self._session_public_view(session)
 
     def clear(self, token: str | None) -> None:
         if not token:
@@ -1888,7 +1950,7 @@ class DataStore:
 
 
 store = DataStore(DATA_FILE)
-sessions = SessionManager(SESSION_TTL_SECONDS)
+sessions = SessionManager(absolute_seconds=SESSION_ABSOLUTE_SECONDS, idle_seconds=SESSION_IDLE_SECONDS)
 
 
 def invalidate_sessions_on_auth_changes(
@@ -1970,6 +2032,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     "username": session["username"],
                     "role": role,
                     "allowedSiteIds": allowed,
+                    **session_timing_fields(session),
                 },
             )
             return
@@ -2085,19 +2148,39 @@ class AppHandler(BaseHTTPRequestHandler):
                 audit_log("login_failed", {"ip": ip, "username": username})
                 self.send_json(HTTPStatus.UNAUTHORIZED, {"error": "Identifiants invalides."})
                 return
-            login_rate_limit_success(ip, username)
-            audit_log("login_success", {"ip": ip, "username": username})
             with store._lock:
                 user_data = next((u for u in store._state["auth"]["users"] if u["username"] == username), None)
                 has_2fa = bool(user_data and user_data.get("twoFactorEnabled") and user_data.get("twoFactorSecret"))
+            if REQUIRE_2FA_FOR_PRIVILEGED and privileged_role_requires_2fa_policy(user["role"]) and not has_2fa:
+                audit_log(
+                    "login_denied_2fa_required",
+                    {"ip": ip, "username": username, "role": user.get("role", "")},
+                )
+                self.send_json(
+                    HTTPStatus.FORBIDDEN,
+                    {
+                        "error": "La double authentification (2FA) est obligatoire pour les comptes administrateur. Activez le 2FA sur ce compte (ou désactivez temporairement MAQUIS_MANAGER_REQUIRE_2FA_ADMINS sur le serveur).",
+                    },
+                    cache_control="no-store",
+                )
+                return
+            login_rate_limit_success(ip, username)
+            audit_log("login_success", {"ip": ip, "username": username})
             if has_2fa:
                 pre_auth = create_pre_auth_token(username)
                 self.send_json(HTTPStatus.OK, {"needsTwoFactor": True, "preAuthToken": pre_auth})
                 return
             token = sessions.create(user["username"], user["role"], user["allowedSiteIds"])
+            sess_view = sessions.get(token) or {}
             self.send_json(
                 HTTPStatus.OK,
-                {"authenticated": True, "username": user["username"], "role": user["role"], "allowedSiteIds": user["allowedSiteIds"]},
+                {
+                    "authenticated": True,
+                    "username": user["username"],
+                    "role": user["role"],
+                    "allowedSiteIds": user["allowedSiteIds"],
+                    **session_timing_fields(sess_view),
+                },
                 cookie=token,
             )
             return
@@ -2132,7 +2215,18 @@ class AppHandler(BaseHTTPRequestHandler):
                 elif role == "superadmin":
                     allowed = list(all_site_ids)
             token = sessions.create(username, role, allowed)
-            self.send_json(HTTPStatus.OK, {"authenticated": True, "username": username, "role": role, "allowedSiteIds": allowed}, cookie=token)
+            sess_view = sessions.get(token) or {}
+            self.send_json(
+                HTTPStatus.OK,
+                {
+                    "authenticated": True,
+                    "username": username,
+                    "role": role,
+                    "allowedSiteIds": allowed,
+                    **session_timing_fields(sess_view),
+                },
+                cookie=token,
+            )
             return
 
         if post_path == "/api/2fa/setup":
@@ -2397,7 +2491,7 @@ class AppHandler(BaseHTTPRequestHandler):
         if cookie:
             self.send_header(
                 "Set-Cookie",
-                f"{SESSION_COOKIE}={cookie}; Path=/; HttpOnly; SameSite=Lax; Max-Age={SESSION_TTL_SECONDS}",
+                f"{SESSION_COOKIE}={cookie}; Path=/; HttpOnly; SameSite=Lax; Max-Age={SESSION_ABSOLUTE_SECONDS}",
             )
         if clear_cookie:
             self.send_header(

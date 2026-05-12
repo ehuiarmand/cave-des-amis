@@ -65,6 +65,15 @@ let pendingReceivePurchaseId = null;
 let purchaseDraftLines = [];
 /** Après fermeture du modal « nouveau casier » sans enregistrer, on annule la reprise commande achat. */
 let pendingPurchaseCasierResume = false;
+let sessionDeadlineUnix = null;
+
+function applySessionTimingFromApi(payload) {
+  if (!payload || typeof payload.sessionDeadlineUnix !== "number" || payload.sessionDeadlineUnix <= 0) {
+    sessionDeadlineUnix = null;
+    return;
+  }
+  sessionDeadlineUnix = payload.sessionDeadlineUnix;
+}
 
 function creditRecoveriesForSite(sourceState = state) {
   const siteId = sourceState?.activeSiteId || currentSiteId();
@@ -1774,7 +1783,7 @@ function renderTopbar() {
     : eff === "admin"
       ? "admin. maquis"
       : eff === "manager"
-        ? "gerant"
+        ? "gérant"
         : (eff || "utilisateur");
   const badge = document.getElementById("role-badge");
   badge.textContent = roleLabel;
@@ -1786,6 +1795,22 @@ function renderTopbar() {
       ? `Maquis actif : ${currentSite()?.nom || sid} (${sid})`
       : "";
     scopeEl.title = "Les ecritures (ventes, stock…) sont rattachees a ce maquis dans l'etat enregistre.";
+  }
+  const sessExp = document.getElementById("top-session-expires");
+  if (sessExp) {
+    if (typeof sessionDeadlineUnix === "number" && sessionDeadlineUnix > 0) {
+      const ms = sessionDeadlineUnix * 1000;
+      if (ms > Date.now()) {
+        sessExp.textContent = `Session (echeance indicative) : ${formatDateTimeDdMmYyyy(new Date(ms))}`;
+        sessExp.title = "L'expiration reelle depend de l'inactivite et de la duree max. configurees sur le serveur (MAQUIS_MANAGER_SESSION_*).";
+      } else {
+        sessExp.textContent = "";
+        sessExp.removeAttribute("title");
+      }
+    } else {
+      sessExp.textContent = "";
+      sessExp.removeAttribute("title");
+    }
   }
 }
 
@@ -9686,6 +9711,7 @@ async function handleLoginSubmit(event) {
       sessionUser = session.username;
       currentRole = normalizeRoleForUsername(session.username, session.role);
       allowedSiteIds = session.allowedSiteIds || [];
+      applySessionTimingFromApi(session);
       errorEl.textContent = "";
       setAuthVisible(true);
       await bootstrapAuthenticatedApp();
@@ -9704,6 +9730,7 @@ async function handleLoginSubmit(event) {
         sessionUser = result.username;
         currentRole = normalizeRoleForUsername(result.username, result.role);
         allowedSiteIds = result.allowedSiteIds || [];
+        applySessionTimingFromApi(result);
         errorEl.textContent = "";
         setAuthVisible(true);
         await bootstrapAuthenticatedApp();
@@ -9726,6 +9753,7 @@ async function logout() {
   sessionUser = null;
   currentRole = null;
   allowedSiteIds = [];
+  sessionDeadlineUnix = null;
   activeOrderId = null;
   editingLineId = null;
   pendingFinalizeOrderId = null;
@@ -10808,6 +10836,7 @@ async function init() {
     sessionUser = session.username;
     currentRole = normalizeRoleForUsername(session.username, session.role);
     allowedSiteIds = session.allowedSiteIds || [];
+    applySessionTimingFromApi(session);
     setAuthVisible(true);
     await bootstrapAuthenticatedApp();
   } catch (error) {

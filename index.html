@@ -83,14 +83,14 @@
         </button>
         <button class="nav-btn" data-page="params" type="button">
           <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 4.754a3.246 3.246 0 1 0 0 6.492 3.246 3.246 0 0 0 0-6.492zM5.754 8a2.246 2.246 0 1 1 4.492 0 2.246 2.246 0 0 1-4.492 0z"/><path d="M9.796 1.343c-.527-1.79-3.065-1.79-3.592 0l-.094.319a.873.873 0 0 1-1.255.52l-.292-.16c-1.64-.892-3.433.902-2.54 2.541l.159.292a.873.873 0 0 1-.52 1.255l-.319.094c-1.79.527-1.79 3.065 0 3.592l.319.094a.873.873 0 0 1 .52 1.255l-.16.292c-.892 1.64.901 3.434 2.541 2.54l.292-.159a.873.873 0 0 1 1.255.52l.094.319c.527 1.79 3.065 1.79 3.592 0l.094-.319a.873.873 0 0 1 1.255-.52l.292.16c1.64.892 3.433-.902 2.54-2.541l-.159-.292a.873.873 0 0 1 .52-1.255l.319-.094c1.79-.527 1.79-3.065 0-3.592l-.319-.094a.873.873 0 0 1-.52-1.255l.16-.292c.892-1.64-.901-3.433-2.541-2.54l-.292.159a.873.873 0 0 1-1.255-.52l-.094-.319z"/></svg>
-          <span>Parametres</span>
+          <span>Paramètres</span>
         </button>
       </nav>
 
       <div class="sidebar-session">
-        <span id="role-badge" class="badge badge-amber">gerant</span>
+        <span id="role-badge" class="badge badge-amber">gérant</span>
         <strong id="session-user" class="sidebar-username"></strong>
-        <button id="logout-btn" class="sidebar-logout" type="button">Deconnexion</button>
+        <button id="logout-btn" class="sidebar-logout" type="button">Déconnexion</button>
       </div>
     </aside>
 
@@ -106,6 +106,7 @@
           <button type="button" id="topbar-more-btn" class="topbar-more-btn" aria-label="Menu rapide">⋯</button>
           <select id="site-switcher" class="site-switcher" aria-label="Maquis actif"></select>
           <p id="header-site-scope" class="muted" style="font-size:0.72rem;margin:6px 0 0;text-align:right;max-width:260px;line-height:1.35"></p>
+          <p id="top-session-expires" class="muted" style="font-size:0.7rem;margin:2px 0 0;text-align:right;max-width:260px;line-height:1.35"></p>
           <div id="top-date" class="top-date"></div>
         </div>
       </header>
@@ -361,7 +362,7 @@
               <input id="qr-count" type="number" min="1" max="200" value="1" placeholder="ex: 20">
             </div>
             <div class="form-group">
-              <label for="qr-prefix">Prefixe</label>
+              <label for="qr-prefix">Préfixe</label>
               <input id="qr-prefix" type="text" value="Table" placeholder="ex: Table">
             </div>
           </div>
@@ -815,7 +816,7 @@
           </div>
           <div id="casier-view-lots">
             <p class="muted" style="margin-bottom:14px;font-size:0.85rem">
-              Stock exprime en <strong>lots</strong> (casiers ou cartons) par categorie. La taille du lot se configure dans le catalogue (champ <strong>Unités par lot</strong>).
+              Stock exprime en <strong>lots</strong> (casiers ou cartons) par catégorie. La taille du lot se configure dans le catalogue (champ <strong>Unités par lot</strong>).
             </p>
             <div class="button-stack" style="grid-template-columns:1fr 1fr;display:grid;margin:0 0 14px">
               <button id="casiers-entree-btn" class="btn btn-primary" type="button">Entrée de lots</button>
@@ -949,10 +950,10 @@
       </section>
 
       <section id="page-params" class="page">
-        <div class="tabs page-subtabs params-subtabs" role="tablist" aria-label="Sous menus parametres">
+        <div class="tabs page-subtabs params-subtabs" role="tablist" aria-label="Sous-menus paramètres">
           <button type="button" class="tab active" data-subtab-params="profil" role="tab" aria-selected="true">Profil</button>
-          <button type="button" class="tab manager-only" data-subtab-params="catalogue" role="tab">Categories</button>
-          <button type="button" class="tab manager-only" data-subtab-params="acces" role="tab">Acces</button>
+          <button type="button" class="tab manager-only" data-subtab-params="catalogue" role="tab">Catégories</button>
+          <button type="button" class="tab manager-only" data-subtab-params="acces" role="tab">Accès</button>
           <button type="button" class="tab any-admin" data-subtab-params="admin" role="tab">Administration</button>
         </div>
 
@@ -968,8 +969,8 @@
                 <input id="p-nom" type="text" placeholder="Mon Bar">
               </div>
               <div class="form-group">
-                <label for="p-gerant">Gerant</label>
-                <input id="p-gerant" type="text" placeholder="Nom du gerant">
+                <label for="p-gerant">Gérant</label>
+                <input id="p-gerant" type="text" placeholder="Nom du gérant">
               </div>
               <div class="form-group">
                 <label for="p-ville">Ville</label>
@@ -1001,10 +1002,10 @@
                   <input id="p-stock-alert-inclusive-seuil" type="checkbox" style="margin-top:3px;width:auto">
                   <span>Alerter des le seuil atteint (stock inferieur ou egal au seuil article)</span>
                 </label>
-                <p class="muted" style="font-size:0.82rem;margin:6px 0 0 28px">Par defaut : alerte seulement si le stock est <strong>strictement</strong> sous le seuil. Cochez pour etre averti des que le stock atteint le seuil (reappro plus tot).</p>
+                <p class="muted" style="font-size:0.82rem;margin:6px 0 0 28px">Par défaut : alerte seulement si le stock est <strong>strictement</strong> sous le seuil. Cochez pour être averti dès que le stock atteint le seuil (réappro plus tôt).</p>
               </div>
               <div class="form-group">
-                <label for="p-prefixe">Prefixe facture</label>
+                <label for="p-prefixe">Préfixe facture</label>
                 <input id="p-prefixe" type="text" placeholder="MBCM">
               </div>
               <div class="form-group" style="grid-column:1/-1">
@@ -1035,7 +1036,7 @@
               </div>
             </div>
             <div class="button-stack">
-              <button id="save-params-btn" class="btn btn-primary" type="button">Enregistrer les parametres</button>
+              <button id="save-params-btn" class="btn btn-primary" type="button">Enregistrer les paramètres</button>
               <button id="export-btn" class="btn btn-outline" type="button">Exporter les donnees JSON</button>
             </div>
           </article>
@@ -1044,7 +1045,7 @@
         <div data-params-panel="catalogue" class="params-panel hidden">
           <article class="card">
             <div class="section-head">
-              <h3>Categories boissons</h3>
+              <h3>Catégories boissons</h3>
               <span class="section-meta">Une categorie par ligne</span>
             </div>
             <div class="form-group">
@@ -1074,7 +1075,7 @@
                 <label for="new-user-role">Role</label>
                 <select id="new-user-role">
                   <option value="serveuse">Serveuse</option>
-                  <option value="manager" class="any-admin">Gerant</option>
+                  <option value="manager" class="any-admin">Gérant</option>
                   <option value="admin" class="admin-only">Administrateur de maquis</option>
                   <option value="superadmin" class="admin-only">Super administrateur</option>
                 </select>
@@ -1098,10 +1099,10 @@
         <div data-params-panel="admin" class="params-panel hidden">
           <article class="card any-admin">
             <div class="section-head">
-              <h3>Historique gerant &amp; serveuses</h3>
+              <h3>Historique gérant &amp; serveuses</h3>
               <span class="section-meta">Audit</span>
             </div>
-            <p class="muted" style="margin-bottom:12px">Journal des actions (creations, modifications, suppressions) faites par les comptes <strong>gerant</strong> et <strong>serveuse</strong>.</p>
+            <p class="muted" style="margin-bottom:12px">Journal des actions (créations, modifications, suppressions) faites par les comptes <strong>gérant</strong> et <strong>serveuse</strong>.</p>
             <div id="staff-audit-list"></div>
           </article>
 
@@ -1131,7 +1132,7 @@
             <div id="sites-list" class="stack-list"></div>
             <div class="form-grid" style="margin-top:16px">
               <p class="muted" style="grid-column:1/-1;font-size:0.85rem;margin:0 0 8px 0">
-                Le maquis cree est rattache aux comptes <strong>super administrateur</strong> uniquement ; le catalogue (articles et tarifs fournisseur) est copie depuis le maquis <strong>maquis-1</strong> (sinon le premier maquis de la liste), avec quantites a zero. Les autres comptes peuvent recevoir l’acces dans l’onglet Acces.
+                Le maquis créé est rattaché aux comptes <strong>super administrateur</strong> uniquement ; le catalogue (articles et tarifs fournisseur) est copié depuis le maquis <strong>maquis-1</strong> (sinon le premier maquis de la liste), avec quantités à zéro. Les autres comptes peuvent recevoir l’accès dans l’onglet Accès.
               </p>
               <div class="form-group">
                 <label for="new-site-nom">Nom du maquis</label>
@@ -1185,7 +1186,7 @@
               <select id="purge-maquis-select" style="width:100%;margin-top:4px;padding:12px;border-radius:12px;border:1px solid var(--line)"></select>
               <label class="checkbox-label" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;margin-top:12px">
                 <input id="purge-maquis-keep-catalog" type="checkbox" checked style="margin-top:3px;width:auto">
-                <span><strong>Garder le catalogue articles</strong> (noms, prix, formats) — seules les quantites passent a zero et l&apos;historique ventes/commandes/etc. est supprime.</span>
+                <span><strong>Garder le catalogue articles</strong> (noms, prix, formats) — seules les quantités passent à zéro et l&apos;historique ventes/commandes/etc. est supprimé.</span>
               </label>
               <p class="muted" style="font-size:0.8rem;margin:10px 0 0">
                 Sans cette case &nbsp;: les lignes <strong>stock</strong> (articles) pour ce maquis sont aussi effacees. Pour recuperer apres erreur utilisez une copie locale <code>backups/data-*.json</code> ou votre export Excel stock.
@@ -1612,7 +1613,7 @@
         <input id="c-lib" type="text" placeholder="ex: Loyer mensuel">
       </div>
       <div class="form-group">
-        <label for="c-cat">Categorie</label>
+        <label for="c-cat">Catégorie</label>
         <select id="c-cat"></select>
       </div>
       <div class="form-group">
@@ -1672,7 +1673,7 @@
         <input id="s-article" type="text" placeholder="ex: Castel Beer 65cl">
       </div>
       <div class="form-group">
-        <label for="s-cat">Categorie</label>
+        <label for="s-cat">Catégorie</label>
         <select id="s-cat"></select>
       </div>
       <div class="form-group">
