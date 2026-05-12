@@ -1141,6 +1141,53 @@ function recordsForSite(list) {
   return (list || []).filter((item) => rowMatchesSite(item, siteId, multiSite));
 }
 
+/**
+ * Duplique catalogue stock et grilles fournisseur depuis un maquis modele vers un nouveau siteId.
+ * Les quantites (init, entrees, sorties, frigo, reserve, lots) sont remises a zero ; nouveaux ids stock.
+ */
+function cloneCatalogRowsForNewSite(templateSiteId, newSiteId) {
+  const stockList = state.stock || [];
+  const priceList = state.supplierPrices || [];
+  const multiSite = (state.sites || []).length > 1;
+  const stockTemplate = stockList.filter((item) => rowMatchesSite(item, templateSiteId, multiSite));
+  const priceTemplate = priceList.filter((row) => rowMatchesSite(row, templateSiteId, multiSite));
+  const nextId = { ...state.nextId };
+  if (nextId.stock == null || Number.isNaN(Number(nextId.stock))) {
+    const maxExisting = stockList.reduce((m, s) => Math.max(m, Number(s.id) || 0), 0);
+    nextId.stock = Math.max(100, maxExisting + 1);
+  }
+  const now = new Date().toISOString();
+  const actor = sessionUser || "-";
+  const newStock = stockTemplate.map((row) => {
+    const c = JSON.parse(JSON.stringify(row));
+    c.id = Number(nextId.stock++);
+    c.siteId = newSiteId;
+    c.init = 0;
+    c.entrees = 0;
+    c.sorties = 0;
+    if (Object.prototype.hasOwnProperty.call(c, "frigo")) c.frigo = 0;
+    if (Object.prototype.hasOwnProperty.call(c, "reserve")) c.reserve = 0;
+    if (Object.prototype.hasOwnProperty.call(c, "initCases")) c.initCases = 0;
+    delete c.lastReapproAt;
+    delete c.lastReapproBy;
+    delete c.lastSortieBy;
+    delete c.sortiesToday;
+    c.createdAt = now;
+    c.createdBy = actor;
+    return c;
+  });
+  const newPrices = priceTemplate.map((row) => {
+    const c = JSON.parse(JSON.stringify(row));
+    c.siteId = newSiteId;
+    c.id = `${newSiteId}-${now}-${Math.random().toString(36).slice(2, 9)}`;
+    c.createdAt = now;
+    c.updatedAt = now;
+    c.updatedBy = actor;
+    return c;
+  });
+  return { newStock, newPrices, nextId };
+}
+
 function canSuperAdmin() {
   if (currentRole === "superadmin") return true;
   const sn = String(sessionUser || "").trim();
@@ -5007,14 +5054,23 @@ async function addSite() {
   if (singleBreweryOnly && !singleBreweryName) { showToast("Saisissez la brasserie unique."); return; }
   const newSite = { id: siteId, nom, ville, pays, dualZonePricing, singleBreweryOnly, singleBreweryName };
   const newSites = [...(state.sites || []), newSite];
+  const sitesBefore = state.sites || [];
+  const templateSiteId = sitesBefore.some((s) => s.id === "maquis-1") ? "maquis-1" : sitesBefore[0]?.id || "";
+  const { newStock, newPrices, nextId } = cloneCatalogRowsForNewSite(templateSiteId, siteId);
   const newUsers = (state.auth?.users || []).map((user) => {
     const currentAllowed = new Set(user.allowedSiteIds || []);
-    if (user.username === sessionUser || user.role === "superadmin" || user.role === "admin" || (canSuperAdmin() && user.role === "manager")) {
+    if (normalizeRoleForUsername(user.username, user.role) === "superadmin") {
       currentAllowed.add(siteId);
     }
     return { ...user, allowedSiteIds: [...currentAllowed] };
   });
-  await persistState({ sites: newSites, auth: { users: newUsers } });
+  await persistState({
+    sites: newSites,
+    auth: { users: newUsers },
+    stock: [...(state.stock || []), ...newStock],
+    supplierPrices: [...(state.supplierPrices || []), ...newPrices],
+    nextId,
+  });
   allowedSiteIds = canSuperAdmin()
     ? (state.sites || []).map((s) => s.id)
     : [...new Set([...allowedSiteIds, siteId])];
@@ -5034,7 +5090,14 @@ async function addSite() {
   resetUserForm();
   renderUserSiteCheckboxes();
   renderUsersList();
-  showToast(`Maquis "${nom}" cree.`);
+  if (currentPage === "home") renderDashboard();
+  if (currentPage === "stock") renderStock();
+  const tplName = (state.sites || []).find((s) => s.id === templateSiteId)?.nom || templateSiteId;
+  showToast(
+    newStock.length
+      ? `Maquis "${nom}" cree — ${newStock.length} article(s) catalogue copies depuis "${tplName}" (stocks a zero).`
+      : `Maquis "${nom}" cree — aucun article copie (catalogue du maquis modele "${tplName}" vide).`,
+  );
 }
 
 async function deleteSite(siteId) {
