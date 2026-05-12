@@ -654,7 +654,7 @@ function handleLoginSubmit(event) {
     errorNode.textContent = "";
     renderAuthState();
     renderApp();
-    showToast("Connexion reussie.");
+    showToast("Connexion réussie.");
     return;
   }
   errorNode.textContent = "Identifiants invalides. Verifiez le nom d'utilisateur et le mot de passe.";

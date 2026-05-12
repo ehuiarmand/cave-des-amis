@@ -2949,6 +2949,7 @@ function renderCashOpeningPanel() {
   container.classList.remove("hidden");
   const dStr = pdjCalendarDate();
   const siteId = currentSiteId();
+  const ventesForDate = recordsForSite(state.ventes).filter((v) => v.date.slice(0, 10) === dStr);
   const closed = stockCheckForSiteDate(dStr, siteId);
   const book = dayBookFor(dStr, siteId);
   const needs = dayBookNeedsCashOpening(book);
@@ -3001,6 +3002,10 @@ function renderCashOpeningPanel() {
         Avant le point du jour, saisissez le montant réellement présent en caisse (fonds de caisse).
         Un cliché du stock à cet instant sert de référence pour la fermeture.
       </p>
+      ${ventesForDate.length ? `<p class="muted" style="margin-top:10px;font-size:0.82rem;line-height:1.45">
+        Vous voyez déjà <strong>${formatVentesCountFr(ventesForDate.length)}</strong> pour le <strong>${escapeHtml(formatDateDdMmYyyy(dStr))}</strong> dans le récapitulatif : ce sont des enregistrements existants.
+        L'ouverture de caisse officialise tout de même la journée et autorise à ajouter de nouvelles ventes jusqu'à la clôture.
+      </p>` : ""}
       <div class="pdj-opening-form">
         <div class="form-group">
           <label for="pdj-opening-cash">Montant en caisse à l'ouverture (FCFA)</label>
@@ -3085,7 +3090,7 @@ function renderSalesByProduct(ventesJour) {
   const rankHtml = htmlProductRankLists(top, bottom, showFlop, { flopHint: "ce jour" });
   container.innerHTML = `
     ${rankHtml}
-    <p class="muted" style="margin:16px 0 10px;font-size:0.82rem">Detail par article (tri CA net)</p>
+    <p class="muted" style="margin:16px 0 10px;font-size:0.82rem">Détail par article (tri CA net)</p>
     <div class="stock-table-wrap">
       <table class="stock-table" style="min-width:620px">
         <thead>
@@ -9925,7 +9930,7 @@ async function handleLoginSubmit(event) {
       errorEl.textContent = "";
       setAuthVisible(true);
       await bootstrapAuthenticatedApp();
-      showToast("Connexion reussie.");
+      showToast("Connexion réussie.");
     } else {
       const username = document.getElementById("login-username").value.trim();
       const password = document.getElementById("login-password").value;
@@ -9944,7 +9949,7 @@ async function handleLoginSubmit(event) {
         errorEl.textContent = "";
         setAuthVisible(true);
         await bootstrapAuthenticatedApp();
-        showToast("Connexion reussie.");
+        showToast("Connexion réussie.");
       }
     }
   } catch (error) {

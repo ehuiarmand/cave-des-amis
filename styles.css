@@ -337,7 +337,7 @@ textarea { font: inherit; }
 .sidebar-nav {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 8px;
   flex: 1;
 }
 
@@ -1083,7 +1083,7 @@ textarea { font: inherit; }
   max-width: none;
   align-items: flex-end;
   justify-content: space-around;
-  gap: 2px;
+  gap: 6px;
   padding: 8px 4px max(10px, var(--safe-bottom));
   border-radius: 0;
   background: var(--mm-mobile-nav-bg);
@@ -2160,7 +2160,7 @@ textarea { font: inherit; }
     left: 0;
     transform: none;
     bottom: 0;
-    gap: 2px;
+    gap: 6px;
     padding: 8px 6px max(10px, var(--safe-bottom));
     border-radius: 0;
   }

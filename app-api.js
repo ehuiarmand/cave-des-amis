@@ -656,7 +656,7 @@ async function handleLoginSubmit(event) {
     errorNode.textContent = "";
     setAuthVisible(true);
     await bootstrapAuthenticatedApp();
-    showToast("Connexion reussie.");
+    showToast("Connexion réussie.");
   } catch (error) {
     errorNode.textContent = error.message;
   }
