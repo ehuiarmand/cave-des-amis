@@ -90,6 +90,13 @@ function formatDateDdMmYyyy(input) {
   return `${pad2(d.getDate())}-${pad2(d.getMonth() + 1)}-${d.getFullYear()}`;
 }
 
+function formatVentesCountFr(count) {
+  const n = Math.max(0, Math.floor(Number(count) || 0));
+  if (n === 0) return "0 vente";
+  if (n === 1) return "1 vente";
+  return `${n} ventes`;
+}
+
 function calcNet(vente) {
   return (vente.prix * vente.qty) - vente.remise;
 }
@@ -160,7 +167,7 @@ function renderTopbar() {
 
 function renderHero() {
   const titles = {
-    home: "Le coeur de votre bar, en temps reel.",
+    home: "Le cœur de votre bar, en temps réel.",
     ventes: "Chaque encaissement reste visible et actionnable.",
     stock: "Gardez les ruptures loin du comptoir.",
     charges: "Suivez les sorties d'argent sans perdre le rythme.",
@@ -239,7 +246,7 @@ function renderPointDuJour() {
   document.getElementById("pdj-creances").textContent = `${fmt(creancesJour)} FCFA`;
   document.getElementById("pdj-nb").textContent = String(ventesJour.length);
   document.getElementById("pdj-remises").textContent = `${fmt(remisesJour)} FCFA`;
-  document.getElementById("pdj-ventes-count").textContent = `${ventesJour.length} vente(s)`;
+  document.getElementById("pdj-ventes-count").textContent = formatVentesCountFr(ventesJour.length);
 
   // Regrouper les paiements encaissés : Espèces vs Mobile Money
   const paiementsRegroupes = ventesEncaissees.reduce((acc, v) => {

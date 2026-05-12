@@ -237,7 +237,7 @@ function renderTopbar() {
 
 function renderHero() {
   const titles = {
-    home: "Le coeur de votre bar, en temps reel.",
+    home: "Le cœur de votre bar, en temps réel.",
     ventes: "Chaque encaissement reste visible et actionnable.",
     stock: "Gardez les ruptures loin du comptoir.",
     charges: "Suivez les sorties d'argent sans perdre le rythme.",
