@@ -1659,7 +1659,7 @@ function syncDualZonePricingUi() {
 }
 
 function applyRoleVisibility() {
-  const restrictedPages = ["stock", "charges", "params"];
+  const restrictedPages = ["home", "stock", "charges", "params"];
   document.querySelectorAll(".nav-btn").forEach((button) => {
     const restricted = restrictedPages.includes(button.dataset.page);
     button.classList.toggle("hidden", !canManage() && restricted);
