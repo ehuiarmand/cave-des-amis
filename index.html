@@ -104,7 +104,8 @@
         </div>
         <div class="topbar-actions">
           <button type="button" id="topbar-more-btn" class="topbar-more-btn" aria-label="Menu rapide">⋯</button>
-          <select id="site-switcher" class="site-switcher"></select>
+          <select id="site-switcher" class="site-switcher" aria-label="Maquis actif"></select>
+          <p id="header-site-scope" class="muted" style="font-size:0.72rem;margin:6px 0 0;text-align:right;max-width:260px;line-height:1.35"></p>
           <div id="top-date" class="top-date"></div>
         </div>
       </header>
@@ -180,22 +181,22 @@
       <section id="page-home" class="page active">
         <div class="kpi-grid">
           <article class="kpi">
-            <p class="kpi-label">CA net total</p>
+            <p class="kpi-label" title="Somme des montants nets des ventes finalisees pour ce maquis (prix x quantite - remise), toutes dates confondues sur l'ecran d'accueil.">CA net total</p>
             <h3 id="kpi-ca" class="kpi-value amber">0</h3>
             <p class="kpi-foot">FCFA</p>
           </article>
           <article class="kpi">
-            <p class="kpi-label">Charges</p>
+            <p class="kpi-label" title="Total des charges enregistrees pour ce maquis (depenses, loyer, etc.).">Charges</p>
             <h3 id="kpi-charges" class="kpi-value red">0</h3>
             <p class="kpi-foot">FCFA</p>
           </article>
           <article class="kpi">
-            <p class="kpi-label">Benefice</p>
+            <p class="kpi-label" title="CA net total moins total des charges (meme perimetre maquis).">Benefice</p>
             <h3 id="kpi-benefice" class="kpi-value">0</h3>
             <p class="kpi-foot">FCFA</p>
           </article>
           <article class="kpi">
-            <p class="kpi-label">Transactions total</p>
+            <p class="kpi-label" title="Nombre de lignes de vente finalisees prises en compte dans le CA net.">Transactions total</p>
             <h3 id="kpi-nb" class="kpi-value amber">0</h3>
             <p class="kpi-foot">ventes</p>
           </article>
@@ -994,6 +995,13 @@
               <div class="form-group">
                 <label for="p-seuil">Seuil alerte stock</label>
                 <input id="p-seuil" type="number" placeholder="5">
+              </div>
+              <div class="form-group" style="grid-column:1/-1">
+                <label class="checkbox-label" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer">
+                  <input id="p-stock-alert-inclusive-seuil" type="checkbox" style="margin-top:3px;width:auto">
+                  <span>Alerter des le seuil atteint (stock inferieur ou egal au seuil article)</span>
+                </label>
+                <p class="muted" style="font-size:0.82rem;margin:6px 0 0 28px">Par defaut : alerte seulement si le stock est <strong>strictement</strong> sous le seuil. Cochez pour etre averti des que le stock atteint le seuil (reappro plus tot).</p>
               </div>
               <div class="form-group">
                 <label for="p-prefixe">Prefixe facture</label>

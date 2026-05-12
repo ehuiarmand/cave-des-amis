@@ -438,6 +438,25 @@ function stockActuel(item) {
   return stockLegacyTotal(item);
 }
 
+/** Si true : alertes lorsque quantite au plus egale au seuil article. Si false (defaut) : alertes seulement si quantite strictement inferieure au seuil. */
+function stockAlertInclusiveSeuil(site = currentSite()) {
+  return Boolean(site?.stockAlertInclusiveSeuil);
+}
+
+function isStockBelowArticleSeuilForAlert(actuelBtl, seuilMin, site = currentSite()) {
+  const seuil = Math.max(0, Number(seuilMin) || 0);
+  if (seuil <= 0) return false;
+  const actuel = Math.max(0, Number(actuelBtl) || 0);
+  return stockAlertInclusiveSeuil(site) ? actuel <= seuil : actuel < seuil;
+}
+
+function isFrigoLowForAlert(frigoBtl, seuilFrigo, site = currentSite()) {
+  const s = Math.max(0, Number(seuilFrigo) || 0);
+  if (s <= 0) return false;
+  const fr = Math.max(0, Number(frigoBtl) || 0);
+  return stockAlertInclusiveSeuil(site) ? fr <= s : fr < s;
+}
+
 function normalizePhysicalStock(item) {
   const total = stockLegacyTotal(item);
   if (item.frigo === undefined && item.reserve === undefined) {
@@ -1749,16 +1768,25 @@ function renderTopbar() {
   document.getElementById("top-bar-name").textContent = currentSite()?.nom || "Mon Bar";
   document.getElementById("top-date").textContent = formatDateDdMmYyyy(new Date());
   document.getElementById("session-user").textContent = sessionUser || "utilisateur";
-  document.getElementById("role-badge").textContent = (() => {
-    const eff = String(sessionUser || "").trim().toLowerCase() === "admin" ? "superadmin" : currentRole;
-    return eff === "superadmin"
-      ? "super administrateur"
-      : eff === "admin"
-        ? "admin. maquis"
-        : eff === "manager"
-          ? "gerant"
-          : (eff || "utilisateur");
-  })();
+  const eff = String(sessionUser || "").trim().toLowerCase() === "admin" ? "superadmin" : currentRole;
+  const roleLabel = eff === "superadmin"
+    ? "super administrateur"
+    : eff === "admin"
+      ? "admin. maquis"
+      : eff === "manager"
+        ? "gerant"
+        : (eff || "utilisateur");
+  const badge = document.getElementById("role-badge");
+  badge.textContent = roleLabel;
+  badge.title = `Compte : ${sessionUser || "—"}. Role effectif : ${roleLabel}. Les actions sensibles sont verifiees cote serveur selon ce role et les maquis autorises.`;
+  const sid = currentSiteId() || "";
+  const scopeEl = document.getElementById("header-site-scope");
+  if (scopeEl) {
+    scopeEl.textContent = sid
+      ? `Maquis actif : ${currentSite()?.nom || sid} (${sid})`
+      : "";
+    scopeEl.title = "Les ecritures (ventes, stock…) sont rattachees a ce maquis dans l'etat enregistre.";
+  }
 }
 
 function renderHero() {
@@ -1982,7 +2010,7 @@ function renderCasiers() {
         const reste = stockBtl % csNum;
         const manquantes = reste > 0 ? csNum - reste : 0;
         const seuil = Number(item.seuilAlerte) || 0;
-        const alerte = seuil > 0 && stockBtl > 0 && stockBtl <= seuil;
+        const alerte = seuil > 0 && stockBtl > 0 && isStockBelowArticleSeuilForAlert(stockBtl, seuil);
         const epuise = stockBtl === 0;
         if (!epuise) {
           totalLotsTous += casiersFull;
@@ -3223,8 +3251,11 @@ function renderDashboard() {
   document.getElementById("obj-val").textContent = `/ ${fmt(objectif)} FCFA`;
   document.getElementById("obj-bar").style.width = `${pct}%`;
   renderBreakdown("cat-chart", ventes.reduce((acc, vente) => ((acc[vente.cat] = (acc[vente.cat] || 0) + calcNet(vente)), acc), {}), caTotal, "Aucune vente finalisee.");
+  const stockAlertRuleHtml = stockAlertInclusiveSeuil(site)
+    ? `<p class="muted" style="font-size:0.78rem;margin:0 0 10px;line-height:1.35">Regle alertes pour ce maquis : le stock (bouteilles) est signale lorsqu'il est <strong>inferieur ou egal</strong> au seuil minimum de l'article (option activee dans Parametres &gt; Profil).</p>`
+    : `<p class="muted" style="font-size:0.78rem;margin:0 0 10px;line-height:1.35">Regle alertes pour ce maquis : le stock (bouteilles) est signale lorsqu'il est <strong>strictement inferieur</strong> au seuil minimum. Cochez « Alerter des le seuil atteint » dans Parametres &gt; Profil pour alerter des que le stock atteint le seuil (egalite incluse).</p>`;
   const alerts = stockAlertItemsForDashboard();
-  document.getElementById("stock-alerts").innerHTML = alerts.length
+  document.getElementById("stock-alerts").innerHTML = stockAlertRuleHtml + (alerts.length
     ? `<div class="stock-alerts-toolbar">
           <button type="button" class="mini-btn" data-stock-alert-propose-all>Toutes les alertes</button>
           <button type="button" class="mini-btn" data-stock-alert-propose-selected>Selection cochée</button>
@@ -3247,7 +3278,7 @@ function renderDashboard() {
           <button type="button" class="mini-btn" data-propose-purchase="${item.id}">Proposer commande</button>
         </div>
       </article>`).join("")}`
-    : emptyState("Tout va bien", "Aucune alerte stock critique pour le moment.");
+    : emptyState("Tout va bien", "Aucune alerte stock critique pour le moment."));
   renderBreakdown("pay-chart", paymentTotals(ventes), caTotal, "Aucun paiement disponible.");
   renderDashboardCasierKpis(stock);
   renderDashboardProductRank(ventes);
@@ -3291,14 +3322,15 @@ function renderDashboardCasierKpis(stockSiteList) {
     .sort((a, b) => b.sug.lots - a.sug.lots)
     .slice(0, 6);
   if (!items.length) {
-    wrap.innerHTML = `<p class="muted" style="margin:0;font-size:0.85rem">Aucun produit sous seuil. Le parc est equilibre.</p>`;
+    wrap.innerHTML = `<p class="muted" style="margin:0;font-size:0.85rem">Aucune suggestion (stock deja au-dessus de 2× le seuil ou pas de lot casier). Le parc est equilibre.</p>`;
     return;
   }
-  wrap.innerHTML = `<p class="muted" style="margin:0 0 8px;font-size:0.82rem">Suggestion de lots à commander (cible : 2× seuil min).</p>` +
+  wrap.innerHTML = `<p class="muted" style="margin:0 0 8px;font-size:0.82rem">Suggestions de reapprovisionnement : cible <strong>2× le seuil minimum</strong> (bouteilles). Le detail du calcul s’affiche sous chaque ligne.</p>` +
     items.map(({ item, sug }) => `<article class="list-item">
       <div style="min-width:0">
         <p class="list-item-title">${escapeHtml(item.article)}</p>
         <p class="list-item-sub">Stock: ${fmt(stockActuel(item))} btl · Seuil: ${fmt(item.seuilMin || 0)} · ${fmt(caseSize(item))} btl/${escapeHtml(lotLabel(item))}</p>
+        <p class="muted" style="margin:4px 0 0;font-size:0.76rem;line-height:1.35">${sug.detail ? escapeHtml(sug.detail) : ""}</p>
       </div>
       <div class="list-side">
         <div>
@@ -3312,14 +3344,17 @@ function renderDashboardCasierKpis(stockSiteList) {
 
 function suggestReapproLots(article) {
   const item = stockItemForArticle(article);
-  if (!item) return { manque: 0, lots: 0 };
-  if (lotType(item) === "unite") return { manque: 0, lots: 0 };
+  if (!item) return { manque: 0, lots: 0, detail: "" };
+  if (lotType(item) === "unite") return { manque: 0, lots: 0, detail: "" };
   const stock = stockActuel(item);
   const seuil = Math.max(0, Number(item.seuilMin) || 0);
   const target = seuil * 2;
   const manque = Math.max(0, target - stock);
   const cs = Math.max(1, caseSize(item));
-  return { manque, lots: Math.ceil(manque / cs) };
+  const detail = seuil > 0
+    ? `Calcul : cible ${fmt(target)} btl (2 x seuil ${fmt(seuil)}) - stock ${fmt(stock)} = ${fmt(manque)} btl a couvrir ; lots arrondis au casier de ${fmt(cs)} btl.`
+    : "";
+  return { manque, lots: Math.ceil(manque / cs), detail };
 }
 
 function suggestPurchaseCases(stockItem) {
@@ -3334,7 +3369,7 @@ function suggestPurchaseCases(stockItem) {
 
 function stockAlertItemsForDashboard() {
   const stock = recordsForSite(state.stock);
-  return stock.filter((item) => stockActuel(item) <= Number(item.seuilMin));
+  return stock.filter((item) => isStockBelowArticleSeuilForAlert(stockActuel(item), item.seuilMin));
 }
 
 /** Badges verts type WhatsApp sur la barre du bas (commandes QR, alertes stock). */
@@ -4646,14 +4681,18 @@ function renderStock() {
     const valeur = casesFromBottles(actuel, item) * (Number(item.prixAchat) || 0);
     totalValue += valeur;
     const seuilFrigo = Number(item.seuilMin) || globalSeuil;
-    const isFrigoLow = frigo <= seuilFrigo;
-    const isAlert = actuel <= Number(item.seuilMin) || isFrigoLow;
+    const isFrigoLow = isFrigoLowForAlert(frigo, seuilFrigo);
+    const seuilArticle = Number(item.seuilMin) || 0;
+    const isAlert = isStockBelowArticleSeuilForAlert(actuel, seuilArticle) || isFrigoLow;
     if (isAlert) nbAlerte++; else nbOk++;
 
     let statusBadge;
     if (actuel <= 0) statusBadge = `<span class="badge badge-red">RUPTURE</span>`;
-    else if (actuel <= Number(item.seuilMin)) statusBadge = `<span class="badge badge-red">CRITIQUE</span>`;
-    else if (actuel <= Number(item.seuilMin) * 2) statusBadge = `<span class="badge badge-amber">FAIBLE</span>`;
+    else if (isStockBelowArticleSeuilForAlert(actuel, seuilArticle)) statusBadge = `<span class="badge badge-red">CRITIQUE</span>`;
+    else if (
+      (stockAlertInclusiveSeuil(site) ? actuel <= seuilArticle * 2 : actuel < seuilArticle * 2)
+      && seuilArticle > 0
+    ) statusBadge = `<span class="badge badge-amber">FAIBLE</span>`;
     else statusBadge = `<span class="stock-ok-badge">✓ OK</span>`;
 
     const packSize = Math.max(1, Number(item.packSize) || 1);
@@ -5052,7 +5091,10 @@ async function addSite() {
   const singleBreweryOnly = Boolean(document.getElementById("new-site-single-br-enabled")?.checked);
   const singleBreweryName = String(document.getElementById("new-site-single-br-name")?.value || "").trim();
   if (singleBreweryOnly && !singleBreweryName) { showToast("Saisissez la brasserie unique."); return; }
-  const newSite = { id: siteId, nom, ville, pays, dualZonePricing, singleBreweryOnly, singleBreweryName };
+  const newSite = {
+    id: siteId, nom, ville, pays, dualZonePricing, singleBreweryOnly, singleBreweryName,
+    stockAlertInclusiveSeuil: false,
+  };
   const newSites = [...(state.sites || []), newSite];
   const sitesBefore = state.sites || [];
   const templateSiteId = sitesBefore.some((s) => s.id === "maquis-1") ? "maquis-1" : sitesBefore[0]?.id || "";
@@ -5143,6 +5185,8 @@ function loadParamsForm() {
   }
   const dualZonePricingEl = document.getElementById("p-dual-zone-pricing");
   if (dualZonePricingEl) dualZonePricingEl.checked = siteUsesDualZonePricing(site);
+  const pStockAlertInclusive = document.getElementById("p-stock-alert-inclusive-seuil");
+  if (pStockAlertInclusive) pStockAlertInclusive.checked = Boolean(site?.stockAlertInclusiveSeuil);
   const categoriesField = document.getElementById("p-categories");
   if (categoriesField) {
     const saved = Array.isArray(state?.categories) && state.categories.length ? state.categories : CATEGORIES;
@@ -7181,6 +7225,7 @@ async function saveParams() {
     smsQrAlert: (document.getElementById("p-sms-qr")?.value || "").trim(),
     singleBreweryOnly,
     singleBreweryName: singleBreweryOnly ? singleBreweryName : "",
+    stockAlertInclusiveSeuil: Boolean(document.getElementById("p-stock-alert-inclusive-seuil")?.checked),
   } : item);
   await persistState({ sites: updatedSites, categories: cleanCategories });
   populateCategorySelects();
@@ -7499,6 +7544,13 @@ async function importStockExcel(file) {
 }
 
 function exportData() {
+  if (!window.confirm(
+    "Exporter tout l'etat de l'application en JSON sur cet appareil ?\n\n"
+    + "Le fichier peut contenir des donnees sensibles (ventes, mots de passe chiffres, stock). "
+    + "Conservez-le dans un endroit sur.",
+  )) {
+    return;
+  }
   const payload = { ...state, exportedAt: new Date().toISOString() };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   const link = document.createElement("a");
@@ -7506,6 +7558,8 @@ function exportData() {
   link.download = `maquis_manager_${today()}.json`;
   link.click();
   URL.revokeObjectURL(link.href);
+  recordStaffAudit("export", "donnees_json", "Export JSON complet (telechargement local)", `Octets ~${blob.size}`);
+  persistState({ staffAuditLog: state.staffAuditLog, nextId: state.nextId }).catch(() => {});
 }
 
 function printOrderTicket(orderId = activeOrderId) {
@@ -7823,7 +7877,7 @@ function printStockReport() {
     const actuel = stockActuel(item);
     const valeur = casesFromBottles(actuel, item) * (Number(item.prixAchat) || 0);
     totalValue += valeur;
-    const alert = actuel <= Number(item.seuilMin);
+    const alert = isStockBelowArticleSeuilForAlert(actuel, item.seuilMin);
     if (alert) alertCount += 1;
     const { prixInt, prixExt } = resolveItemPrices(item);
     return `<tr>

@@ -283,6 +283,7 @@ def make_site(
         "seuilStock": seuil_stock,
         "prefixeFacture": prefixe_facture,
         "dualZonePricing": dual_zone_pricing,
+        "stockAlertInclusiveSeuil": False,
     }
 
 
@@ -953,6 +954,18 @@ class SessionManager:
         with self._lock:
             self._sessions.pop(token, None)
 
+    def invalidate_all_for_username(self, username: str) -> None:
+        un = str(username or "").strip().lower()
+        if not un:
+            return
+        with self._lock:
+            for tok in list(self._sessions.keys()):
+                sess = self._sessions.get(tok)
+                if not sess:
+                    continue
+                if str(sess.get("username", "")).strip().lower() == un:
+                    self._sessions.pop(tok, None)
+
 
 class DataStore:
     def __init__(self, path: Path) -> None:
@@ -1607,7 +1620,19 @@ class DataStore:
 
             if is_super:
                 current["sites"] = payload.get("sites", current["sites"])
-                current["activeSiteId"] = payload.get("activeSiteId", current["activeSiteId"])
+                site_ids = [site.get("id") for site in current["sites"] if site.get("id")]
+                req_aid = payload.get("activeSiteId", current.get("activeSiteId"))
+                if req_aid in site_ids:
+                    current["activeSiteId"] = req_aid
+                elif current.get("activeSiteId") in site_ids:
+                    current["activeSiteId"] = current["activeSiteId"]
+                else:
+                    current["activeSiteId"] = site_ids[0] if site_ids else None
+                if payload.get("activeSiteId") is not None and req_aid not in site_ids and site_ids:
+                    audit_log(
+                        "active_site_rejected",
+                        {"requested": str(req_aid), "username": str(session.get("username", ""))},
+                    )
                 current["ventes"] = payload.get("ventes", current["ventes"])
                 current["stock"] = payload.get("stock", current["stock"])
                 current["commandes"] = payload.get("commandes", current.get("commandes", []))
@@ -1625,8 +1650,6 @@ class DataStore:
                 current["staffAuditLog"] = payload.get("staffAuditLog", current.get("staffAuditLog", []))
                 current["stockEntrees"] = payload.get("stockEntrees", current.get("stockEntrees", []))
                 current["stockLosses"] = payload.get("stockLosses", current.get("stockLosses", []))
-
-                site_ids = [site.get("id") for site in current["sites"] if site.get("id")]
 
                 auth_payload = payload.get("auth", {})
                 users_payload = auth_payload.get("users")
@@ -1671,6 +1694,12 @@ class DataStore:
                         raise ValueError("Aucun utilisateur valide.")
                     if not any(u["role"] in ("superadmin", "admin", "manager") for u in new_users):
                         raise ValueError("Au moins un super administrateur, administrateur de maquis ou gerant est obligatoire.")
+                    old_snap = {
+                        str(u.get("username", "")).strip(): json.loads(json.dumps(u))
+                        for u in current["auth"]["users"]
+                        if isinstance(u, dict) and str(u.get("username", "")).strip()
+                    }
+                    invalidate_sessions_on_auth_changes(old_snap, new_users)
                     current["auth"]["users"] = new_users
                 if current["activeSiteId"] not in site_ids and site_ids:
                     current["activeSiteId"] = site_ids[0]
@@ -1708,7 +1737,14 @@ class DataStore:
 
             users_payload = payload.get("auth", {}).get("users")
             if isinstance(users_payload, list):
-                current["auth"]["users"] = merge_auth_users_scoped(session, current["auth"]["users"], users_payload, sid_list)
+                old_snap = {
+                    str(u.get("username", "")).strip(): json.loads(json.dumps(u))
+                    for u in current["auth"]["users"]
+                    if isinstance(u, dict) and str(u.get("username", "")).strip()
+                }
+                merged_users = merge_auth_users_scoped(session, current["auth"]["users"], users_payload, sid_list)
+                invalidate_sessions_on_auth_changes(old_snap, merged_users)
+                current["auth"]["users"] = merged_users
 
             if current["activeSiteId"] not in site_ids and site_ids:
                 current["activeSiteId"] = site_ids[0]
@@ -1853,6 +1889,30 @@ class DataStore:
 
 store = DataStore(DATA_FILE)
 sessions = SessionManager(SESSION_TTL_SECONDS)
+
+
+def invalidate_sessions_on_auth_changes(
+    old_by_username: dict[str, dict[str, Any]],
+    new_users: list[dict[str, Any]],
+) -> None:
+    """Deconnecte les sessions d'un utilisateur si mot de passe, role ou maquis autorises changent."""
+    for nu in new_users or []:
+        if not isinstance(nu, dict):
+            continue
+        un = str(nu.get("username", "")).strip()
+        if not un:
+            continue
+        ou = old_by_username.get(un)
+        if not ou or not isinstance(ou, dict):
+            continue
+        sites_old = sorted(str(x) for x in (ou.get("allowedSiteIds") or []))
+        sites_new = sorted(str(x) for x in (nu.get("allowedSiteIds") or []))
+        if (
+            ou.get("passwordHash") != nu.get("passwordHash")
+            or str(ou.get("role", "")) != str(nu.get("role", ""))
+            or sites_old != sites_new
+        ):
+            sessions.invalidate_all_for_username(un)
 
 
 class AppHandler(BaseHTTPRequestHandler):
@@ -2156,6 +2216,9 @@ class AppHandler(BaseHTTPRequestHandler):
 
         if post_path == "/api/logout":
             token = self.session_token()
+            sess = sessions.get(token)
+            if sess:
+                audit_log("logout", {"ip": self.client_ip(), "username": str(sess.get("username", ""))})
             sessions.clear(token)
             self.send_json(HTTPStatus.OK, {"authenticated": False}, clear_cookie=True)
             return
@@ -2213,6 +2276,15 @@ class AppHandler(BaseHTTPRequestHandler):
             except ValueError as error:
                 self.send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
                 return
+            audit_log(
+                "state_put",
+                {
+                    "ip": self.client_ip(),
+                    "username": str(session.get("username", "")),
+                    "role": str(session.get("role", "")),
+                    "sections": sorted(str(k) for k in (payload or {}).keys()),
+                },
+            )
             self.send_json(HTTPStatus.OK, updated)
             return
         if parsed.path.startswith("/api/"):
