@@ -151,6 +151,50 @@ function creditIssuerLabelsByDebtor(sourceState = state) {
   return labels;
 }
 
+/** Plus ancienne ouverture de crédit (vente avec « Crédit client » ou « À régler »), par débiteur — pour affichage recouvrement. */
+function creditFirstOpenedLabelByDebtor(sourceState = state) {
+  const ventes = recordsForSite(sourceState?.ventes || []);
+  /** @type {Record<string, { ts: number, hasTime: boolean }>} */
+  const best = {};
+  ventes.forEach((v) => {
+    const net = calcNet(v);
+    const details = v.paiementDetails?.length ? v.paiementDetails : [{ method: v.paiement || "", amount: net }];
+    const debtorName = debtorDisplayKey(v.debiteur || v.client || "Client inconnu");
+    let creditAmount = 0;
+    details.forEach((d) => {
+      if (isCreditClientMethod(d.method)) creditAmount += Number(d.amount) || 0;
+    });
+    if (!creditAmount && isAReglerPaiement(v.paiement)) creditAmount = net;
+    if (creditAmount <= 0) return;
+    const sold = String(v.soldAt || v.createdAt || "").trim();
+    let ts;
+    let hasTime = false;
+    if (sold) {
+      const d = new Date(sold);
+      if (!Number.isNaN(d.getTime())) {
+        ts = d.getTime();
+        hasTime = true;
+      }
+    }
+    if (ts == null) {
+      const day = String(v.date || "").trim().slice(0, 10);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(day)) {
+        ts = new Date(`${day}T12:00:00`).getTime();
+        hasTime = false;
+      }
+    }
+    if (ts == null || !Number.isFinite(ts)) return;
+    const cur = best[debtorName];
+    if (!cur || ts < cur.ts) best[debtorName] = { ts, hasTime };
+  });
+  const labels = {};
+  Object.keys(best).forEach((k) => {
+    const { ts, hasTime } = best[k];
+    labels[k] = hasTime ? formatDateTimeDdMmYyyy(new Date(ts)) : formatDateDdMmYyyy(new Date(ts));
+  });
+  return labels;
+}
+
 function creditTotals(sourceState = state) {
   const issued = recordsForSite(sourceState?.ventes || []).reduce((sum, v) => {
     const net = calcNet(v);
@@ -5511,6 +5555,7 @@ function renderCreditRecovery() {
   const totals = creditTotals();
   const dueMap = creditOutstandingMap();
   const issuerByDebtor = creditIssuerLabelsByDebtor();
+  const creditOpenedByDebtor = creditFirstOpenedLabelByDebtor();
   const entries = Object.entries(dueMap).sort((a, b) => b[1] - a[1]);
   const totalDue = entries.reduce((sum, [, v]) => sum + (Number(v) || 0), 0);
   const byDebtor = creditRecoveriesGroupedByDebtor();
@@ -5546,14 +5591,15 @@ function renderCreditRecovery() {
             <tr class="credit-debtor-summary">
               <td><strong>${escapeHtml(name)}</strong></td>
               <td class="muted" style="font-size:0.9rem">${escapeHtml(issuerByDebtor[name] || "—")}</td>
+              <td class="muted" style="font-size:0.9rem;white-space:nowrap">${escapeHtml(creditOpenedByDebtor[name] || "—")}</td>
               <td style="text-align:right"><strong style="color:#ff8e82">${fmt(amount)} FCFA</strong></td>
               <td><button type="button" class="mini-btn" data-credit-fill="${escapeHtml(name)}">Encaisser</button></td>
             </tr>`;
     const instRows = installments.length
-      ? [`<tr class="credit-installment-row"><td colspan="4" class="credit-installment-label">Échéances enregistrées (${installments.length})</td></tr>`,
+      ? [`<tr class="credit-installment-row"><td colspan="5" class="credit-installment-label">Échéances enregistrées (${installments.length})</td></tr>`,
         ...installments.map((p) => `
             <tr class="credit-installment-row">
-              <td colspan="2" style="padding-left:1.1rem;font-size:0.88rem">
+              <td colspan="3" style="padding-left:1.1rem;font-size:0.88rem">
                 <span class="muted">↳</span>
                 ${escapeHtml(formatCreditPaidAt(p))}
                 · ${escapeHtml(p.paiement || "—")}
@@ -5570,10 +5616,11 @@ function renderCreditRecovery() {
   list.innerHTML = `
     <div class="stock-table-wrap" style="margin-top:10px">
       <p class="eyebrow" style="margin-bottom:8px">Crédits en cours (reste à payer)</p>
-      <table class="stock-table" style="min-width:880px">
+      <table class="stock-table" style="min-width:980px">
         <thead><tr>
           <th>Débiteur</th>
           <th>Crédit accordé par</th>
+          <th>Prise du crédit</th>
           <th style="text-align:right">Reste à payer</th>
           <th>Action</th>
         </tr></thead>
