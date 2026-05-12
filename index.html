@@ -123,13 +123,13 @@
             <div class="pdj-head-meta">
               <span id="pdj-date" class="section-meta"></span>
               <div class="superadmin-only pdj-superadmin-date-banner" id="pdj-work-date-row">
-                <strong style="display:block;font-size:0.82rem;margin-bottom:6px;color:var(--mm-primary-dark)">Super administrateur — journee a traiter</strong>
-                <label for="pdj-work-date" style="display:block;font-size:0.8rem;color:var(--muted);margin-bottom:6px">Date (ouverture caisse, verification stock, recloture)</label>
+                <strong style="display:block;font-size:0.82rem;margin-bottom:6px;color:var(--mm-primary-dark)">Super administrateur — journée à traiter</strong>
+                <label for="pdj-work-date" style="display:block;font-size:0.8rem;color:var(--muted);margin-bottom:6px">Date (ouverture caisse, vérification stock, reclôture)</label>
                 <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">
                   <input id="pdj-work-date" type="date" style="min-height:40px">
                   <button type="button" class="mini-btn" id="pdj-apply-work-date">Appliquer</button>
                 </div>
-                <p class="muted" style="font-size:0.78rem;margin:8px 0 0;line-height:1.35">Apres une reouverture, choisissez la meme date pour corriger les ecarts puis recloturer.</p>
+                <p class="muted" style="font-size:0.78rem;margin:8px 0 0;line-height:1.35">Après une réouverture, choisissez la même date pour corriger les écarts puis reclôturer.</p>
               </div>
             </div>
           </div>
@@ -142,7 +142,7 @@
               <strong id="pdj-ca" class="pdj-val amber">0 FCFA</strong>
             </div>
             <div class="pdj-kpi">
-              <span class="kpi-label">A regler</span>
+              <span class="kpi-label">À régler</span>
               <strong id="pdj-creances" class="pdj-val red">0 FCFA</strong>
             </div>
             <div class="pdj-kpi">
@@ -150,7 +150,7 @@
               <strong id="pdj-nb" class="pdj-val amber">0</strong>
             </div>
             <div class="pdj-kpi">
-              <span class="kpi-label">Remises accordees</span>
+              <span class="kpi-label">Remises accordées</span>
               <strong id="pdj-remises" class="pdj-val red">0 FCFA</strong>
             </div>
           </div>
@@ -162,16 +162,16 @@
           <div id="pdj-sales-by-product"></div>
           </div>
           <div class="section-head pdj-detail-head">
-            <h3 class="pdj-detail-title">Verification stock fermeture</h3>
+            <h3 class="pdj-detail-title">Vérification stock fermeture</h3>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-              <button id="close-day-btn" class="mini-btn" type="button">Verifier avant cloture</button>
-              <button id="print-closure-btn" class="btn btn-outline hidden" type="button">Imprimer le rapport de cloture</button>
+              <button id="close-day-btn" class="mini-btn" type="button">Clôturer la journée</button>
+              <button id="print-closure-btn" class="btn btn-outline hidden" type="button">Imprimer le rapport de clôture</button>
             </div>
           </div>
           <div id="pdj-stock-check"></div>
           <div id="pdj-reopen-closures" class="any-admin"></div>
           <div class="section-head pdj-detail-head">
-            <h3 class="pdj-detail-title">Detail des ventes</h3>
+            <h3 class="pdj-detail-title">Détail des ventes</h3>
             <span id="pdj-ventes-count" class="section-meta">0 vente(s)</span>
           </div>
           <div id="pdj-ventes-list"></div>
@@ -272,6 +272,7 @@
           <button class="tab" data-subtab-ventes="consignes">Consignes</button>
           <button class="tab" data-subtab-ventes="qr">QR Codes</button>
         </div>
+        <div id="ventes-journal-gate" class="hidden" style="margin:0 0 12px"></div>
         <article class="card" id="ventes-card-gestion">
           <div class="section-head">
             <div>

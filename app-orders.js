@@ -20,8 +20,12 @@ const PAYMENT_METHODS = ["Espèces", "Orange Money", "MTN MoMo", "Wave", "Carte"
 /** Modes incluant Credit fournisseur (dettes fournisseurs), uniquement pour les charges / depenses */
 const CHARGE_PAYMENT_METHODS = [...PAYMENT_METHODS, "Credit fournisseur"];
 const CHARGE_CATEGORIES = ["Loyer", "Salaires", "Électricité", "Eau", "Gaz / Charbon", "Achats boissons", "Achats snacks", "Téléphone", "Transport", "Entretien", "Impôts & taxes", "Autres"];
-/** Si false : pas d'étape obligatoire « ouverture de caisse » (ouverture manuelle du jour comptable). */
-const PDJ_REQUIRE_CASH_OPENING = false;
+/**
+ * Si true : cycle journalier imposé — ouverture caisse avant ventes, clôture avant nouvelle ouverture,
+ * ventes bloquées si journée non ouverte ou déjà clôturée pour la date concernée.
+ * Si false : comportement legacy (pas de blocage ventes lié au PDJ).
+ */
+const PDJ_REQUIRE_CASH_OPENING = true;
 const COLORS = {
   "Bières": "#2196f3",
   "Sodas & Jus": "#42a5f5",
@@ -1311,6 +1315,8 @@ function syncPdjWorkDateInput() {
   if (vDateEl) vDateEl.value = workDate;
   const filterDateEl = document.getElementById("orders-filter-date");
   if (filterDateEl) filterDateEl.value = workDate;
+  syncFinalizeButtonJournalState();
+  if (currentPage === "ventes") renderVentesPage();
 }
 
 const STAFF_AUDIT_MAX = 800;
@@ -1860,22 +1866,22 @@ function renderTopbar() {
 
 function renderHero() {
   const titles = {
-    home: "Le coeur de votre bar, en temps reel.",
-    pdj: "Le point du jour, separe du tableau de bord.",
+    home: "Le cœur de votre bar, en temps réel.",
+    pdj: "Le point du jour, séparé du tableau de bord.",
     ventes: "Servez plusieurs clients sans perdre la commande en cours.",
-    guide: "Mode d'emploi accessible a toute l'equipe.",
+    guide: "Mode d'emploi accessible à toute l'équipe.",
     stock: "Les prix de vente partent du catalogue stock.",
-    charges: "Les sorties d'argent restent centralisees.",
-    params: "Parametres organises par onglets : profil, catalogue, acces, administration.",
+    charges: "Les sorties d'argent restent centralisées.",
+    params: "Paramètres organisés par onglets : profil, catalogue, accès, administration.",
   };
   const copies = {
-    home: "Le serveur garde les sessions et l'etat complet de l'application.",
-    pdj: "Ouverture puis fermeture de journee : gerant et administrateurs ; les serveuses consultent uniquement.",
-    ventes: "Une commande peut etre modifiee autant de fois que necessaire avant la facture finale.",
-    guide: "Sommaire, liens vers le guide imprimable PDF ; meme les comptes serveuse peuvent consulter cette page.",
-    stock: "Renseignez prix achat et prix vente pour accelerer la prise de commande.",
-    charges: "Toutes les depenses sont historisees cote serveur.",
-    params: "Profil du maquis et export JSON sous Profil ; categories et utilisateurs ont leur propre onglet.",
+    home: "Le serveur garde les sessions et l'état complet de l'application.",
+    pdj: "Ouverture puis fermeture de journée : gérant et administrateurs ; les ventes sont bloquées tant que la journée n'est pas ouverte. Les serveuses consultent le reste.",
+    ventes: "Une commande peut être modifiée autant de fois que nécessaire avant la facture finale, si la journée est ouverte.",
+    guide: "Sommaire, liens vers le guide imprimable PDF ; même les comptes serveuse peuvent consulter cette page.",
+    stock: "Renseignez prix achat et prix vente pour accélérer la prise de commande.",
+    charges: "Toutes les dépenses sont historisées côté serveur.",
+    params: "Profil du maquis et export JSON sous Profil ; catégories et utilisateurs ont leur propre onglet.",
   };
   document.getElementById("hero-title").textContent = titles[currentPage];
   document.getElementById("hero-copy").textContent = copies[currentPage];
@@ -2767,29 +2773,29 @@ function renderPastClosuresForReopen() {
     .filter((sc) => sc && sc.siteId === siteId && sc.date && Array.isArray(sc.items) && sc.items.length)
     .sort((a, b) => String(b.date).localeCompare(String(a.date)));
   if (!checks.length) {
-    host.innerHTML = `<p class="muted" style="font-size:0.88rem;margin:8px 0 0">Aucune journee cloturee enregistree pour ce maquis.</p>`;
+    host.innerHTML = `<p class="muted" style="font-size:0.88rem;margin:8px 0 0">Aucune journée clôturée enregistrée pour ce maquis.</p>`;
     return;
   }
   host.innerHTML = `
     <div class="section-head pdj-detail-head" style="margin-top:16px">
-      <h3 class="pdj-detail-title">Journees cloturees (reouverture)</h3>
+      <h3 class="pdj-detail-title">Journées clôturées (réouverture)</h3>
     </div>
     <p class="muted" style="font-size:0.85rem;margin:0 0 12px;line-height:1.45">
-      Reserve aux administrateurs : supprime la fiche de cloture et annule les ecritures de stock associees (sorties journalieres et ecarts comptables enregistres a la cloture).
-      Les quantites frigo / reserve actuelles ne sont pas modifiees automatiquement ; verifiez le stock physique si necessaire.
+      Réservé aux administrateurs : supprime la fiche de clôture et annule les écritures de stock associées (sorties journalières et écarts comptables enregistrés à la clôture).
+      Les quantités frigo / réserve actuelles ne sont pas modifiées automatiquement ; vérifiez le stock physique si nécessaire.
     </p>
     <ul style="list-style:none;padding:0;margin:0;display:grid;gap:10px">
       ${checks.map((sc) => {
         const dLabel = formatDateDdMmYyyy(sc.date);
         const when = sc.createdAt ? formatDateTimeDdMmYyyy(sc.createdAt) : "";
-        const cashOpen = typeof sc.openingCashFcfa === "number" ? `${fmt(sc.openingCashFcfa)} FCFA a l'ouverture` : "";
+        const cashOpen = typeof sc.openingCashFcfa === "number" ? `${fmt(sc.openingCashFcfa)} FCFA à l'ouverture` : "";
         return `<li class="list-item" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
           <div>
             <strong>${escapeHtml(dLabel)}</strong>
-            ${when ? `<span class="muted" style="font-size:0.85rem"> · cloturee ${escapeHtml(when)}</span>` : ""}
+            ${when ? `<span class="muted" style="font-size:0.85rem"> · clôturée ${escapeHtml(when)}</span>` : ""}
             ${cashOpen ? `<p class="muted" style="margin:4px 0 0;font-size:0.82rem">${escapeHtml(cashOpen)}</p>` : ""}
           </div>
-          <button type="button" class="mini-btn" style="border-color:#c54f41;color:#983428" data-reopen-close="${escapeHtml(String(sc.date))}">Reouvrir cette journee</button>
+          <button type="button" class="mini-btn" style="border-color:#c54f41;color:#983428" data-reopen-close="${escapeHtml(String(sc.date))}">Réouvrir cette journée</button>
         </li>`;
       }).join("")}
     </ul>`;
@@ -2806,7 +2812,7 @@ async function reopenAccountingDayConfirm(siteId, dateStr) {
   }
   const label = formatDateDdMmYyyy(dateStr);
   if (!window.confirm(
-    `Reouvrir la journee du ${label} ? La fiche de cloture sera supprimee et les ecritures de stock generees par cette cloture seront annulees (frigo / reserve non ajustes automatiquement).`,
+    `Réouvrir la journée du ${label} ? La fiche de clôture sera supprimée et les écritures de stock générées par cette clôture seront annulées (frigo / réserve non ajustés automatiquement).`,
   )) return;
   await reopenAccountingDay(siteId, dateStr);
 }
@@ -2836,7 +2842,7 @@ async function reopenAccountingDay(siteId, dateStr) {
   }
   renderStock();
   renderPointDuJour();
-  showToast(`Journee du ${formatDateDdMmYyyy(dateStr)} reouverte. Corrigez le stock puis recloturez.`);
+  showToast(`Journée du ${formatDateDdMmYyyy(dateStr)} réouverte. Corrigez le stock puis reclôturer.`);
 }
 
 function dayBookFor(dateStr = today(), siteId = currentSiteId()) {
@@ -2879,6 +2885,11 @@ async function recordCashOpening() {
   state.dayBooks = state.dayBooks || [];
   const siteId = currentSiteId();
   const dateStr = pdjCalendarDate();
+  const blockOpen = blockingJournalBeforeOpeningNewDate(dateStr, siteId);
+  if (blockOpen) {
+    showToast(`La journée du ${isoDateToDdMmYyyy(blockOpen)} doit être clôturée avant d'ouvrir la suivante.`);
+    return;
+  }
   if (!canSuperAdmin() && dateStr !== today()) {
     showToast("Seul le super administrateur peut enregistrer l'ouverture pour une autre date.");
     return;
@@ -2928,18 +2939,35 @@ function renderCashOpeningPanel() {
     return;
   }
   container.classList.remove("hidden");
-  const book = dayBookFor(pdjCalendarDate(), currentSiteId());
+  const dStr = pdjCalendarDate();
+  const siteId = currentSiteId();
+  const closed = stockCheckForSiteDate(dStr, siteId);
+  const book = dayBookFor(dStr, siteId);
   const needs = dayBookNeedsCashOpening(book);
   if (lockBlock) {
     lockBlock.classList.toggle("pdj-main--locked", needs && canManagePdjAccounting());
   }
+  if (closed) {
+    container.innerHTML = `
+      <div class="pdj-opening-card pdj-opening-card--done" style="border-left:3px solid #1565c0;background:#f4f8ff">
+        <p class="eyebrow" style="margin-bottom:4px">Journée clôturée</p>
+        <strong>${escapeHtml(formatDateDdMmYyyy(dStr))}</strong>
+        <p class="muted" style="margin-top:8px;line-height:1.45">
+          Les ventes pour cette date sont bloquées. Pour encaisser à nouveau, ouvrez la journée suivante depuis cette page (date adéquate, puis ouverture de caisse).
+        </p>
+        <p class="muted" style="margin-top:8px;font-size:0.82rem;line-height:1.45">
+          Une réouverture de journée nécessite un profil gérant ou administrateur et sera journalisée.
+        </p>
+      </div>`;
+    return;
+  }
   if (!canManagePdjAccounting() && needs) {
     container.innerHTML = `
       <div class="pdj-opening-card pdj-opening-card--done" style="border-color:#e0e0e0;background:#fafafa">
-        <p class="eyebrow" style="margin-bottom:4px">Etape gerant</p>
+        <p class="eyebrow" style="margin-bottom:4px">Étape gérant</p>
         <strong>Ouverture de caisse</strong>
         <p class="muted" style="margin-top:8px">
-          Reserve au <strong>gerant</strong> ou a un <strong>administrateur</strong> (pas aux comptes serveuse).
+          Réservé au <strong>gérant</strong> ou à un <strong>administrateur</strong> (pas aux comptes serveuse).
         </p>
       </div>`;
     return;
@@ -2947,9 +2975,10 @@ function renderCashOpeningPanel() {
   if (!needs && book) {
     container.innerHTML = `
       <div class="pdj-opening-card pdj-opening-card--done">
-        <p class="eyebrow" style="margin-bottom:4px">Caisse ouverte</p>
+        <p class="eyebrow" style="margin-bottom:4px">Journée ouverte</p>
         <strong>Fonds en caisse : ${fmt(book.openingCashFcfa)} FCFA</strong>
-        <p class="muted" style="margin-top:8px;font-size:0.88rem">
+        <p class="muted" style="margin-top:8px;font-size:0.88rem;line-height:1.45">
+          Les ventes sont autorisées pour cette date jusqu'à la <strong>clôture</strong> (vérification stock et caisse ci‑dessous).
           Enregistré ${escapeHtml(formatDateTimeDdMmYyyy(book.openingRecordedAt || book.openedAt))}
           ${book.openingRecordedBy ? ` · ${escapeHtml(book.openingRecordedBy)}` : ""}
         </p>
@@ -2958,7 +2987,7 @@ function renderCashOpeningPanel() {
   }
   container.innerHTML = `
     <div class="pdj-opening-card">
-      <p class="eyebrow" style="margin-bottom:4px">Étape obligatoire</p>
+      <p class="eyebrow" style="margin-bottom:4px">Ouvrir la journée</p>
       <strong>Ouverture de caisse</strong>
       <p class="muted" style="margin-top:8px">
         Avant le point du jour, saisissez le montant réellement présent en caisse (fonds de caisse).
@@ -2969,7 +2998,7 @@ function renderCashOpeningPanel() {
           <label for="pdj-opening-cash">Montant en caisse à l'ouverture (FCFA)</label>
           <input id="pdj-opening-cash" class="input-fcfa" type="text" inputmode="numeric" placeholder="ex: 50 000" value="">
         </div>
-        <button type="button" class="btn btn-primary" id="pdj-opening-submit" style="width:auto;min-height:44px">Valider l'ouverture</button>
+        <button type="button" class="btn btn-primary" id="pdj-opening-submit" style="width:auto;min-height:44px">Ouvrir la journée</button>
       </div>
     </div>`;
 }
@@ -3077,6 +3106,85 @@ function stockCheckForSiteDate(dateStr, siteId = currentSiteId()) {
   return (state.stockChecks || []).find((item) => item.siteId === siteId && item.date === dateStr) || null;
 }
 
+/** Plus petite date ISO encore « ouverte » (ouverture caisse validée, pas de clôture stock). */
+function firstUnclosedJournalDate(siteId = currentSiteId()) {
+  let best = null;
+  for (const b of state.dayBooks || []) {
+    if (!b || b.siteId !== siteId || !b.date) continue;
+    const d = String(b.date).slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
+    if (dayBookNeedsCashOpening(b)) continue;
+    if (stockCheckForSiteDate(d, siteId)) continue;
+    if (!best || d.localeCompare(best) < 0) best = d;
+  }
+  return best;
+}
+
+/**
+ * Si non null : impossible d'ouvrir (enregistrer l'ouverture caisse pour) `dateStr` tant que la date retournée n'est pas clôturée.
+ * Exception : compléter l'ouverture de la même `dateStr` lorsque le fonds de caisse n'est pas encore saisi.
+ */
+function blockingJournalBeforeOpeningNewDate(dateStr, siteId = currentSiteId()) {
+  const u = firstUnclosedJournalDate(siteId);
+  if (!u) return null;
+  if (u === dateStr && dayBookNeedsCashOpening(dayBookFor(dateStr, siteId))) return null;
+  if (u !== dateStr) return u;
+  return null;
+}
+
+/** Date utilisée pour les contrôles ventes (formulaire commande / modal). */
+function journalSaleDateFromDom() {
+  const raw = document.getElementById("v-date")?.value?.trim() || "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  return workingDate();
+}
+
+/**
+ * @returns {{ ok: true } | { ok: false, code: string, message: string }}
+ */
+function journalAllowsSalesForDate(saleDateStr, siteId = currentSiteId()) {
+  if (!PDJ_REQUIRE_CASH_OPENING) return { ok: true };
+  if (!saleDateStr || !siteId) {
+    return { ok: false, code: "no_open", message: "Vous devez ouvrir la journée avant d'enregistrer une vente." };
+  }
+  const d = String(saleDateStr).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) {
+    return { ok: false, code: "no_open", message: "Vous devez ouvrir la journée avant d'enregistrer une vente." };
+  }
+  const book = dayBookFor(d, siteId);
+  if (dayBookNeedsCashOpening(book)) {
+    return { ok: false, code: "no_open", message: "Vous devez ouvrir la journée avant d'enregistrer une vente." };
+  }
+  if (stockCheckForSiteDate(d, siteId)) {
+    return {
+      ok: false,
+      code: "closed",
+      message: `La journée du ${isoDateToDdMmYyyy(d)} est clôturée. Ouvrez une nouvelle journée (Point du jour) avant d'enregistrer des ventes pour cette date.`,
+    };
+  }
+  return { ok: true };
+}
+
+function assertJournalAllowsSalesOrToast(saleDateStr, siteId = currentSiteId()) {
+  const j = journalAllowsSalesForDate(saleDateStr, siteId);
+  if (!j.ok) showToast(j.message);
+  return j.ok;
+}
+
+function journalEncaisseDisabledForOrder(order) {
+  if (!PDJ_REQUIRE_CASH_OPENING || !order) return false;
+  const d = String(order.date || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return true;
+  return !journalAllowsSalesForDate(d, order.siteId || currentSiteId()).ok;
+}
+
+function journalEncaisseBlockTitle(order) {
+  if (!order) return "";
+  const d = String(order.date || "").slice(0, 10);
+  const j = journalAllowsSalesForDate(d, order.siteId || currentSiteId());
+  return j.ok ? "" : j.message;
+}
+
 function todaySortiesBottlesForArticle(article, saleDateStr = pdjCalendarDate()) {
   const stockItem = recordsForSite(state.stock).find((s) => s.article === article);
   const packSize = Math.max(1, Number(stockItem?.packSize) || 1);
@@ -3095,11 +3203,15 @@ function renderDailyStockCheck() {
   const printBtn = document.getElementById("print-closure-btn");
   if (!container || !button) return;
   const superadminCorrection = Boolean(closed && canAnyAdmin());
+  const openingBlocked = PDJ_REQUIRE_CASH_OPENING && dayBookNeedsCashOpening(dayBook);
+  const isPastDate = dStr !== today();
   button.textContent = superadminCorrection
-    ? "Mettre a jour la cloture"
+    ? "Mettre à jour la clôture"
     : closed
-      ? "Reverifier la journee"
-      : "Verifier avant cloture";
+      ? "Revérifier la journée"
+      : openingBlocked && !(isPastDate && canAnyAdmin()) && canManagePdjAccounting()
+        ? "Ouverture requise"
+        : "Clôturer la journée";
   if (printBtn) printBtn.classList.toggle("hidden", !closed);
   if (!items.length) {
     container.innerHTML = emptyState("Aucun stock", "Ajoutez des articles avant de faire le point de fermeture.");
@@ -3107,8 +3219,6 @@ function renderDailyStockCheck() {
     return;
   }
 
-  const openingBlocked = PDJ_REQUIRE_CASH_OPENING && dayBookNeedsCashOpening(dayBook);
-  const isPastDate = dStr !== today();
   if (openingBlocked && !(isPastDate && canAnyAdmin()) && canManagePdjAccounting()) {
     container.innerHTML = emptyState(
       "Ouverture de caisse requise",
@@ -3765,6 +3875,8 @@ function renderOrdersManagement() {
   document.getElementById("orders-management-table").innerHTML = orders.length
     ? orders.map((order) => {
       const next = order._isPaid ? "" : nextOrderStatus(orderStatus(order));
+      const encBlocked = next === "Encaisser" && journalEncaisseDisabledForOrder(order);
+      const encTitle = encBlocked ? escapeHtml(journalEncaisseBlockTitle(order)) : "";
       return `<tr>
         <td>#${escapeHtml(order.factureNumber || String(order.id))}</td>
         <td>${escapeHtml(order.table || order.client || "Comptoir")}</td>
@@ -3777,7 +3889,8 @@ function renderOrdersManagement() {
         <td>
           <button type="button" class="mini-btn" data-order-details="${escapeHtml(order.id)}">Details</button>
           ${order._isPaid ? "" : `<button type="button" class="mini-btn" data-activate-order="${order.id}">Ouvrir</button>`}
-          ${next ? `<button type="button" class="mini-btn" data-advance-order="${order.id}">${escapeHtml(next)}</button>` : ""}
+          ${next && !(next === "Encaisser" && encBlocked) ? `<button type="button" class="mini-btn" data-advance-order="${order.id}">${escapeHtml(next)}</button>` : ""}
+          ${encBlocked ? `<button type="button" class="mini-btn" disabled title="${encTitle}">Encaisser</button>` : ""}
           ${!order._isPaid && canDeleteOrder(order) ? `<button type="button" class="mini-btn" data-delete-order="${order.id}">Annuler</button>` : ""}
         </td>
       </tr>`;
@@ -3792,9 +3905,13 @@ function renderOrders() {
       const total = order.lignes.reduce((sum, line) => sum + calcNet(line), 0);
       const highlightClass = flashingQrOrderIds.has(order.id) ? "order-card-new" : "";
       const next = nextOrderStatus(orderStatus(order));
-      const nextAction = next === "Encaisser"
-        ? `<button type="button" class="mini-btn" data-finalize-order="${order.id}">Encaisser</button>`
-        : next ? `<button type="button" class="mini-btn" data-advance-order="${order.id}">${escapeHtml(next)}</button>` : "";
+      const encBlocked = next === "Encaisser" && journalEncaisseDisabledForOrder(order);
+      const encTitle = encBlocked ? escapeHtml(journalEncaisseBlockTitle(order)) : "";
+      const nextAction = next === "Encaisser" && encBlocked
+        ? `<button type="button" class="mini-btn" disabled title="${encTitle}">Encaisser</button>`
+        : next === "Encaisser"
+          ? `<button type="button" class="mini-btn" data-finalize-order="${order.id}">Encaisser</button>`
+          : next ? `<button type="button" class="mini-btn" data-advance-order="${order.id}">${escapeHtml(next)}</button>` : "";
       return `<article class="order-card ${order.id === activeOrderId ? "active" : ""} ${highlightClass}">
         <div class="section-head">
           <div>
@@ -3971,12 +4088,13 @@ function openSaisieRapide() {
 
 async function submitSaisieRapide() {
   if (!srCart.length) { showToast("Ajoutez au moins un article."); return; }
+  const date = pdjCalendarDate();
+  if (!assertJournalAllowsSalesOrToast(date, currentSiteId())) return;
   const btn = document.getElementById("sr-submit-btn");
   if (btn) { btn.disabled = true; btn.textContent = "Validation..."; }
   try {
   const clientName = `Saisie rapide · ${sessionUser || "Serveuse"}`;
   const location = document.getElementById("sr-location")?.value || "Intérieur";
-  const date = pdjCalendarDate();
   state.nextId = state.nextId || {};
   state.nextId.commande = (Number(state.nextId.commande) || 0) + 1;
   const order = {
@@ -4035,6 +4153,28 @@ async function submitSaisieRapide() {
 
 function renderVentesPage() {
   syncDualZonePricingUi();
+  const gate = document.getElementById("ventes-journal-gate");
+  if (gate) {
+    if (!PDJ_REQUIRE_CASH_OPENING) {
+      gate.classList.add("hidden");
+      gate.innerHTML = "";
+    } else {
+      const d = journalSaleDateFromDom();
+      const j = journalAllowsSalesForDate(d, currentSiteId());
+      gate.classList.remove("hidden");
+      if (j.ok) {
+        gate.innerHTML = `<div class="inline-card" style="border-left:3px solid #72d7a9;margin-bottom:12px">
+          <strong>Journée ouverte</strong> (${escapeHtml(isoDateToDdMmYyyy(d))}) — vous pouvez enregistrer des lignes de commande et encaisser. Clôturez la journée sur le <strong>Point du jour</strong> en fin de service.
+        </div>`;
+      } else {
+        gate.innerHTML = `<div class="inline-card" style="border-left:3px solid #ff8e82;margin-bottom:12px">
+          <strong>Ventes indisponibles pour cette date</strong>
+          <p class="muted" style="margin:8px 0 0;line-height:1.45">${escapeHtml(j.message)}</p>
+          <p class="muted" style="margin:6px 0 0;font-size:0.86rem;line-height:1.45">Ouvrez la journée (ou la suivante si celle-ci est déjà clôturée) depuis la page <strong>Point du jour</strong> — rôle gérant ou administrateur.</p>
+        </div>`;
+      }
+    }
+  }
   document.getElementById("articles-list").innerHTML = recordsForSite(state.stock).map((item) => `<option value="${escapeHtml(item.article)}">`).join("");
   if (document.getElementById("modal-vente")?.classList.contains("open")) renderVenteArticlePicker();
   renderOrdersManagement();
@@ -5274,10 +5414,20 @@ function populateOrderSelect() {
   const options = [{ value: "", label: "Nouvelle commande" }, ...orders];
   document.getElementById("v-order-select").innerHTML = options.map((option) => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`).join("");
   document.getElementById("v-order-select").value = activeOrderId ? String(activeOrderId) : "";
+  syncFinalizeButtonJournalState();
 }
 
 function currentOrder() {
   return recordsForSite(state.commandes).find((order) => order.id === activeOrderId) || null;
+}
+
+function syncFinalizeButtonJournalState() {
+  const btn = document.getElementById("finalize-order-btn");
+  if (!btn) return;
+  const id = Number(document.getElementById("v-order-select")?.value) || activeOrderId || null;
+  const saleD = document.getElementById("v-date")?.value?.trim() || pdjCalendarDate();
+  const allow = journalAllowsSalesForDate(saleD, currentSiteId()).ok;
+  btn.disabled = !id || !allow;
 }
 
 function openOrderEditor(orderId = null, lineId = null) {
@@ -5298,7 +5448,7 @@ function openOrderEditor(orderId = null, lineId = null) {
   document.getElementById("v-remise").value = line?.remise ? String(line.remise) : "0";
   document.getElementById("v-note").value = line?.note || order?.note || "";
   document.getElementById("save-vente-btn").textContent = line ? "Mettre a jour la ligne" : "Ajouter un article";
-  document.getElementById("finalize-order-btn").disabled = !order;
+  syncFinalizeButtonJournalState();
   updateKitInfo();
   updateVentePreview();
   const vSearch = document.getElementById("v-article-search");
@@ -5321,7 +5471,7 @@ function resetOrderForm() {
   document.getElementById("v-remise").value = "0";
   document.getElementById("v-note").value = "";
   document.getElementById("save-vente-btn").textContent = "Ajouter un article";
-  document.getElementById("finalize-order-btn").disabled = !activeOrderId;
+  syncFinalizeButtonJournalState();
   const vSearchReset = document.getElementById("v-article-search");
   if (vSearchReset) vSearchReset.value = "";
   renderVenteArticlePicker();
@@ -6549,6 +6699,7 @@ async function saveOrderLine() {
   const selectedOrderId = Number(document.getElementById("v-order-select").value) || activeOrderId;
   const creatingNewOrder = !selectedOrderId;
   const date = document.getElementById("v-date").value || today();
+  if (!assertJournalAllowsSalesOrToast(date, currentSiteId())) return;
   const order = ensureOrder(document.getElementById("v-client").value, date, document.getElementById("v-note").value);
   const requestedBottles = (Number(document.getElementById("v-qty").value) || 1) * Math.max(1, Number(format?.quantite) || Number(product?.packSize) || 1);
   const availability = stockAvailabilityForLine(product.article, requestedBottles, order.id, editingLineId);
@@ -6622,6 +6773,8 @@ async function finalizeOrder(orderId = activeOrderId) {
     showToast("Aucune ligne a facturer pour ce client.");
     return;
   }
+  const saleDateGuard = String(order.date || today()).slice(0, 10);
+  if (!assertJournalAllowsSalesOrToast(saleDateGuard, order.siteId || currentSiteId())) return;
   const orderTotal = order.lignes.reduce((sum, line) => sum + calcNet(line), 0);
   const paymentMix = readPaymentMix(orderTotal);
   if (paymentMix.error) {
@@ -6716,6 +6869,8 @@ function openFinalizeDialog(orderId = activeOrderId) {
     showToast("Aucune ligne a facturer pour ce client.");
     return;
   }
+  const saleD = String(order.date || today()).slice(0, 10);
+  if (!assertJournalAllowsSalesOrToast(saleD, order.siteId || currentSiteId())) return;
   pendingFinalizeOrderId = orderId;
   resetFinalizeModalUi();
   document.querySelectorAll(".finalize-pay-input").forEach((input) => { input.value = ""; });
@@ -10850,7 +11005,11 @@ document.getElementById("fab-btn").addEventListener("click", () => {
     const order = currentOrder();
     document.getElementById("v-client").value = order?.client || document.getElementById("v-client").value;
     document.getElementById("v-note").value = order?.note || document.getElementById("v-note").value;
-    document.getElementById("finalize-order-btn").disabled = !id;
+    syncFinalizeButtonJournalState();
+  });
+  document.getElementById("v-date")?.addEventListener("change", () => {
+    syncFinalizeButtonJournalState();
+    if (currentPage === "ventes") renderVentesPage();
   });
   ["qr-table", "qr-alias", "qr-count", "qr-prefix"].forEach((id) => {
     document.getElementById(id).addEventListener("input", renderQrPreview);
