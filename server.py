@@ -24,6 +24,30 @@ from urllib.request import Request, urlopen
 
 
 BASE_DIR = Path(__file__).resolve().parent
+DEBUG_LOG_FILE = BASE_DIR / "debug-dee456.log"
+
+
+def _dbg_session(msg: str, hypothesis_id: str, data: dict[str, Any]) -> None:
+    # #region agent log
+    try:
+        line = json.dumps(
+            {
+                "sessionId": "dee456",
+                "hypothesisId": hypothesis_id,
+                "location": "server.py",
+                "message": msg,
+                "data": data,
+                "timestamp": int(time.time() * 1000),
+            },
+            ensure_ascii=False,
+        )
+        with DEBUG_LOG_FILE.open("a", encoding="utf-8") as _df:
+            _df.write(line + "\n")
+    except OSError:
+        pass
+    # #endregion
+
+
 DATA_FILE = BASE_DIR / "data.json"
 BACKUP_DIR = BASE_DIR / "backups"
 AUDIT_LOG_FILE = BASE_DIR / "audit.log.jsonl"
@@ -1428,6 +1452,20 @@ class DataStore:
                     allowed_set = set(allowed)
                     raw_sub = {str(k): v for k, v in pdj_full.items() if str(k) in allowed_set}
                     pdj_out = json.loads(json.dumps(_sanitize_pdj_work_date_map(raw_sub, list(allowed_set))))
+            # #region agent log
+            if session is not None:
+                _dbg_session(
+                    "changes_pdj",
+                    "A",
+                    {
+                        "username": str(session.get("username", "")),
+                        "role": str(session.get("role", "")),
+                        "siteId_param": site_id,
+                        "pdj_out": pdj_out,
+                        "pdj_full_raw": dict(pdj_full) if session is not None else {},
+                    },
+                )
+            # #endregion
             return {
                 "meta": self.meta(),
                 "since": since_raw,
@@ -1877,12 +1915,28 @@ class DataStore:
             current["stockLosses"] = merge_scoped_rows(current.get("stockLosses", []), payload.get("stockLosses", []), allowed, sid_list)
 
             if "pdjWorkDateBySite" in payload:
+                _prev_pdj = dict(current.get("pdjWorkDateBySite") or {})
                 current["pdjWorkDateBySite"] = _merge_pdj_work_date_map_session(
                     current.get("pdjWorkDateBySite"),
                     payload.get("pdjWorkDateBySite"),
                     set(allowed),
                     sid_list,
                 )
+                # #region agent log
+                _dbg_session(
+                    "put_pdj_merge",
+                    "E",
+                    {
+                        "username": str(session.get("username", "")),
+                        "role": str(session.get("role", "")),
+                        "prev_keys": list(_prev_pdj.keys()),
+                        "new_keys": list((current.get("pdjWorkDateBySite") or {}).keys()),
+                        "payload_keys": list((payload.get("pdjWorkDateBySite") or {}).keys())
+                        if isinstance(payload.get("pdjWorkDateBySite"), dict)
+                        else [],
+                    },
+                )
+                # #endregion
 
             aid = payload.get("activeSiteId", current.get("activeSiteId"))
             if aid in site_ids and str(aid) in allowed:

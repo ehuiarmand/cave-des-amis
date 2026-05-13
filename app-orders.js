@@ -1308,6 +1308,32 @@ function pdjCalendarDate() {
   const sid = currentSiteId();
   const forced = String(state?.pdjWorkDateBySite?.[sid] || "").trim().slice(0, 10);
   const t = today();
+  // #region agent log
+  if (!canAnyAdmin() && sid) {
+    const _now = Date.now();
+    globalThis.__pdjCalDbgLast = globalThis.__pdjCalDbgLast || 0;
+    if (_now - globalThis.__pdjCalDbgLast > 8000) {
+      globalThis.__pdjCalDbgLast = _now;
+      fetch("http://127.0.0.1:7725/ingest/d031651a-daea-460d-8400-58dc731a515d", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "dee456" },
+        body: JSON.stringify({
+          sessionId: "dee456",
+          hypothesisId: "C",
+          location: "app-orders.js:pdjCalendarDate",
+          message: "pdj_non_admin",
+          data: {
+            sid,
+            forced,
+            keys: state?.pdjWorkDateBySite ? Object.keys(state.pdjWorkDateBySite) : [],
+            role: String(currentRole || ""),
+          },
+          timestamp: _now,
+        }),
+      }).catch(() => {});
+    }
+  }
+  // #endregion
   if (forced && /^\d{4}-\d{2}-\d{2}$/.test(forced) && forced <= t) {
     return forced;
   }
@@ -5631,6 +5657,27 @@ function stopLiveSync() {
 async function syncStateSilently() {
   if (!state || modalIsOpen()) return;
   if (!["ventes", "home", "stock", "pdj", "commandes"].includes(currentPage)) return;
+  // #region agent log
+  {
+    const _n = Date.now();
+    globalThis.__syncDbgLast = globalThis.__syncDbgLast || 0;
+    if (_n - globalThis.__syncDbgLast > 10000) {
+      globalThis.__syncDbgLast = _n;
+      fetch("http://127.0.0.1:7725/ingest/d031651a-daea-460d-8400-58dc731a515d", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "dee456" },
+        body: JSON.stringify({
+          sessionId: "dee456",
+          hypothesisId: "D",
+          location: "app-orders.js:syncStateSilently",
+          message: "sync_enter",
+          data: { currentPage, role: String(currentRole || ""), siteId: currentSiteId() },
+          timestamp: _n,
+        }),
+      }).catch(() => {});
+    }
+  }
+  // #endregion
 
   if (currentPage === "stock") {
     // Full reload for stock page — delta only returns commandes, not stock/purchases
@@ -5687,6 +5734,25 @@ async function syncStateSilently() {
     state.pdjWorkDateBySite = { ...delta.pdjWorkDateBySite };
     applyPdjWorkDateToVentesAndOrderDom();
     syncPdjWorkDateInput();
+    // #region agent log
+    fetch("http://127.0.0.1:7725/ingest/d031651a-daea-460d-8400-58dc731a515d", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "dee456" },
+      body: JSON.stringify({
+        sessionId: "dee456",
+        hypothesisId: "B",
+        location: "app-orders.js:syncStateSilently",
+        message: "pdj_merged_from_delta",
+        data: {
+          currentPage,
+          role: String(currentRole || ""),
+          siteId: currentSiteId(),
+          deltaPdj: delta.pdjWorkDateBySite,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
   }
 
   const latestQrOrders = qrOrdersForCurrentSite(state);
