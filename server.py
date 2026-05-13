@@ -19,7 +19,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import parse_qs, urlparse, urlencode
+from urllib.parse import parse_qs, quote, urlparse, urlencode
 from urllib.request import Request, urlopen
 
 
@@ -78,6 +78,17 @@ REQUIRE_2FA_FOR_PRIVILEGED = _env_first(
     "MAQUIS_MANAGER_REQUIRE_2FA_ADMINS",
     default="0",
 ).lower() in ("1", "true", "yes", "on")
+
+# Libellé « émetteur » dans les applis OTP (QR 2FA) : indépendant du nom du maquis dans les paramètres.
+TOTP_APP_LABEL = (
+    _env_first(
+        "MAQUIS_MANAGER_TOTP_LABEL",
+        "MAQUIS_MANAGER_APP_NAME",
+        "TDB_BAR_TOTP_LABEL",
+        default="Maquis Manager",
+    ).strip()
+    or "Maquis Manager"
+)
 
 
 def privileged_role_requires_2fa_policy(role: str) -> bool:
@@ -2250,7 +2261,12 @@ class AppHandler(BaseHTTPRequestHandler):
                 else:
                     self.send_json(HTTPStatus.NOT_FOUND, {"error": "Utilisateur introuvable."})
                     return
-            otp_url = f"otpauth://totp/Maquis%20Manager:{target}?secret={secret}&issuer=Maquis%20Manager&algorithm=SHA1&digits=6&period=30"
+            iss = quote(TOTP_APP_LABEL, safe="")
+            acc = quote(target, safe="")
+            otp_url = (
+                f"otpauth://totp/{iss}:{acc}?secret={secret}"
+                f"&issuer={iss}&algorithm=SHA1&digits=6&period=30"
+            )
             self.send_json(HTTPStatus.OK, {"secret": secret, "otpauthUrl": otp_url})
             return
 
