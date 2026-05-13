@@ -672,9 +672,9 @@ def load_backup_state_payload(backup_filename: str) -> dict[str, Any]:
     path = BACKUP_DIR / name
     if not path.is_file():
         raise ValueError("Fichier de sauvegarde introuvable.")
-    if re.fullmatch(r"data-\d{8}-\d{6}\.json", name):
+    if re.fullmatch(r"data-\d{8}-\d{6}(-manuel)?\.json", name):
         return migrate_state(json.loads(path.read_text(encoding="utf-8")))
-    if re.fullmatch(r"app-\d{8}-\d{6}\.sqlite3", name):
+    if re.fullmatch(r"app-\d{8}-\d{6}(-manuel)?\.sqlite3", name):
         conn = sqlite3.connect(str(path))
         try:
             row = conn.execute("SELECT v FROM kv WHERE k = ?", ("state",)).fetchone()
@@ -683,7 +683,7 @@ def load_backup_state_payload(backup_filename: str) -> dict[str, Any]:
         if not row or not row[0]:
             raise ValueError("Sauvegarde SQLite sans etat.")
         return migrate_state(json.loads(row[0]))
-    raise ValueError("Formats acceptes : data-AAAAMMJJ-HHMMSS.json ou app-AAAAMMJJ-HHMMSS.sqlite3.")
+    raise ValueError("Formats acceptes : data-AAAAMMJJ-HHMMSS.json (ou -manuel) ou app-AAAAMMJJ-HHMMSS.sqlite3 (ou -manuel).")
 
 
 def session_is_superadmin(session: dict[str, Any] | None) -> bool:
@@ -2097,6 +2097,44 @@ class DataStore:
             self._write(current)
             return self.public_state()
 
+    def write_manual_backup(self) -> dict[str, str]:
+        """Ecrit une copie supplementaire dans backups/ (suffixe -manuel), sans modifier l'etat courant."""
+        BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+        manual_keep = 40
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        with self._lock:
+            if self._sqlite_enabled:
+                name = f"app-{stamp}-manuel.sqlite3"
+                dest = BACKUP_DIR / name
+                if not self._sqlite_path.exists():
+                    raise ValueError("Base SQLite introuvable.")
+                dest.write_bytes(self._sqlite_path.read_bytes())
+            else:
+                name = f"data-{stamp}-manuel.json"
+                dest = BACKUP_DIR / name
+                body = json.dumps(self._state, ensure_ascii=False, indent=2)
+                dest.write_text(body, encoding="utf-8")
+        self._prune_manual_backups(manual_keep)
+        return {"ok": "true", "file": name}
+
+    def _prune_manual_backups(self, keep: int) -> None:
+        try:
+            if self._sqlite_enabled:
+                paths = list(BACKUP_DIR.glob("app-*-manuel.sqlite3"))
+            else:
+                paths = list(BACKUP_DIR.glob("data-*-manuel.json"))
+        except OSError:
+            return
+        try:
+            paths.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        except OSError:
+            return
+        for p in paths[keep:]:
+            try:
+                p.unlink()
+            except OSError:
+                pass
+
 
 store = DataStore(DATA_FILE)
 sessions = SessionManager(absolute_seconds=SESSION_ABSOLUTE_SECONDS, idle_seconds=SESSION_IDLE_SECONDS)
@@ -2259,6 +2297,27 @@ class AppHandler(BaseHTTPRequestHandler):
                 {"ip": self.client_ip(), "username": session.get("username", ""), "backupFile": bf, "siteId": site_raw},
             )
             self.send_json(HTTPStatus.OK, restored_site, cache_control="no-store")
+            return
+        if post_path == "/api/admin/create-manual-backup":
+            session = self.require_session()
+            if session is None:
+                return
+            if not session_is_superadmin(session):
+                self.send_json(HTTPStatus.FORBIDDEN, {"error": "Acces refuse."})
+                return
+            try:
+                info = store.write_manual_backup()
+            except ValueError as error:
+                self.send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+                return
+            except OSError as error:
+                self.send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": f"Ecriture disque : {error}"})
+                return
+            audit_log(
+                "create_manual_backup",
+                {"ip": self.client_ip(), "username": session.get("username", ""), "file": info.get("file", "")},
+            )
+            self.send_json(HTTPStatus.OK, info, cache_control="no-store")
             return
         if post_path == "/api/public/order":
             payload = self.read_json()

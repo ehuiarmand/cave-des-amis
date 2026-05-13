@@ -9,6 +9,7 @@ const API = {
   restoreFromJson: "/api/admin/restore-from-json",
   adminBackups: "/api/admin/backups",
   restoreSiteFromBackup: "/api/admin/restore-site-from-backup",
+  createManualBackup: "/api/admin/create-manual-backup",
   twoFaVerify: "/api/2fa/verify",
   twoFaSetup: "/api/2fa/setup",
   twoFaEnable: "/api/2fa/enable",
@@ -1430,6 +1431,7 @@ function syncVentesJournalDateInputsFromPdj(workDate, { force = false } = {}) {
 /** Met a jour les champs date des ventes / commandes selon pdjCalendarDate() (journee serveur incluse). */
 function applyPdjWorkDateToVentesAndOrderDom() {
   syncVentesJournalDateInputsFromPdj(pdjCalendarDate(), { force: false });
+  renderTopbar();
 }
 
 /** Enregistre la date PDJ choisie pour le maquis actif : visible par tous (serveurs, gerants). */
@@ -1459,6 +1461,7 @@ async function persistPdjWorkDateFromSuperPicker() {
     `${siteId} -> ${map[siteId] || "mode automatique"}`,
   );
   syncPdjWorkDateInput();
+  renderTopbar();
   renderOrdersManagement();
   if (currentPage === "pdj") renderPointDuJour();
   if (currentPage === "ventes") renderVentesPage();
@@ -1975,7 +1978,27 @@ function applyRoleVisibility() {
 
 function renderTopbar() {
   document.getElementById("top-bar-name").textContent = currentSite()?.nom || "Mon Bar";
-  document.getElementById("top-date").textContent = formatDateDdMmYyyy(new Date());
+  const journalDateEl = document.getElementById("top-journal-date");
+  const journalDiffEl = document.getElementById("top-journal-diff");
+  if (journalDateEl) {
+    if (state && sessionUser) {
+      const j = pdjCalendarDate();
+      journalDateEl.textContent = formatDateDdMmYyyy(j);
+      if (journalDiffEl) {
+        const civil = today();
+        if (j && j !== civil) {
+          journalDiffEl.textContent = `Jour civil : ${formatDateDdMmYyyy(civil)}`;
+          journalDiffEl.classList.remove("hidden");
+        } else {
+          journalDiffEl.textContent = "";
+          journalDiffEl.classList.add("hidden");
+        }
+      }
+    } else {
+      journalDateEl.textContent = "—";
+      journalDiffEl?.classList.add("hidden");
+    }
+  }
   document.getElementById("session-user").textContent = sessionUser || "utilisateur";
   const eff = String(sessionUser || "").trim().toLowerCase() === "admin" ? "superadmin" : currentRole;
   const roleLabel = eff === "superadmin"
@@ -8304,6 +8327,34 @@ function exportData() {
   persistState({ staffAuditLog: state.staffAuditLog, nextId: state.nextId }).catch(() => {});
 }
 
+async function createManualBackupOnServer() {
+  if (!canSuperAdmin()) {
+    showToast("Reserve au super administrateur.");
+    return;
+  }
+  if (!window.confirm(
+    "Enregistrer une copie de secours sur le serveur (dossier backups/) ?\n\n"
+    + "Le fichier sera nomme avec le suffixe -manuel (conserve en nombre limite).",
+  )) {
+    return;
+  }
+  try {
+    const r = await apiRequest(API.createManualBackup, { method: "POST", body: JSON.stringify({}) });
+    const f = String(r?.file || "").trim();
+    recordStaffAudit("create", "backup_manuel_serveur", f ? `Fichier ${f}` : "Snapshot serveur", "");
+    await persistState({ staffAuditLog: state.staffAuditLog, nextId: state.nextId }).catch(() => {});
+    showToast(f ? `Sauvegarde serveur : ${f}` : "Sauvegarde serveur enregistree.");
+    refreshRestoreBackupUi().catch(() => {});
+  } catch (error) {
+    const msg = typeof error?.message === "string" ? error.message : "";
+    if (error?.status === 404 || msg.includes("404") || msg.includes("introuvable")) {
+      showToast("Route serveur absente : mettez a jour server.py et redemarrez le serveur.");
+    } else {
+      handleApiError(error);
+    }
+  }
+}
+
 function printOrderTicket(orderId = activeOrderId) {
   const order = recordsForSite(state.commandes).find((item) => item.id === orderId);
   if (!order) {
@@ -10931,6 +10982,7 @@ document.getElementById("fab-btn").addEventListener("click", () => {
   document.getElementById("print-closure-btn").addEventListener("click", printDayClosure);
   document.getElementById("pdj-work-date")?.addEventListener("change", () => {
     syncPdjWorkDateInput();
+    renderTopbar();
     renderOrdersManagement();
     if (currentPage === "pdj") renderPointDuJour();
     if (currentPage === "ventes") renderVentesPage();
@@ -10981,6 +11033,8 @@ document.getElementById("fab-btn").addEventListener("click", () => {
   document.getElementById("reappro-case-size-select").addEventListener("change", updateReapproPrixInfo);
   document.getElementById("enable-2fa-btn").addEventListener("click", () => enable2FA().catch(handleApiError));
   document.getElementById("export-btn").addEventListener("click", exportData);
+  document.getElementById("top-backup-download-btn")?.addEventListener("click", () => exportData());
+  document.getElementById("top-backup-server-btn")?.addEventListener("click", () => createManualBackupOnServer().catch(handleApiError));
   document.getElementById("reset-btn").addEventListener("click", async () => {
     if (!canSuperAdmin()) {
       showToast("Seul le super administrateur peut reinitialiser l'application.");
