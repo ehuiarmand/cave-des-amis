@@ -1302,9 +1302,15 @@ function canManagePdjAccounting() {
 }
 
 /** Date traitee sur le Point du jour : admin et superadmin peuvent choisir une journee anterieure pour corriger les ecarts.
- *  Pour tous les roles, si la journee d'hier est encore ouverte (maquis ouvert la nuit), on reste sur hier. */
+ *  Pour tous les roles, si la journee d'hier est encore ouverte (maquis ouvert la nuit), on reste sur hier.
+ *  Si le super administrateur a impose une date (serveur, pdjWorkDateBySite), tout le monde l'utilise pour ce maquis. */
 function pdjCalendarDate() {
+  const sid = currentSiteId();
+  const forced = String(state?.pdjWorkDateBySite?.[sid] || "").trim().slice(0, 10);
   const t = today();
+  if (forced && /^\d{4}-\d{2}-\d{2}$/.test(forced) && forced <= t) {
+    return forced;
+  }
   if (!canAnyAdmin()) return workingDate();
   const el = document.getElementById("pdj-work-date");
   const v = el?.value?.trim();
@@ -1317,7 +1323,11 @@ function syncPdjWorkDateInput() {
   if (!el || !canAnyAdmin()) return;
   const t = today();
   el.max = t;
-  if (!el.value || el.value > t) el.value = workingDate();
+  const sid = currentSiteId();
+  const forced = String(state?.pdjWorkDateBySite?.[sid] || "").trim().slice(0, 10);
+  const useForced = forced && /^\d{4}-\d{2}-\d{2}$/.test(forced) && forced <= t;
+  if (useForced) el.value = forced;
+  else if (!el.value || el.value > t) el.value = workingDate();
   const workDate = pdjCalendarDate();
   const vDateEl = document.getElementById("v-date");
   if (vDateEl) vDateEl.value = workDate;
@@ -1325,6 +1335,43 @@ function syncPdjWorkDateInput() {
   if (filterDateEl) filterDateEl.value = workDate;
   syncFinalizeButtonJournalState();
   if (currentPage === "ventes") renderVentesPage();
+}
+
+/** Enregistre la date PDJ choisie pour le maquis actif : visible par tous (serveurs, gerants). */
+async function persistPdjWorkDateFromSuperPicker() {
+  if (!canSuperAdmin()) {
+    showToast("Reserve au super administrateur.");
+    return;
+  }
+  const el = document.getElementById("pdj-work-date");
+  const raw = el?.value?.trim() || "";
+  const t = today();
+  const siteId = currentSiteId();
+  const map = { ...(state.pdjWorkDateBySite || {}) };
+  if (!raw || raw === t) {
+    delete map[siteId];
+  } else if (/^\d{4}-\d{2}-\d{2}$/.test(raw) && raw <= t) {
+    map[siteId] = raw;
+  } else {
+    showToast("Date invalide.");
+    return;
+  }
+  await persistState({ pdjWorkDateBySite: map });
+  recordStaffAudit(
+    "update",
+    "pdj_date_serveur",
+    "Journee comptable imposee (toutes sessions)",
+    `${siteId} -> ${map[siteId] || "mode automatique"}`,
+  );
+  syncPdjWorkDateInput();
+  renderOrdersManagement();
+  if (currentPage === "pdj") renderPointDuJour();
+  if (currentPage === "ventes") renderVentesPage();
+  showToast(
+    map[siteId]
+      ? `Journee du ${isoDateToDdMmYyyy(map[siteId])} appliquee a tout le monde pour ce maquis.`
+      : "Retour a la date automatique pour ce maquis.",
+  );
 }
 
 const STAFF_AUDIT_MAX = 800;
@@ -2841,7 +2888,9 @@ async function reopenAccountingDay(siteId, dateStr) {
   }
   revertStockCheckLedgerEffects(check);
   state.stockChecks = (state.stockChecks || []).filter((sc) => !(sc.siteId === siteId && sc.date === dateStr));
-  await persistState({ stock: state.stock, stockChecks: state.stockChecks });
+  const pdjMapReopen = { ...(state.pdjWorkDateBySite || {}) };
+  if (canAnyAdmin()) pdjMapReopen[String(siteId)] = dateStr;
+  await persistState({ stock: state.stock, stockChecks: state.stockChecks, pdjWorkDateBySite: pdjMapReopen });
   // Auto-positionner la date de travail sur la date recouverte
   const workDateEl = document.getElementById("pdj-work-date");
   if (workDateEl && canAnyAdmin()) {
@@ -2929,7 +2978,12 @@ async function recordCashOpening() {
   }
   state.dayBooks = [book, ...state.dayBooks.filter((b) => !(b.siteId === siteId && b.date === dateStr))];
   recordStaffAudit("update", "caisse_ouverture", `Ouverture caisse ${formatDateDdMmYyyy(dateStr)}`, `${fmt(amount)} FCFA · snapshot stock`);
-  await persistState({ dayBooks: state.dayBooks });
+  const pdjMapOpen = { ...(state.pdjWorkDateBySite || {}) };
+  if (canSuperAdmin()) {
+    if (dateStr === today()) delete pdjMapOpen[siteId];
+    else pdjMapOpen[siteId] = dateStr;
+  }
+  await persistState({ dayBooks: state.dayBooks, pdjWorkDateBySite: pdjMapOpen });
   renderPointDuJour();
   showToast("Ouverture de caisse enregistrée. Le point du jour est disponible.");
 }
@@ -5669,6 +5723,9 @@ async function purgeMaquisDataViaStatePut(siteId, keepStockCatalog) {
     }
     overrides[key] = list.filter(keep);
   });
+  const pm = { ...(state.pdjWorkDateBySite || {}) };
+  delete pm[sid];
+  overrides.pdjWorkDateBySite = pm;
   await persistState(overrides);
 }
 
@@ -5690,6 +5747,7 @@ async function persistState(overrides = {}) {
       stockLosses: overrides.stockLosses ?? state.stockLosses ?? [],
       stockEntrees: overrides.stockEntrees ?? state.stockEntrees ?? [],
       dayBooks: overrides.dayBooks !== undefined ? overrides.dayBooks : (state.dayBooks || []),
+      pdjWorkDateBySite: overrides.pdjWorkDateBySite !== undefined ? overrides.pdjWorkDateBySite : (state.pdjWorkDateBySite || {}),
       purchaseOrders: overrides.purchaseOrders ?? state.purchaseOrders ?? [],
       supplierPrices: overrides.supplierPrices ?? state.supplierPrices ?? [],
       creditRecoveries: overrides.creditRecoveries || state.creditRecoveries || [],
@@ -7408,7 +7466,10 @@ async function closeAccountingDay() {
     `Cloture journee ${formatDateDdMmYyyy(dStr)}`,
     `${cashBlock}${stockBlock}`,
   );
-  await persistState({ stock: state.stock, stockChecks: state.stockChecks });
+  const sidClose = currentSiteId();
+  const pdjMapClose = { ...(state.pdjWorkDateBySite || {}) };
+  if (pdjMapClose[sidClose] === dStr) delete pdjMapClose[sidClose];
+  await persistState({ stock: state.stock, stockChecks: state.stockChecks, pdjWorkDateBySite: pdjMapClose });
   renderStock();
   renderPointDuJour();
   const cashHint = cashEcartEspeces === 0 ? "" : ` Écart espèces : ${cashEcartEspeces > 0 ? "+" : ""}${fmt(cashEcartEspeces)} FCFA.`;
@@ -10021,6 +10082,7 @@ async function bootstrapAuthenticatedApp(opts = {}) {
   if (!Array.isArray(state.creditRecoveries)) state.creditRecoveries = [];
   if (!Array.isArray(state.purchaseOrders)) state.purchaseOrders = [];
   if (!Array.isArray(state.supplierPrices)) state.supplierPrices = [];
+  if (!state.pdjWorkDateBySite || typeof state.pdjWorkDateBySite !== "object") state.pdjWorkDateBySite = {};
   if (!Array.isArray(state.dayBooks)) state.dayBooks = [];
   if (!Array.isArray(state.stockEntrees)) state.stockEntrees = [];
   if (!Array.isArray(state.stockLosses)) state.stockLosses = [];
@@ -10137,6 +10199,7 @@ function attachEvents() {
     activeOrderId = null;
     knownQrOrderIds = new Set(qrOrdersForCurrentSite(state).map((item) => item.id));
     clearQrAlert();
+    syncPdjWorkDateInput();
     renderTopbar();
     renderDashboard();
     renderVentesPage();
@@ -10430,10 +10493,7 @@ document.getElementById("fab-btn").addEventListener("click", () => {
     if (currentPage === "ventes") renderVentesPage();
   });
   document.getElementById("pdj-apply-work-date")?.addEventListener("click", () => {
-    syncPdjWorkDateInput();
-    renderOrdersManagement();
-    if (currentPage === "pdj") renderPointDuJour();
-    if (currentPage === "ventes") renderVentesPage();
+    persistPdjWorkDateFromSuperPicker().catch(handleApiError);
   });
   document.getElementById("close-day-btn").addEventListener("click", () => {
     if (!canManagePdjAccounting()) {

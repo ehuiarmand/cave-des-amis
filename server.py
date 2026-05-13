@@ -96,6 +96,60 @@ def privileged_role_requires_2fa_policy(role: str) -> bool:
     return r in ("superadmin", "admin")
 
 
+def _today_iso_local() -> str:
+    return time.strftime("%Y-%m-%d", time.localtime())
+
+
+def _sanitize_pdj_work_date_map(raw: Any, valid_site_ids: list[str]) -> dict[str, str]:
+    """Dates comptables forcées par maquis (yyyy-mm-dd, <= aujourd'hui, sites connus)."""
+    if not isinstance(raw, dict):
+        return {}
+    allowed = {str(s).strip() for s in valid_site_ids if s}
+    tmax = _today_iso_local()
+    out: dict[str, str] = {}
+    for k, v in raw.items():
+        sid = str(k).strip()
+        if sid not in allowed:
+            continue
+        if v is None:
+            continue
+        s = str(v).strip()[:10]
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", s) or s > tmax:
+            continue
+        out[sid] = s
+    return out
+
+
+def _merge_pdj_work_date_map_session(
+    current_map: Any,
+    incoming: Any,
+    allowed_site_ids: set[str],
+) -> dict[str, str]:
+    """Mise a jour des dates PDJ forcees : cles autorisees seulement ; valeur vide / null supprime."""
+    cur: dict[str, str] = {}
+    if isinstance(current_map, dict):
+        for k, v in current_map.items():
+            sid = str(k).strip()
+            if sid in allowed_site_ids and isinstance(v, str):
+                s = v.strip()[:10]
+                if re.fullmatch(r"\d{4}-\d{2}-\d{2}", s) and s <= _today_iso_local():
+                    cur[sid] = s
+    if not isinstance(incoming, dict):
+        return cur
+    tmax = _today_iso_local()
+    for sid_raw, v in incoming.items():
+        sid = str(sid_raw).strip()
+        if sid not in allowed_site_ids:
+            continue
+        if v is None or (isinstance(v, str) and not str(v).strip()):
+            cur.pop(sid, None)
+            continue
+        s = str(v).strip()[:10]
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", s) and s <= tmax:
+            cur[sid] = s
+    return cur
+
+
 def session_timing_fields(sess: dict[str, Any]) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for key in ("sessionCreatedAt", "sessionDeadlineUnix", "sessionAbsoluteSeconds", "sessionIdleSeconds"):
@@ -454,6 +508,7 @@ def build_default_state() -> dict[str, Any]:
         "commandes": [],
         "stockChecks": [],
         "dayBooks": [],
+        "pdjWorkDateBySite": {},
         "purchaseOrders": [],
         "supplierPrices": [],
         "casiers": [],
@@ -1258,6 +1313,7 @@ class DataStore:
                 "stockEntrees": json.loads(json.dumps(self._state.get("stockEntrees", []))),
                 "stockLosses": json.loads(json.dumps(self._state.get("stockLosses", []))),
                 "dayBooks": json.loads(json.dumps(self._state.get("dayBooks", []))),
+                "pdjWorkDateBySite": json.loads(json.dumps(self._state.get("pdjWorkDateBySite", {}))),
                 "purchaseOrders": json.loads(json.dumps(self._state.get("purchaseOrders", []))),
                 "supplierPrices": json.loads(json.dumps(self._state.get("supplierPrices", []))),
                 "casiers": json.loads(json.dumps(self._state.get("casiers", []))),
@@ -1317,6 +1373,10 @@ class DataStore:
                 for u in self._state["auth"]["users"]
                 if user_visible_in_public_state(u, session)
             ]
+            allowed_set = set(allowed)
+            pdj_full = self._state.get("pdjWorkDateBySite", {}) or {}
+            pdj_filtered = {k: v for k, v in pdj_full.items() if str(k) in allowed_set}
+
             return {
                 "meta": full["meta"],
                 "sites": json.loads(json.dumps(sites)),
@@ -1328,6 +1388,7 @@ class DataStore:
                 "stockEntrees": filter_site_rows(self._state.get("stockEntrees", [])),
                 "stockLosses": filter_site_rows(self._state.get("stockLosses", [])),
                 "dayBooks": filter_site_rows(self._state.get("dayBooks", [])),
+                "pdjWorkDateBySite": json.loads(json.dumps(pdj_filtered)),
                 "purchaseOrders": filter_site_rows(self._state.get("purchaseOrders", [])),
                 "supplierPrices": filter_site_rows(self._state.get("supplierPrices", [])),
                 "casiers": filter_site_rows(self._state.get("casiers", [])),
@@ -1711,6 +1772,10 @@ class DataStore:
                 current["commandes"] = payload.get("commandes", current.get("commandes", []))
                 current["stockChecks"] = payload.get("stockChecks", current.get("stockChecks", []))
                 current["dayBooks"] = payload.get("dayBooks", current.get("dayBooks", []))
+                current["pdjWorkDateBySite"] = _sanitize_pdj_work_date_map(
+                    payload.get("pdjWorkDateBySite", current.get("pdjWorkDateBySite", {})),
+                    site_ids,
+                )
                 current["purchaseOrders"] = payload.get("purchaseOrders", current.get("purchaseOrders", []))
                 current["supplierPrices"] = payload.get("supplierPrices", current.get("supplierPrices", []))
                 current["casiers"] = payload.get("casiers", current.get("casiers", []))
@@ -1799,6 +1864,13 @@ class DataStore:
             current["staffAuditLog"] = merge_scoped_rows(current.get("staffAuditLog", []), payload.get("staffAuditLog", []), allowed, sid_list)
             current["stockEntrees"] = merge_scoped_rows(current.get("stockEntrees", []), payload.get("stockEntrees", []), allowed, sid_list)
             current["stockLosses"] = merge_scoped_rows(current.get("stockLosses", []), payload.get("stockLosses", []), allowed, sid_list)
+
+            if "pdjWorkDateBySite" in payload:
+                current["pdjWorkDateBySite"] = _merge_pdj_work_date_map_session(
+                    current.get("pdjWorkDateBySite"),
+                    payload.get("pdjWorkDateBySite"),
+                    set(allowed),
+                )
 
             aid = payload.get("activeSiteId", current.get("activeSiteId"))
             if aid in site_ids and str(aid) in allowed:
