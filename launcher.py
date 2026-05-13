@@ -53,24 +53,47 @@ if not detected_port[0]:
 port = detected_port[0]
 print(f"Serveur detecte sur le port {port}")
 
-# Ecriture du fichier de config Cloudflare avec le bon port
-config_content = f"""tunnel: {TUNNEL_UUID}
-credentials-file: {CREDENTIALS_FILE}
+# Lancement de ngrok pour exposer le port local
+print("Demarrage du tunnel ngrok...")
+ngrok_process = subprocess.Popen(
+    [os.path.join(script_dir, "ngrok.exe"), "http", str(port)],
+    stdout=subprocess.PIPE,
+    stderr=subprocess.STDOUT,
+    text=True,
+    bufsize=1,
+)
 
-ingress:
-  - hostname: {HOSTNAME}
-    service: http://localhost:{port}
-  - service: http_status:404
-"""
-with open(CONFIG_FILE, "w") as f:
-    f.write(config_content)
+# Attendre que ngrok affiche l'URL
+ngrok_url = None
+for line in iter(ngrok_process.stdout.readline, ""):
+    print(line, end="", flush=True)
+    if "Forwarding" in line and "https://" in line:
+        # Extraire l'URL après ->
+        parts = line.split("->")
+        if len(parts) > 1:
+            url_part = parts[0].strip().split()[-1]  # Prendre la dernière partie avant ->
+            if url_part.startswith("https://"):
+                ngrok_url = url_part
+                break
+
+if not ngrok_url:
+    print("ERREUR : impossible de detecter l'URL ngrok.")
+    server.terminate()
+    ngrok_process.terminate()
+    sys.exit(1)
 
 print()
 print("  ================================================")
 print(f"  Votre application est accessible sur :")
-print(f"  https://{HOSTNAME}")
+print(f"  {ngrok_url}")
 print("  ================================================")
 print()
 
-os.system(f'cloudflared tunnel --config "{CONFIG_FILE}" run {TUNNEL_NAME}')
-server.terminate()
+# Garder les processus actifs
+try:
+    server.wait()
+except KeyboardInterrupt:
+    pass
+finally:
+    ngrok_process.terminate()
+    server.terminate()

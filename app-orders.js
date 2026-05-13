@@ -26,6 +26,11 @@ const CHARGE_CATEGORIES = ["Loyer", "Salaires", "Électricité", "Eau", "Gaz / C
  * Si false : comportement legacy (pas de blocage ventes lié au PDJ).
  */
 const PDJ_REQUIRE_CASH_OPENING = true;
+/** Brouillon saisi dans « Montant en caisse à l'ouverture » : réinjecté si le panneau est re-rendu (ex. sync live ~4 s) pendant la saisie. */
+const pdjOpeningCashDraftBySiteDate = {};
+function pdjOpeningCashDraftKey(siteId, dateStr) {
+  return `${String(siteId || "").trim()}|${String(dateStr || "").trim().slice(0, 10)}`;
+}
 const COLORS = {
   "Bières": "#2196f3",
   "Sodas & Jus": "#42a5f5",
@@ -1301,15 +1306,27 @@ function canManagePdjAccounting() {
   return Boolean(sessionUser) && String(currentRole || "").trim() !== "serveuse";
 }
 
-/** Date traitee sur le Point du jour : admin et superadmin peuvent choisir une journee anterieure pour corriger les ecarts.
- *  Pour tous les roles, si la journee d'hier est encore ouverte (maquis ouvert la nuit), on reste sur hier.
- *  Si le super administrateur a impose une date (serveur, pdjWorkDateBySite), tout le monde l'utilise pour ce maquis. */
+/** Date traitee sur le Point du jour : admin/superadmin lisent d'abord le champ date (choix local), puis la date imposee serveur si le champ est vide.
+ *  Les autres roles : date imposee serveur si presente, sinon workingDate().
+ *  Si la journee d'hier est encore ouverte (maquis de nuit), workingDate() peut rester sur hier. */
 function pdjCalendarDate() {
   const sid = currentSiteId();
-  const forced = String(state?.pdjWorkDateBySite?.[sid] || "").trim().slice(0, 10);
   const t = today();
+  const forced = String(state?.pdjWorkDateBySite?.[sid] || "").trim().slice(0, 10);
+  const hasForced = Boolean(forced && /^\d{4}-\d{2}-\d{2}$/.test(forced) && forced <= t);
+
+  if (canAnyAdmin()) {
+    const el = document.getElementById("pdj-work-date");
+    const v = el?.value?.trim();
+    if (v && /^\d{4}-\d{2}-\d{2}$/.test(v)) {
+      return v > t ? t : v;
+    }
+    if (hasForced) return forced;
+    return workingDate();
+  }
+
   // #region agent log
-  if (!canAnyAdmin() && sid) {
+  if (sid) {
     const _now = Date.now();
     globalThis.__pdjCalDbgLast = globalThis.__pdjCalDbgLast || 0;
     if (_now - globalThis.__pdjCalDbgLast > 8000) {
@@ -1334,13 +1351,7 @@ function pdjCalendarDate() {
     }
   }
   // #endregion
-  if (forced && /^\d{4}-\d{2}-\d{2}$/.test(forced) && forced <= t) {
-    return forced;
-  }
-  if (!canAnyAdmin()) return workingDate();
-  const el = document.getElementById("pdj-work-date");
-  const v = el?.value?.trim();
-  if (v && /^\d{4}-\d{2}-\d{2}$/.test(v)) return v > t ? t : v;
+  if (hasForced) return forced;
   return workingDate();
 }
 
@@ -1352,8 +1363,10 @@ function syncPdjWorkDateInput() {
   const sid = currentSiteId();
   const forced = String(state?.pdjWorkDateBySite?.[sid] || "").trim().slice(0, 10);
   const useForced = forced && /^\d{4}-\d{2}-\d{2}$/.test(forced) && forced <= t;
-  if (useForced) el.value = forced;
-  else if (!el.value || el.value > t) el.value = workingDate();
+  if (useForced) {
+    const cur = String(el.value || "").trim();
+    if (!cur || cur > t || !/^\d{4}-\d{2}-\d{2}$/.test(cur)) el.value = forced;
+  } else if (!el.value || el.value > t) el.value = workingDate();
   const workDate = pdjCalendarDate();
   const vDateEl = document.getElementById("v-date");
   if (vDateEl) vDateEl.value = workDate;
@@ -2777,7 +2790,8 @@ function renderPointDuJour() {
 
   const pdjDateEl = document.getElementById("pdj-date");
   if (pdjDateEl) {
-    pdjDateEl.textContent = canSuperAdmin() && dStr !== today()
+    const t = today();
+    pdjDateEl.textContent = dStr !== t
       ? `Journée du ${formatDateDdMmYyyy(dStr)} · aujourd'hui ${formatDateDdMmYyyy(new Date())}`
       : formatDateDdMmYyyy(new Date());
   }
@@ -2980,8 +2994,24 @@ async function recordCashOpening() {
   const dateStr = pdjCalendarDate();
   const blockOpen = blockingJournalBeforeOpeningNewDate(dateStr, siteId);
   if (blockOpen) {
-    showToast(`La journée du ${isoDateToDdMmYyyy(blockOpen)} doit être clôturée avant d'ouvrir la suivante.`);
-    return;
+    if (!canSuperAdmin()) {
+      showToast(`La journée du ${isoDateToDdMmYyyy(blockOpen)} doit être clôturée avant d'ouvrir la suivante.`);
+      return;
+    }
+    // #region agent log
+    fetch("http://127.0.0.1:7725/ingest/d031651a-daea-460d-8400-58dc731a515d", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "dee456" },
+      body: JSON.stringify({
+        sessionId: "dee456",
+        hypothesisId: "F",
+        location: "app-orders.js:recordCashOpening",
+        message: "superadmin_bypass_chain_ancienne_journee_non_cloturee",
+        data: { dateStr, siteId, blockOpen },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
   }
   if (!canSuperAdmin() && dateStr !== today()) {
     showToast("Seul le super administrateur peut enregistrer l'ouverture pour une autre date.");
@@ -3020,6 +3050,7 @@ async function recordCashOpening() {
     else pdjMapOpen[siteId] = dateStr;
   }
   await persistState({ dayBooks: state.dayBooks, pdjWorkDateBySite: pdjMapOpen });
+  delete pdjOpeningCashDraftBySiteDate[pdjOpeningCashDraftKey(siteId, dateStr)];
   renderPointDuJour();
   showToast("Ouverture de caisse enregistrée. Le point du jour est disponible.");
 }
@@ -3084,6 +3115,32 @@ function renderCashOpeningPanel() {
       </div>`;
     return;
   }
+  const draftKey = pdjOpeningCashDraftKey(siteId, dStr);
+  const prevOpening = document.getElementById("pdj-opening-cash");
+  const hadOpeningFocus = document.activeElement?.id === "pdj-opening-cash";
+  if (prevOpening) pdjOpeningCashDraftBySiteDate[draftKey] = prevOpening.value;
+  const openingDraft = pdjOpeningCashDraftBySiteDate[draftKey] ?? "";
+  // #region agent log
+  if (openingDraft.length > 0) {
+    const _n = Date.now();
+    globalThis.__pdjOpeningDraftLogLast = globalThis.__pdjOpeningDraftLogLast || 0;
+    if (_n - globalThis.__pdjOpeningDraftLogLast > 8000) {
+      globalThis.__pdjOpeningDraftLogLast = _n;
+      fetch("http://127.0.0.1:7725/ingest/d031651a-daea-460d-8400-58dc731a515d", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "dee456" },
+        body: JSON.stringify({
+          sessionId: "dee456",
+          hypothesisId: "G",
+          location: "app-orders.js:renderCashOpeningPanel",
+          message: "opening_draft_preserved_across_render",
+          data: { draftKey, draftLen: openingDraft.length, hadPrev: Boolean(prevOpening), hadFocus: hadOpeningFocus },
+          timestamp: _n,
+        }),
+      }).catch(() => {});
+    }
+  }
+  // #endregion
   container.innerHTML = `
     <div class="pdj-opening-card">
       <p class="eyebrow" style="margin-bottom:4px">Ouvrir la journée</p>
@@ -3099,11 +3156,23 @@ function renderCashOpeningPanel() {
       <div class="pdj-opening-form">
         <div class="form-group">
           <label for="pdj-opening-cash">Montant en caisse à l'ouverture (FCFA)</label>
-          <input id="pdj-opening-cash" class="input-fcfa" type="text" inputmode="numeric" placeholder="ex: 50 000" value="">
+          <input id="pdj-opening-cash" class="input-fcfa" type="text" inputmode="numeric" placeholder="ex: 50 000" value="${escapeHtml(openingDraft)}">
         </div>
         <button type="button" class="btn btn-primary" id="pdj-opening-submit" style="width:auto;min-height:44px">Ouvrir la journée</button>
       </div>
     </div>`;
+  if (hadOpeningFocus) {
+    const neu = document.getElementById("pdj-opening-cash");
+    if (neu) {
+      neu.focus();
+      const L = neu.value.length;
+      try {
+        neu.setSelectionRange(L, L);
+      } catch (_) {
+        /* ignore */
+      }
+    }
+  }
 }
 
 const PRODUCT_RANK_TOP_N = 5;
@@ -10711,6 +10780,13 @@ document.getElementById("fab-btn").addEventListener("click", () => {
   bindMobileMoreSheet();
   document.getElementById("page-pdj")?.addEventListener("click", (event) => {
     if (event.target.closest("#pdj-opening-submit")) recordCashOpening().catch(handleApiError);
+  });
+  document.getElementById("page-pdj")?.addEventListener("input", (event) => {
+    const t = event.target;
+    if (!t || t.id !== "pdj-opening-cash") return;
+    const sid = currentSiteId();
+    const d = pdjCalendarDate();
+    pdjOpeningCashDraftBySiteDate[pdjOpeningCashDraftKey(sid, d)] = t.value;
   });
   document.getElementById("pdj-stock-check")?.addEventListener("input", (event) => {
     const input = event.target.closest("[data-check-frigo],[data-check-reserve]");
