@@ -238,6 +238,17 @@ function fmt(value) {
   return new Intl.NumberFormat("fr-FR").format(Math.round(Number(value) || 0));
 }
 
+/** Parse un entier affiché avec fmt() / fr-FR (espaces insécables, virgules). */
+function parseFormattedIntegerFr(text) {
+  const raw = String(text ?? "")
+    .replace(/\u202f/g, "")
+    .replace(/\u00a0/g, "")
+    .replace(/\s/g, "")
+    .replace(/[^\d+-]/g, "");
+  const n = Number(raw);
+  return Number.isFinite(n) ? Math.round(n) : 0;
+}
+
 /** Affichage quantité « casiers » commande (y compris demi-casier, tous types de lots). */
 function fmtPurchaseCases(value) {
   const n = Number(value);
@@ -3463,10 +3474,9 @@ function journalEncaisseBlockTitle(order) {
 
 function todaySortiesBottlesForArticle(article, saleDateStr = pdjCalendarDate()) {
   const stockItem = recordsForSite(state.stock).find((s) => s.article === article);
-  const packSize = Math.max(1, Number(stockItem?.packSize) || 1);
   return recordsForSite(state.ventes)
     .filter((v) => v.date.slice(0, 10) === saleDateStr && v.article === article)
-    .reduce((sum, v) => sum + (Number(v.qty) || 0) * packSize, 0);
+    .reduce((sum, v) => sum + lineBottleQty(v, stockItem), 0);
 }
 
 function renderDailyStockCheck() {
@@ -11161,7 +11171,7 @@ document.getElementById("fab-btn").addEventListener("click", () => {
     const reserve = Math.max(0, Number(reserveEl.value) || 0);
     const row = input.closest("tr");
     if (!row) return;
-    const theorique = Number(row.cells[3]?.textContent?.replace(/\s/g, "").replace(",", ".")) || 0;
+    const theorique = parseFormattedIntegerFr(row.cells[3]?.textContent);
     const ecart = (frigo + reserve) - theorique;
     const ecartCell = row.cells[row.cells.length - 1];
     if (ecartCell) {
