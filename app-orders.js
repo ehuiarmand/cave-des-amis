@@ -337,11 +337,17 @@ function today() {
 const NIGHT_SHIFT_CUTOFF_HOUR = 8;
 
 /**
- * Date de travail effective : si on est avant NIGHT_SHIFT_CUTOFF_HOUR et que la journée
- * d'hier est encore ouverte (dayBook existant, pas encore clôturé), on reste sur hier.
- * Cela couvre les maquis qui ferment au petit matin.
+ * Date de travail effective : si une journée passée est encore ouverte (caisse validée, pas de clôture stock),
+ * on reste sur cette date jusqu'à la clôture — saisies le lendemain possibles.
+ * Sinon, avant NIGHT_SHIFT_CUTOFF_HOUR, si hier est encore ouvert, on reste sur hier (maquis de nuit).
  */
 function workingDate() {
+  const siteId = currentSiteId();
+  const unclosed = firstUnclosedJournalDate(siteId);
+  const t = today();
+  if (unclosed && String(unclosed).slice(0, 10) < t) {
+    return String(unclosed).slice(0, 10);
+  }
   const now = new Date();
   if (now.getHours() < NIGHT_SHIFT_CUTOFF_HOUR) {
     const yest = new Date(now);
@@ -2987,6 +2993,17 @@ function dayBookNeedsCashOpening(book) {
   return true;
 }
 
+/** Stock à l'ouverture enregistré lors de l'ouverture caisse (cliché) — base du théorique pour la journée `dayBook.date`. */
+function stockOpeningFromDayBook(item, book) {
+  if (!item || !book?.openingStockById) return null;
+  const snap = book.openingStockById;
+  const id = String(item.id);
+  let raw = snap[id];
+  if (raw === undefined) raw = snap[item.id];
+  const n = typeof raw === "number" ? raw : Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
 function captureOpeningStockSnapshot() {
   const snapshot = {};
   recordsForSite(state.stock).forEach((item) => {
@@ -3510,7 +3527,7 @@ function renderDailyStockCheck() {
     }
     const ventesJourRo = recordsForSite(state.ventes).filter((v) => v.date.slice(0, 10) === dStr);
     const rowsOpen = items.map((item) => {
-      const stockAtOpen = dStr === today() ? stockActuel(item) : stockActuel(item);
+      const stockAtOpen = stockOpeningFromDayBook(item, dayBook) ?? stockActuel(item);
       const sortiesToday = todaySortiesBottlesForArticle(item.article, dStr);
       const remaining = Math.max(0, stockAtOpen - sortiesToday);
       const frigoVal = stockFrigo(item);
@@ -3562,9 +3579,9 @@ function renderDailyStockCheck() {
     : null;
   const rows = items.map((item) => {
     const closedCheckItem = closed ? (closed.items || []).find((ci) => Number(ci.id) === Number(item.id)) : null;
-    const stockAtOpen = dStr === today()
-      ? stockActuel(item)
-      : (closedCheckItem?.stockAvant ?? stockActuel(item));
+    const stockAtOpen = stockOpeningFromDayBook(item, dayBook)
+      ?? closedCheckItem?.stockAvant
+      ?? stockActuel(item);
     const sortiesToday = todaySortiesBottlesForArticle(item.article, dStr);
     const remaining = Math.max(0, stockAtOpen - sortiesToday); // restant théorique
     const seedCi = seedFromClose ? (seedFromClose.items || []).find((ci) => Number(ci.id) === Number(item.id)) : null;
@@ -7608,9 +7625,9 @@ async function closeAccountingDay() {
     const frigo = Math.max(0, Number(document.querySelector(`[data-check-frigo="${item.id}"]`)?.value) || 0);
     const reserve = Math.max(0, Number(document.querySelector(`[data-check-reserve="${item.id}"]`)?.value) || 0);
     const existingCloseItem = existingCloseCheck ? (existingCloseCheck.items || []).find((ci) => Number(ci.id) === Number(item.id)) : null;
-    const stockAtOpen = dStr === today()
-      ? stockActuel(item)
-      : (existingCloseItem?.stockAvant ?? stockActuel(item));
+    const stockAtOpen = stockOpeningFromDayBook(item, dayBook)
+      ?? existingCloseItem?.stockAvant
+      ?? stockActuel(item);
     const sortiesToday = todaySortiesBottlesForArticle(item.article, dStr);
     const expectedRemaining = Math.max(0, stockAtOpen - sortiesToday); // restant théorique après ventes
     const counted = frigo + reserve;
