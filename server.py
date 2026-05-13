@@ -124,16 +124,13 @@ def _merge_pdj_work_date_map_session(
     current_map: Any,
     incoming: Any,
     allowed_site_ids: set[str],
+    all_site_ids: list[str],
 ) -> dict[str, str]:
-    """Mise a jour des dates PDJ forcees : cles autorisees seulement ; valeur vide / null supprime."""
-    cur: dict[str, str] = {}
-    if isinstance(current_map, dict):
-        for k, v in current_map.items():
-            sid = str(k).strip()
-            if sid in allowed_site_ids and isinstance(v, str):
-                s = v.strip()[:10]
-                if re.fullmatch(r"\d{4}-\d{2}-\d{2}", s) and s <= _today_iso_local():
-                    cur[sid] = s
+    """Met a jour pdjWorkDateBySite : part du serveur (tous maquis valides), puis patch des sites autorises."""
+    cur = _sanitize_pdj_work_date_map(
+        current_map if isinstance(current_map, dict) else {},
+        list(all_site_ids),
+    )
     if not isinstance(incoming, dict):
         return cur
     tmax = _today_iso_local()
@@ -1402,7 +1399,7 @@ class DataStore:
                 "auth": {"users": users_out},
             }
 
-    def changes(self, *, since: str, site_id: str | None = None) -> dict[str, Any]:
+    def changes(self, *, since: str, site_id: str | None = None, session: dict[str, Any] | None = None) -> dict[str, Any]:
         """Return incremental changes since an ISO timestamp (UTC)."""
         with self._lock:
             since_raw = str(since or "").strip()
@@ -1418,9 +1415,23 @@ class DataStore:
                 updated = str(order.get("updatedAt") or order.get("createdAt") or "")
                 if updated and updated > since_raw:
                     commandes.append(order)
+            pdj_out: dict[str, str] = {}
+            if session is not None:
+                site_ids = [str(s["id"]) for s in self._state.get("sites", []) if s.get("id")]
+                pdj_full = self._state.get("pdjWorkDateBySite", {}) or {}
+                if session_is_superadmin(session):
+                    pdj_out = json.loads(json.dumps(_sanitize_pdj_work_date_map(pdj_full, site_ids)))
+                else:
+                    allowed = session_allowed_sites(session, site_ids)
+                    if not allowed and site_ids:
+                        allowed = {site_ids[0]}
+                    allowed_set = set(allowed)
+                    raw_sub = {str(k): v for k, v in pdj_full.items() if str(k) in allowed_set}
+                    pdj_out = json.loads(json.dumps(_sanitize_pdj_work_date_map(raw_sub, list(allowed_set))))
             return {
                 "meta": self.meta(),
                 "since": since_raw,
+                "pdjWorkDateBySite": json.loads(json.dumps(pdj_out)),
                 "changes": {
                     "commandes": json.loads(json.dumps(commandes)),
                 },
@@ -1870,6 +1881,7 @@ class DataStore:
                     current.get("pdjWorkDateBySite"),
                     payload.get("pdjWorkDateBySite"),
                     set(allowed),
+                    sid_list,
                 )
 
             aid = payload.get("activeSiteId", current.get("activeSiteId"))
@@ -2139,7 +2151,7 @@ class AppHandler(BaseHTTPRequestHandler):
             if site_id and not session_is_superadmin(session) and site_id not in (session.get("allowedSiteIds") or []):
                 self.send_json(HTTPStatus.FORBIDDEN, {"error": "Maquis non autorise pour cette session."})
                 return
-            self.send_json(HTTPStatus.OK, store.changes(since=since, site_id=site_id), cache_control="no-store")
+            self.send_json(HTTPStatus.OK, store.changes(since=since, site_id=site_id, session=session), cache_control="no-store")
             return
         if get_path == "/api/state":
             session = self.require_session()

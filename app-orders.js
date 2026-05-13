@@ -1337,6 +1337,16 @@ function syncPdjWorkDateInput() {
   if (currentPage === "ventes") renderVentesPage();
 }
 
+/** Met a jour les champs date des ventes / commandes selon pdjCalendarDate() (journee serveur incluse). */
+function applyPdjWorkDateToVentesAndOrderDom() {
+  const workDate = pdjCalendarDate();
+  const vDateEl = document.getElementById("v-date");
+  if (vDateEl) vDateEl.value = workDate;
+  const filterDateEl = document.getElementById("orders-filter-date");
+  if (filterDateEl) filterDateEl.value = workDate;
+  syncFinalizeButtonJournalState();
+}
+
 /** Enregistre la date PDJ choisie pour le maquis actif : visible par tous (serveurs, gerants). */
 async function persistPdjWorkDateFromSuperPicker() {
   if (!canSuperAdmin()) {
@@ -5620,7 +5630,7 @@ function stopLiveSync() {
 
 async function syncStateSilently() {
   if (!state || modalIsOpen()) return;
-  if (!["ventes", "home", "stock"].includes(currentPage)) return;
+  if (!["ventes", "home", "stock", "pdj", "commandes"].includes(currentPage)) return;
 
   if (currentPage === "stock") {
     // Full reload for stock page — delta only returns commandes, not stock/purchases
@@ -5632,6 +5642,7 @@ async function syncStateSilently() {
         const _nextCasier = state.nextId?.casier;
         const _nextCasierMvt = state.nextId?.casierMouvement;
         state = fresh;
+        if (!state.pdjWorkDateBySite || typeof state.pdjWorkDateBySite !== "object") state.pdjWorkDateBySite = {};
         if (!state.nextId) state.nextId = {};
         if (!state.casiers?.length && _casiers.length) state.casiers = _casiers;
         if (!state.casierMouvements?.length && _casierMouvements.length) state.casierMouvements = _casierMouvements;
@@ -5640,6 +5651,8 @@ async function syncStateSilently() {
         lsSaveCasiers();
       }
     } catch (e) { return; }
+    applyPdjWorkDateToVentesAndOrderDom();
+    syncPdjWorkDateInput();
     renderTopbar();
     renderSiteSwitcher();
     renderStock();
@@ -5652,8 +5665,9 @@ async function syncStateSilently() {
 
   const previousQrIds = new Set(qrOrdersForCurrentSite(state).map((item) => item.id));
   const since = state?.meta?.updatedAt || "";
+  let delta = null;
   try {
-    const delta = await apiRequest(`${API.changes}?since=${encodeURIComponent(since)}&siteId=${encodeURIComponent(currentSiteId())}`);
+    delta = await apiRequest(`${API.changes}?since=${encodeURIComponent(since)}&siteId=${encodeURIComponent(currentSiteId())}`);
     const incoming = (delta?.changes?.commandes || []).slice();
     if (incoming.length) {
       const byId = new Map((state.commandes || []).map((order) => [order.id, order]));
@@ -5666,6 +5680,13 @@ async function syncStateSilently() {
   } catch (error) {
     // Fallback: if delta endpoint fails, reload full state.
     state = await apiRequest(API.state);
+    if (!state.pdjWorkDateBySite || typeof state.pdjWorkDateBySite !== "object") state.pdjWorkDateBySite = {};
+    delta = null;
+  }
+  if (delta && typeof delta.pdjWorkDateBySite === "object") {
+    state.pdjWorkDateBySite = { ...delta.pdjWorkDateBySite };
+    applyPdjWorkDateToVentesAndOrderDom();
+    syncPdjWorkDateInput();
   }
 
   const latestQrOrders = qrOrdersForCurrentSite(state);
@@ -5685,6 +5706,9 @@ async function syncStateSilently() {
   }
   if (currentPage === "ventes") {
     renderVentesPage();
+  }
+  if (currentPage === "pdj") {
+    renderPointDuJour();
   }
 }
 
