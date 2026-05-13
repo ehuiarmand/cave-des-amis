@@ -2576,6 +2576,31 @@ textarea { font: inherit; }
 .audit-detail-pre.is-expanded {
   max-height: min(72vh, 620px);
 }
+
+.credit-moment-btn {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+  white-space: nowrap;
+  text-align: inherit;
+}
+.credit-moment-btn:hover {
+  text-decoration-style: solid;
+}
+.credit-detail-body {
+  margin-bottom: 12px;
+}
+.credit-detail-body .stock-table-wrap {
+  margin-top: 10px;
+}
+
 .audit-cell-wrap {
   max-width: 240px;
   vertical-align: top;

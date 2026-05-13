@@ -486,7 +486,7 @@ function buildCreditRecoveryHistoryHtml() {
   }
   const rows = payments.map((p) => `
     <tr>
-      <td>${escapeHtml(formatCreditPaidAt(p))}</td>
+      <td><button type="button" class="credit-moment-btn" data-credit-pay-detail="${String(p.id)}" title="Voir le détail du versement">${escapeHtml(formatCreditPaidAt(p))}</button></td>
       <td><strong>${escapeHtml(debtorDisplayKey(p.debiteur))}</strong></td>
       <td style="text-align:right;color:#72d7a9;font-weight:600">${fmt(p.montant)} FCFA</td>
       <td>${escapeHtml(p.paiement || "—")}</td>
@@ -508,6 +508,129 @@ function buildCreditRecoveryHistoryHtml() {
       </table>
     </div>
   </div>`;
+}
+
+/** Montant « crédit client » ou « à régler » pris sur une vente (FCFA). */
+function creditPortionOnVente(v) {
+  if (!v) return 0;
+  const net = calcNet(v);
+  const details = v.paiementDetails?.length ? v.paiementDetails : [{ method: v.paiement || "", amount: net }];
+  let creditAmount = 0;
+  details.forEach((d) => {
+    if (isCreditClientMethod(d.method)) creditAmount += Number(d.amount) || 0;
+  });
+  if (!creditAmount && isAReglerPaiement(v.paiement)) creditAmount = net;
+  return Math.max(0, creditAmount);
+}
+
+/** Ventes à crédit pour un débiteur (ordre chronologique d'encaissement). */
+function ventesCreditBreakdownForDebtor(debtorKey) {
+  const dk = debtorDisplayKey(debtorKey);
+  const out = [];
+  recordsForSite(state.ventes || []).forEach((v) => {
+    const debtorName = debtorDisplayKey(v.debiteur || v.client || "Client inconnu");
+    if (debtorName !== dk) return;
+    const creditFcfa = creditPortionOnVente(v);
+    if (creditFcfa <= 0) return;
+    const sold = String(v.soldAt || v.createdAt || "").trim();
+    const ts = sold ? new Date(sold).getTime() : NaN;
+    out.push({ v, creditFcfa, ts: Number.isFinite(ts) ? ts : 0 });
+  });
+  out.sort((a, b) => a.ts - b.ts);
+  return out;
+}
+
+function openCreditDebtorOpenedDetailModal(debtorRaw) {
+  const dk = debtorDisplayKey(debtorRaw);
+  const titleEl = document.getElementById("credit-detail-title");
+  const body = document.getElementById("credit-detail-body");
+  if (!body) return;
+  if (titleEl) titleEl.textContent = `Prise du crédit — ${dk}`;
+  const issuer = creditIssuerLabelsByDebtor()[dk] || "—";
+  const rows = ventesCreditBreakdownForDebtor(dk);
+  if (!rows.length) {
+    body.innerHTML = `<p class="muted">Aucune vente en « Crédit client » ou « À régler » trouvée pour ce nom sur ce maquis.</p>`;
+    openModal("modal-credit-detail");
+    return;
+  }
+  const first = rows[0].v;
+  const firstMoment = String(first.soldAt || first.createdAt || "").trim();
+  const firstLabel = firstMoment
+    ? formatDateTimeDdMmYyyy(new Date(firstMoment))
+    : `${formatDateDdMmYyyy(first.date)} (heure non renseignée)`;
+  const tableRows = rows.map(({ v, creditFcfa }) => {
+    const enc = String(v.soldAt || v.createdAt || "").trim();
+    const encLabel = enc ? formatDateTimeDdMmYyyy(new Date(enc)) : `${formatDateDdMmYyyy(v.date)} (heure non renseignée)`;
+    const note = String(v.note || "").trim();
+    return `<tr>
+      <td class="muted" style="white-space:nowrap;font-size:0.88rem">${escapeHtml(encLabel)}</td>
+      <td>${escapeHtml(formatDateDdMmYyyy(v.date))}</td>
+      <td>${escapeHtml(v.factureNumber || "—")}</td>
+      <td>${escapeHtml(v.article || "—")}</td>
+      <td style="text-align:right;font-weight:600">${fmt(creditFcfa)} FCFA</td>
+      <td style="text-align:right">${fmt(calcNet(v))} FCFA</td>
+      <td>${escapeHtml(v.paiement || "—")}</td>
+      <td class="muted" style="font-size:0.85rem">${escapeHtml(String(v.creditIssuedBy || "").trim() || "—")}</td>
+      <td class="muted" style="font-size:0.82rem;max-width:200px">${escapeHtml(note || "—")}</td>
+    </tr>`;
+  }).join("");
+  body.innerHTML = `
+    <p class="muted" style="margin-bottom:10px;line-height:1.45">
+      La colonne <strong>Prise du crédit</strong> du tableau reprend la <strong>première</strong> vente à crédit : <strong>${escapeHtml(firstLabel)}</strong>.
+      Crédit accordé par (résumé) : <strong>${escapeHtml(issuer)}</strong>.
+    </p>
+    <div class="stock-table-wrap">
+      <table class="stock-table" style="min-width:880px">
+        <thead><tr>
+          <th>Encaissement</th>
+          <th>Journée vente</th>
+          <th>Facture</th>
+          <th>Article</th>
+          <th style="text-align:right">Montant crédit</th>
+          <th style="text-align:right">Total ligne</th>
+          <th>Paiement (vente)</th>
+          <th>Accord par</th>
+          <th>Note</th>
+        </tr></thead>
+        <tbody>${tableRows}</tbody>
+      </table>
+    </div>`;
+  openModal("modal-credit-detail");
+}
+
+function openCreditPaymentDetailModal(recoveryId) {
+  const id = Number(recoveryId);
+  const p = creditRecoveriesForSite().find((x) => Number(x.id) === id);
+  const titleEl = document.getElementById("credit-detail-title");
+  const body = document.getElementById("credit-detail-body");
+  if (!body) return;
+  if (!p) {
+    if (titleEl) titleEl.textContent = "Versement introuvable";
+    body.innerHTML = `<p class="muted">Ce versement n'est plus dans les données affichées pour ce maquis.</p>`;
+    openModal("modal-credit-detail");
+    return;
+  }
+  if (titleEl) titleEl.textContent = `Versement — ${debtorDisplayKey(p.debiteur)}`;
+  const paidRaw = String(p.paidAt || "").trim();
+  const createdRaw = String(p.createdAt || "").trim();
+  const paidIso = paidRaw ? formatDateTimeDdMmYyyy(new Date(paidRaw)) : "—";
+  const createdIso = createdRaw ? formatDateTimeDdMmYyyy(new Date(createdRaw)) : "—";
+  body.innerHTML = `
+    <dl class="audit-detail-dl">
+      <div><dt>Client (débiteur)</dt><dd><strong>${escapeHtml(debtorDisplayKey(p.debiteur))}</strong></dd></div>
+      <div><dt>Montant versé</dt><dd><strong style="color:#72d7a9">${fmt(p.montant)} FCFA</strong></dd></div>
+      <div><dt>Mode</dt><dd>${escapeHtml(p.paiement || "—")}</dd></div>
+      <div><dt>Date comptable</dt><dd>${escapeHtml(p.date ? formatDateDdMmYyyy(p.date) : "—")}</dd></div>
+      <div><dt>Date / heure versement</dt><dd>${escapeHtml(paidIso)}</dd></div>
+      <div><dt>Enregistré le</dt><dd>${escapeHtml(createdIso)}</dd></div>
+      <div><dt>Identifiant</dt><dd>${escapeHtml(String(p.id ?? "—"))}</dd></div>
+    </dl>
+    <div class="form-group" style="margin-top:14px">
+      <label>Note</label>
+      <div class="audit-detail-block">${escapeHtml(String(p.note || "").trim() || "—")}</div>
+    </div>
+    <p class="muted" style="font-size:0.82rem;margin-top:10px">Heure affichée selon l'horloge de cet appareil (fuseau local).</p>`;
+  openModal("modal-credit-detail");
 }
 
 function calcNet(item) {
@@ -3479,6 +3602,57 @@ function todaySortiesBottlesForArticle(article, saleDateStr = pdjCalendarDate())
     .reduce((sum, v) => sum + lineBottleQty(v, stockItem), 0);
 }
 
+/** Résumé lecture seule d'une fiche de clôture (serveuse ou gérant hors correction administrateur). */
+function htmlPdjClosedStockCheckReadOnly(closed, roleNoteHtml) {
+  const checkItems = closed.items || [];
+  const rows = checkItems.map((ci) => {
+    const ecartColor = ci.ecart === 0 ? "#72d7a9" : "#ff8e82";
+    const ecartLabel = ci.ecart === 0 ? "OK" : (ci.ecart > 0 ? `+${fmt(ci.ecart)}` : fmt(ci.ecart));
+    return `<tr>
+        <td>${escapeHtml(ci.article)}</td>
+        <td style="text-align:right;color:#1976d2">${fmt(ci.stockAvant ?? ci.expected ?? 0)}</td>
+        <td style="text-align:right;color:#ff8e82">${fmt(ci.sortiesToday ?? 0)}</td>
+        <td style="text-align:right">${fmt(ci.expected ?? 0)}</td>
+        <td style="text-align:right">${fmt(ci.frigo ?? 0)}</td>
+        <td style="text-align:right">${fmt(ci.reserve ?? 0)}</td>
+        <td style="text-align:right"><strong style="color:#72d7a9">${fmt(ci.stockApres ?? ci.counted ?? 0)}</strong></td>
+        <td style="text-align:right;color:${ecartColor}">${ecartLabel}</td>
+      </tr>`;
+  }).join("");
+  const hasCash = typeof closed.openingCashFcfa === "number";
+  const cashBlock = hasCash
+    ? `<div class="inline-card" style="margin-bottom:12px;display:grid;gap:10px">
+          <strong>Caisse (espèces)</strong>
+          <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px"><span class="muted">Fonds à l'ouverture</span><strong>${fmt(closed.openingCashFcfa)} FCFA</strong></div>
+          ${typeof closed.closingCashFcfa === "number" ? `<div style="display:flex;justify-content:space-between"><span class="muted">Dénombrement fermeture</span><strong>${fmt(closed.closingCashFcfa)} FCFA</strong></div>` : ""}
+          ${typeof closed.expectedEspecesCash === "number" ? `<div style="display:flex;justify-content:space-between"><span class="muted">Théorique caisse espèces</span><strong>${fmt(closed.expectedEspecesCash)} FCFA</strong></div>` : ""}
+          ${typeof closed.cashEcartEspeces === "number"
+      ? `<div style="display:flex;justify-content:space-between;color:${closed.cashEcartEspeces === 0 ? "#72d7a9" : "#ff8e82"}"><span>Écart espèces</span><strong>${closed.cashEcartEspeces === 0 ? "OK" : `${closed.cashEcartEspeces > 0 ? "+" : ""}${fmt(closed.cashEcartEspeces)} FCFA`}</strong></div>`
+      : ""}
+        </div>`
+    : "";
+  return `
+      ${cashBlock}
+      <p class="muted" style="margin-bottom:10px;font-size:0.88rem">${roleNoteHtml}</p>
+      <div class="inline-card" style="margin-bottom:12px">
+        <span class="muted">Journée clôturée le</span>
+        <strong>${escapeHtml(formatDateTimeDdMmYyyy(closed.createdAt))}</strong>
+      </div>
+      <div class="stock-table-wrap"><table class="stock-table">
+        <thead><tr>
+          <th>Article</th>
+          <th class="th-orange" style="text-align:right">Stk Ouverture</th>
+          <th class="th-blue" style="text-align:right">Sorties jour</th>
+          <th style="text-align:right">Théorique</th>
+          <th style="text-align:right">Frigo</th>
+          <th style="text-align:right">Réserve</th>
+          <th class="th-orange" style="text-align:right">Stk Fermeture</th>
+          <th style="text-align:right">Écart</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>`;
+}
+
 function renderDailyStockCheck() {
   const items = recordsForSite(state.stock).slice().sort((a, b) => a.article.localeCompare(b.article, "fr"));
   const dStr = pdjCalendarDate();
@@ -3493,11 +3667,13 @@ function renderDailyStockCheck() {
   const isPastDate = dStr !== today();
   button.textContent = superadminCorrection
     ? "Mettre à jour la clôture"
-    : closed
-      ? "Revérifier la journée"
-      : openingBlocked && !(isPastDate && canAnyAdmin()) && canManagePdjAccounting()
-        ? "Ouverture requise"
-        : "Clôturer la journée";
+    : closed && canManagePdjAccounting() && !canAnyAdmin()
+      ? "Journée clôturée"
+      : closed
+        ? "Revérifier la journée"
+        : openingBlocked && !(isPastDate && canAnyAdmin()) && canManagePdjAccounting()
+          ? "Ouverture requise"
+          : "Clôturer la journée";
   if (printBtn) printBtn.classList.toggle("hidden", !closed);
   if (!items.length) {
     container.innerHTML = emptyState("Aucun stock", "Ajoutez des articles avant de faire le point de fermeture.");
@@ -3505,7 +3681,7 @@ function renderDailyStockCheck() {
     return;
   }
 
-  if (openingBlocked && !(isPastDate && canAnyAdmin()) && canManagePdjAccounting()) {
+  if (!closed && openingBlocked && !(isPastDate && canAnyAdmin()) && canManagePdjAccounting()) {
     container.innerHTML = emptyState(
       "Ouverture de caisse requise",
       "Validez le montant en caisse en haut de cette page avant la vérification stock et la clôture.",
@@ -3526,53 +3702,10 @@ function renderDailyStockCheck() {
       return;
     }
     if (closed) {
-      const checkItems = closed.items || [];
-      const rows = checkItems.map((ci) => {
-        const ecartColor = ci.ecart === 0 ? "#72d7a9" : "#ff8e82";
-        const ecartLabel = ci.ecart === 0 ? "OK" : (ci.ecart > 0 ? `+${fmt(ci.ecart)}` : fmt(ci.ecart));
-        return `<tr>
-        <td>${escapeHtml(ci.article)}</td>
-        <td style="text-align:right;color:#1976d2">${fmt(ci.stockAvant ?? ci.expected ?? 0)}</td>
-        <td style="text-align:right;color:#ff8e82">${fmt(ci.sortiesToday ?? 0)}</td>
-        <td style="text-align:right">${fmt(ci.expected ?? 0)}</td>
-        <td style="text-align:right">${fmt(ci.frigo ?? 0)}</td>
-        <td style="text-align:right">${fmt(ci.reserve ?? 0)}</td>
-        <td style="text-align:right"><strong style="color:#72d7a9">${fmt(ci.stockApres ?? ci.counted ?? 0)}</strong></td>
-        <td style="text-align:right;color:${ecartColor}">${ecartLabel}</td>
-      </tr>`;
-      }).join("");
-      const hasCash = typeof closed.openingCashFcfa === "number";
-      const cashBlock = hasCash
-        ? `<div class="inline-card" style="margin-bottom:12px;display:grid;gap:10px">
-          <strong>Caisse (espèces)</strong>
-          <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px"><span class="muted">Fonds à l'ouverture</span><strong>${fmt(closed.openingCashFcfa)} FCFA</strong></div>
-          ${typeof closed.closingCashFcfa === "number" ? `<div style="display:flex;justify-content:space-between"><span class="muted">Dénombrement fermeture</span><strong>${fmt(closed.closingCashFcfa)} FCFA</strong></div>` : ""}
-          ${typeof closed.expectedEspecesCash === "number" ? `<div style="display:flex;justify-content:space-between"><span class="muted">Théorique caisse espèces</span><strong>${fmt(closed.expectedEspecesCash)} FCFA</strong></div>` : ""}
-          ${typeof closed.cashEcartEspeces === "number"
-          ? `<div style="display:flex;justify-content:space-between;color:${closed.cashEcartEspeces === 0 ? "#72d7a9" : "#ff8e82"}"><span>Écart espèces</span><strong>${closed.cashEcartEspeces === 0 ? "OK" : `${closed.cashEcartEspeces > 0 ? "+" : ""}${fmt(closed.cashEcartEspeces)} FCFA`}</strong></div>`
-          : ""}
-        </div>`
-        : "";
-      container.innerHTML = `
-      ${cashBlock}
-      <p class="muted" style="margin-bottom:10px;font-size:0.88rem">Lecture seule — vérification et clôture réservées au gérant ou à un administrateur.</p>
-      <div class="inline-card" style="margin-bottom:12px">
-        <span class="muted">Journée clôturée le</span>
-        <strong>${escapeHtml(formatDateTimeDdMmYyyy(closed.createdAt))}</strong>
-      </div>
-      <div class="stock-table-wrap"><table class="stock-table">
-        <thead><tr>
-          <th>Article</th>
-          <th class="th-orange" style="text-align:right">Stk Ouverture</th>
-          <th class="th-blue" style="text-align:right">Sorties jour</th>
-          <th style="text-align:right">Théorique</th>
-          <th style="text-align:right">Frigo</th>
-          <th style="text-align:right">Réserve</th>
-          <th class="th-orange" style="text-align:right">Stk Fermeture</th>
-          <th style="text-align:right">Écart</th>
-        </tr></thead>
-        <tbody>${rows}</tbody>
-      </table></div>`;
+      container.innerHTML = htmlPdjClosedStockCheckReadOnly(
+        closed,
+        "Lecture seule — vérification et clôture réservées au gérant ou à un administrateur.",
+      );
       if (printBtn) printBtn.classList.toggle("hidden", !closed);
       return;
     }
@@ -3612,6 +3745,16 @@ function renderDailyStockCheck() {
       </table></div>
       <p class="muted" style="margin-top:8px;font-size:0.82rem">${formatVentesCountFr(ventesJourRo.length)} sur cette date — ${fmt(items.length)} ligne(s) de stock.</p>`;
     if (printBtn) printBtn.classList.toggle("hidden", true);
+    return;
+  }
+
+  if (closed && !canAnyAdmin()) {
+    container.innerHTML = htmlPdjClosedStockCheckReadOnly(
+      closed,
+      "La journée est clôturée (lecture seule). Un administrateur peut corriger la fiche si nécessaire.",
+    );
+    button.disabled = true;
+    if (printBtn) printBtn.classList.toggle("hidden", !closed);
     return;
   }
 
@@ -6286,7 +6429,9 @@ function renderCreditRecovery() {
             <tr class="credit-debtor-summary">
               <td><strong>${escapeHtml(name)}</strong></td>
               <td class="muted" style="font-size:0.9rem">${escapeHtml(issuerByDebtor[name] || "—")}</td>
-              <td class="muted" style="font-size:0.9rem;white-space:nowrap">${escapeHtml(creditOpenedByDebtor[name] || "—")}</td>
+              <td class="muted" style="font-size:0.9rem;white-space:nowrap">${creditOpenedByDebtor[name]
+                ? `<button type="button" class="credit-moment-btn" data-credit-open-detail="${escapeHtml(name)}" title="Voir toutes les ventes à crédit pour ce client">${escapeHtml(creditOpenedByDebtor[name])}</button>`
+                : "—"}</td>
               <td style="text-align:right"><strong style="color:#ff8e82">${fmt(amount)} FCFA</strong></td>
               <td><button type="button" class="mini-btn" data-credit-fill="${escapeHtml(name)}">Encaisser</button></td>
             </tr>`;
@@ -6296,7 +6441,7 @@ function renderCreditRecovery() {
             <tr class="credit-installment-row">
               <td colspan="3" style="padding-left:1.1rem;font-size:0.88rem">
                 <span class="muted">↳</span>
-                ${escapeHtml(formatCreditPaidAt(p))}
+                <button type="button" class="credit-moment-btn" data-credit-pay-detail="${String(p.id)}" title="Voir le détail du versement">${escapeHtml(formatCreditPaidAt(p))}</button>
                 · ${escapeHtml(p.paiement || "—")}
                 ${p.note ? ` · <span class="muted">${escapeHtml(p.note)}</span>` : ""}
               </td>
@@ -11628,6 +11773,18 @@ document.getElementById("fab-btn").addEventListener("click", () => {
   const creditList = document.getElementById("credit-list");
   if (creditList) {
     creditList.addEventListener("click", (event) => {
+      const openDet = event.target.closest("[data-credit-open-detail]");
+      if (openDet) {
+        const raw = openDet.getAttribute("data-credit-open-detail") || "";
+        openCreditDebtorOpenedDetailModal(raw);
+        return;
+      }
+      const payDet = event.target.closest("[data-credit-pay-detail]");
+      if (payDet) {
+        const rid = payDet.getAttribute("data-credit-pay-detail") || "";
+        openCreditPaymentDetailModal(rid);
+        return;
+      }
       const fill = event.target.closest("[data-credit-fill]");
       if (!fill) return;
       const name = fill.getAttribute("data-credit-fill") || "";

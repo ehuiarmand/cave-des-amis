@@ -737,6 +737,7 @@ def merge_scoped_rows(
             continue
         if row_id_norm(r) in incoming_ids:
             continue
+        kept.append(r)
     kept.extend(incoming_for_scope)
     return kept
 
