@@ -31,6 +31,18 @@ const pdjOpeningCashDraftBySiteDate = {};
 function pdjOpeningCashDraftKey(siteId, dateStr) {
   return `${String(siteId || "").trim()}|${String(dateStr || "").trim().slice(0, 10)}`;
 }
+
+/** True si les deux cartes PDJ (date imposee par maquis) sont identiques — evite re-render PDJ inutile a chaque sync. */
+function shallowEqualPdjWorkDateMaps(a, b) {
+  const ax = a && typeof a === "object" ? a : {};
+  const bx = b && typeof b === "object" ? b : {};
+  const keys = new Set([...Object.keys(ax), ...Object.keys(bx)]);
+  for (const k of keys) {
+    if (String(ax[k] ?? "").trim() !== String(bx[k] ?? "").trim()) return false;
+  }
+  return true;
+}
+
 const COLORS = {
   "Bières": "#2196f3",
   "Sodas & Jus": "#42a5f5",
@@ -5810,8 +5822,10 @@ async function syncStateSilently() {
   const previousQrIds = new Set(qrOrdersForCurrentSite(state).map((item) => item.id));
   const since = state?.meta?.updatedAt || "";
   let delta = null;
+  let hadCmdDelta = false;
   try {
     delta = await apiRequest(`${API.changes}?since=${encodeURIComponent(since)}&siteId=${encodeURIComponent(currentSiteId())}`);
+    hadCmdDelta = ((delta?.changes?.commandes || []).length > 0);
     const incoming = (delta?.changes?.commandes || []).slice();
     if (incoming.length) {
       const byId = new Map((state.commandes || []).map((order) => [order.id, order]));
@@ -5827,8 +5841,12 @@ async function syncStateSilently() {
     if (!state.pdjWorkDateBySite || typeof state.pdjWorkDateBySite !== "object") state.pdjWorkDateBySite = {};
     delta = null;
   }
+  let skipPdjFullRender = false;
   if (delta && typeof delta.pdjWorkDateBySite === "object") {
-    state.pdjWorkDateBySite = { ...delta.pdjWorkDateBySite };
+    const incPdj = delta.pdjWorkDateBySite;
+    const prevPdj = state.pdjWorkDateBySite || {};
+    skipPdjFullRender = currentPage === "pdj" && !hadCmdDelta && shallowEqualPdjWorkDateMaps(prevPdj, incPdj);
+    state.pdjWorkDateBySite = { ...incPdj };
     applyPdjWorkDateToVentesAndOrderDom();
     syncPdjWorkDateInput();
     // #region agent log
@@ -5871,7 +5889,29 @@ async function syncStateSilently() {
     renderVentesPage();
   }
   if (currentPage === "pdj") {
-    renderPointDuJour();
+    if (!skipPdjFullRender) {
+      renderPointDuJour();
+    } else {
+      // #region agent log
+      const _si = Date.now();
+      globalThis.__pdjSyncSkipRenderLogLast = globalThis.__pdjSyncSkipRenderLogLast || 0;
+      if (_si - globalThis.__pdjSyncSkipRenderLogLast > 12000) {
+        globalThis.__pdjSyncSkipRenderLogLast = _si;
+        fetch("http://127.0.0.1:7725/ingest/d031651a-daea-460d-8400-58dc731a515d", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "dee456" },
+          body: JSON.stringify({
+            sessionId: "dee456",
+            hypothesisId: "I",
+            location: "app-orders.js:syncStateSilently",
+            message: "pdj_full_render_skipped_unchanged_delta",
+            data: { siteId: currentSiteId(), hadCmdDelta },
+            timestamp: _si,
+          }),
+        }).catch(() => {});
+      }
+      // #endregion
+    }
   }
 }
 
