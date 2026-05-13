@@ -81,6 +81,8 @@ let liveSyncTimer = null;
 let qrAlertCount = 0;
 let knownQrOrderIds = new Set();
 let flashingQrOrderIds = new Set();
+/** Cle site + jour PDJ : derniere valeur poussee dans v-date / orders-filter-date (evite d'ecraser le filtre a chaque sync). */
+let ventesDomPdjStamp = "";
 let pendingPreAuthToken = null;
 let pendingReceivePurchaseId = null;
 let purchaseDraftLines = [];
@@ -1380,22 +1382,30 @@ function syncPdjWorkDateInput() {
     if (!cur || cur > t || !/^\d{4}-\d{2}-\d{2}$/.test(cur)) el.value = forced;
   } else if (!el.value || el.value > t) el.value = workingDate();
   const workDate = pdjCalendarDate();
-  const vDateEl = document.getElementById("v-date");
-  if (vDateEl) vDateEl.value = workDate;
-  const filterDateEl = document.getElementById("orders-filter-date");
-  if (filterDateEl) filterDateEl.value = workDate;
-  syncFinalizeButtonJournalState();
+  syncVentesJournalDateInputsFromPdj(workDate, { force: false });
   if (currentPage === "ventes") renderVentesPage();
+}
+
+/** Aligne v-date et orders-filter-date sur la journee PDJ active, sauf si rien n'a change (sinon la sync live efface le filtre des gerants). */
+function syncVentesJournalDateInputsFromPdj(workDate, { force = false } = {}) {
+  const site = String(currentSiteId() || "");
+  const d = String(workDate || "").trim().slice(0, 10);
+  const stampKey = `${site}|${d}`;
+  if (!force && ventesDomPdjStamp === stampKey) {
+    syncFinalizeButtonJournalState();
+    return;
+  }
+  ventesDomPdjStamp = stampKey;
+  const vDateEl = document.getElementById("v-date");
+  if (vDateEl) vDateEl.value = d;
+  const filterDateEl = document.getElementById("orders-filter-date");
+  if (filterDateEl) filterDateEl.value = d;
+  syncFinalizeButtonJournalState();
 }
 
 /** Met a jour les champs date des ventes / commandes selon pdjCalendarDate() (journee serveur incluse). */
 function applyPdjWorkDateToVentesAndOrderDom() {
-  const workDate = pdjCalendarDate();
-  const vDateEl = document.getElementById("v-date");
-  if (vDateEl) vDateEl.value = workDate;
-  const filterDateEl = document.getElementById("orders-filter-date");
-  if (filterDateEl) filterDateEl.value = workDate;
-  syncFinalizeButtonJournalState();
+  syncVentesJournalDateInputsFromPdj(pdjCalendarDate(), { force: false });
 }
 
 /** Enregistre la date PDJ choisie pour le maquis actif : visible par tous (serveurs, gerants). */
@@ -10336,13 +10346,13 @@ async function bootstrapAuthenticatedApp(opts = {}) {
   populateSupplierList();
   populateSelect("c-cat", CHARGE_CATEGORIES);
   populateSelect("c-pay", CHARGE_PAYMENT_METHODS);
-  document.getElementById("v-date").value = pdjCalendarDate();
+  ventesDomPdjStamp = "";
+  syncVentesJournalDateInputsFromPdj(pdjCalendarDate(), { force: true });
   document.getElementById("c-date").value = today();
   const consigneDateEl = document.getElementById("consigne-date");
   if (consigneDateEl) consigneDateEl.value = pdjCalendarDate();
   const creditDt = document.getElementById("credit-datetime");
   if (creditDt) creditDt.value = datetimeLocalNow();
-  document.getElementById("orders-filter-date").value = pdjCalendarDate();
   document.getElementById("stock-move-start").value = today().slice(0, 8) + "01";
   document.getElementById("stock-move-end").value = today();
   populateOrderSelect();
@@ -10429,6 +10439,8 @@ function attachEvents() {
     knownQrOrderIds = new Set(qrOrdersForCurrentSite(state).map((item) => item.id));
     clearQrAlert();
     syncPdjWorkDateInput();
+    ventesDomPdjStamp = "";
+    syncVentesJournalDateInputsFromPdj(pdjCalendarDate(), { force: true });
     renderTopbar();
     renderDashboard();
     renderVentesPage();
