@@ -1177,6 +1177,31 @@
             </div>
           </article>
 
+          <article class="card superadmin-only">
+            <div class="section-head">
+              <h3>Décalage des journées comptables</h3>
+              <span class="section-meta">Correction</span>
+            </div>
+            <p class="muted" style="margin-bottom:12px;font-size:0.88rem;line-height:1.45">
+              Décale d’exactement <strong>un jour calendaire</strong> toutes les dates utilisées pour le point du jour, les ventes, les commandes, les charges, les consignes, les achats fournisseur, les mouvements casiers, etc.
+              À utiliser si tout l’historique a été saisi avec un jour de décalage par rapport à la réalité. Pensez à une <strong>sauvegarde</strong> (<code>backups/</code>) avant d’appliquer.
+            </p>
+            <div class="form-grid" style="margin-bottom:12px">
+              <div class="form-group">
+                <label for="shift-journal-delta">Sens du décalage</label>
+                <select id="shift-journal-delta" style="width:100%;margin-top:4px;padding:12px;border-radius:12px;border:1px solid var(--line)">
+                  <option value="-1">Reculer d’un jour (−1)</option>
+                  <option value="1">Avancer d’un jour (+1)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="shift-journal-site-select">Périmètre</label>
+                <select id="shift-journal-site-select" style="width:100%;margin-top:4px;padding:12px;border-radius:12px;border:1px solid var(--line)"></select>
+              </div>
+            </div>
+            <button id="shift-journal-day-btn" class="btn btn-danger" type="button">Appliquer le décalage d’un jour</button>
+          </article>
+
           <article class="card admin-only">
             <div class="section-head">
               <h3>Zone sensible</h3>
@@ -2077,6 +2102,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=136"></script>
+  <script src="./app-orders.js?v=137"></script>
 </body>
 </html>

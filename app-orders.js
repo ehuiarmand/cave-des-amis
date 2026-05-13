@@ -368,6 +368,24 @@ function pad2(n) {
   return String(n).padStart(2, "0");
 }
 
+/** yyyy-mm-dd + delta jours (fuseau local, midi pour limiter les bugs DST). */
+function addCalendarDaysIso(isoDateFragment, deltaDays) {
+  const d = String(isoDateFragment ?? "").trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || !Number.isFinite(deltaDays) || deltaDays === 0) return d;
+  const dt = new Date(`${d}T12:00:00`);
+  dt.setDate(dt.getDate() + deltaDays);
+  return `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}`;
+}
+
+/** Chaîne ISO datetime : remplace les 10 premiers caractères (date) par la même heure le jour décalé. */
+function shiftIsoDatetimeLeadingCalendarDay(str, deltaDays) {
+  const s = String(str ?? "").trim();
+  if (!s) return s;
+  const head = s.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(head)) return s;
+  return addCalendarDaysIso(head, deltaDays) + s.slice(10);
+}
+
 /** yyyy-mm-dd → dd-mm-yyyy (affichage uniquement ; les données restent ISO). */
 function isoDateToDdMmYyyy(iso) {
   const s = String(iso ?? "").trim().slice(0, 10);
@@ -5489,6 +5507,28 @@ function populatePurgeMaquisSelect() {
   const cur = currentSiteId();
   if (sites.some((s) => String(s.id) === String(prev))) sel.value = prev;
   else if (sites.some((s) => String(s.id) === String(cur))) sel.value = String(cur);
+  populateJournalShiftSiteSelect();
+}
+
+function populateJournalShiftSiteSelect() {
+  const sel = document.getElementById("shift-journal-site-select");
+  if (!sel || !state) return;
+  if (!canSuperAdmin()) {
+    sel.innerHTML = "";
+    return;
+  }
+  const sites = state.sites || [];
+  const prev = sel.value || "";
+  sel.innerHTML = [
+    `<option value="">Tous les maquis</option>`,
+    ...sites.map((s) => `<option value="${escapeHtml(s.id)}">${escapeHtml(s.nom)} (${escapeHtml(s.id)})</option>`),
+  ].join("");
+  if (prev === "") sel.value = "";
+  else if (sites.some((s) => String(s.id) === String(prev))) sel.value = prev;
+  else {
+    const cur = currentSiteId();
+    sel.value = sites.some((s) => String(s.id) === String(cur)) ? String(cur) : "";
+  }
 }
 
 function renderSitesList() {
@@ -5942,6 +5982,151 @@ async function syncStateSilently() {
       // #endregion
     }
   }
+}
+
+/**
+ * Superadmin : décale d’un jour toutes les dates « journée » (PDJ, ventes, commandes, etc.).
+ * `siteIdFilter` vide = tous les maquis. Ordre des dayBooks/stockChecks évite les collisions (siteId, date).
+ */
+async function applySuperadminAccountingJournalDayShift(deltaDays, siteIdFilter = "") {
+  if (!canSuperAdmin()) {
+    showToast("Reserve au super administrateur.");
+    return;
+  }
+  const d = Number(deltaDays);
+  if (d !== 1 && d !== -1) {
+    showToast("Decalage autorise : +1 ou -1 jour uniquement.");
+    return;
+  }
+  const sid = String(siteIdFilter || "").trim();
+  const multi = multiSiteActive();
+  const rowInScope = (row) => {
+    if (!row || typeof row !== "object") return false;
+    if (!sid) return true;
+    return rowMatchesSite(row, sid, multi);
+  };
+
+  const orderedDayBookLike = (rows) => {
+    const scoped = (rows || []).filter((r) => r && r.date && rowInScope(r));
+    const desc = d > 0;
+    const sign = desc ? -1 : 1;
+    scoped.sort((a, b2) => {
+      const c = String(a.siteId || "").localeCompare(String(b2.siteId || ""));
+      if (c !== 0) return c;
+      return sign * String(a.date).localeCompare(String(b2.date));
+    });
+    return scoped;
+  };
+
+  for (const b of orderedDayBookLike(state.dayBooks)) {
+    b.date = addCalendarDaysIso(b.date, d);
+    if (b.openedAt) b.openedAt = shiftIsoDatetimeLeadingCalendarDay(b.openedAt, d);
+    if (b.openingRecordedAt) b.openingRecordedAt = shiftIsoDatetimeLeadingCalendarDay(b.openingRecordedAt, d);
+  }
+  for (const sc of orderedDayBookLike(state.stockChecks)) {
+    sc.date = addCalendarDaysIso(sc.date, d);
+    if (sc.createdAt) sc.createdAt = shiftIsoDatetimeLeadingCalendarDay(sc.createdAt, d);
+    if (sc.openedAt) sc.openedAt = shiftIsoDatetimeLeadingCalendarDay(sc.openedAt, d);
+  }
+
+  for (const v of state.ventes || []) {
+    if (!v || !v.date || !rowInScope(v)) continue;
+    v.date = addCalendarDaysIso(v.date, d);
+  }
+
+  for (const o of state.commandes || []) {
+    if (!o || !rowInScope(o)) continue;
+    if (o.date) o.date = addCalendarDaysIso(String(o.date).slice(0, 10), d);
+    for (const line of o.lignes || []) {
+      if (line && line.date) line.date = addCalendarDaysIso(String(line.date).slice(0, 10), d);
+    }
+  }
+
+  for (const c of state.charges || []) {
+    if (!c || !c.date || !rowInScope(c)) continue;
+    c.date = addCalendarDaysIso(String(c.date).slice(0, 10), d);
+  }
+
+  for (const c of state.consignes || []) {
+    if (!c || !rowInScope(c)) continue;
+    ["date", "dateRetour", "dateReutilisation"].forEach((k) => {
+      if (!c[k]) return;
+      const head = String(c[k]).trim().slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(head)) return;
+      c[k] = addCalendarDaysIso(head, d);
+    });
+  }
+
+  for (const r of state.creditRecoveries || []) {
+    if (!r || !rowInScope(r)) continue;
+    if (r.date) r.date = addCalendarDaysIso(String(r.date).slice(0, 10), d);
+    if (r.paidAt) r.paidAt = shiftIsoDatetimeLeadingCalendarDay(r.paidAt, d);
+    if (r.createdAt) r.createdAt = shiftIsoDatetimeLeadingCalendarDay(r.createdAt, d);
+  }
+
+  for (const po of state.purchaseOrders || []) {
+    if (!po || !rowInScope(po)) continue;
+    if (po.date) po.date = addCalendarDaysIso(String(po.date).slice(0, 10), d);
+  }
+
+  for (const e of state.stockEntrees || []) {
+    if (!e || !e.date || !rowInScope(e)) continue;
+    e.date = addCalendarDaysIso(String(e.date).slice(0, 10), d);
+  }
+
+  for (const loss of state.stockLosses || []) {
+    if (!loss || !rowInScope(loss)) continue;
+    if (loss.date) loss.date = addCalendarDaysIso(String(loss.date).slice(0, 10), d);
+    if (loss.createdAt) loss.createdAt = shiftIsoDatetimeLeadingCalendarDay(loss.createdAt, d);
+  }
+
+  for (const m of state.casierMouvements || []) {
+    if (!m || !rowInScope(m)) continue;
+    if (m.date) m.date = addCalendarDaysIso(String(m.date).slice(0, 10), d);
+    if (m.createdAt) m.createdAt = shiftIsoDatetimeLeadingCalendarDay(m.createdAt, d);
+  }
+
+  const pdjMap = { ...(state.pdjWorkDateBySite || {}) };
+  for (const k of Object.keys(pdjMap)) {
+    if (sid && String(k) !== sid) continue;
+    const v = pdjMap[k];
+    if (!v) continue;
+    const head = String(v).trim().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(head)) continue;
+    pdjMap[k] = addCalendarDaysIso(head, d);
+  }
+  state.pdjWorkDateBySite = pdjMap;
+
+  const scopeLabel = sid ? `maquis ${sid}` : "tous les maquis";
+  recordStaffAudit(
+    "update",
+    "journal_calendar_shift",
+    `Decalage dates comptables ${d > 0 ? "+1" : "-1"} jour`,
+    scopeLabel,
+  );
+
+  await persistState({
+    ventes: state.ventes,
+    commandes: state.commandes,
+    stockChecks: state.stockChecks,
+    stockEntrees: state.stockEntrees,
+    stockLosses: state.stockLosses,
+    dayBooks: state.dayBooks,
+    charges: state.charges,
+    consignes: state.consignes,
+    creditRecoveries: state.creditRecoveries,
+    purchaseOrders: state.purchaseOrders,
+    casierMouvements: state.casierMouvements,
+    pdjWorkDateBySite: state.pdjWorkDateBySite,
+  });
+
+  renderPointDuJour();
+  renderVentesPage();
+  renderDashboard();
+  renderCharges();
+  renderCreditRecovery();
+  renderPurchaseOrders();
+  showToast(`Dates comptables decalees (${d > 0 ? "+1" : "-1"} jour, ${scopeLabel}).`);
 }
 
 /** Liste alignee avec server.py (_SITE_SCOPED_ROW_KEYS) — secours purge maquis via PUT si route POST absente (vieux serveur). */
@@ -10855,6 +11040,30 @@ document.getElementById("fab-btn").addEventListener("click", () => {
           ? `Donnees du maquis "${site.nom}" effacees (serveur sans /api/purge-maquis ; redemarrez avec la derniere version de server.py).`
           : `Donnees du maquis "${site.nom}" effacees sur le serveur.`,
       );
+    } catch (error) {
+      handleApiError(error);
+    }
+  });
+  document.getElementById("shift-journal-day-btn")?.addEventListener("click", async () => {
+    if (!canSuperAdmin()) {
+      showToast("Seul le super administrateur peut decaler les dates comptables.");
+      return;
+    }
+    const deltaEl = document.getElementById("shift-journal-delta");
+    const siteEl = document.getElementById("shift-journal-site-select");
+    const d = Number(deltaEl?.value);
+    const siteIdFilter = String(siteEl?.value || "").trim();
+    const siteLabel = siteIdFilter
+      ? ((state?.sites || []).find((s) => String(s.id) === siteIdFilter)?.nom || siteIdFilter)
+      : "tous les maquis";
+    const dir = d > 0 ? "AVANCER (+1 jour)" : "RECULER (-1 jour)";
+    const msg1 =
+      `${dir} — toutes les dates de journée (ventes, PDJ, clôtures stock, commandes, charges, consignes, crédits, achats, casiers…) pour : ${siteLabel}.\n\n`
+      + "Faites une sauvegarde (dossier backups/) avant de continuer. Cette operation est difficile a annuler sans restauration.";
+    if (!window.confirm(msg1)) return;
+    if (!window.confirm("Confirmation finale : appliquer le decalage d'un jour sur le serveur ?")) return;
+    try {
+      await applySuperadminAccountingJournalDayShift(d, siteIdFilter);
     } catch (error) {
       handleApiError(error);
     }
