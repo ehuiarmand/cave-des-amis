@@ -3005,25 +3005,9 @@ async function recordCashOpening() {
   const siteId = currentSiteId();
   const dateStr = pdjCalendarDate();
   const blockOpen = blockingJournalBeforeOpeningNewDate(dateStr, siteId);
-  if (blockOpen) {
-    if (!canSuperAdmin()) {
-      showToast(`La journée du ${isoDateToDdMmYyyy(blockOpen)} doit être clôturée avant d'ouvrir la suivante.`);
-      return;
-    }
-    // #region agent log
-    fetch("http://127.0.0.1:7725/ingest/d031651a-daea-460d-8400-58dc731a515d", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "dee456" },
-      body: JSON.stringify({
-        sessionId: "dee456",
-        hypothesisId: "F",
-        location: "app-orders.js:recordCashOpening",
-        message: "superadmin_bypass_chain_ancienne_journee_non_cloturee",
-        data: { dateStr, siteId, blockOpen },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
+  if (blockOpen && !canBypassBlockingJournalForCashOpening(dateStr)) {
+    showToast(`La journée du ${isoDateToDdMmYyyy(blockOpen)} doit être clôturée avant d'ouvrir la suivante.`);
+    return;
   }
   if (!canSuperAdmin() && dateStr !== today()) {
     showToast("Seul le super administrateur peut enregistrer l'ouverture pour une autre date.");
@@ -3060,6 +3044,8 @@ async function recordCashOpening() {
   if (canSuperAdmin()) {
     if (dateStr === today()) delete pdjMapOpen[siteId];
     else pdjMapOpen[siteId] = dateStr;
+  } else if (dateStr === today() && (String(currentRole || "").trim() === "manager" || canSiteAdmin())) {
+    delete pdjMapOpen[siteId];
   }
   await persistState({ dayBooks: state.dayBooks, pdjWorkDateBySite: pdjMapOpen });
   delete pdjOpeningCashDraftBySiteDate[pdjOpeningCashDraftKey(siteId, dateStr)];
@@ -3342,6 +3328,16 @@ function blockingJournalBeforeOpeningNewDate(dateStr, siteId = currentSiteId()) 
   if (u === dateStr && dayBookNeedsCashOpening(dayBookFor(dateStr, siteId))) return null;
   if (u !== dateStr) return u;
   return null;
+}
+
+/** Contournement de la chaîne des journées non clôturées : superadmin (toute date) ; gérant / admin (site) uniquement pour aujourd'hui ou la date de travail (maquis de nuit). */
+function canBypassBlockingJournalForCashOpening(dateStr) {
+  if (canSuperAdmin()) return true;
+  const r = String(currentRole || "").trim();
+  if (r !== "manager" && r !== "admin") return false;
+  const t = today();
+  const w = workingDate();
+  return dateStr === t || dateStr === w;
 }
 
 /** Date utilisée pour les contrôles ventes (formulaire commande / modal). */
