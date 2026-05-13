@@ -3064,6 +3064,7 @@ function renderCashOpeningPanel() {
   if (lockBlock) lockBlock.classList.remove("pdj-main--locked");
   if (!PDJ_REQUIRE_CASH_OPENING) {
     container.classList.add("hidden");
+    container.removeAttribute("data-pdj-opening-fp");
     container.innerHTML = "";
     return;
   }
@@ -3078,6 +3079,7 @@ function renderCashOpeningPanel() {
     lockBlock.classList.toggle("pdj-main--locked", needs && canManagePdjAccounting());
   }
   if (closed) {
+    container.removeAttribute("data-pdj-opening-fp");
     container.innerHTML = `
       <div class="pdj-opening-card pdj-opening-card--done" style="border-left:3px solid #1565c0;background:#f4f8ff">
         <p class="eyebrow" style="margin-bottom:4px">Journée clôturée</p>
@@ -3092,6 +3094,7 @@ function renderCashOpeningPanel() {
     return;
   }
   if (!canManagePdjAccounting() && needs) {
+    container.removeAttribute("data-pdj-opening-fp");
     container.innerHTML = `
       <div class="pdj-opening-card pdj-opening-card--done" style="border-color:#e0e0e0;background:#fafafa">
         <p class="eyebrow" style="margin-bottom:4px">Étape gérant</p>
@@ -3103,6 +3106,7 @@ function renderCashOpeningPanel() {
     return;
   }
   if (!needs && book) {
+    container.removeAttribute("data-pdj-opening-fp");
     container.innerHTML = `
       <div class="pdj-opening-card pdj-opening-card--done">
         <p class="eyebrow" style="margin-bottom:4px">Journée ouverte</p>
@@ -3116,9 +3120,32 @@ function renderCashOpeningPanel() {
     return;
   }
   const draftKey = pdjOpeningCashDraftKey(siteId, dStr);
-  const prevOpening = document.getElementById("pdj-opening-cash");
+  const formFp = `open|${siteId}|${dStr}|n${ventesForDate.length}`;
+  const prevOpening = container.querySelector("#pdj-opening-cash");
   const hadOpeningFocus = document.activeElement?.id === "pdj-opening-cash";
   if (prevOpening) pdjOpeningCashDraftBySiteDate[draftKey] = prevOpening.value;
+  if (prevOpening && container.getAttribute("data-pdj-opening-fp") === formFp) {
+    // #region agent log
+    const _sk = Date.now();
+    globalThis.__pdjOpeningSkipLogLast = globalThis.__pdjOpeningSkipLogLast || 0;
+    if (_sk - globalThis.__pdjOpeningSkipLogLast > 8000) {
+      globalThis.__pdjOpeningSkipLogLast = _sk;
+      fetch("http://127.0.0.1:7725/ingest/d031651a-daea-460d-8400-58dc731a515d", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "dee456" },
+        body: JSON.stringify({
+          sessionId: "dee456",
+          hypothesisId: "H",
+          location: "app-orders.js:renderCashOpeningPanel",
+          message: "opening_panel_skip_dom_replace",
+          data: { formFp, draftLen: (prevOpening.value || "").length },
+          timestamp: _sk,
+        }),
+      }).catch(() => {});
+    }
+    // #endregion
+    return;
+  }
   const openingDraft = pdjOpeningCashDraftBySiteDate[draftKey] ?? "";
   // #region agent log
   if (openingDraft.length > 0) {
@@ -3161,6 +3188,7 @@ function renderCashOpeningPanel() {
         <button type="button" class="btn btn-primary" id="pdj-opening-submit" style="width:auto;min-height:44px">Ouvrir la journée</button>
       </div>
     </div>`;
+  container.setAttribute("data-pdj-opening-fp", formFp);
   if (hadOpeningFocus) {
     const neu = document.getElementById("pdj-opening-cash");
     if (neu) {
