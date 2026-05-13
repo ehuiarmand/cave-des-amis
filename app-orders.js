@@ -5822,11 +5822,17 @@ async function syncStateSilently() {
   const previousQrIds = new Set(qrOrdersForCurrentSite(state).map((item) => item.id));
   const since = state?.meta?.updatedAt || "";
   let delta = null;
+  /** True si le delta contient des commandes « nouvelles » pour ce poll (évite faux positifs quand le serveur renvoie les mêmes QR tant que meta.updatedAt est inchangé). */
   let hadCmdDelta = false;
+  let cmdPollDupStaleMeta = false;
   try {
+    const metaBeforePoll = String(state?.meta?.updatedAt || "");
     delta = await apiRequest(`${API.changes}?since=${encodeURIComponent(since)}&siteId=${encodeURIComponent(currentSiteId())}`);
-    hadCmdDelta = ((delta?.changes?.commandes || []).length > 0);
     const incoming = (delta?.changes?.commandes || []).slice();
+    const metaAfterPoll = String(delta?.meta?.updatedAt ?? "");
+    const pollMetaUnchanged = Boolean(metaBeforePoll) && metaAfterPoll === metaBeforePoll;
+    cmdPollDupStaleMeta = incoming.length > 0 && pollMetaUnchanged;
+    hadCmdDelta = incoming.length > 0 && !pollMetaUnchanged;
     if (incoming.length) {
       const byId = new Map((state.commandes || []).map((order) => [order.id, order]));
       incoming.forEach((order) => byId.set(order.id, order));
@@ -5905,7 +5911,7 @@ async function syncStateSilently() {
             hypothesisId: "I",
             location: "app-orders.js:syncStateSilently",
             message: "pdj_full_render_skipped_unchanged_delta",
-            data: { siteId: currentSiteId(), hadCmdDelta },
+            data: { siteId: currentSiteId(), hadCmdDelta, cmdPollDupStaleMeta },
             timestamp: _si,
           }),
         }).catch(() => {});
