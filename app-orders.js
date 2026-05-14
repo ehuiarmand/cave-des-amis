@@ -67,6 +67,8 @@ let state = null;
 let sessionUser = null;
 let currentRole = null;
 let allowedSiteIds = [];
+/** True si le compte couvre tous les maquis (sauvegardes, multi-sites, purge globale). Voir reponse API `globalSuperadmin`. */
+let globalSuperadmin = null;
 let currentPage = "home";
 let currentFilter = "all";
 let ventesSubTab = "commandes";
@@ -97,7 +99,13 @@ let pendingPurchaseCasierResume = false;
 let sessionDeadlineUnix = null;
 
 function applySessionTimingFromApi(payload) {
-  if (!payload || typeof payload.sessionDeadlineUnix !== "number" || payload.sessionDeadlineUnix <= 0) {
+  if (!payload) {
+    return;
+  }
+  if ("globalSuperadmin" in payload) {
+    globalSuperadmin = payload.globalSuperadmin;
+  }
+  if (typeof payload.sessionDeadlineUnix !== "number" || payload.sessionDeadlineUnix <= 0) {
     sessionDeadlineUnix = null;
     return;
   }
@@ -1600,6 +1608,14 @@ function canSuperAdmin() {
   return false;
 }
 
+/** Superadmin « racine » (tous maquis) : sauvegardes serveur, creation maquis, decalage global, etc. */
+function canGlobalSuperAdmin() {
+  if (String(sessionUser || "").trim().toLowerCase() === "admin") return true;
+  if (!canSuperAdmin()) return false;
+  if (globalSuperadmin === undefined || globalSuperadmin === null) return true;
+  return Boolean(globalSuperadmin);
+}
+
 /** Le login reserve admin est toujours superadmin cote UI et controles locaux. */
 function normalizeRoleForUsername(username, role) {
   if (String(username || "").trim().toLowerCase() === "admin") return "superadmin";
@@ -2101,7 +2117,7 @@ function canAccessSite(siteId) {
 }
 
 function renderSiteSwitcher() {
-  const availableSites = canSuperAdmin()
+  const availableSites = canGlobalSuperAdmin()
     ? (state?.sites || [])
     : (state?.sites || []).filter((site) => canAccessSite(site.id));
   const select = document.getElementById("site-switcher");
@@ -2291,6 +2307,9 @@ function applyRoleVisibility() {
   document.querySelectorAll(".superadmin-only").forEach((node) => {
     node.classList.toggle("hidden-by-role", !canSuperAdmin());
   });
+  document.querySelectorAll(".global-superadmin-only").forEach((node) => {
+    node.classList.toggle("hidden-by-role", !canGlobalSuperAdmin());
+  });
   document.querySelectorAll(".any-admin").forEach((node) => {
     node.classList.toggle("hidden-by-role", !canAnyAdmin());
   });
@@ -2301,11 +2320,15 @@ function applyRoleVisibility() {
   if (roleSelect) {
     [...roleSelect.options].forEach((opt) => {
       if (opt.classList.contains("admin-only")) opt.hidden = !canSuperAdmin();
+      else if (opt.classList.contains("scoped-superadmin-option")) opt.hidden = !(canSuperAdmin() || canSiteAdmin());
       else if (opt.classList.contains("any-admin")) opt.hidden = !canAnyAdmin();
       else opt.hidden = false;
     });
     if (!canAnyAdmin() && roleSelect.value !== "serveuse") roleSelect.value = "serveuse";
-    if (!canSuperAdmin() && (roleSelect.value === "superadmin" || roleSelect.value === "admin")) {
+    if (!canSuperAdmin() && roleSelect.value === "admin") {
+      roleSelect.value = "serveuse";
+    }
+    if (!(canSuperAdmin() || canSiteAdmin()) && roleSelect.value === "superadmin") {
       roleSelect.value = "serveuse";
     }
   }
@@ -6046,7 +6069,7 @@ function renderUserSiteCheckboxes() {
     [...container.querySelectorAll("[data-site-id]:checked")].map((input) => input.dataset.siteId),
   );
   // Manager ne peut rattacher que ses propres maquis ; admin voit tout
-  const visibleSites = canSuperAdmin()
+  const visibleSites = canGlobalSuperAdmin()
     ? (state.sites || [])
     : (state.sites || []).filter((site) => allowedSiteIds.includes(site.id));
   container.innerHTML = visibleSites.map((site) => `
@@ -6062,7 +6085,7 @@ function renderUserSiteCheckboxes() {
 
 function renderEditableUserSites(user) {
   const container = document.getElementById("new-user-sites");
-  const visibleSites = canSuperAdmin()
+  const visibleSites = canGlobalSuperAdmin()
     ? (state.sites || [])
     : (state.sites || []).filter((site) => allowedSiteIds.includes(site.id));
   container.innerHTML = visibleSites.map((site) => `
@@ -6179,8 +6202,8 @@ async function addUser() {
     showToast("Les gerants peuvent uniquement creer des comptes serveuse.");
     return;
   }
-  if (!canSuperAdmin() && canSiteAdmin() && (role === "superadmin" || role === "admin")) {
-    showToast("Seul le super administrateur peut creer ce type de compte.");
+  if (!canSuperAdmin() && canSiteAdmin() && role === "admin") {
+    showToast("Seul le super administrateur global peut creer un autre administrateur de maquis.");
     return;
   }
   const effectiveSessionRole =
@@ -6243,7 +6266,7 @@ async function deleteUser(username) {
 
 function populatePurgeMaquisSelect() {
   const sel = document.getElementById("purge-maquis-select");
-  if (!sel || !canSuperAdmin() || !state) return;
+  if (!sel || !canGlobalSuperAdmin() || !state) return;
   const sites = state.sites || [];
   const prev = sel.value || "";
   sel.innerHTML = sites.length
@@ -6258,7 +6281,7 @@ function populatePurgeMaquisSelect() {
 function populateJournalShiftSiteSelect() {
   const sel = document.getElementById("shift-journal-site-select");
   if (!sel || !state) return;
-  if (!canSuperAdmin()) {
+  if (!canGlobalSuperAdmin()) {
     sel.innerHTML = "";
     return;
   }
@@ -6279,7 +6302,7 @@ function populateJournalShiftSiteSelect() {
 function renderSitesList() {
   const container = document.getElementById("sites-list");
   if (!container) return;
-  if (!canSuperAdmin()) {
+  if (!canGlobalSuperAdmin()) {
     container.innerHTML = "";
     populatePurgeMaquisSelect();
     return;
@@ -6302,7 +6325,7 @@ function renderSitesList() {
 }
 
 async function addSite() {
-  if (!canSuperAdmin()) {
+  if (!canGlobalSuperAdmin()) {
     showToast("Seul le super administrateur peut creer un maquis.");
     return;
   }
@@ -6328,10 +6351,15 @@ async function addSite() {
   const sitesBefore = state.sites || [];
   const templateSiteId = sitesBefore.some((s) => s.id === "maquis-1") ? "maquis-1" : sitesBefore[0]?.id || "";
   const { newStock, newPrices, nextId } = cloneCatalogRowsForNewSite(templateSiteId, siteId);
+  const allBeforeIds = new Set((sitesBefore || []).map((s) => s.id));
   const newUsers = (state.auth?.users || []).map((user) => {
     const currentAllowed = new Set(user.allowedSiteIds || []);
-    if (normalizeRoleForUsername(user.username, user.role) === "superadmin") {
-      currentAllowed.add(siteId);
+    const r = normalizeRoleForUsername(user.username, user.role);
+    if (r === "superadmin") {
+      const coversAll = allBeforeIds.size > 0 && [...allBeforeIds].every((id) => currentAllowed.has(id));
+      if (coversAll || String(user.username || "").trim().toLowerCase() === "admin") {
+        currentAllowed.add(siteId);
+      }
     }
     return { ...user, allowedSiteIds: [...currentAllowed] };
   });
@@ -6342,7 +6370,7 @@ async function addSite() {
     supplierPrices: [...(state.supplierPrices || []), ...newPrices],
     nextId,
   });
-  allowedSiteIds = canSuperAdmin()
+  allowedSiteIds = canGlobalSuperAdmin()
     ? (state.sites || []).map((s) => s.id)
     : [...new Set([...allowedSiteIds, siteId])];
   document.getElementById("new-site-nom").value = "";
@@ -6372,7 +6400,7 @@ async function addSite() {
 }
 
 async function deleteSite(siteId) {
-  if (!canSuperAdmin()) {
+  if (!canGlobalSuperAdmin()) {
     showToast("Seul le super administrateur peut supprimer un maquis.");
     return;
   }
@@ -6384,7 +6412,7 @@ async function deleteSite(siteId) {
   }
   const newSites = (state.sites || []).filter((s) => s.id !== siteId);
   await persistState({ sites: newSites });
-  if (canSuperAdmin()) allowedSiteIds = (state.sites || []).map((s) => s.id);
+  if (canGlobalSuperAdmin()) allowedSiteIds = (state.sites || []).map((s) => s.id);
   if (state.activeSiteId === siteId) {
     await persistState({ activeSiteId: newSites[0]?.id || null });
   }
@@ -6876,7 +6904,7 @@ async function syncStateSilently() {
  * `siteIdFilter` vide = tous les maquis. Ordre des dayBooks/stockChecks évite les collisions (siteId, date).
  */
 async function applySuperadminAccountingJournalDayShift(deltaDays, siteIdFilter = "") {
-  if (!canSuperAdmin()) {
+  if (!canGlobalSuperAdmin()) {
     showToast("Reserve au super administrateur.");
     return;
   }
@@ -7024,7 +7052,7 @@ const PURGE_MAQUIS_ROW_KEYS = [
 ];
 
 async function purgeMaquisDataViaStatePut(siteId, keepStockCatalog) {
-  if (!canSuperAdmin()) throw new Error("Reserve au super administrateur.");
+  if (!canGlobalSuperAdmin()) throw new Error("Reserve au super administrateur.");
   const sid = String(siteId || "").trim();
   const keep = (row) => !(row && typeof row === "object" && String(row.siteId || "").trim() === sid);
   const overrides = {};
@@ -9076,7 +9104,7 @@ async function saveParams() {
 }
 
 async function restoreFromJson() {
-  if (!canSuperAdmin()) {
+  if (!canGlobalSuperAdmin()) {
     showToast("Seul le super administrateur peut restaurer depuis data.json.");
     return;
   }
@@ -9109,7 +9137,7 @@ async function refreshRestoreBackupUi() {
   const fileSel = document.getElementById("restore-backup-file");
   const siteSel = document.getElementById("restore-backup-site");
   if (!fileSel || !siteSel) return;
-  if (!canSuperAdmin()) {
+  if (!canGlobalSuperAdmin()) {
     if (infoEl) infoEl.textContent = "";
     return;
   }
@@ -9185,7 +9213,7 @@ async function refreshRestoreBackupUi() {
 }
 
 async function restoreSelectedSiteFromBackup() {
-  if (!canSuperAdmin()) {
+  if (!canGlobalSuperAdmin()) {
     showToast("Reserve au super administrateur.");
     return;
   }
@@ -9414,7 +9442,7 @@ function exportData() {
 }
 
 async function createManualBackupOnServer() {
-  if (!canSuperAdmin()) {
+  if (!canGlobalSuperAdmin()) {
     showToast("Reserve au super administrateur.");
     return;
   }
@@ -11620,6 +11648,7 @@ async function logout() {
   sessionUser = null;
   currentRole = null;
   allowedSiteIds = [];
+  globalSuperadmin = null;
   sessionDeadlineUnix = null;
   activeOrderId = null;
   editingLineId = null;
@@ -12184,7 +12213,7 @@ document.getElementById("fab-btn").addEventListener("click", () => {
   document.getElementById("top-backup-download-btn")?.addEventListener("click", () => exportData());
   document.getElementById("top-backup-server-btn")?.addEventListener("click", () => createManualBackupOnServer().catch(handleApiError));
   document.getElementById("reset-btn").addEventListener("click", async () => {
-    if (!canSuperAdmin()) {
+    if (!canGlobalSuperAdmin()) {
       showToast("Seul le super administrateur peut reinitialiser l'application.");
       return;
     }
@@ -12201,7 +12230,7 @@ document.getElementById("fab-btn").addEventListener("click", () => {
     }
   });
   document.getElementById("purge-maquis-btn")?.addEventListener("click", async () => {
-    if (!canSuperAdmin()) {
+    if (!canGlobalSuperAdmin()) {
       showToast("Seul le super administrateur peut purger un maquis.");
       return;
     }
@@ -12229,7 +12258,7 @@ document.getElementById("fab-btn").addEventListener("click", () => {
         const apiMsg = typeof first?.message === "string" ? first.message : "";
         const unknownRoute =
           st === 404 || apiMsg.includes("Route API introuvable") || apiMsg.includes("NOT_FOUND") || /\b404\b/.test(apiMsg);
-        if (!canSuperAdmin() || !unknownRoute) throw first;
+        if (!canGlobalSuperAdmin() || !unknownRoute) throw first;
         await purgeMaquisDataViaStatePut(siteId, keepCat);
         compatPut = true;
       }
@@ -12247,7 +12276,7 @@ document.getElementById("fab-btn").addEventListener("click", () => {
     }
   });
   document.getElementById("shift-journal-day-btn")?.addEventListener("click", async () => {
-    if (!canSuperAdmin()) {
+    if (!canGlobalSuperAdmin()) {
       showToast("Seul le super administrateur peut decaler les dates comptables.");
       return;
     }

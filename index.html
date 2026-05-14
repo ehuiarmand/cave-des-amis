@@ -117,7 +117,7 @@
             <span id="top-journal-diff" class="top-journal-diff hidden" aria-live="polite"></span>
             <div class="top-backup-strip manager-only">
               <button type="button" id="top-backup-download-btn" class="top-backup-chip" title="Télécharger une copie JSON sur cet appareil">JSON local</button>
-              <button type="button" id="top-backup-server-btn" class="top-backup-chip superadmin-only" title="Écrire une copie dans le dossier backups/ du serveur (super administrateur)">Sauvegarde serveur</button>
+              <button type="button" id="top-backup-server-btn" class="top-backup-chip global-superadmin-only" title="Écrire une copie dans le dossier backups/ du serveur (super administrateur global)">Sauvegarde serveur</button>
             </div>
           </div>
         </div>
@@ -1117,7 +1117,7 @@
                   <option value="serveuse">Serveuse</option>
                   <option value="manager" class="any-admin">Gérant</option>
                   <option value="admin" class="admin-only">Administrateur de maquis</option>
-                  <option value="superadmin" class="admin-only">Super administrateur</option>
+                  <option value="superadmin" class="scoped-superadmin-option">Super administrateur</option>
                 </select>
               </div>
               <div class="form-group">
@@ -1146,7 +1146,7 @@
             <div id="staff-audit-list"></div>
           </article>
 
-          <article class="card superadmin-only">
+          <article class="card global-superadmin-only">
             <div class="section-head">
               <h3>Multi-maquis</h3>
               <span class="section-meta">Sites</span>
@@ -1216,7 +1216,7 @@
             </div>
           </article>
 
-          <article class="card superadmin-only">
+          <article class="card global-superadmin-only">
             <div class="section-head">
               <h3>Décalage des journées comptables</h3>
               <span class="section-meta">Correction</span>
@@ -2182,6 +2182,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=176"></script>
+  <script src="./app-orders.js?v=177"></script>
 </body>
 </html>

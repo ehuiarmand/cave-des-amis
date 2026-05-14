@@ -1136,7 +1136,8 @@ textarea { font: inherit; }
 .manager-only.hidden-by-role,
 .admin-only.hidden-by-role,
 .any-admin.hidden-by-role,
-.superadmin-only.hidden-by-role {
+.superadmin-only.hidden-by-role,
+.global-superadmin-only.hidden-by-role {
   display: none !important;
 }
 

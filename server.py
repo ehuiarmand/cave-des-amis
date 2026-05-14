@@ -686,14 +686,46 @@ def load_backup_state_payload(backup_filename: str) -> dict[str, Any]:
     raise ValueError("Formats acceptes : data-AAAAMMJJ-HHMMSS.json (ou -manuel) ou app-AAAAMMJJ-HHMMSS.sqlite3 (ou -manuel).")
 
 
-def session_is_superadmin(session: dict[str, Any] | None) -> bool:
+def compute_global_superadmin(
+    username: str,
+    role: str,
+    allowed_site_ids: list[str] | None,
+    all_site_ids: list[str] | None,
+) -> bool:
+    """Compte « racine » : admin / tanoh, ou superadmin couvrant tous les maquis connus."""
+    un = str(username or "").strip().lower()
+    if un in ("admin", "tanoh"):
+        return True
+    if str(role or "") != "superadmin":
+        return False
+    if not all_site_ids:
+        return True
+    a_set = {str(x) for x in all_site_ids if x is not None and str(x)}
+    if not a_set:
+        return True
+    u_set = {str(x) for x in (allowed_site_ids or []) if str(x) in a_set}
+    return a_set.issubset(u_set)
+
+
+def session_is_superadmin(session: dict[str, Any] | None, *, all_site_ids: list[str] | None = None) -> bool:
+    """Superadmin global : acces multi-maquis complet (sauvegardes, liste des sites, PUT etat non scope)."""
     if session is None:
         return True
-    if str(session.get("role", "")) == "superadmin":
+    if session.get("globalSuperadmin") is True:
         return True
-    if str(session.get("username", "")).strip().lower() == "admin":
+    if session.get("globalSuperadmin") is False:
+        return False
+    if all_site_ids is not None:
+        return compute_global_superadmin(
+            str(session.get("username", "")),
+            str(session.get("role", "")),
+            list(session.get("allowedSiteIds") or []),
+            all_site_ids,
+        )
+    un = str(session.get("username", "")).strip().lower()
+    if un in ("admin", "tanoh"):
         return True
-    return False
+    return str(session.get("role", "")) == "superadmin"
 
 
 def session_allowed_sites(session: dict[str, Any], site_ids: list[str]) -> set[str]:
@@ -753,13 +785,18 @@ def merge_next_id_dict(current: dict[str, Any], incoming: dict[str, Any] | None)
     return out
 
 
-def user_visible_in_public_state(u: dict[str, Any], session: dict[str, Any]) -> bool:
-    if session_is_superadmin(session):
+def user_visible_in_public_state(u: dict[str, Any], session: dict[str, Any], all_site_ids: list[str]) -> bool:
+    if session_is_superadmin(session, all_site_ids=all_site_ids):
         return True
     if str(u.get("username", "")) == str(session.get("username", "")):
         return True
+    all_set = {str(x) for x in all_site_ids}
     if str(u.get("role", "")) == "superadmin":
-        return False
+        u_sites = {str(s) for s in (u.get("allowedSiteIds") or []) if str(s) in all_set}
+        if all_set and u_sites >= all_set:
+            return session_is_superadmin(session, all_site_ids=all_site_ids)
+        sess_sites = {str(s) for s in (session.get("allowedSiteIds") or []) if str(s) in all_set}
+        return bool(u_sites & sess_sites)
     user_sites = {str(s) for s in (u.get("allowedSiteIds") or [])}
     sess_sites = {str(s) for s in (session.get("allowedSiteIds") or [])}
     return bool(user_sites & sess_sites)
@@ -798,11 +835,20 @@ def merge_auth_users_scoped(
         t_role = str(exist.get("role", ""))
         t_sites = {str(x) for x in (exist.get("allowedSiteIds") or []) if str(x) in site_set}
         if s_role == "admin":
-            if t_role in ("superadmin", "admin"):
+            if t_role == "admin":
                 return False
+            if t_role == "superadmin":
+                if str(exist.get("username", "")).strip().lower() in ("admin", "tanoh"):
+                    return False
+                return bool(t_sites) and t_sites <= allowed
             return bool(t_sites) and t_sites <= allowed
         if s_role == "manager":
             return t_role == "serveuse" and bool(t_sites & allowed)
+        if s_role == "superadmin":
+            tun = str(exist.get("username", "")).strip().lower()
+            if tun in ("admin", "tanoh"):
+                return False
+            return bool(t_sites & allowed) if t_sites else bool(allowed)
         return False
 
     for un, pu in payload_by.items():
@@ -815,10 +861,13 @@ def merge_auth_users_scoped(
 
         if exist is None:
             if s_role == "admin":
-                if new_role not in ("manager", "serveuse"):
+                if new_role not in ("manager", "serveuse", "superadmin"):
                     continue
             elif s_role == "manager":
                 if new_role != "serveuse":
+                    continue
+            elif s_role == "superadmin":
+                if new_role not in ("superadmin", "admin", "manager", "serveuse"):
                     continue
             else:
                 continue
@@ -842,7 +891,7 @@ def merge_auth_users_scoped(
             continue
 
         if str(exist.get("username", "")) == s_user:
-            if new_role == "superadmin" and str(exist.get("role", "")) != "superadmin":
+            if new_role == "superadmin" and str(exist.get("role", "")) != "superadmin" and s_role != "superadmin":
                 new_role = str(exist.get("role", ""))
             if s_role != "superadmin" and new_role == "superadmin":
                 new_role = str(exist.get("role", ""))
@@ -852,9 +901,14 @@ def merge_auth_users_scoped(
                 new_role = str(exist.get("role", ""))
 
         if s_role == "admin" and str(exist.get("username", "")) != s_user:
-            if new_role in ("superadmin", "admin"):
+            if new_role == "admin":
                 new_role = str(exist.get("role", ""))
-            if new_role not in ("manager", "serveuse"):
+            if new_role not in ("manager", "serveuse", "superadmin"):
+                new_role = str(exist.get("role", ""))
+
+        scoped_super = s_role == "superadmin" and not session_is_superadmin(session, all_site_ids=site_ids)
+        if scoped_super and str(exist.get("username", "")) != s_user:
+            if new_role not in ("superadmin", "admin", "manager", "serveuse"):
                 new_role = str(exist.get("role", ""))
 
         nu_allowed = clamp_sites(pu.get("allowedSiteIds", exist.get("allowedSiteIds")))
@@ -889,32 +943,48 @@ def merge_auth_users_scoped(
     return result
 
 
-def session_state_etag(base_etag: str, session: dict[str, Any]) -> str:
-    if session_is_superadmin(session):
+def session_state_etag(base_etag: str, session: dict[str, Any], *, all_site_ids: list[str] | None = None) -> str:
+    if session_is_superadmin(session, all_site_ids=all_site_ids):
         return base_etag
     raw = f"{session.get('username', '')}|{session.get('role', '')}|{','.join(sorted(str(x) for x in (session.get('allowedSiteIds') or [])))}"
     return f"{base_etag}:{hashlib.sha256(raw.encode('utf-8')).hexdigest()[:14]}"
 
 
-def session_may_configure_2fa_for_other(session: dict[str, Any], target_username: str, auth_users: list[dict[str, Any]]) -> bool:
-    if session_is_superadmin(session):
+def session_may_configure_2fa_for_other(
+    session: dict[str, Any],
+    target_username: str,
+    auth_users: list[dict[str, Any]],
+    *,
+    all_site_ids: list[str] | None = None,
+) -> bool:
+    if session_is_superadmin(session, all_site_ids=all_site_ids):
         return True
     if str(session.get("username", "")) == str(target_username):
         return True
     if session.get("role") == "manager":
         return True
-    if session.get("role") != "admin":
-        return False
     tu = next((u for u in auth_users if u.get("username") == target_username), None)
     if not tu:
-        return False
-    if str(tu.get("role", "")) in ("superadmin", "admin"):
         return False
     ts = {str(x) for x in (tu.get("allowedSiteIds") or [])}
     ss = {str(x) for x in (session.get("allowedSiteIds") or [])}
     if not ts or not ss:
         return False
-    return ts <= ss
+    if str(tu.get("role", "")) == "admin":
+        return False
+    if str(tu.get("role", "")) == "superadmin":
+        tun = str(tu.get("username", "")).strip().lower()
+        if tun in ("admin", "tanoh"):
+            return False
+        return ts <= ss
+    if str(session.get("role", "")) == "admin":
+        return ts <= ss
+    if str(session.get("role", "")) == "superadmin":
+        tun = str(tu.get("username", "")).strip().lower()
+        if tun in ("admin", "tanoh"):
+            return False
+        return ts <= ss
+    return False
 
 
 def normalize_auth_users(payload: dict[str, Any]) -> None:
@@ -1054,14 +1124,26 @@ class SessionManager:
         self._sessions: dict[str, dict[str, Any]] = {}
         self._lock = threading.Lock()
 
-    def create(self, username: str, role: str, allowed_site_ids: list[str]) -> str:
+    def create(
+        self,
+        username: str,
+        role: str,
+        allowed_site_ids: list[str],
+        *,
+        global_superadmin: bool = False,
+        all_site_ids: list[str] | None = None,
+    ) -> str:
         token = secrets.token_urlsafe(32)
         now = int(time.time())
+        gs = bool(global_superadmin)
+        if not gs and all_site_ids is not None:
+            gs = compute_global_superadmin(username, role, list(allowed_site_ids or []), all_site_ids)
         with self._lock:
             self._sessions[token] = {
                 "username": username,
                 "role": role,
                 "allowedSiteIds": list(allowed_site_ids or []),
+                "globalSuperadmin": gs,
                 "createdAt": now,
                 "lastActivityAt": now,
             }
@@ -1081,6 +1163,7 @@ class SessionManager:
             "username": sess["username"],
             "role": sess["role"],
             "allowedSiteIds": list(sess.get("allowedSiteIds") or []),
+            "globalSuperadmin": bool(sess.get("globalSuperadmin")),
             "sessionCreatedAt": created,
             "sessionDeadlineUnix": deadline,
             "sessionAbsoluteSeconds": self.absolute_seconds,
@@ -1140,6 +1223,10 @@ class DataStore:
         self._last_etag = self._compute_etag()
         self._rev = int(self._state.get("_meta", {}).get("rev") or self._rev or 1)
         self._updated_at = str(self._state.get("_meta", {}).get("updatedAt") or self._updated_at or "")
+
+    def all_site_ids(self) -> list[str]:
+        with self._lock:
+            return [str(s.get("id")) for s in self._state.get("sites", []) if s.get("id")]
 
     def _sqlite_connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(str(self._sqlite_path))
@@ -1373,7 +1460,7 @@ class DataStore:
     def public_state_for_session(self, session: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
             full = self.public_state()
-            if session_is_superadmin(session):
+            if session_is_superadmin(session, all_site_ids=site_ids):
                 payload = dict(full)
                 payload["adminBackups"] = json.loads(json.dumps(self.list_backups()))
                 return payload
@@ -1405,7 +1492,7 @@ class DataStore:
                     "displayName": str(u.get("displayName", "") or "").strip()[:120],
                 }
                 for u in self._state["auth"]["users"]
-                if user_visible_in_public_state(u, session)
+                if user_visible_in_public_state(u, session, site_ids)
             ]
             allowed_set = set(allowed)
             pdj_full = self._state.get("pdjWorkDateBySite", {}) or {}
@@ -1456,7 +1543,7 @@ class DataStore:
             if session is not None:
                 site_ids = [str(s["id"]) for s in self._state.get("sites", []) if s.get("id")]
                 pdj_full = self._state.get("pdjWorkDateBySite", {}) or {}
-                if session_is_superadmin(session):
+                if session_is_superadmin(session, all_site_ids=site_ids):
                     pdj_out = json.loads(json.dumps(_sanitize_pdj_work_date_map(pdj_full, site_ids)))
                 else:
                     allowed = session_allowed_sites(session, site_ids)
@@ -1816,8 +1903,14 @@ class DataStore:
                         user["allowedSiteIds"] = list(all_site_ids)
                         self._write(self._state)
                 elif role == "superadmin":
-                    allowed = list(all_site_ids)
-                return {"username": user["username"], "role": role, "allowedSiteIds": allowed}
+                    allowed = [sid for sid in user.get("allowedSiteIds", all_site_ids) if sid in all_site_ids] or all_site_ids[:1]
+                gs = compute_global_superadmin(str(user.get("username", "")), role, allowed, all_site_ids)
+                return {
+                    "username": user["username"],
+                    "role": role,
+                    "allowedSiteIds": allowed,
+                    "globalSuperadmin": gs,
+                }
         return None
 
     def update_state(self, payload: dict[str, Any], session: dict[str, Any]) -> dict[str, Any]:
@@ -1825,7 +1918,7 @@ class DataStore:
             current = self._state
             site_ids = [site.get("id") for site in current["sites"] if site.get("id")]
             sid_list = [str(s) for s in site_ids]
-            is_super = session_is_superadmin(session)
+            is_super = session_is_superadmin(session, all_site_ids=sid_list)
 
             if is_super:
                 current["sites"] = payload.get("sites", current["sites"])
@@ -1890,7 +1983,7 @@ class DataStore:
                             allowed = [sid for sid in existing_by_name[username].get("allowedSiteIds", []) if sid in site_ids] or site_ids[:1]
                         else:
                             allowed = site_ids[:1]
-                        if username.strip().lower() == "admin" or role == "superadmin":
+                        if username.strip().lower() == "admin":
                             allowed = list(site_ids)
                         existing = existing_by_name.get(username, {})
                         dn_sup = str(user_data.get("displayName", existing.get("displayName", "")) or "").strip()[:120]
@@ -2237,9 +2330,12 @@ class AppHandler(BaseHTTPRequestHandler):
                 role = "superadmin"
                 with store._lock:
                     allowed = [s["id"] for s in store._state["sites"]]
-            elif str(role) == "superadmin":
-                with store._lock:
-                    allowed = [s["id"] for s in store._state["sites"]]
+            aids = store.all_site_ids()
+            gs_raw = session.get("globalSuperadmin")
+            if gs_raw is None:
+                global_sa = session_is_superadmin(session, all_site_ids=aids)
+            else:
+                global_sa = bool(gs_raw)
             self.send_json(
                 HTTPStatus.OK,
                 {
@@ -2247,6 +2343,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     "username": session["username"],
                     "role": role,
                     "allowedSiteIds": allowed,
+                    "globalSuperadmin": global_sa,
                     **session_timing_fields(session),
                 },
             )
@@ -2255,7 +2352,7 @@ class AppHandler(BaseHTTPRequestHandler):
             session = self.require_session()
             if session is None:
                 return
-            if not session_is_superadmin(session):
+            if not session_is_superadmin(session, all_site_ids=store.all_site_ids()):
                 self.send_json(HTTPStatus.FORBIDDEN, {"error": "Acces refuse."})
                 return
             with store._lock:
@@ -2268,7 +2365,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 return
             since = str((query.get("since") or [""])[0]).strip()
             site_id = str((query.get("siteId") or [""])[0]).strip() or None
-            if site_id and not session_is_superadmin(session) and site_id not in (session.get("allowedSiteIds") or []):
+            if site_id and not session_is_superadmin(session, all_site_ids=store.all_site_ids()) and site_id not in (session.get("allowedSiteIds") or []):
                 self.send_json(HTTPStatus.FORBIDDEN, {"error": "Maquis non autorise pour cette session."})
                 return
             self.send_json(HTTPStatus.OK, store.changes(since=since, site_id=site_id, session=session), cache_control="no-store")
@@ -2277,7 +2374,7 @@ class AppHandler(BaseHTTPRequestHandler):
             session = self.require_session()
             if session is None:
                 return
-            etag = session_state_etag(store.etag(), session)
+            etag = session_state_etag(store.etag(), session, all_site_ids=store.all_site_ids())
             if self.headers.get("If-None-Match") == etag:
                 self.send_not_modified(etag)
                 return
@@ -2294,7 +2391,7 @@ class AppHandler(BaseHTTPRequestHandler):
             session = self.require_session()
             if session is None:
                 return
-            if not session_is_superadmin(session):
+            if not session_is_superadmin(session, all_site_ids=store.all_site_ids()):
                 self.send_json(HTTPStatus.FORBIDDEN, {"error": "Acces refuse."})
                 return
             try:
@@ -2309,7 +2406,7 @@ class AppHandler(BaseHTTPRequestHandler):
             session = self.require_session()
             if session is None:
                 return
-            if not session_is_superadmin(session):
+            if not session_is_superadmin(session, all_site_ids=store.all_site_ids()):
                 self.send_json(HTTPStatus.FORBIDDEN, {"error": "Acces refuse."})
                 return
             body = self.read_json()
@@ -2330,7 +2427,7 @@ class AppHandler(BaseHTTPRequestHandler):
             session = self.require_session()
             if session is None:
                 return
-            if not session_is_superadmin(session):
+            if not session_is_superadmin(session, all_site_ids=store.all_site_ids()):
                 self.send_json(HTTPStatus.FORBIDDEN, {"error": "Acces refuse."})
                 return
             try:
@@ -2407,7 +2504,13 @@ class AppHandler(BaseHTTPRequestHandler):
                 pre_auth = create_pre_auth_token(canon)
                 self.send_json(HTTPStatus.OK, {"needsTwoFactor": True, "preAuthToken": pre_auth})
                 return
-            token = sessions.create(user["username"], user["role"], user["allowedSiteIds"])
+            token = sessions.create(
+                user["username"],
+                user["role"],
+                user["allowedSiteIds"],
+                global_superadmin=bool(user.get("globalSuperadmin")),
+                all_site_ids=store.all_site_ids(),
+            )
             sess_view = sessions.get(token) or {}
             self.send_json(
                 HTTPStatus.OK,
@@ -2416,6 +2519,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     "username": user["username"],
                     "role": user["role"],
                     "allowedSiteIds": user["allowedSiteIds"],
+                    "globalSuperadmin": bool(user.get("globalSuperadmin")),
                     **session_timing_fields(sess_view),
                 },
                 cookie=token,
@@ -2450,8 +2554,9 @@ class AppHandler(BaseHTTPRequestHandler):
                         user_data["allowedSiteIds"] = list(all_site_ids)
                         store._write(store._state)
                 elif role == "superadmin":
-                    allowed = list(all_site_ids)
-            token = sessions.create(username, role, allowed)
+                    allowed = [sid for sid in user_data.get("allowedSiteIds", all_site_ids) if sid in all_site_ids] or all_site_ids[:1]
+                gs = compute_global_superadmin(str(username), role, allowed, all_site_ids)
+            token = sessions.create(username, role, allowed, global_superadmin=gs, all_site_ids=all_site_ids)
             sess_view = sessions.get(token) or {}
             self.send_json(
                 HTTPStatus.OK,
@@ -2460,6 +2565,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     "username": username,
                     "role": role,
                     "allowedSiteIds": allowed,
+                    "globalSuperadmin": gs,
                     **session_timing_fields(sess_view),
                 },
                 cookie=token,
@@ -2474,7 +2580,9 @@ class AppHandler(BaseHTTPRequestHandler):
             target = str(payload.get("username", session["username"])).strip()
             with store._lock:
                 auth_users = list(store._state["auth"]["users"])
-            if target != session["username"] and not session_may_configure_2fa_for_other(session, target, auth_users):
+            if target != session["username"] and not session_may_configure_2fa_for_other(
+                session, target, auth_users, all_site_ids=store.all_site_ids()
+            ):
                 self.send_json(HTTPStatus.FORBIDDEN, {"error": "Acces refuse."})
                 return
             secret = generate_totp_secret()
@@ -2505,7 +2613,9 @@ class AppHandler(BaseHTTPRequestHandler):
             code = str(payload.get("code", "")).strip()
             with store._lock:
                 auth_users = list(store._state["auth"]["users"])
-            if target != session["username"] and not session_may_configure_2fa_for_other(session, target, auth_users):
+            if target != session["username"] and not session_may_configure_2fa_for_other(
+                session, target, auth_users, all_site_ids=store.all_site_ids()
+            ):
                 self.send_json(HTTPStatus.FORBIDDEN, {"error": "Acces refuse."})
                 return
             with store._lock:
@@ -2535,7 +2645,9 @@ class AppHandler(BaseHTTPRequestHandler):
             target = str(payload.get("username", session["username"])).strip()
             with store._lock:
                 auth_users = list(store._state["auth"]["users"])
-            if target != session["username"] and not session_may_configure_2fa_for_other(session, target, auth_users):
+            if target != session["username"] and not session_may_configure_2fa_for_other(
+                session, target, auth_users, all_site_ids=store.all_site_ids()
+            ):
                 self.send_json(HTTPStatus.FORBIDDEN, {"error": "Acces refuse."})
                 return
             with store._lock:
@@ -2563,7 +2675,7 @@ class AppHandler(BaseHTTPRequestHandler):
             session = self.require_session()
             if session is None:
                 return
-            if not session_is_superadmin(session):
+            if not session_is_superadmin(session, all_site_ids=store.all_site_ids()):
                 self.send_json(HTTPStatus.FORBIDDEN, {"error": "Seul le super administrateur peut reinitialiser l'application."})
                 return
             payload = store.reset()
@@ -2574,7 +2686,7 @@ class AppHandler(BaseHTTPRequestHandler):
             session = self.require_session()
             if session is None:
                 return
-            if not session_is_superadmin(session):
+            if not session_is_superadmin(session, all_site_ids=store.all_site_ids()):
                 self.send_json(HTTPStatus.FORBIDDEN, {"error": "Seul le super administrateur peut purger un maquis."})
                 return
             body = self.read_json()
