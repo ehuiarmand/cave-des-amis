@@ -6518,20 +6518,28 @@ function openOrderEditor(orderId = null, lineId = null) {
   editingLineId = lineId;
   const order = orderId ? recordsForSite(state.commandes).find((item) => item.id === orderId) : null;
   const line = order && lineId ? order.lignes.find((item) => item.id === lineId) : null;
+  if (lineId && (!order || !line)) {
+    showToast("Ligne ou commande introuvable.");
+    activeOrderId = null;
+    editingLineId = null;
+    populateOrderSelect();
+    return;
+  }
   populateOrderSelect();
-  if (!lineId) {
+  // Sans commande cible : saisie rapide (panier multi-articles)
+  if (!lineId && !orderId) {
     const ctx = document.getElementById("sr-order-context-wrap");
     if (ctx) ctx.classList.remove("hidden");
     const titleEl = document.getElementById("sr-modal-title");
-    if (titleEl) titleEl.textContent = order ? "Ajouter des articles" : "Saisie rapide";
+    if (titleEl) titleEl.textContent = "Saisie rapide";
     const srDate = document.getElementById("sr-date");
-    if (srDate) srDate.value = order?.date || pdjCalendarDate();
+    if (srDate) srDate.value = pdjCalendarDate();
     const srClient = document.getElementById("sr-client");
-    if (srClient) srClient.value = order?.client || "";
+    if (srClient) srClient.value = "";
     const srOrderSel = document.getElementById("sr-order-select");
-    if (srOrderSel) srOrderSel.value = order ? String(order.id) : "";
+    if (srOrderSel) srOrderSel.value = "";
     const srNote = document.getElementById("sr-note");
-    if (srNote) srNote.value = order?.note || "";
+    if (srNote) srNote.value = "";
     srCart = [];
     const searchEl = document.getElementById("sr-search");
     if (searchEl) searchEl.value = "";
@@ -6541,19 +6549,29 @@ function openOrderEditor(orderId = null, lineId = null) {
     window.requestAnimationFrame(() => searchEl?.focus());
     return;
   }
+  if (!lineId && orderId && !order) {
+    showToast("Commande introuvable.");
+    activeOrderId = null;
+    populateOrderSelect();
+    return;
+  }
+  // Commande existante : ajout de ligne ou edition — formulaire vente (recherche catalogue)
   document.getElementById("v-date").value = line?.date || order?.date || pdjCalendarDate();
   document.getElementById("v-client").value = order?.client || "";
   document.getElementById("v-order-select").value = order ? String(order.id) : "";
   document.getElementById("v-article").value = line?.article || "";
   document.getElementById("v-location").value = line?.location || "Intérieur";
-  populateSaleFormatSelect(findKnownProduct(line?.article || ""), line?.formatQuantite || line?.packSize);
+  populateSaleFormatSelect(
+    line ? findKnownProduct(line.article || "") : null,
+    line ? (line.formatQuantite || line.packSize) : null,
+  );
   document.getElementById("v-prix").value = line?.prix ? String(line.prix) : "";
   document.getElementById("v-qty").value = line?.qty ? String(line.qty) : "1";
   document.getElementById("v-remise").value = line?.remise ? String(line.remise) : "0";
   document.getElementById("v-note").value = line?.note || order?.note || "";
   document.getElementById("save-vente-btn").textContent = line ? "Mettre a jour la ligne" : "Ajouter un article";
   syncFinalizeButtonJournalState();
-  updateKitInfo();
+  updateKitInfo(line ? findKnownProduct(line.article) : null);
   updateVentePreview();
   const vSearch = document.getElementById("v-article-search");
   if (vSearch) vSearch.value = "";
@@ -11759,7 +11777,23 @@ function takeOverOrder(orderId) {
   activeOrderId = orderId;
   clearQrAlert();
   renderOrders();
-  showToast("Commande selectionnee. Cliquez sur 'Ajouter un article' pour modifier.");
+  syncVenteFormFromActiveOrder();
+  showToast("Commande selectionnee — formulaire vente aligne. Utilisez « Ajouter un article » pour le catalogue.");
+}
+
+/** Aligne le formulaire vente (hors modal) sur la commande active — utile apres « Ouvrir la commande ». */
+function syncVenteFormFromActiveOrder() {
+  const order = activeOrderId ? recordsForSite(state.commandes).find((o) => o.id === activeOrderId) : null;
+  if (!order) return;
+  const vDate = document.getElementById("v-date");
+  if (vDate) vDate.value = order.date || pdjCalendarDate();
+  const vClient = document.getElementById("v-client");
+  if (vClient) vClient.value = order.client || "";
+  const vNote = document.getElementById("v-note");
+  if (vNote) vNote.value = order.note || "";
+  const vSel = document.getElementById("v-order-select");
+  if (vSel) vSel.value = String(order.id);
+  syncFinalizeButtonJournalState();
 }
 
 function attachEvents() {
