@@ -70,7 +70,7 @@ let allowedSiteIds = [];
 let currentPage = "home";
 let currentFilter = "all";
 let ventesSubTab = "commandes";
-let caisseInnerTab = "historique";
+let caisseInnerTab = "recouvrement";
 let stockSubTab = "catalogue";
 let paramsSubTab = "profil";
 let stockTableCompact = true;
@@ -2251,14 +2251,17 @@ function renderHero() {
 function syncCaisseInnerPanels() {
   const hist = document.getElementById("ventes-caisse-panel-historique");
   const rec = document.getElementById("ventes-caisse-panel-recouvrement");
-  if (!hist || !rec) return;
-  const showHist = caisseInnerTab === "historique";
-  hist.classList.toggle("hidden", !showHist);
-  rec.classList.toggle("hidden", showHist);
-  hist.setAttribute("aria-hidden", showHist ? "false" : "true");
-  rec.setAttribute("aria-hidden", showHist ? "true" : "false");
+  if (!rec) return;
+  if (caisseInnerTab === "historique") caisseInnerTab = "recouvrement";
+  if (hist) {
+    hist.classList.add("hidden");
+    hist.setAttribute("aria-hidden", "true");
+  }
+  rec.classList.remove("hidden");
+  rec.setAttribute("aria-hidden", "false");
   document.querySelectorAll("[data-caisse-inner]").forEach((btn) => {
-    const active = btn.dataset.caisseInner === caisseInnerTab;
+    const inner = btn.dataset.caisseInner;
+    const active = inner === "recouvrement";
     btn.classList.toggle("active", active);
     btn.setAttribute("aria-selected", active ? "true" : "false");
   });
@@ -2266,7 +2269,7 @@ function syncCaisseInnerPanels() {
 
 function setCaisseInnerTab(tab) {
   if (tab !== "historique" && tab !== "recouvrement") return;
-  caisseInnerTab = tab;
+  caisseInnerTab = tab === "historique" ? "recouvrement" : tab;
   syncCaisseInnerPanels();
   syncNavActiveState();
 }
@@ -2742,8 +2745,11 @@ function navigate(page, opts = {}) {
   const vstab = opts.ventesSubtab;
   const cinner = opts.caisseInner;
   if (vstab !== undefined && vstab !== null && String(vstab).trim() !== "") ventesSubTab = vstab;
-  if (cinner !== undefined && cinner !== null && String(cinner).trim() !== "") caisseInnerTab = cinner;
-  if (vstab === "caisse" && (cinner === undefined || String(cinner).trim() === "")) caisseInnerTab = "historique";
+  if (cinner !== undefined && cinner !== null && String(cinner).trim() !== "") {
+    const ci = String(cinner).trim();
+    caisseInnerTab = ci === "historique" ? "recouvrement" : ci;
+  }
+  if (vstab === "caisse" && (cinner === undefined || String(cinner).trim() === "")) caisseInnerTab = "recouvrement";
 
   document.querySelectorAll(".page").forEach((node) => node.classList.remove("active"));
   const pageEl = document.getElementById(`page-${page}`);
@@ -4251,6 +4257,8 @@ function salesForHistory() {
 }
 
 function renderSalesHistory() {
+  const histPanel = document.getElementById("ventes-caisse-panel-historique");
+  if (!histPanel || histPanel.classList.contains("hidden")) return;
   renderTabs();
   const ventes = salesForHistory().slice().sort((a, b) => b.date.localeCompare(a.date));
   const invoices = new Map();
@@ -4446,27 +4454,62 @@ function openOrderDetailModal(orderKey) {
   openModal("modal-order-detail");
 }
 
-function renderOrdersManagement() {
+/** Liste et métadonnées alignées sur les filtres « Gestion des commandes » (date, statut, type). */
+function computeOrdersManagementList() {
   const date = document.getElementById("orders-filter-date")?.value || pdjCalendarDate();
   const status = document.getElementById("orders-filter-status")?.value || "all";
   const type = document.getElementById("orders-filter-type")?.value || "all";
   const activeOrders = recordsForSite(state.commandes);
   const salesToday = recordsForSite(state.ventes).filter((vente) => saleDateValue(vente) === date);
-
   const paidOrders = paidOrdersFromSales();
-
   const baseOrders = status === "Paye"
     ? paidOrders
     : status === "all"
       ? [...activeOrders, ...paidOrders]
       : activeOrders;
-
   const orders = baseOrders.filter((order) => {
     const dateOk = !date || saleDateValue(order) === date;
     const statusOk = status === "all" || orderStatus(order) === status;
     const typeOk = type === "all" || orderType(order) === type;
     return dateOk && statusOk && typeOk;
   }).sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  return { orders, date, status, type, activeOrders, salesToday };
+}
+
+function printOrdersManagementList() {
+  const { orders, date, status, type } = computeOrdersManagementList();
+  if (!orders.length) {
+    showToast("Aucune commande a imprimer pour ces filtres.");
+    return;
+  }
+  const site = currentSite();
+  const statusLab = status === "all" ? "Tous les statuts" : escapeHtml(status);
+  const typeLab = type === "all" ? "Tous les types" : type === "a-emporter" ? "A emporter" : "Sur place";
+  const totalListe = orders.reduce((sum, order) => sum + orderTotal(order), 0);
+  const rows = orders.map((order) => `
+    <tr>
+      <td>${escapeHtml(String(order.factureNumber || order.id))}</td>
+      <td>${escapeHtml(order.table || order.client || "Comptoir")}</td>
+      <td>${escapeHtml(order.server || order.serveur || "Client QR")}</td>
+      <td>${escapeHtml(orderStatus(order))}</td>
+      <td>${orderType(order) === "a-emporter" ? "A emporter" : "Sur place"}</td>
+      <td style="text-align:right">${fmt((order.lignes || []).length)}</td>
+      <td style="text-align:right">${fmt(orderTotal(order))} FCFA</td>
+      <td>${escapeHtml(orderTime(order))}</td>
+    </tr>
+  `).join("");
+  const ticketWindow = window.open("", "_blank", "width=1100,height=900");
+  if (!ticketWindow) {
+    showToast("Impossible d'ouvrir l'impression.");
+    return;
+  }
+  const filtreMeta = `Date : ${escapeHtml(formatDateDdMmYyyy(date))} &mdash; Statut : ${statusLab} &mdash; Type : ${escapeHtml(typeLab)}`;
+  ticketWindow.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>Commandes filtrées</title><style>body{font-family:Arial,sans-serif;color:#111;padding:28px}header{display:flex;justify-content:space-between;gap:18px;border-bottom:2px solid #111;padding-bottom:14px;margin-bottom:18px}h1,h2,p{margin:0 0 8px}.meta{color:#555;font-size:13px;line-height:1.45}.summary{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:16px 0}.box{border:1px solid #111;padding:12px}.box strong{display:block;font-size:18px;margin-top:4px}table{width:100%;border-collapse:collapse;margin-top:12px;font-size:12px}th,td{border-bottom:1px solid #ddd;padding:7px 6px;text-align:left}th{background:#f2f2f2}td:nth-child(n+6){text-align:right}td:last-child{text-align:left}@media print{body{padding:0}table{font-size:11px}}</style></head><body><header><div><h1>${escapeHtml(site?.nom || "Maquis")}</h1><p>${escapeHtml(site?.ville || "")} ${escapeHtml(site?.pays || "")}</p><p class="meta">${filtreMeta}</p></div><div><h2>Gestion des commandes</h2><p class="meta">Imprimé le ${escapeHtml(formatDateTimeDdMmYyyy(new Date()))}</p></div></header><div class="summary"><div class="box">Lignes affichées<strong>${fmt(orders.length)}</strong></div><div class="box">Total (liste)<strong>${fmt(totalListe)} FCFA</strong></div><div class="box">Journée affichée<strong>${escapeHtml(formatDateDdMmYyyy(date))}</strong></div></div><table><thead><tr><th>Numéro</th><th>Table / client</th><th>Serveur</th><th>Statut</th><th>Type</th><th>Articles</th><th>Montant</th><th>Heure</th></tr></thead><tbody>${rows}</tbody></table><script>window.onload=function(){window.print();}</script></body></html>`);
+  ticketWindow.document.close();
+}
+
+function renderOrdersManagement() {
+  const { orders, date, activeOrders, salesToday } = computeOrdersManagementList();
 
   document.getElementById("orders-today-kpi").textContent = String(activeOrders.filter((order) => saleDateValue(order) === date).length + salesToday.length);
   document.getElementById("orders-pending-kpi").textContent = String(activeOrders.filter((order) => orderStatus(order) === "En attente").length);
@@ -11272,7 +11315,7 @@ function attachEvents() {
     resetOrderForm();
     openOrderEditor();
   });
-  document.getElementById("orders-filter-btn").addEventListener("click", renderOrdersManagement);
+  document.getElementById("print-orders-management-btn")?.addEventListener("click", printOrdersManagementList);
   ["orders-filter-date", "orders-filter-status", "orders-filter-type"].forEach((id) => {
     document.getElementById(id).addEventListener("change", renderOrdersManagement);
   });

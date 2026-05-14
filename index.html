@@ -331,7 +331,7 @@
             </div>
             <div class="form-group">
               <label>&nbsp;</label>
-              <button id="orders-filter-btn" class="btn btn-primary" type="button">Filtrer</button>
+              <button id="print-orders-management-btn" class="btn btn-outline" type="button">Imprimer la periode</button>
             </div>
           </div>
           <div class="stock-table-wrap" style="margin-top:18px">
@@ -512,15 +512,11 @@
           <div class="caisse-shell">
             <div class="caisse-shell-intro">
               <p class="eyebrow">Caisse</p>
-              <h3 class="caisse-shell-title">Historique &amp; recouvrement</h3>
-              <p class="muted caisse-shell-copy">Consultez les ventes closes ou suivez les crédits clients.</p>
+              <h3 class="caisse-shell-title">Recouvrement crédits</h3>
+              <p class="muted caisse-shell-copy">Les ventes encaissées et factures du jour sont visibles dans <strong>Commandes</strong>. Ici : versements et suivi des créances clients.</p>
             </div>
-            <nav class="caisse-inner-tabs" role="tablist" aria-label="Sections caisse">
-              <button type="button" class="tab caisse-inner-tab active" role="tab" aria-selected="true" data-caisse-inner="historique">Historique ventes</button>
-              <button type="button" class="tab caisse-inner-tab" role="tab" aria-selected="false" data-caisse-inner="recouvrement">Recouvrement crédits</button>
-            </nav>
 
-            <div id="ventes-caisse-panel-historique" class="caisse-inner-panel" role="tabpanel" data-caisse-panel="historique" aria-hidden="false">
+            <div id="ventes-caisse-panel-historique" class="caisse-inner-panel hidden" role="tabpanel" data-caisse-panel="historique" aria-hidden="true">
               <div class="section-head">
                 <h3>Historique des ventes finalisees</h3>
                 <span class="section-meta">Factures clôturées</span>
@@ -543,7 +539,7 @@
               <div id="ventes-list"></div>
             </div>
 
-            <div id="ventes-caisse-panel-recouvrement" class="caisse-inner-panel hidden credit-recovery-panel" role="tabpanel" data-caisse-panel="recouvrement" aria-hidden="true">
+            <div id="ventes-caisse-panel-recouvrement" class="caisse-inner-panel credit-recovery-panel" role="tabpanel" data-caisse-panel="recouvrement" aria-hidden="false">
               <div class="section-head credit-recovery-head">
                 <div>
                   <p class="eyebrow" style="margin-bottom:4px">Recouvrement</p>
@@ -1287,7 +1283,7 @@
         </span>
         <span class="bottom-nav-label">Commandes</span>
       </button>
-      <button type="button" class="nav-btn bottom-nav-item" data-page="ventes" data-ventes-subtab="caisse" data-caisse-inner="historique" aria-current="false">
+      <button type="button" class="nav-btn bottom-nav-item" data-page="ventes" data-ventes-subtab="caisse" data-caisse-inner="recouvrement" aria-current="false">
         <span class="bottom-nav-icon-wrap">
           <svg class="nav-icon bottom-nav-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1.5 2A1.5 1.5 0 0 0 0 3.5v2h15v-2A1.5 1.5 0 0 0 13.5 2h-12zM15 7H1v5.5a1.5 1.5 0 0 0 1.5 1.5h11a1.5 1.5 0 0 0 1.5-1.5V7z"/></svg>
         </span>
@@ -2186,6 +2182,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=155"></script>
+  <script src="./app-orders.js?v=158"></script>
 </body>
 </html>
