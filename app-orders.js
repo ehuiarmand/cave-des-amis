@@ -2234,6 +2234,42 @@ function syncDualZonePricingUi() {
       renderQrPreview();
     }
   }
+
+  const stockHint = document.getElementById("stock-sale-formats-hint");
+  if (stockHint) {
+    stockHint.textContent = dual
+      ? "Un format = quantite de bouteilles vendues ensemble avec son prix cave et prix maquis."
+      : "Un format = quantite de bouteilles vendues ensemble avec un prix de vente unique (FCFA).";
+  }
+  const stockModal = document.getElementById("modal-stock");
+  const formatRows = [...document.querySelectorAll("[data-format-row]")];
+  if (stockModal && !stockModal.classList.contains("hidden") && formatRows.length) {
+    const snap = formatRows.map((row) => {
+      const quantite = Math.max(1, Number(row.querySelector(".stock-format-qty")?.value) || 1);
+      const rawInt = String(row.querySelector(".stock-format-int")?.value ?? "").trim();
+      const rawExtEl = row.querySelector(".stock-format-ext");
+      const rawExt = rawExtEl ? String(rawExtEl.value ?? "").trim() : rawInt;
+      const prixInterieur = rawInt === "" ? "" : Number(rawInt);
+      let prixExterieur;
+      if (!dual) {
+        prixExterieur = prixInterieur === "" ? "" : prixInterieur;
+      } else if (rawExt === "") {
+        prixExterieur = prixInterieur === "" ? "" : prixInterieur;
+      } else {
+        prixExterieur = Number(rawExt);
+      }
+      return { quantite, prixInterieur, prixExterieur };
+    });
+    renderStockSaleFormats(snap);
+    if (!dual) {
+      const kitInt = document.getElementById("s-prix-kit-int");
+      const kitExt = document.getElementById("s-prix-kit-ext");
+      if (kitInt && kitExt) kitExt.value = kitInt.value;
+      updateStockPriceInput();
+    }
+  }
+
+  if (currentPage === "stock") renderStock();
 }
 
 function applyRoleVisibility() {
@@ -5805,6 +5841,7 @@ function renderStock() {
     ? allItems.filter((item) => String(item.article || "").toLowerCase().includes(term))
     : allItems;
   const site = currentSite();
+  const dualPricing = siteUsesDualZonePricing(site);
   const globalSeuil = Number(site?.seuilStock) || 5;
   let totalValue = 0;
   let nbAlerte = 0;
@@ -5850,8 +5887,10 @@ function renderStock() {
       <td style="text-align:right"><strong>${fmt(actuel)}</strong></td>
       <td style="text-align:right">${fmt(item.seuilMin)}</td>
       <td class="${D}" style="text-align:right">${fmt(item.prixAchat || 0)} / cas.</td>
-      <td class="${D}" style="text-align:right">${fmt(prixInt)}</td>
-      <td class="${D}" style="text-align:right">${fmt(prixExt)}</td>
+      ${dualPricing
+      ? `<td class="${D}" style="text-align:right">${fmt(prixInt)}</td>
+      <td class="${D}" style="text-align:right">${fmt(prixExt)}</td>`
+      : `<td class="${D}" style="text-align:right">${fmt(prixInt)}</td>`}
       <td class="${D}" style="text-align:right">${fmt(valeur)}</td>
       <td>${statusBadge}</td>
       <td class="stock-actions-cell">
@@ -5888,8 +5927,10 @@ function renderStock() {
             <th class="th-blue" style="text-align:right">Stk Actuel</th>
             <th class="th-orange" style="text-align:right">Seuil</th>
             <th class="th-orange scd" style="text-align:right">Prix Achat / cas.</th>
-            <th class="th-orange scd" style="text-align:right">Prix Vente Int.</th>
-            <th class="th-orange scd" style="text-align:right">Prix Vente Ext.</th>
+            ${dualPricing
+            ? `<th class="th-orange scd" style="text-align:right">Prix Vente Int.</th>
+            <th class="th-orange scd" style="text-align:right">Prix Vente Ext.</th>`
+            : `<th class="th-orange scd" style="text-align:right">Prix vente</th>`}
             <th class="th-blue scd" style="text-align:right">Valeur Stk</th>
             <th class="th-blue">Statut</th>
             <th></th>
@@ -8280,23 +8321,39 @@ async function advanceOrder(orderId) {
 }
 
 function updateStockPriceInput() {
+  const dual = siteUsesDualZonePricing();
+  const kitInt = document.getElementById("s-prix-kit-int");
+  const input = document.getElementById("s-price-location-value");
+  if (!dual) {
+    if (input) input.value = kitInt?.value || "";
+    return;
+  }
   const location = document.getElementById("s-price-location")?.value || "int";
   const hiddenId = location === "ext" ? "s-prix-kit-ext" : "s-prix-kit-int";
-  const input = document.getElementById("s-price-location-value");
   if (input) input.value = document.getElementById(hiddenId)?.value || "";
 }
 
 function commitStockPriceInput() {
+  const dual = siteUsesDualZonePricing();
+  const input = document.getElementById("s-price-location-value");
+  const kitInt = document.getElementById("s-prix-kit-int");
+  const kitExt = document.getElementById("s-prix-kit-ext");
+  if (!dual) {
+    const v = input?.value ?? "";
+    if (kitInt) kitInt.value = v;
+    if (kitExt) kitExt.value = v;
+    return;
+  }
   const location = document.getElementById("s-price-location")?.value || "int";
   const hiddenId = location === "ext" ? "s-prix-kit-ext" : "s-prix-kit-int";
   const hidden = document.getElementById(hiddenId);
-  const input = document.getElementById("s-price-location-value");
   if (hidden && input) hidden.value = input.value;
 }
 
 function renderStockSaleFormats(formats = [{ quantite: 1, prixInterieur: "", prixExterieur: "" }]) {
   const container = document.getElementById("sale-formats-list");
   if (!container) return;
+  const dual = siteUsesDualZonePricing();
   const rows = formats.length ? formats : [{ quantite: 1, prixInterieur: "", prixExterieur: "" }];
   container.innerHTML = rows.map((format, index) => `
     <div class="sale-format-row" data-format-row>
@@ -8304,26 +8361,34 @@ function renderStockSaleFormats(formats = [{ quantite: 1, prixInterieur: "", pri
         <label>Quantite</label>
         <input class="stock-format-qty" type="number" min="1" value="${escapeHtml(format.quantite || 1)}" placeholder="1">
       </div>
-      <div class="form-group">
+      ${dual
+      ? `<div class="form-group">
         <label>Prix cave</label>
         <input class="stock-format-int" type="number" min="0" value="${escapeHtml(format.prixInterieur || "")}" placeholder="ex: 700">
       </div>
       <div class="form-group">
         <label>Prix maquis</label>
         <input class="stock-format-ext" type="number" min="0" value="${escapeHtml(format.prixExterieur || "")}" placeholder="ex: 600">
-      </div>
+      </div>`
+      : `<div class="form-group">
+        <label>Prix de vente (FCFA)</label>
+        <input class="stock-format-int" type="number" min="0" value="${escapeHtml(format.prixInterieur || format.prixExterieur || "")}" placeholder="ex: 700">
+      </div>`}
       <button type="button" class="mini-btn" data-remove-sale-format="${index}" ${rows.length <= 1 ? "disabled" : ""}>Retirer</button>
     </div>
   `).join("");
 }
 
 function readStockSaleFormats() {
+  const dual = siteUsesDualZonePricing();
   const rows = [...document.querySelectorAll("[data-format-row]")];
   const byQuantity = new Map();
   rows.forEach((row) => {
     const quantite = Math.max(1, Number(row.querySelector(".stock-format-qty")?.value) || 1);
     const prixInterieur = Number(row.querySelector(".stock-format-int")?.value) || 0;
-    const prixExterieur = Number(row.querySelector(".stock-format-ext")?.value) || prixInterieur;
+    const prixExterieur = dual
+      ? (Number(row.querySelector(".stock-format-ext")?.value) || prixInterieur)
+      : prixInterieur;
     if (prixInterieur > 0) byQuantity.set(quantite, { quantite, prixInterieur, prixExterieur });
   });
   return [...byQuantity.values()].sort((a, b) => a.quantite - b.quantite);
@@ -8335,7 +8400,7 @@ function mergeStockModalKitPricesIntoFormats(formats) {
   const kitExt = Number(document.getElementById("s-prix-kit-ext")?.value) || 0;
   const packFromForm = Math.max(1, Number(document.getElementById("s-pack")?.value) || 1);
   if (kitInt <= 0) return formats;
-  const ext = kitExt > 0 ? kitExt : kitInt;
+  const ext = siteUsesDualZonePricing() ? (kitExt > 0 ? kitExt : kitInt) : kitInt;
   const list = Array.isArray(formats) ? formats.slice() : [];
   if (!list.length) {
     return [{ quantite: packFromForm, prixInterieur: kitInt, prixExterieur: ext }];
@@ -8357,11 +8422,16 @@ function mergeStockModalKitPricesIntoFormats(formats) {
 }
 
 function addStockSaleFormat() {
-  const formats = [...document.querySelectorAll("[data-format-row]")].map((row) => ({
-    quantite: Math.max(1, Number(row.querySelector(".stock-format-qty")?.value) || 1),
-    prixInterieur: Number(row.querySelector(".stock-format-int")?.value) || "",
-    prixExterieur: Number(row.querySelector(".stock-format-ext")?.value) || "",
-  }));
+  const dual = siteUsesDualZonePricing();
+  const formats = [...document.querySelectorAll("[data-format-row]")].map((row) => {
+    const pi = Number(row.querySelector(".stock-format-int")?.value) || "";
+    const pe = dual ? (Number(row.querySelector(".stock-format-ext")?.value) || "") : pi;
+    return {
+      quantite: Math.max(1, Number(row.querySelector(".stock-format-qty")?.value) || 1),
+      prixInterieur: pi,
+      prixExterieur: pe,
+    };
+  });
   const maxQty = formats.reduce((max, format) => Math.max(max, Number(format.quantite) || 1), 0);
   renderStockSaleFormats([...formats, { quantite: maxQty + 1, prixInterieur: "", prixExterieur: "" }]);
 }
@@ -8386,6 +8456,7 @@ function resetStockForm() {
     preservedValue: siteSingleBreweryName() || "",
   });
   renderStockSaleFormats();
+  updateStockPriceInput();
   document.getElementById("stock-modal-title").textContent = "Nouvel article en stock";
   document.getElementById("save-stock-btn").textContent = "Enregistrer l'article";
   syncSingleBreweryUi();
@@ -8415,6 +8486,9 @@ function openEditStock(itemId) {
   });
   document.getElementById("s-prix-kit-int").value = String(item.prixVenteInt || item.prixKitInt || item.prixBouteille || item.prixVente || "");
   document.getElementById("s-prix-kit-ext").value = String(item.prixVenteExt || item.prixKitExt || item.prixBouteille || item.prixVente || "");
+  if (!siteUsesDualZonePricing()) {
+    document.getElementById("s-prix-kit-ext").value = document.getElementById("s-prix-kit-int").value;
+  }
   document.getElementById("s-price-location").value = "int";
   renderStockSaleFormats(normalizeSaleFormats(item));
   updateStockPriceInput();
@@ -8449,10 +8523,19 @@ async function saveStock() {
   };
   if (siteIsSingleBrewery() && !fields.brasserie) { showToast("Brasserie unique manquante dans les paramètres du maquis."); return; }
   fields.formatsVente = mergeStockModalKitPricesIntoFormats(readStockSaleFormats());
+  if (!siteUsesDualZonePricing()) {
+    fields.formatsVente = fields.formatsVente.map((f) => ({
+      ...f,
+      prixExterieur: f.prixInterieur,
+    }));
+  }
   const primaryFormat = fields.formatsVente.find((format) => format.quantite === 1) || fields.formatsVente[0];
   fields.packSize = Math.max(1, Number(primaryFormat?.quantite) || Number(document.getElementById("s-pack").value) || 1);
   fields.prixVenteInt = Number(primaryFormat?.prixInterieur) || Number(document.getElementById("s-prix-kit-int").value) || 0;
   fields.prixVenteExt = Number(primaryFormat?.prixExterieur) || Number(document.getElementById("s-prix-kit-ext").value) || fields.prixVenteInt;
+  if (!siteUsesDualZonePricing()) {
+    fields.prixVenteExt = fields.prixVenteInt;
+  }
   // Si article à l'unité, forcer 1 unité par lot.
   if (String(fields.lotType).toLowerCase() === "unite" || String(fields.lotType).toLowerCase() === "unité") {
     fields.caseSize = 1;
@@ -8465,7 +8548,11 @@ async function saveStock() {
   fields.prixKitInt = fields.packSize > 1 ? fields.prixVenteInt : 0;
   fields.prixKitExt = fields.packSize > 1 ? fields.prixVenteExt : 0;
   if (fields.prixAchat <= 0 || !fields.formatsVente.length || fields.prixVenteInt <= 0) {
-    showToast("Prix achat et au moins un format avec prix cave obligatoires.");
+    showToast(
+      siteUsesDualZonePricing()
+        ? "Prix achat et au moins un format avec prix cave obligatoires."
+        : "Prix achat et au moins un format avec prix de vente obligatoires.",
+    );
     return;
   }
   if (fields.prixVenteExt <= 0) {
@@ -9110,9 +9197,10 @@ function exportStockExcel() {
   const items = recordsForSite(state.stock).slice().sort((a, b) => a.article.localeCompare(b.article, "fr"));
   if (!items.length) { showToast("Aucun article en stock a exporter."); return; }
 
+  const dualExport = siteUsesDualZonePricing();
   const rows = items.map((item) => {
     const { prixInt, prixExt } = resolveItemPrices(item);
-    return {
+    const base = {
       "Article": item.article,
       "Categorie": item.cat || "",
       "Taille casier": caseSize(item),
@@ -9125,14 +9213,16 @@ function exportStockExcel() {
       "Reserve (btl)": stockReserve(item),
       "Seuil Min (btl)": Number(item.seuilMin) || 0,
       "Prix Achat / cas. (FCFA)": Number(item.prixAchat) || 0,
-      "Prix Vente Int. (FCFA)": prixInt,
-      "Prix Vente Ext. (FCFA)": prixExt,
     };
+    if (dualExport) {
+      return { ...base, "Prix Vente Int. (FCFA)": prixInt, "Prix Vente Ext. (FCFA)": prixExt };
+    }
+    return { ...base, "Prix Vente (FCFA)": prixInt };
   });
 
   const ws = XLSX.utils.json_to_sheet(rows);
   // Largeurs de colonnes
-  ws["!cols"] = [22, 18, 13, 10, 17, 13, 13, 16, 12, 13, 15, 22, 22, 22].map((w) => ({ wch: w }));
+  ws["!cols"] = (dualExport ? [22, 18, 13, 10, 17, 13, 13, 16, 12, 13, 15, 22, 22, 22] : [22, 18, 13, 10, 17, 13, 13, 16, 12, 13, 15, 22, 22]).map((w) => ({ wch: w }));
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Stock");
   const siteName = (currentSite()?.nom || "stock").replace(/[^a-zA-Z0-9]/g, "_");
@@ -9152,6 +9242,7 @@ async function importStockExcel(file) {
       const rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
       if (!rows.length) { showToast("Fichier vide ou format incorrect."); return; }
 
+      const dualImport = siteUsesDualZonePricing();
       let created = 0, updated = 0, skipped = 0;
       for (const row of rows) {
         const articleName = String(row["Article"] || "").trim();
@@ -9161,8 +9252,16 @@ async function importStockExcel(file) {
         const packS = Math.max(1, Number(row["Btl / kit"]) || 1);
         const initBtl = Math.max(0, Number(row["Stock Initial (btl)"]) || 0);
         const prixAchat = Number(row["Prix Achat / cas. (FCFA)"]) || 0;
-        const prixVenteInt = Number(row["Prix Vente Int. (FCFA)"]) || 0;
-        const prixVenteExt = Number(row["Prix Vente Ext. (FCFA)"]) || prixVenteInt;
+        let prixVenteInt;
+        let prixVenteExt;
+        if (dualImport) {
+          prixVenteInt = Number(row["Prix Vente Int. (FCFA)"]) || 0;
+          prixVenteExt = Number(row["Prix Vente Ext. (FCFA)"]) || prixVenteInt;
+        } else {
+          const singleCol = Number(row["Prix Vente (FCFA)"]) || 0;
+          prixVenteInt = singleCol || Number(row["Prix Vente Int. (FCFA)"]) || 0;
+          prixVenteExt = prixVenteInt;
+        }
         const csDiv = Math.max(1, caseS);
 
         const fields = {
