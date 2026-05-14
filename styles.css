@@ -2264,7 +2264,8 @@ textarea { font: inherit; }
 
   .topbar-more-btn { display: grid; }
 
-  /* Évite doublon avec la barre du bas : onglets Ventes accessibles via Commandes / Caisse / Plus */
+  /* Évite doublon avec la barre du bas (Commandes / Caisse) : on masque la rangée d’onglets.
+     Consignes et QR restent accessibles via le menu « Plus » (bas d’écran). */
   #page-ventes > .tabs.page-subtabs {
     display: none !important;
   }

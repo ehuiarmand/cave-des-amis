@@ -109,8 +109,8 @@
           </div>
           <button type="button" id="topbar-more-btn" class="topbar-more-btn" aria-label="Menu rapide">⋯</button>
           <select id="site-switcher" class="site-switcher" aria-label="Maquis actif"></select>
-          <p id="header-site-scope" class="muted" style="font-size:0.72rem;margin:6px 0 0;text-align:right;max-width:260px;line-height:1.35"></p>
-          <p id="top-session-expires" class="muted" style="font-size:0.7rem;margin:2px 0 0;text-align:right;max-width:260px;line-height:1.35"></p>
+          <p id="header-site-scope" class="muted hidden" aria-hidden="true" style="font-size:0.72rem;margin:6px 0 0;text-align:right;max-width:260px;line-height:1.35"></p>
+          <p id="top-session-expires" class="muted hidden" aria-hidden="true" style="font-size:0.7rem;margin:2px 0 0;text-align:right;max-width:260px;line-height:1.35"></p>
           <div class="top-journal-block" id="top-journal-block" title="Date utilisée pour les ventes, le point du jour et les écritures du maquis actif.">
             <span class="top-journal-label">Journée comptable</span>
             <span id="top-journal-date" class="top-journal-date" aria-live="polite">—</span>
@@ -458,7 +458,7 @@
               <select id="consigne-facture-select">
                 <option value="">— Saisie manuelle (sans facture) —</option>
               </select>
-              <p class="muted" style="margin:6px 0 0;font-size:0.82rem">Pour un <strong>mélange</strong> : indiquez le nombre de bouteilles laissées par <strong>ligne</strong> (colonne « Reliquat »), puis <strong>Enregistrer</strong> — une consigne est créée par article. Le bouton « +1 » préremplit une ligne.</p>
+              <p class="muted" style="margin:6px 0 0;font-size:0.82rem">Liste limitée aux factures encaissées pour la <strong>journée comptable en cours</strong> (date PDJ du maquis). Pour un <strong>mélange</strong> : indiquez le nombre de bouteilles laissées par <strong>ligne</strong> (colonne « Reliquat »), puis <strong>Enregistrer</strong> — une consigne est créée par article. Le bouton « +1 » préremplit une ligne.</p>
             </div>
             <div id="consigne-facture-lines-wrap" class="hidden" style="margin-bottom:12px;border:1px solid var(--border);border-radius:8px;padding:10px;max-height:240px;overflow:auto">
               <p class="eyebrow" style="margin:0 0 8px;font-size:0.75rem">Lignes de la facture</p>
@@ -1334,6 +1334,13 @@
               <span class="mobile-more-feature-desc">Commandes clients et impression des QR.</span>
             </span>
           </button>
+          <button type="button" class="mobile-more-feature" data-more-nav="consignes">
+            <span class="mobile-more-feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M8 3h8l1 4H7L8 3z"/><path d="M7 7h10v12a2 2 0 01-2 2H9a2 2 0 01-2-2V7z"/><path d="M10 11h4M12 9v4"/></svg></span>
+            <span class="mobile-more-feature-copy">
+              <strong>Consignes</strong>
+              <span class="mobile-more-feature-desc">Reliquats payés et consignes bouteilles.</span>
+            </span>
+          </button>
           <button type="button" class="mobile-more-feature" data-more-nav="guide">
             <span class="mobile-more-feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg></span>
             <span class="mobile-more-feature-copy">
@@ -2179,6 +2186,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=151"></script>
+  <script src="./app-orders.js?v=155"></script>
 </body>
 </html>

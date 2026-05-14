@@ -2024,6 +2024,31 @@ function renderSiteSwitcher() {
   select.disabled = availableSites.length <= 1;
   syncDualZonePricingUi();
   syncSingleBreweryUi();
+  syncSiteSwitcherDetailTitle();
+}
+
+/** Infobulle du sélecteur maquis : maquis actif + échéance indicative de session (lignes masquées dans la barre). */
+function syncSiteSwitcherDetailTitle() {
+  const select = document.getElementById("site-switcher");
+  if (!select) return;
+  if (!state || !sessionUser) {
+    select.removeAttribute("title");
+    return;
+  }
+  const sid = currentSiteId() || "";
+  const parts = [];
+  if (sid) {
+    parts.push(`Maquis actif : ${currentSite()?.nom || sid} (${sid})`);
+  }
+  if (typeof sessionDeadlineUnix === "number" && sessionDeadlineUnix > 0) {
+    const ms = sessionDeadlineUnix * 1000;
+    if (ms > Date.now()) {
+      parts.push(`Session (echeance indicative) : ${formatDateTimeDdMmYyyy(new Date(ms))}`);
+    }
+  }
+  parts.push("Les ecritures (ventes, stock…) sont rattachees au maquis choisi.");
+  parts.push("L'expiration reelle de session depend de l'inactivite et du serveur (MAQUIS_MANAGER_SESSION_*).");
+  select.title = parts.join(" ");
 }
 
 /** Maquis avec prix cave / terrasse ou tarif unique (pas de lieu en vente). */
@@ -2197,30 +2222,7 @@ function renderTopbar() {
   const badge = document.getElementById("role-badge");
   badge.textContent = roleLabel;
   badge.title = `Compte : ${sessionUserDisplayLabel() || "—"} (${sessionUser || "—"}). Role effectif : ${roleLabel}. Les actions sensibles sont verifiees cote serveur selon ce role et les maquis autorises.`;
-  const sid = currentSiteId() || "";
-  const scopeEl = document.getElementById("header-site-scope");
-  if (scopeEl) {
-    scopeEl.textContent = sid
-      ? `Maquis actif : ${currentSite()?.nom || sid} (${sid})`
-      : "";
-    scopeEl.title = "Les ecritures (ventes, stock…) sont rattachees a ce maquis dans l'etat enregistre.";
-  }
-  const sessExp = document.getElementById("top-session-expires");
-  if (sessExp) {
-    if (typeof sessionDeadlineUnix === "number" && sessionDeadlineUnix > 0) {
-      const ms = sessionDeadlineUnix * 1000;
-      if (ms > Date.now()) {
-        sessExp.textContent = `Session (echeance indicative) : ${formatDateTimeDdMmYyyy(new Date(ms))}`;
-        sessExp.title = "L'expiration reelle depend de l'inactivite et de la duree max. configurees sur le serveur (MAQUIS_MANAGER_SESSION_*).";
-      } else {
-        sessExp.textContent = "";
-        sessExp.removeAttribute("title");
-      }
-    } else {
-      sessExp.textContent = "";
-      sessExp.removeAttribute("title");
-    }
-  }
+  syncSiteSwitcherDetailTitle();
 }
 
 function renderHero() {
@@ -2805,6 +2807,7 @@ function bindMobileMoreSheet() {
     const nav = link.dataset.moreNav;
     closeMobileMoreSheet();
     if (nav === "qr") navigate("ventes", { ventesSubtab: "qr" });
+    else if (nav === "consignes") navigate("ventes", { ventesSubtab: "consignes" });
     else if (nav === "guide") navigate("guide");
     else if (nav === "charges") navigate("charges");
     else if (nav === "params") navigate("params");
@@ -3740,6 +3743,8 @@ function renderDailyStockCheck() {
   const dStr = pdjCalendarDate();
   const closed = stockCheckForSiteDate(dStr, currentSiteId());
   const dayBook = dayBookFor(dStr, currentSiteId());
+  const pendingForClose = pendingOrdersForJournalDate(dStr, currentSiteId());
+  const closeBlockedByPending = pendingForClose.length > 0;
   const container = document.getElementById("pdj-stock-check");
   const button = document.getElementById("close-day-btn");
   const printBtn = document.getElementById("print-closure-btn");
@@ -3747,6 +3752,15 @@ function renderDailyStockCheck() {
   const superadminCorrection = Boolean(closed && canAnyAdmin());
   const openingBlocked = PDJ_REQUIRE_CASH_OPENING && dayBookNeedsCashOpening(dayBook);
   const isPastDate = dStr !== today();
+  const pendingBanner = closeBlockedByPending
+    ? `<div class="inline-card" style="margin-bottom:12px;border-left:3px solid #ff8e82">
+        <strong>Clôture impossible</strong>
+        <p class="muted" style="margin-top:6px;font-size:0.86rem;line-height:1.45">
+          ${pendingForClose.length} commande(s) au statut <strong>En attente</strong> pour le <strong>${escapeHtml(formatDateDdMmYyyy(dStr))}</strong>.
+          Depuis <strong>Ventes</strong>, ouvrez chaque commande et passez-la en <strong>Servi</strong> (ou annulez-la) avant de clôturer la journée.
+        </p>
+      </div>`
+    : "";
   button.textContent = superadminCorrection
     ? "Mettre à jour la clôture"
     : closed && canManagePdjAccounting() && !canAnyAdmin()
@@ -3759,7 +3773,12 @@ function renderDailyStockCheck() {
   if (printBtn) printBtn.classList.toggle("hidden", !closed);
   if (!items.length) {
     container.innerHTML = emptyState("Aucun stock", "Ajoutez des articles avant de faire le point de fermeture.");
-    button.disabled = false;
+    button.disabled = closeBlockedByPending;
+    if (closeBlockedByPending) {
+      button.title = `${pendingForClose.length} commande(s) en attente — traitez-les depuis Ventes avant clôture.`;
+    } else {
+      button.removeAttribute("title");
+    }
     return;
   }
 
@@ -3769,9 +3788,15 @@ function renderDailyStockCheck() {
       "Validez le montant en caisse en haut de cette page avant la vérification stock et la clôture.",
     );
     button.disabled = true;
+    button.removeAttribute("title");
     return;
   }
-  button.disabled = false;
+  button.disabled = closeBlockedByPending;
+  if (closeBlockedByPending) {
+    button.title = `${pendingForClose.length} commande(s) en attente — traitez-les depuis Ventes avant clôture.`;
+  } else {
+    button.removeAttribute("title");
+  }
 
   if (!canManagePdjAccounting()) {
     button.disabled = true;
@@ -3810,6 +3835,7 @@ function renderDailyStockCheck() {
       </tr>`;
     }).join("");
     container.innerHTML = `
+      ${pendingBanner}
       <p class="muted" style="margin-bottom:10px;font-size:0.88rem">
         Lecture seule — la saisie de fermeture et la clôture sont réservées au <strong>gérant</strong> ou à un <strong>administrateur</strong>.
       </p>
@@ -3836,6 +3862,7 @@ function renderDailyStockCheck() {
       "La journée est clôturée (lecture seule). Un administrateur peut corriger la fiche si nécessaire.",
     );
     button.disabled = true;
+    button.removeAttribute("title");
     if (printBtn) printBtn.classList.toggle("hidden", !closed);
     return;
   }
@@ -3910,7 +3937,7 @@ function renderDailyStockCheck() {
   const openedLabel = dayBook?.openedAt ? formatDateTimeDdMmYyyy(dayBook.openedAt) : "—";
   const hadClosingFocus = document.activeElement?.id === "pdj-closing-cash";
   container.innerHTML = `
-      ${correctionBanner}
+      ${pendingBanner}${correctionBanner}
       <div class="inline-card" style="margin-bottom:12px">
         <span class="muted">Référence ouverture</span>
         <strong>${escapeHtml(openedLabel)}</strong>
@@ -3955,6 +3982,12 @@ function renderDailyStockCheck() {
         /* ignore */
       }
     }
+  }
+  button.disabled = closeBlockedByPending;
+  if (closeBlockedByPending) {
+    button.title = `${pendingForClose.length} commande(s) en attente — traitez-les depuis Ventes avant clôture.`;
+  } else {
+    button.removeAttribute("title");
   }
 }
 
@@ -4269,6 +4302,19 @@ function nextOrderStatus(status) {
   return "";
 }
 
+/** Commandes du maquis pour la date comptable encore au statut explicite « En attente » (ex. commandes QR). */
+function pendingOrdersForJournalDate(dateStr, siteId = currentSiteId()) {
+  const multi = multiSiteActive();
+  const d = String(dateStr || "").trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return [];
+  return (state?.commandes || []).filter((o) => {
+    if (!rowMatchesSite(o, siteId, multi)) return false;
+    const od = String(o.date || "").trim().slice(0, 10);
+    if (od !== d) return false;
+    return String(o.status || "").trim() === "En attente";
+  });
+}
+
 function canDeleteOrder(order) {
   const status = orderStatus(order);
   if (status === "Paye" || status === "PayÃ©" || status === "Payé") return canAnyAdmin();
@@ -4336,6 +4382,12 @@ function paidOrdersFromSales() {
     if (ts && !paidByFacture[key].createdAt) paidByFacture[key].createdAt = ts;
   });
   return Object.values(paidByFacture);
+}
+
+/** Même agrégat que paidOrdersFromSales, limité à la date comptable PDJ active (maquis courant). */
+function paidOrdersFromSalesForCurrentAccountingDay() {
+  const d = pdjCalendarDate();
+  return paidOrdersFromSales().filter((o) => String(o.date || "").trim().slice(0, 10) === d);
 }
 
 function managementOrders() {
@@ -4810,6 +4862,7 @@ function renderVentesPage() {
   renderSalesHistory();
   renderCreditRecovery();
   renderConsignes();
+  if (currentPage === "pdj") renderPointDuJour();
 }
 
 // ─── CONSIGNES ────────────────────────────────────────────────────────────────
@@ -4907,6 +4960,15 @@ async function saveConsignesMultiFromFacture(entries) {
   const fact0 = String(entries[0]?.vente?.factureNumber || "").trim();
   const note = consigneMergeNoteFacture(noteBase, fact0);
 
+  const dPdj = pdjCalendarDate();
+  for (const { vente } of entries) {
+    const vd = String(vente?.date || "").trim().slice(0, 10);
+    if (vd !== dPdj) {
+      showToast("Choisissez une facture de la journée comptable en cours (liste Facture concernée).");
+      return;
+    }
+  }
+
   state.consignes = state.consignes || [];
   state.nextId = state.nextId || {};
   const now = new Date().toISOString();
@@ -4957,7 +5019,7 @@ function populateConsigneFactureSelect() {
   if (!sel) return;
   const prev = sel.value;
   const ts = (o) => String(o.lignes?.[0]?.soldAt || o.lignes?.[0]?.createdAt || o.createdAt || `${o.date || ""}T23:59:59`);
-  const orders = paidOrdersFromSales()
+  const orders = paidOrdersFromSalesForCurrentAccountingDay()
     .slice()
     .sort((a, b) => ts(b).localeCompare(ts(a)))
     .slice(0, CONSIGNE_FACTURE_SELECT_LIMIT);
@@ -4984,7 +5046,7 @@ function renderConsigneFactureLinesForOrder(orderId) {
     tbody.innerHTML = "";
     return;
   }
-  const order = paidOrdersFromSales().find((o) => String(o.id) === String(orderId));
+  const order = paidOrdersFromSalesForCurrentAccountingDay().find((o) => String(o.id) === String(orderId));
   if (!order?.lignes?.length) {
     wrap.classList.add("hidden");
     tbody.innerHTML = "";
@@ -8280,6 +8342,7 @@ async function closeAccountingDay() {
     return;
   }
   const dStr = pdjCalendarDate();
+  const pendingForClose = pendingOrdersForJournalDate(dStr, currentSiteId());
   // Ne pas comparer dStr à today() : la journée ouverte peut être la veille (nuit / décalage)
   // jusqu'à clôture — seuls les admins peuvent choisir une autre date via le sélecteur PDJ.
   const dayBook = dayBookFor(dStr, currentSiteId());
@@ -8288,6 +8351,12 @@ async function closeAccountingDay() {
     showToast(dStr === today()
       ? "Enregistrez d'abord l'ouverture de caisse pour aujourd'hui."
       : "Enregistrez d'abord l'ouverture de caisse pour cette journee.");
+    return;
+  }
+  if (pendingForClose.length) {
+    showToast(
+      `${pendingForClose.length} commande(s) en attente pour le ${formatDateDdMmYyyy(dStr)}. Passez-les en « Servi » ou annulez-les (Ventes) avant de clôturer.`,
+    );
     return;
   }
   const closingRaw = document.getElementById("pdj-closing-cash")?.value;
