@@ -3842,6 +3842,10 @@ function htmlPdjClosedStockCheckReadOnly(closed, roleNoteHtml) {
           <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px"><span class="muted">Fonds à l'ouverture</span><strong>${fmt(closed.openingCashFcfa)} FCFA</strong></div>
           ${typeof closed.closingCashFcfa === "number" ? `<div style="display:flex;justify-content:space-between"><span class="muted">Dénombrement fermeture</span><strong>${fmt(closed.closingCashFcfa)} FCFA</strong></div>` : ""}
           ${typeof closed.expectedEspecesCash === "number" ? `<div style="display:flex;justify-content:space-between"><span class="muted">Théorique caisse espèces</span><strong>${fmt(closed.expectedEspecesCash)} FCFA</strong></div>` : ""}
+          ${typeof closed.especesChargesJour === "number" && closed.especesChargesJour > 0
+    ? `<div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px"><span class="muted">Dépenses jour (espèces, info)</span><strong>${fmt(closed.especesChargesJour)} FCFA</strong></div>
+          <p class="muted" style="margin:0;font-size:0.8rem;line-height:1.35">Non déduites du théorique (souvent réglées hors caisse de la journée).</p>`
+    : ""}
           ${typeof closed.cashEcartEspeces === "number"
       ? `<div style="display:flex;justify-content:space-between;color:${closed.cashEcartEspeces === 0 ? "#72d7a9" : "#ff8e82"}"><span>Écart espèces</span><strong>${closed.cashEcartEspeces === 0 ? "OK" : `${closed.cashEcartEspeces > 0 ? "+" : ""}${fmt(closed.cashEcartEspeces)} FCFA`}</strong></div>`
       : ""}
@@ -4001,13 +4005,17 @@ function renderDailyStockCheck() {
   const seedFromClose = closed && canAnyAdmin() ? closed : null;
   const ventesJour = recordsForSite(state.ventes).filter((v) => v.date.slice(0, 10) === dStr);
   const totauxJourOpen = paymentTotals(ventesJour);
-  const especesVentes = Number(totauxJourOpen["Espèces"]) || 0;
+  const especesVentes = Number(totauxJourOpen["Espèces"]) || Number(totauxJourOpen["EspÃ¨ces"]) || 0;
   const chargesJour = recordsForSite(state.charges).filter((c) => (c.date || "").slice(0, 10) === dStr);
   const especesCharges = chargesJour.reduce((sum, c) => (
-    normalizePaymentMethodKey(c.paiement) === normalizePaymentMethodKey("Espèces") ? sum + (Number(c.montant) || 0) : sum
+    normalizePaymentMethodKey(c.paiement) === normalizePaymentMethodKey("Espèces")
+    || normalizePaymentMethodKey(c.paiement) === normalizePaymentMethodKey("EspÃ¨ces")
+      ? sum + (Number(c.montant) || 0)
+      : sum
   ), 0);
   const openingCash = Number(dayBook?.openingCashFcfa) || 0;
-  const expectedEspeces = openingCash + especesVentes - especesCharges;
+  /** Théorique caisse = fonds d'ouverture + encaissements espèces du jour (les charges espèces ne sont pas déduites : souvent payées hors caisse du jour). */
+  const expectedEspeces = openingCash + especesVentes;
   const closingSeed = seedFromClose && typeof seedFromClose.closingCashFcfa === "number"
     ? Math.round(Number(seedFromClose.closingCashFcfa))
     : null;
@@ -4077,7 +4085,10 @@ function renderDailyStockCheck() {
         <strong>Fermeture caisse (espèces)</strong>
         <p class="muted" style="margin-top:6px;font-size:0.88rem;line-height:1.45">
           Théorique en caisse : <strong>${fmt(expectedEspeces)} FCFA</strong>
-          (ouverture ${fmt(openingCash)} + ventes espèces ${fmt(especesVentes)} − dépenses réglées en espèces ${fmt(especesCharges)}).
+          (ouverture ${fmt(openingCash)} + ventes espèces ${fmt(especesVentes)}).
+          ${especesCharges > 0
+    ? `Dépenses du jour enregistrées en espèces : <strong>${fmt(especesCharges)} FCFA</strong> — montant informatif, non déduit du théorique (souvent réglé hors caisse de la journée).`
+    : "Aucune dépense en espèces enregistrée à cette date pour ce maquis."}
         </p>
         <div class="form-grid two-cols" style="margin-top:10px">
           <div class="form-group">
@@ -4977,6 +4988,11 @@ async function submitSaisieRapide() {
       state.nextId.ligneCommande = Number(state.nextId.ligneCommande) || 0;
       const selectedOrderId = Number(document.getElementById("sr-order-select")?.value) || 0;
       const creatingNewOrder = !selectedOrderId;
+      const existingOrder = selectedOrderId
+        ? recordsForSite(state.commandes).find((item) => item.id === selectedOrderId)
+        : null;
+      const srClientTrim = (document.getElementById("sr-client")?.value ?? "").trim();
+      if (!assertNomClientCommandeNonQrOrToast(srClientTrim, existingOrder)) return;
       const order = ensureOrder(
         document.getElementById("sr-client")?.value ?? "",
         date,
@@ -5611,6 +5627,11 @@ async function confirmKit() {
   const clientName = (document.getElementById("v-client")?.value || "").trim();
   const date = document.getElementById("v-date")?.value || pdjCalendarDate();
   const note = document.getElementById("v-note")?.value || "";
+  const selectedOrderId = Number(document.getElementById("v-order-select")?.value) || activeOrderId;
+  const existingOrder = selectedOrderId
+    ? recordsForSite(state.commandes).find((item) => item.id === selectedOrderId)
+    : null;
+  if (!assertNomClientCommandeNonQrOrToast(clientName, existingOrder)) return;
   let anyAdded = false;
   for (const article of checked) {
     const product = findKnownProduct(article);
@@ -8068,6 +8089,27 @@ function renderPurchaseOrders() {
   }).join("");
 }
 
+function orderIsQrCommande(order) {
+  return String(order?.source || "").trim() === "qr";
+}
+
+/** Hors commande QR : nom client / table obligatoire. */
+function assertNomClientCommandeNonQrOrToast(clientTrim, existingOrder) {
+  if (existingOrder && orderIsQrCommande(existingOrder)) return true;
+  if (String(clientTrim || "").trim()) return true;
+  showToast("Indiquez le nom du client ou de la table (obligatoire hors commande QR).");
+  return false;
+}
+
+/** Si le formulaire vente affiche la même commande, reprend le nom client saisi avant encaissement. */
+function syncOrderClientFromVentesFormIfEditing(order) {
+  if (!order || orderIsQrCommande(order)) return;
+  const vSel = Number(document.getElementById("v-order-select")?.value) || 0;
+  if (vSel !== order.id) return;
+  const t = (document.getElementById("v-client")?.value || "").trim();
+  if (t) order.client = t;
+}
+
 function ensureOrder(clientName, date, note, selectedOrderIdOverride = undefined) {
   const selectedOrderId = selectedOrderIdOverride !== undefined && selectedOrderIdOverride !== null
     ? Number(selectedOrderIdOverride) || 0
@@ -8077,7 +8119,7 @@ function ensureOrder(clientName, date, note, selectedOrderIdOverride = undefined
     order = {
       id: state.nextId.commande++,
       siteId: currentSiteId(),
-      client: clientName.trim() || `Client ${state.nextId.commande - 1}`,
+      client: clientName.trim(),
       date,
       createdAt: new Date().toISOString(),
       status: "Servi",
@@ -8113,6 +8155,11 @@ async function saveOrderLine() {
   const creatingNewOrder = !selectedOrderId;
   const date = document.getElementById("v-date").value || today();
   if (!assertJournalAllowsSalesOrToast(date, currentSiteId())) return;
+  const existingOrder = selectedOrderId
+    ? recordsForSite(state.commandes).find((item) => item.id === selectedOrderId)
+    : null;
+  const clientTrim = (document.getElementById("v-client").value || "").trim();
+  if (!assertNomClientCommandeNonQrOrToast(clientTrim, existingOrder)) return;
   const order = ensureOrder(document.getElementById("v-client").value, date, document.getElementById("v-note").value);
   const requestedBottles = (Number(document.getElementById("v-qty").value) || 1) * Math.max(1, Number(format?.quantite) || Number(product?.packSize) || 1);
   const availability = stockAvailabilityForLine(product.article, requestedBottles, order.id, editingLineId);
@@ -8184,6 +8231,11 @@ async function finalizeOrder(orderId = activeOrderId) {
   const order = state.commandes.find((item) => item.id === orderId);
   if (!order || !order.lignes.length) {
     showToast("Aucune ligne a facturer pour ce client.");
+    return;
+  }
+  syncOrderClientFromVentesFormIfEditing(order);
+  if (!orderIsQrCommande(order) && !String(order.client || "").trim()) {
+    showToast("Indiquez le nom du client ou de la table avant encaissement (obligatoire hors commande QR).");
     return;
   }
   const saleDateGuard = String(order.date || today()).slice(0, 10);
@@ -8282,6 +8334,11 @@ function openFinalizeDialog(orderId = activeOrderId) {
   const order = state.commandes.find((item) => item.id === orderId);
   if (!order || !order.lignes.length) {
     showToast("Aucune ligne a facturer pour ce client.");
+    return;
+  }
+  syncOrderClientFromVentesFormIfEditing(order);
+  if (!orderIsQrCommande(order) && !String(order.client || "").trim()) {
+    showToast("Indiquez le nom du client ou de la table avant encaissement (obligatoire hors commande QR).");
     return;
   }
   const saleD = String(order.date || today()).slice(0, 10);
@@ -8748,7 +8805,8 @@ function closureCashSnapshot(dStr) {
   ), 0);
   const dayBook = dayBookFor(dStr, currentSiteId());
   const openingCash = Number(dayBook?.openingCashFcfa) || 0;
-  const expectedEspecesCash = openingCash + especesVentes - especesCharges;
+  /** Même règle que l'écran PDJ : théorique = ouverture + ventes espèces (charges non déduites). */
+  const expectedEspecesCash = openingCash + especesVentes;
   const closingRaw = document.getElementById("pdj-closing-cash")?.value;
   const closingCashFcfa = closingRaw === undefined || closingRaw === null || String(closingRaw).trim() === ""
     ? expectedEspecesCash
@@ -8811,13 +8869,17 @@ async function closeAccountingDay() {
   const totauxJour = paymentTotals(ventesJour);
   const caEncaisse = Object.entries(totauxJour).reduce((sum, [m, a]) => String(m).includes("dit client") ? sum : sum + a, 0);
   const caCreances = Object.entries(totauxJour).reduce((sum, [m, a]) => String(m).includes("dit client") ? sum + a : sum, 0);
-  const especesVentes = Number(totauxJour["Espèces"]) || 0;
+  const especesVentes = Number(totauxJour["Espèces"]) || Number(totauxJour["EspÃ¨ces"]) || 0;
   const chargesJour = recordsForSite(state.charges).filter((c) => (c.date || "").slice(0, 10) === dStr);
   const especesCharges = chargesJour.reduce((sum, c) => (
-    normalizePaymentMethodKey(c.paiement) === normalizePaymentMethodKey("Espèces") ? sum + (Number(c.montant) || 0) : sum
+    normalizePaymentMethodKey(c.paiement) === normalizePaymentMethodKey("Espèces")
+    || normalizePaymentMethodKey(c.paiement) === normalizePaymentMethodKey("EspÃ¨ces")
+      ? sum + (Number(c.montant) || 0)
+      : sum
   ), 0);
   const openingCash = Number(dayBook?.openingCashFcfa) || 0;
-  const expectedEspecesCash = openingCash + especesVentes - especesCharges;
+  /** Même règle que l'écran PDJ : théorique = ouverture + ventes espèces (charges non déduites). */
+  const expectedEspecesCash = openingCash + especesVentes;
   const cashEcartEspeces = closingCashFcfa - expectedEspecesCash;
 
   const existingCloseCheck = stockCheckForSiteDate(dStr, currentSiteId());
@@ -8891,6 +8953,7 @@ async function closeAccountingDay() {
     closingCashFcfa,
     expectedEspecesCash,
     cashEcartEspeces,
+    especesChargesJour: especesCharges,
     caEncaisse,
     caCreances,
     nbVentes: ventesJour.length,
@@ -8911,7 +8974,7 @@ async function closeAccountingDay() {
   const cashBlock = [
     `Date: ${formatDateDdMmYyyy(dStr)}`,
     `CA encaisse: ${fmt(caEncaisse)} FCFA · Creances: ${fmt(caCreances)} FCFA · Nb ventes: ${fmt(ventesJour.length)}`,
-    `Caisse especes: ouverture ${fmt(openingCash)} · ventes ${fmt(especesVentes)} · charges ${fmt(especesCharges)} · attendu ${fmt(expectedEspecesCash)} · denombre ${fmt(closingCashFcfa)} · ecart ${cashEcartEspeces > 0 ? "+" : ""}${fmt(cashEcartEspeces)}`,
+    `Caisse especes: ouverture ${fmt(openingCash)} · ventes ${fmt(especesVentes)} · depenses jour espèces (info) ${fmt(especesCharges)} · theorique ${fmt(expectedEspecesCash)} · denombre ${fmt(closingCashFcfa)} · ecart ${cashEcartEspeces > 0 ? "+" : ""}${fmt(cashEcartEspeces)}`,
   ].join("\n");
   const stockBlock = gapLines.length
     ? `\n\nEcarts stock (${gapLines.length}):\n${gapLines.join("\n")}`
@@ -9464,6 +9527,7 @@ function printDayClosure() {
       <div class="box-row"><span>Ouverture</span><strong>${fmt(closed.openingCashFcfa)} FCFA</strong></div>
       ${typeof closed.closingCashFcfa === "number" ? `<div class="box-row"><span>Fermeture (dénombrement)</span><strong>${fmt(closed.closingCashFcfa)} FCFA</strong></div>` : ""}
       ${typeof closed.expectedEspecesCash === "number" ? `<div class="box-row"><span>Théorique caisse</span><strong>${fmt(closed.expectedEspecesCash)} FCFA</strong></div>` : ""}
+      ${typeof closed.especesChargesJour === "number" && closed.especesChargesJour > 0 ? `<div class="box-row"><span>Dépenses jour (espèces, info)</span><strong>${fmt(closed.especesChargesJour)} FCFA</strong></div>` : ""}
       ${typeof closed.cashEcartEspeces === "number" ? `<div class="box-row" style="font-weight:700;color:${closed.cashEcartEspeces === 0 ? "#2a9d5c" : "#c0392b"}"><span>Écart espèces</span><strong>${closed.cashEcartEspeces === 0 ? "OK" : `${closed.cashEcartEspeces > 0 ? "+" : ""}${fmt(closed.cashEcartEspeces)} FCFA`}</strong></div>` : ""}`
       : "";
   const cashHeaderExtra = typeof closed.openingCashFcfa === "number"
