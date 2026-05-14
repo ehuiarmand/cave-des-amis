@@ -8487,6 +8487,22 @@ async function saveStock() {
   showToast(editId ? `"${articleName}" mis a jour.` : "Article catalogue ajoute.");
 }
 
+/** Acteur (compte) ayant enregistré l'encaissement, indexé par numéro de facture — utile si les ventes n'ont pas encore le champ serveur. */
+function encaissementActorByFactureNumber(sourceState = state) {
+  const map = Object.create(null);
+  const log = Array.isArray(sourceState?.staffAuditLog) ? sourceState.staffAuditLog : [];
+  for (const row of log) {
+    if (String(row?.entity || "").trim() !== "encaissement") continue;
+    const m = String(row.summary || "").match(/Facture\s+([A-Za-z0-9_-]+)/i);
+    if (!m) continue;
+    const fn = m[1].trim();
+    if (!fn || map[fn]) continue;
+    const actor = String(row.actor || "").trim();
+    if (actor) map[fn] = actor;
+  }
+  return map;
+}
+
 function stockMovementDateValue(item) {
   return String(item.date || item.createdAt || "").slice(0, 10);
 }
@@ -8494,12 +8510,7 @@ function stockMovementDateValue(item) {
 /** Libellé « Utilisateur » pour la traçabilité : ne pas attribuer la vente à la personne qui consulte l’écran. */
 function formatStockMovementUser(item) {
   const raw = String(item?.user ?? "").trim();
-  const reason = String(item?.reason ?? "");
-  if (reason.includes("Approvisionnement (historique)")) {
-    if (raw && !/^admin$/i.test(raw) && raw !== "Historique" && raw !== "-") return raw;
-    return "Cumul catalogue sans bon de livraison";
-  }
-  if (!raw || raw === "-") return "Non renseigné";
+  if (!raw || raw === "-" || raw === "—" || raw === "–") return "Non renseigné";
   if (/^admin$/i.test(raw)) return "Import / identifiant système hérité";
   return raw;
 }
@@ -8508,37 +8519,37 @@ function stockMovements() {
   const siteId = currentSiteId();
   const multiSite = multiSiteActive();
   const movements = [];
+
   recordsForSite(state.stock).forEach((item) => {
     const created = item.createdAt || today();
     if (Number(item.init) > 0) {
-      movements.push({ date: created, article: item.article, type: "entree", qty: Number(item.init) || 0, unit: "Bouteille", reason: "Stock initial", user: item.createdBy || "-" });
-    }
-    const itemEntrees = (state.stockEntrees || []).filter((e) => rowMatchesSite(e, siteId, multiSite) && e.article === item.article);
-    if (itemEntrees.length > 0) {
-      itemEntrees.forEach((e) => {
-        movements.push({
-          date: e.date,
-          article: e.article,
-          type: "entree",
-          qty: e.qty,
-          unit: "Bouteille",
-          reason: `Achat (${fmtPurchaseCases(e.cases)} casier(s) x ${fmt(e.caseSize)} btl)`,
-          user: e.user || e.createdBy || item.lastReapproBy || item.createdBy || "-",
-        });
-      });
-    } else if (Number(item.entrees) > 0) {
       movements.push({
-        date: item.lastReapproAt || today(),
+        date: created,
         article: item.article,
         type: "entree",
-        qty: Number(item.entrees) || 0,
+        qty: Number(item.init) || 0,
         unit: "Bouteille",
-        reason: "Approvisionnement (historique — cumul sans détail livraison)",
-        user: item.lastReapproBy || item.createdBy || "",
+        reason: "Stock initial (catalogue)",
+        user: item.createdBy || "",
       });
     }
-    // item.sorties is a cumulative accounting counter — individual ventes are already listed below
   });
+
+  (state.stockEntrees || [])
+    .filter((e) => rowMatchesSite(e, siteId, multiSite))
+    .forEach((e) => {
+      const stockRow = (state.stock || []).find((s) => s.siteId === siteId && s.article === e.article) || {};
+      movements.push({
+        date: e.date,
+        article: e.article,
+        type: "entree",
+        qty: e.qty,
+        unit: "Bouteille",
+        reason: `Achat fournisseur (${fmtPurchaseCases(e.cases)} casier(s) × ${fmt(e.caseSize)} btl)`,
+        user: e.user || e.createdBy || stockRow.lastReapproBy || stockRow.createdBy || "",
+      });
+    });
+
   (state.stockLosses || []).filter((l) => rowMatchesSite(l, siteId, multiSite)).forEach((loss) => {
     movements.push({
       date: loss.date || loss.createdAt || today(),
@@ -8547,20 +8558,27 @@ function stockMovements() {
       qty: loss.qty,
       unit: "Bouteille",
       reason: `Perte : ${loss.motif}${loss.notes ? " – " + loss.notes : ""}`,
-      user: loss.createdBy || "-",
+      user: loss.createdBy || "",
     });
   });
+
+  const encActors = encaissementActorByFactureNumber(state);
   recordsForSite(state.ventes).forEach((vente) => {
     const stockItem = (state.stock || []).find((item) => item.siteId === siteId && item.article === vente.article);
     const packSize = Math.max(1, Number(stockItem?.packSize) || 1);
+    const fn = String(vente.factureNumber || "").trim();
+    const fromAudit = fn ? encActors[fn] : "";
+    const seller = [vente.server, vente.serveur, vente.creditIssuedBy, fromAudit]
+      .map((x) => String(x || "").trim())
+      .find((x) => x && x !== "-" && x !== "—" && x !== "–") || "";
     movements.push({
       date: vente.date || today(),
       article: vente.article,
       type: "sortie",
       qty: (Number(vente.qty) || 0) * packSize,
       unit: "Bouteille",
-      reason: `Vente ${vente.factureNumber || ""}`.trim(),
-      user: vente.server || vente.serveur || vente.creditIssuedBy || "",
+      reason: fn ? `Vente · facture ${fn}` : `Vente · ligne #${vente.id}`,
+      user: seller,
     });
   });
   return movements;
