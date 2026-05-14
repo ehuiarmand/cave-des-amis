@@ -1786,16 +1786,18 @@ class DataStore:
 
     def verify_credentials(self, username: str, password: str) -> dict[str, Any] | None:
         un_in = str(username or "").strip()
+        key_in = un_in.casefold()
         with self._lock:
             all_site_ids = [site["id"] for site in self._state["sites"]]
             for user in self._state["auth"]["users"]:
-                stored = str(user.get("username", ""))
+                stored = str(user.get("username", "")).strip()
                 if not stored:
                     continue
+                key_stored = stored.casefold()
                 try:
-                    user_match = hmac.compare_digest(stored.lower(), un_in.lower())
+                    user_match = hmac.compare_digest(key_stored, key_in)
                 except (TypeError, ValueError):
-                    user_match = stored.lower() == un_in.lower()
+                    user_match = key_stored == key_in
                 if not user_match:
                     continue
                 if not verify_password(password, user.get("passwordHash", "")):

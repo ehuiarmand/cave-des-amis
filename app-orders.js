@@ -11081,23 +11081,6 @@ function takeOverOrder(orderId) {
 function attachEvents() {
   installFcfaThousandsDelegation();
   document.getElementById("login-form").addEventListener("submit", handleLoginSubmit);
-  const loginUsernameEl = document.getElementById("login-username");
-  if (loginUsernameEl) {
-    loginUsernameEl.addEventListener("input", () => {
-      const el = loginUsernameEl;
-      const start = el.selectionStart;
-      const end = el.selectionEnd;
-      const upper = el.value.toUpperCase();
-      if (el.value !== upper) {
-        el.value = upper;
-        try {
-          el.setSelectionRange(start, end);
-        } catch (_) {
-          /* ignore */
-        }
-      }
-    });
-  }
   document.getElementById("logout-btn").addEventListener("click", () => logout());
   document.getElementById("site-switcher").addEventListener("change", () => {
     const siteId = document.getElementById("site-switcher").value;
