@@ -8681,8 +8681,7 @@ function stockMovements() {
 
   const encActors = encaissementActorByFactureNumber(state);
   recordsForSite(state.ventes).forEach((vente) => {
-    const stockItem = (state.stock || []).find((item) => item.siteId === siteId && item.article === vente.article);
-    const packSize = Math.max(1, Number(stockItem?.packSize) || 1);
+    const stockItem = stockItemForArticle(vente.article, siteId);
     const fn = String(vente.factureNumber || "").trim();
     const fromAudit = fn ? encActors[fn] : "";
     const seller = [vente.server, vente.serveur, vente.creditIssuedBy, fromAudit]
@@ -8692,7 +8691,7 @@ function stockMovements() {
       date: vente.date || today(),
       article: vente.article,
       type: "sortie",
-      qty: (Number(vente.qty) || 0) * packSize,
+      qty: lineBottleQty(vente, stockItem),
       unit: "Bouteille",
       reason: fn ? `Vente · facture ${fn}` : `Vente · ligne #${vente.id}`,
       user: seller,
