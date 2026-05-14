@@ -7947,10 +7947,8 @@ async function closeAccountingDay() {
     return;
   }
   const dStr = pdjCalendarDate();
-  if (!canAnyAdmin() && dStr !== today()) {
-    showToast("Seul un administrateur peut clôturer une autre date.");
-    return;
-  }
+  // Ne pas comparer dStr à today() : la journée ouverte peut être la veille (nuit / décalage)
+  // jusqu'à clôture — seuls les admins peuvent choisir une autre date via le sélecteur PDJ.
   const dayBook = dayBookFor(dStr, currentSiteId());
   const isPastDateCorrection = dStr !== today() && canAnyAdmin();
   if (!isPastDateCorrection && PDJ_REQUIRE_CASH_OPENING && (!dayBook || dayBookNeedsCashOpening(dayBook))) {
