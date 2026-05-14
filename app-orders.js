@@ -85,6 +85,8 @@ let appLiveClockTimer = null;
 let qrAlertCount = 0;
 let knownQrOrderIds = new Set();
 let flashingQrOrderIds = new Set();
+/** Ignore un clic sur le fond du modal détail commande juste après ouverture (ghost click tactile). */
+let suppressOrderDetailBackdropUntil = 0;
 /** Cle site + jour PDJ : derniere valeur poussee dans v-date / orders-filter-date (evite d'ecraser le filtre a chaque sync). */
 let ventesDomPdjStamp = "";
 let pendingPreAuthToken = null;
@@ -507,10 +509,29 @@ function formatCreditPaidAt(p) {
   return day ? `${isoDateToDdMmYyyy(day)} (heure non renseignée)` : "—";
 }
 
-/** Versements déjà enregistrés par débiteur (clé majuscules), tri récent → ancien. */
+/** Note affichée / enregistrée pour un versement recouvrement si le champ est vide. */
+const CREDIT_RECOVERY_DEFAULT_NOTE = "Payé";
+
+function formatCreditRecoveryNote(p) {
+  return String(p?.note ?? "").trim() || CREDIT_RECOVERY_DEFAULT_NOTE;
+}
+
+/** Versements visibles dans l’historique recouvrement : uniquement pour les débiteurs qui ont encore un reste à payer (dette non totalement réglée). */
+function isCreditRecoveryVisibleInHistoryUi(p, sourceState = state) {
+  const dueMap = creditOutstandingMap(sourceState);
+  const dk = debtorDisplayKey(p.debiteur);
+  const remaining = Math.round(Number(dueMap[dk]) || 0);
+  return remaining > 0;
+}
+
+function creditRecoveriesForHistoryUi(sourceState = state) {
+  return creditRecoveriesForSite(sourceState).filter((p) => isCreditRecoveryVisibleInHistoryUi(p, sourceState));
+}
+
+/** Versements enregistrés par débiteur pour l’affichage recouvrement (dette encore ouverte), tri récent → ancien. */
 function creditRecoveriesGroupedByDebtor(sourceState = state) {
   const map = {};
-  creditRecoveriesForSite(sourceState).forEach((p) => {
+  creditRecoveriesForHistoryUi(sourceState).forEach((p) => {
     const k = debtorDisplayKey(p.debiteur);
     if (!map[k]) map[k] = [];
     map[k].push(p);
@@ -525,15 +546,20 @@ function creditRecoveriesGroupedByDebtor(sourceState = state) {
   return map;
 }
 
-/** Table HTML : tous les versements enregistrés (historique recouvrement), du plus récent au plus ancien. */
+/** Table HTML : versements recouvrement (débiteurs encore dus), du plus récent au plus ancien. */
 function buildCreditRecoveryHistoryHtml() {
-  const payments = creditRecoveriesForSite()
+  const allSite = creditRecoveriesForSite();
+  const payments = creditRecoveriesForHistoryUi()
     .slice()
     .sort((a, b) => String(b.paidAt || b.createdAt || "").localeCompare(String(a.paidAt || a.createdAt || "")));
+  const hasHiddenBecauseSoldes = allSite.length > 0 && payments.length === 0;
   if (!payments.length) {
+    const emptyMsg = hasHiddenBecauseSoldes
+      ? "Aucun versement affiché : pour ce maquis, toutes les dettes suivies ici sont soldées. L’historique par client réapparaît dès qu’un débiteur a de nouveau un reste à payer. Les enregistrements restent pris en compte pour les totaux."
+      : "Aucun versement enregistré pour ce maquis. Après « Enregistrer le versement », chaque paiement apparaît ici avec date, montant et mode (tant que le client a encore une dette ouverte).";
     return `<div class="credit-history-section" style="margin-top:18px">
       <p class="eyebrow" style="margin-bottom:8px">Historique des paiements</p>
-      <p class="muted" style="font-size:0.9rem">Aucun versement enregistré pour ce maquis. Après « Enregistrer le versement », chaque paiement apparaît ici avec date, montant et mode.</p>
+      <p class="muted" style="font-size:0.9rem">${emptyMsg}</p>
     </div>`;
   }
   const rows = payments.map((p) => `
@@ -542,7 +568,7 @@ function buildCreditRecoveryHistoryHtml() {
       <td><strong>${escapeHtml(debtorDisplayKey(p.debiteur))}</strong></td>
       <td style="text-align:right;color:#72d7a9;font-weight:600">${fmt(p.montant)} FCFA</td>
       <td>${escapeHtml(p.paiement || "—")}</td>
-      <td class="muted" style="font-size:0.88rem;max-width:240px">${escapeHtml(p.note || "—")}</td>
+      <td class="muted" style="font-size:0.88rem;max-width:240px">${escapeHtml(formatCreditRecoveryNote(p))}</td>
     </tr>
   `).join("");
   return `<div class="credit-history-section" style="margin-top:18px">
@@ -559,6 +585,7 @@ function buildCreditRecoveryHistoryHtml() {
         <tbody>${rows}</tbody>
       </table>
     </div>
+    <p class="muted" style="font-size:0.78rem;margin-top:8px;line-height:1.4">Seuls les versements des clients ayant encore un reste à payer sont listés. Dès qu’une dette est entièrement réglée, ses paiements disparaissent de cet historique (les données restent enregistrées).</p>
   </div>`;
 }
 
@@ -592,6 +619,54 @@ function ventesCreditBreakdownForDebtor(debtorKey) {
   return out;
 }
 
+/** Ventes à crédit regroupées par numéro de facture (une ligne par facture dans le détail). */
+function ventesCreditBreakdownByFactureForDebtor(debtorKey) {
+  const lines = ventesCreditBreakdownForDebtor(debtorKey);
+  const byFact = new Map();
+  for (const row of lines) {
+    const v = row.v;
+    const fk = String(v.factureNumber || "").trim() || `VENTE-${v.id}`;
+    if (!byFact.has(fk)) byFact.set(fk, []);
+    byFact.get(fk).push(row);
+  }
+  const groups = [];
+  byFact.forEach((groupLines, factureKey) => {
+    const sorted = groupLines.slice().sort((a, b) => a.ts - b.ts);
+    const first = sorted[0];
+    const creditSum = sorted.reduce((s, r) => s + r.creditFcfa, 0);
+    const lineSum = sorted.reduce((s, r) => s + calcNet(r.v), 0);
+    const saleDays = [...new Set(sorted.map((r) => formatDateDdMmYyyy(r.v.date)))].sort();
+    const journVente = saleDays.length <= 1 ? (saleDays[0] || "—") : saleDays.join(" · ");
+    const articlesCell = sorted
+      .map((r) => `${escapeHtml(r.v.article || "—")} <span class="muted">(${fmt(r.creditFcfa)})</span>`)
+      .join("<br>");
+    const paySet = [...new Set(sorted.map((r) => String(r.v.paiement || "").trim() || "—"))];
+    const payLabel = paySet.length === 1 ? paySet[0] : paySet.join(" · ");
+    const issSet = [...new Set(sorted.map((r) => String(r.v.creditIssuedBy || "").trim()).filter(Boolean))];
+    const issLabel = issSet.length ? issSet.join(" · ") : "—";
+    const notes = sorted.map((r) => String(r.v.note || "").trim()).filter(Boolean);
+    const noteLabel = notes.length ? [...new Set(notes)].join(" · ") : "—";
+    const enc = String(first.v.soldAt || first.v.createdAt || "").trim();
+    const encLabel = enc
+      ? formatDateTimeDdMmYyyy(parseFlexibleDateTime(enc))
+      : `${formatDateDdMmYyyy(first.v.date)} (heure non renseignée)`;
+    groups.push({
+      factureKey,
+      first,
+      encLabel,
+      journVente,
+      articlesCell,
+      creditSum,
+      lineSum,
+      payLabel,
+      issLabel,
+      noteLabel,
+    });
+  });
+  groups.sort((a, b) => a.first.ts - b.first.ts);
+  return groups;
+}
+
 function openCreditDebtorOpenedDetailModal(debtorRaw) {
   const dk = debtorDisplayKey(debtorRaw);
   const titleEl = document.getElementById("credit-detail-title");
@@ -605,41 +680,44 @@ function openCreditDebtorOpenedDetailModal(debtorRaw) {
     openModal("modal-credit-detail");
     return;
   }
+  const factGroups = ventesCreditBreakdownByFactureForDebtor(dk);
   const first = rows[0].v;
   const firstMoment = String(first.soldAt || first.createdAt || "").trim();
   const firstLabel = firstMoment
     ? formatDateTimeDdMmYyyy(parseFlexibleDateTime(firstMoment))
     : `${formatDateDdMmYyyy(first.date)} (heure non renseignée)`;
-  const tableRows = rows.map(({ v, creditFcfa }) => {
-    const enc = String(v.soldAt || v.createdAt || "").trim();
-    const encLabel = enc ? formatDateTimeDdMmYyyy(parseFlexibleDateTime(enc)) : `${formatDateDdMmYyyy(v.date)} (heure non renseignée)`;
-    const note = String(v.note || "").trim();
-    return `<tr>
-      <td class="muted" style="white-space:nowrap;font-size:0.88rem">${escapeHtml(encLabel)}</td>
-      <td>${escapeHtml(formatDateDdMmYyyy(v.date))}</td>
-      <td>${escapeHtml(v.factureNumber || "—")}</td>
-      <td>${escapeHtml(v.article || "—")}</td>
-      <td style="text-align:right;font-weight:600">${fmt(creditFcfa)} FCFA</td>
-      <td style="text-align:right">${fmt(calcNet(v))} FCFA</td>
-      <td>${escapeHtml(v.paiement || "—")}</td>
-      <td class="muted" style="font-size:0.85rem">${escapeHtml(String(v.creditIssuedBy || "").trim() || "—")}</td>
-      <td class="muted" style="font-size:0.82rem;max-width:200px">${escapeHtml(note || "—")}</td>
-    </tr>`;
-  }).join("");
+  const tableRows = factGroups
+    .map(
+      (g) => `<tr>
+      <td class="muted" style="white-space:nowrap;font-size:0.88rem">${escapeHtml(g.encLabel)}</td>
+      <td>${escapeHtml(g.journVente)}</td>
+      <td>${escapeHtml(g.factureKey)}</td>
+      <td style="font-size:0.88rem;line-height:1.35">${g.articlesCell}</td>
+      <td style="text-align:right;font-weight:600">${fmt(g.creditSum)} FCFA</td>
+      <td style="text-align:right">${fmt(g.lineSum)} FCFA</td>
+      <td>${escapeHtml(g.payLabel)}</td>
+      <td class="muted" style="font-size:0.85rem">${escapeHtml(g.issLabel)}</td>
+      <td class="muted" style="font-size:0.82rem;max-width:200px">${escapeHtml(g.noteLabel)}</td>
+    </tr>`,
+    )
+    .join("");
   body.innerHTML = `
     <p class="muted" style="margin-bottom:10px;line-height:1.45">
-      La colonne <strong>Prise du crédit</strong> du tableau reprend la <strong>première</strong> vente à crédit : <strong>${escapeHtml(firstLabel)}</strong>.
+      La colonne <strong>Prise du crédit</strong> du tableau reprend la <strong>première</strong> vente à crédit chronologiquement : <strong>${escapeHtml(firstLabel)}</strong>.
       Crédit accordé par (résumé) : <strong>${escapeHtml(issuer)}</strong>.
+    </p>
+    <p class="muted" style="margin-bottom:10px;font-size:0.86rem;line-height:1.45">
+      Ci‑dessous, <strong>une ligne par facture</strong>. La colonne <strong>Heure facture</strong> est l’horodatage d’enregistrement de la vente (pas un versement de recouvrement). Les montants crédit sont totalisés par facture.
     </p>
     <div class="stock-table-wrap">
       <table class="stock-table" style="min-width:880px">
         <thead><tr>
-          <th>Encaissement</th>
+          <th>Heure facture</th>
           <th>Journée vente</th>
           <th>Facture</th>
-          <th>Article</th>
+          <th>Articles (crédit)</th>
           <th style="text-align:right">Montant crédit</th>
-          <th style="text-align:right">Total ligne</th>
+          <th style="text-align:right">Total lignes</th>
           <th>Paiement (vente)</th>
           <th>Accord par</th>
           <th>Note</th>
@@ -679,7 +757,7 @@ function openCreditPaymentDetailModal(recoveryId) {
     </dl>
     <div class="form-group" style="margin-top:14px">
       <label>Note</label>
-      <div class="audit-detail-block">${escapeHtml(String(p.note || "").trim() || "—")}</div>
+      <div class="audit-detail-block">${escapeHtml(formatCreditRecoveryNote(p))}</div>
     </div>
     <p class="muted" style="font-size:0.82rem;margin-top:10px">Heure affichée selon l'horloge de cet appareil (fuseau local).</p>`;
   openModal("modal-credit-detail");
@@ -4402,8 +4480,24 @@ function managementOrders() {
   return [...recordsForSite(state.commandes), ...paidOrdersFromSales()];
 }
 
+function orderFromManagementKey(orderKey) {
+  const raw = String(orderKey ?? "").trim();
+  if (!raw) return null;
+  const orders = managementOrders();
+  let found = orders.find((item) => String(item.id) === raw || String(item.factureNumber || "").trim() === raw);
+  if (found) return found;
+  const n = Number(raw);
+  if (!Number.isNaN(n)) {
+    found = orders.find((item) => {
+      const oid = item.id;
+      return (typeof oid === "number" && oid === n) || String(oid) === String(n);
+    });
+  }
+  return found || null;
+}
+
 function openOrderDetailModal(orderKey) {
-  const order = managementOrders().find((item) => String(item.id) === String(orderKey) || String(item.factureNumber || "") === String(orderKey));
+  const order = orderFromManagementKey(orderKey);
   if (!order) {
     showToast("Commande introuvable.");
     return;
@@ -4416,7 +4510,7 @@ function openOrderDetailModal(orderKey) {
   if (title) title.textContent = `Detail ${invoiceNumber}`;
   const paymentRows = order._isPaid
     ? Object.entries(paymentTotals(order.lignes || []))
-      .map(([method, amount]) => `<div><dt>${escapeHtml(method)}</dt><dd>${fmt(amount)} FCFA</dd></div>`)
+      .map(([method, amount]) => `<div><dt>${escapeHtml(method || "Paiement")}</dt><dd>${fmt(amount)} FCFA</dd></div>`)
       .join("")
     : `<div><dt>Paiement</dt><dd>${escapeHtml((order.lignes || [])[0]?.paiement || "-")}</dd></div>`;
   const lineRows = (order.lignes || []).map((line) => `
@@ -6853,7 +6947,7 @@ function renderCreditRecovery() {
   if (!entries.length) {
     list.innerHTML = `
       <div class="muted" style="margin-bottom:14px;padding:12px;border:1px solid var(--border);border-radius:8px;font-size:0.92rem">
-        <strong>Aucun solde débiteur actif</strong> — soit tous les crédits sont soldés, soit aucune vente n’a été encaissée en « Crédit client » pour ce maquis. Le tableau ci‑dessous liste quand même <strong>tous les versements déjà enregistrés</strong>.
+        <strong>Aucun solde débiteur actif</strong> — soit tous les crédits sont soldés, soit aucune vente n’a été encaissée en « Crédit client » pour ce maquis. L’historique des versements ne s’affiche que pour les clients qui ont encore un reste à payer ; il est donc vide tant que toutes les dettes sont réglées.
       </div>
       ${historyHtml}`;
     return;
@@ -6879,7 +6973,7 @@ function renderCreditRecovery() {
                 <span class="muted">↳</span>
                 <button type="button" class="credit-moment-btn" data-credit-pay-detail="${String(p.id)}" title="Voir le détail du versement">${escapeHtml(formatCreditPaidAt(p))}</button>
                 · ${escapeHtml(p.paiement || "—")}
-                ${p.note ? ` · <span class="muted">${escapeHtml(p.note)}</span>` : ""}
+                · <span class="muted">${escapeHtml(formatCreditRecoveryNote(p))}</span>
               </td>
               <td style="text-align:right;font-size:0.88rem;color:#72d7a9;font-weight:600">${fmt(p.montant)} FCFA</td>
               <td></td>
@@ -6907,13 +7001,31 @@ function renderCreditRecovery() {
   `;
 }
 
+let _creditRecoverySaveInFlight = false;
+let _lastCreditRecoverySaveFingerprint = "";
+let _lastCreditRecoverySaveFingerprintAt = 0;
+const CREDIT_RECOVERY_SAVE_DEDUPE_MS = 4500;
+
+function creditRecoveryIsDuplicateInSite(nameNorm, applied, method, paidAtIso, sourceState = state) {
+  const payIso = String(paidAtIso || "").trim();
+  const m = String(method || "").trim();
+  return creditRecoveriesForSite(sourceState).some(
+    (x) =>
+      debtorDisplayKey(x.debiteur) === nameNorm &&
+      Math.round(Number(x.montant) || 0) === applied &&
+      String(x.paiement || "").trim() === m &&
+      String(x.paidAt || "").trim() === payIso,
+  );
+}
+
 async function saveCreditRecovery() {
   const name = (document.getElementById("credit-name")?.value || "").trim();
   const nameNorm = debtorDisplayKey(name);
   const montant = Math.round(Number(document.getElementById("credit-amount")?.value) || 0);
   const method = document.getElementById("credit-method")?.value || "Espèces";
   const dtInput = document.getElementById("credit-datetime")?.value?.trim() || "";
-  const note = (document.getElementById("credit-note")?.value || "").trim();
+  const noteRaw = (document.getElementById("credit-note")?.value || "").trim();
+  const note = noteRaw || CREDIT_RECOVERY_DEFAULT_NOTE;
   if (!name) { showToast("Le nom du client débiteur est obligatoire."); return; }
   if (montant <= 0) { showToast("Entrez un montant valide."); return; }
 
@@ -6932,29 +7044,56 @@ async function saveCreditRecovery() {
   const applied = remaining > 0 ? Math.min(montant, Math.round(remaining)) : montant;
   if (remaining > 0 && applied <= 0) { showToast("Ce client n'a plus de crédit en cours."); return; }
 
-  const row = {
-    id: state.nextId.creditRecovery++,
-    siteId: currentSiteId(),
-    date: dateCalendar,
-    paidAt: paidAtIso,
-    debiteur: nameNorm,
-    montant: applied,
-    paiement: method,
-    note,
-    createdAt: new Date().toISOString(),
-  };
-  state.creditRecoveries = [row, ...(state.creditRecoveries || [])];
-  recordStaffAudit("create", "credit_recovery", `Encaissement credit · ${nameNorm}`, `${fmt(applied)} FCFA · ${method}${note ? ` · ${note}` : ""}`);
-  await persistState({ creditRecoveries: state.creditRecoveries, nextId: state.nextId });
-  document.getElementById("credit-name").value = nameNorm;
-  document.getElementById("credit-amount").value = "";
-  document.getElementById("credit-note").value = "";
-  const creditDt = document.getElementById("credit-datetime");
-  if (creditDt) creditDt.value = datetimeLocalNow();
-  showToast("Versement enregistré.");
-  renderCreditRecovery();
-  renderDashboard();
-  renderPointDuJour();
+  if (_creditRecoverySaveInFlight) {
+    showToast("Enregistrement en cours…");
+    return;
+  }
+
+  const saveBtn = document.getElementById("credit-save-btn");
+  _creditRecoverySaveInFlight = true;
+  if (saveBtn) saveBtn.disabled = true;
+
+  try {
+    if (creditRecoveryIsDuplicateInSite(nameNorm, applied, method, paidAtIso)) {
+      showToast("Ce versement est déjà enregistré (doublon évité).");
+      return;
+    }
+    const fp = `${nameNorm}|${applied}|${method}|${paidAtIso}`;
+    const now = Date.now();
+    if (fp === _lastCreditRecoverySaveFingerprint && now - _lastCreditRecoverySaveFingerprintAt < CREDIT_RECOVERY_SAVE_DEDUPE_MS) {
+      showToast("Versement déjà pris en compte.");
+      return;
+    }
+
+    const row = {
+      id: state.nextId.creditRecovery++,
+      siteId: currentSiteId(),
+      date: dateCalendar,
+      paidAt: paidAtIso,
+      debiteur: nameNorm,
+      montant: applied,
+      paiement: method,
+      note,
+      createdAt: new Date().toISOString(),
+    };
+    state.creditRecoveries = [row, ...(state.creditRecoveries || [])];
+    recordStaffAudit("create", "credit_recovery", `Encaissement credit · ${nameNorm}`, `${fmt(applied)} FCFA · ${method}${note ? ` · ${note}` : ""}`);
+    await persistState({ creditRecoveries: state.creditRecoveries, nextId: state.nextId });
+    _lastCreditRecoverySaveFingerprint = fp;
+    _lastCreditRecoverySaveFingerprintAt = Date.now();
+    document.getElementById("credit-name").value = nameNorm;
+    document.getElementById("credit-amount").value = "";
+    document.getElementById("credit-note").value = "";
+    const creditDt = document.getElementById("credit-datetime");
+    if (creditDt) creditDt.value = datetimeLocalNow();
+    showToast("Versement enregistré.");
+    renderCreditRecovery();
+    renderDashboard();
+    renderPointDuJour();
+  } finally {
+    _creditRecoverySaveInFlight = false;
+    if (saveBtn) saveBtn.disabled = false;
+  }
 }
 
 function purchaseOrdersForSite() {
@@ -9301,11 +9440,22 @@ function printStockReport() {
 }
 
 function openModal(id) {
-  document.getElementById(id).classList.add("open");
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.add("open");
+  el.setAttribute("aria-hidden", "false");
+  if (id === "modal-order-detail") {
+    suppressOrderDetailBackdropUntil = Date.now() + 450;
+  }
 }
 
 function closeModal(id) {
-  document.getElementById(id).classList.remove("open");
+  const el = document.getElementById(id);
+  if (el) {
+    el.classList.remove("open");
+    el.setAttribute("aria-hidden", "true");
+  }
+  if (id === "modal-order-detail") suppressOrderDetailBackdropUntil = 0;
   if (id === "modal-purchase-receive") pendingReceivePurchaseId = null;
   if (id === "modal-finalize") resetFinalizeModalUi();
   if (id === "modal-saisie-rapide") { srCart = []; }
@@ -11316,6 +11466,13 @@ function attachEvents() {
     openOrderEditor();
   });
   document.getElementById("print-orders-management-btn")?.addEventListener("click", printOrdersManagementList);
+  document.getElementById("orders-management-table")?.addEventListener("click", (event) => {
+    const detailBtn = event.target.closest("[data-order-details]");
+    if (!detailBtn) return;
+    event.preventDefault();
+    event.stopPropagation();
+    openOrderDetailModal(detailBtn.getAttribute("data-order-details") || "");
+  });
   ["orders-filter-date", "orders-filter-status", "orders-filter-type"].forEach((id) => {
     document.getElementById(id).addEventListener("change", renderOrdersManagement);
   });
@@ -12009,11 +12166,6 @@ document.getElementById("fab-btn").addEventListener("click", () => {
       renderStockSaleFormats(formats);
       return;
     }
-    const orderDetails = event.target.closest("[data-order-details]");
-    if (orderDetails) {
-      openOrderDetailModal(orderDetails.dataset.orderDetails);
-      return;
-    }
     const activateOrder = event.target.closest("[data-activate-order]");
     if (activateOrder) {
       takeOverOrder(Number(activateOrder.dataset.activateOrder));
@@ -12194,7 +12346,9 @@ document.getElementById("fab-btn").addEventListener("click", () => {
   });
   document.querySelectorAll(".modal-overlay").forEach((overlay) => {
     overlay.addEventListener("click", (event) => {
-      if (event.target === overlay) closeModal(overlay.id);
+      if (event.target !== overlay) return;
+      if (overlay.id === "modal-order-detail" && Date.now() < suppressOrderDetailBackdropUntil) return;
+      closeModal(overlay.id);
     });
   });
   const creditSaveBtn = document.getElementById("credit-save-btn");
