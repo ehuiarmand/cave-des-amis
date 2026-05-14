@@ -6321,7 +6321,7 @@ async function saveMyUserProfile() {
 
 function populateOrderSelect() {
   const orders = recordsForSite(state.commandes).map((order) => ({ value: String(order.id), label: order.client || `Commande ${order.id}` }));
-  const options = [{ value: "", label: "Nouvelle commande" }, ...orders];
+  const options = [{ value: "", label: "Saisie rapide" }, ...orders];
   const html = options.map((option) => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`).join("");
   const vSel = document.getElementById("v-order-select");
   if (vSel) {
@@ -6360,7 +6360,7 @@ function openOrderEditor(orderId = null, lineId = null) {
     const ctx = document.getElementById("sr-order-context-wrap");
     if (ctx) ctx.classList.remove("hidden");
     const titleEl = document.getElementById("sr-modal-title");
-    if (titleEl) titleEl.textContent = order ? "Ajouter des articles" : "Nouvelle commande";
+    if (titleEl) titleEl.textContent = order ? "Ajouter des articles" : "Saisie rapide";
     const srDate = document.getElementById("sr-date");
     if (srDate) srDate.value = order?.date || pdjCalendarDate();
     const srClient = document.getElementById("sr-client");
