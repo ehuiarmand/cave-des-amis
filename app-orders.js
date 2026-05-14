@@ -638,10 +638,15 @@ function ventesCreditBreakdownByFactureForDebtor(debtorKey) {
     const saleDays = [...new Set(sorted.map((r) => formatDateDdMmYyyy(r.v.date)))].sort();
     const journVente = saleDays.length <= 1 ? (saleDays[0] || "—") : saleDays.join(" · ");
     const articlesCell = sorted
-      .map((r) => `${escapeHtml(r.v.article || "—")} <span class="muted">(${fmt(r.creditFcfa)})</span>`)
+      .map((r) => `${escapeHtml(r.v.article || "—")} — <span class="muted">dû : ${fmt(r.creditFcfa)} FCFA</span>`)
       .join("<br>");
     const paySet = [...new Set(sorted.map((r) => String(r.v.paiement || "").trim() || "—"))];
     const payLabel = paySet.length === 1 ? paySet[0] : paySet.join(" · ");
+    const serveurParts = sorted.map((r) => String(r.v.server || r.v.serveur || "").trim()).filter(Boolean);
+    const serveurFromCredit = sorted.map((r) => String(r.v.creditIssuedBy || "").trim()).find(Boolean);
+    const serveurLabel = serveurParts.length
+      ? [...new Set(serveurParts)].join(" · ")
+      : (serveurFromCredit || "—");
     const issSet = [...new Set(sorted.map((r) => String(r.v.creditIssuedBy || "").trim()).filter(Boolean))];
     const issLabel = issSet.length ? issSet.join(" · ") : "—";
     const notes = sorted.map((r) => String(r.v.note || "").trim()).filter(Boolean);
@@ -659,6 +664,7 @@ function ventesCreditBreakdownByFactureForDebtor(debtorKey) {
       creditSum,
       lineSum,
       payLabel,
+      serveurLabel,
       issLabel,
       noteLabel,
     });
@@ -696,6 +702,7 @@ function openCreditDebtorOpenedDetailModal(debtorRaw) {
       <td style="text-align:right;font-weight:600">${fmt(g.creditSum)} FCFA</td>
       <td style="text-align:right">${fmt(g.lineSum)} FCFA</td>
       <td>${escapeHtml(g.payLabel)}</td>
+      <td class="muted" style="font-size:0.85rem">${escapeHtml(g.serveurLabel)}</td>
       <td class="muted" style="font-size:0.85rem">${escapeHtml(g.issLabel)}</td>
       <td class="muted" style="font-size:0.82rem;max-width:200px">${escapeHtml(g.noteLabel)}</td>
     </tr>`,
@@ -707,7 +714,7 @@ function openCreditDebtorOpenedDetailModal(debtorRaw) {
       Crédit accordé par (résumé) : <strong>${escapeHtml(issuer)}</strong>.
     </p>
     <p class="muted" style="margin-bottom:10px;font-size:0.86rem;line-height:1.45">
-      Ci‑dessous, <strong>une ligne par facture</strong>. La colonne <strong>Heure facture</strong> est l’horodatage d’enregistrement de la vente (pas un versement de recouvrement). Les montants crédit sont totalisés par facture.
+      Ci‑dessous, <strong>une ligne par facture</strong>. Chaque article listé est une ligne de vente avec <strong>crédit / à régler</strong> : la mention <strong>dû</strong> indique le montant crédit pour cette ligne. La colonne <strong>Heure facture</strong> est l’horodatage d’enregistrement de la vente (pas un versement de recouvrement).
     </p>
     <div class="stock-table-wrap">
       <table class="stock-table" style="min-width:880px">
@@ -715,11 +722,12 @@ function openCreditDebtorOpenedDetailModal(debtorRaw) {
           <th>Heure facture</th>
           <th>Journée vente</th>
           <th>Facture</th>
-          <th>Articles (crédit)</th>
+          <th>Articles dus (crédit)</th>
           <th style="text-align:right">Montant crédit</th>
           <th style="text-align:right">Total lignes</th>
           <th>Paiement (vente)</th>
-          <th>Accord par</th>
+          <th>Serveur</th>
+          <th>Accord crédit</th>
           <th>Note</th>
         </tr></thead>
         <tbody>${tableRows}</tbody>
@@ -4420,6 +4428,70 @@ function orderTotal(order) {
   return (order?.lignes || []).reduce((sum, line) => sum + calcNet(line), 0);
 }
 
+/** Cellule HTML : détail articles (ligne × qté — montant), pour tableau / impression. */
+function orderManagementArticlesCell(order, maxLines = 25) {
+  const lines = order?.lignes || [];
+  if (!lines.length) return escapeHtml("—");
+  const slice = lines.slice(0, maxLines);
+  const rows = slice.map((l) => {
+    const art = String(l.article || l.libelle || "").trim() || "—";
+    const q = Math.max(1, Math.round(Number(l.qty) || 1));
+    return `${escapeHtml(art)} ×${fmt(q)} <span style="color:#555">(${fmt(calcNet(l))} FCFA)</span>`;
+  });
+  const more = lines.length > maxLines
+    ? `<br><span style="color:#888;font-size:0.92em">… +${lines.length - maxLines} ligne(s)</span>`
+    : "";
+  return rows.join("<br>") + more;
+}
+
+/** Bloc HTML imprimable : tableau détaillé des lignes pour une commande. */
+function orderPrintDetailBlock(order) {
+  const lines = order?.lignes || [];
+  const num = escapeHtml(String(order.factureNumber || order.id));
+  const who = escapeHtml(orderServerDisplay(order));
+  const cli = escapeHtml(order.table || order.client || "Comptoir");
+  const tot = `${fmt(orderTotal(order))} FCFA`;
+  if (!lines.length) {
+    return `<div style="margin-top:12px;padding:8px;border:1px solid #ddd;border-radius:6px"><strong>${num}</strong> · ${cli} · ${tot}<br><span style="color:#888">Aucune ligne détaillée</span></div>`;
+  }
+  const body = lines.map((l) => {
+    const art = escapeHtml(String(l.article || l.libelle || "—").trim());
+    const q = fmt(Math.max(1, Math.round(Number(l.qty) || 1)));
+    const pu = fmt(Number(l.prix) || 0);
+    const net = fmt(calcNet(l));
+    const pay = escapeHtml(String(l.paiement || "—").trim());
+    return `<tr><td>${art}</td><td style="text-align:right">${q}</td><td style="text-align:right">${pu}</td><td style="text-align:right">${net} FCFA</td><td>${pay}</td></tr>`;
+  }).join("");
+  return `<div style="margin-top:14px;page-break-inside:avoid">
+    <p style="margin:0 0 6px;font-size:12px;font-weight:700">${num} · ${cli} · ${tot} · <span style="font-weight:600;color:#333">Serveur : ${who}</span></p>
+    <table style="width:100%;font-size:11px;border-collapse:collapse;margin:0 0 4px"><thead><tr style="background:#f2f2f2">
+      <th style="text-align:left;padding:5px;border:1px solid #ddd">Article</th>
+      <th style="text-align:right;padding:5px;border:1px solid #ddd">Qté</th>
+      <th style="text-align:right;padding:5px;border:1px solid #ddd">Prix u.</th>
+      <th style="text-align:right;padding:5px;border:1px solid #ddd">Total</th>
+      <th style="text-align:left;padding:5px;border:1px solid #ddd">Paiement</th>
+    </tr></thead><tbody>${body}</tbody></table>
+  </div>`;
+}
+
+/** Serveur affiché : commande active, puis ventes liées (champs server / creditIssuedBy). */
+function orderServerDisplay(order) {
+  if (String(order?.source || "").trim() === "qr") return "Client QR";
+  const bad = (x) => {
+    const t = String(x || "").trim();
+    return !t || t === "-" || t === "—" || t === "–";
+  };
+  let s = String(order?.server || order?.serveur || "").trim();
+  if (!bad(s)) return s;
+  for (const v of order?.lignes || []) {
+    const t = String(v.server || v.serveur || "").trim();
+    if (!bad(t)) return t;
+    const by = String(v.creditIssuedBy || "").trim();
+    if (!bad(by)) return by;
+  }
+  return "Non renseigné";
+}
+
 function orderTime(order) {
   if (order?._isPaid && Array.isArray(order.lignes) && order.lignes.length) {
     const v = order.lignes[0];
@@ -4456,7 +4528,7 @@ function paidOrdersFromSales() {
         date: v.date,
         client: v.client || v.table,
         table: v.table || v.client,
-        server: v.server || v.serveur || "-",
+        server: "",
         lignes: [],
         status: "Paye",
         _isPaid: true,
@@ -4464,10 +4536,35 @@ function paidOrdersFromSales() {
       };
     }
     paidByFacture[key].lignes.push(v);
+    const vs = String(v.server || v.serveur || "").trim();
+    if (vs && !String(paidByFacture[key].server || "").trim()) paidByFacture[key].server = vs;
     const ts = v.soldAt || v.createdAt;
     if (ts && !paidByFacture[key].createdAt) paidByFacture[key].createdAt = ts;
   });
-  return Object.values(paidByFacture);
+  return Object.values(paidByFacture).map((o) => {
+    let srv = String(o.server || "").trim();
+    if (!srv || srv === "-") {
+      for (const v of o.lignes || []) {
+        const t = String(v.server || v.serveur || "").trim();
+        if (t) {
+          srv = t;
+          break;
+        }
+      }
+    }
+    if (!srv || srv === "-") {
+      for (const v of o.lignes || []) {
+        const by = String(v.creditIssuedBy || "").trim();
+        if (by) {
+          srv = by;
+          break;
+        }
+      }
+    }
+    o.server = srv || "";
+    o.serveur = o.server;
+    return o;
+  });
 }
 
 /** Même agrégat que paidOrdersFromSales, limité à la date comptable PDJ active (maquis courant). */
@@ -4530,7 +4627,7 @@ function openOrderDetailModal(orderKey) {
       <div><dt>Heure</dt><dd>${escapeHtml(orderTime(order))}</dd></div>
       <div><dt>Statut</dt><dd>${escapeHtml(orderStatus(order))}</dd></div>
       <div><dt>Table / client</dt><dd>${escapeHtml(order.table || order.client || "Comptoir")}</dd></div>
-      <div><dt>Serveur</dt><dd>${escapeHtml(order.server || order.serveur || "-")}</dd></div>
+      <div><dt>Serveur</dt><dd>${escapeHtml(orderServerDisplay(order))}</dd></div>
       <div><dt>Type</dt><dd>${orderType(order) === "a-emporter" ? "A emporter" : "Sur place"}</dd></div>
       <div><dt>Total</dt><dd><strong>${fmt(total)} FCFA</strong></dd></div>
       ${paymentRows}
@@ -4584,10 +4681,10 @@ function printOrdersManagementList() {
     <tr>
       <td>${escapeHtml(String(order.factureNumber || order.id))}</td>
       <td>${escapeHtml(order.table || order.client || "Comptoir")}</td>
-      <td>${escapeHtml(order.server || order.serveur || "Client QR")}</td>
+      <td>${escapeHtml(orderServerDisplay(order))}</td>
       <td>${escapeHtml(orderStatus(order))}</td>
       <td>${orderType(order) === "a-emporter" ? "A emporter" : "Sur place"}</td>
-      <td style="text-align:right">${fmt((order.lignes || []).length)}</td>
+      <td style="text-align:left;max-width:240px;font-size:0.86rem;line-height:1.35;vertical-align:top" class="order-art-cell">${orderManagementArticlesCell(order)}</td>
       <td style="text-align:right">${fmt(orderTotal(order))} FCFA</td>
       <td>${escapeHtml(orderTime(order))}</td>
     </tr>
@@ -4598,7 +4695,8 @@ function printOrdersManagementList() {
     return;
   }
   const filtreMeta = `Date : ${escapeHtml(formatDateDdMmYyyy(date))} &mdash; Statut : ${statusLab} &mdash; Type : ${escapeHtml(typeLab)}`;
-  ticketWindow.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>Commandes filtrées</title><style>body{font-family:Arial,sans-serif;color:#111;padding:28px}header{display:flex;justify-content:space-between;gap:18px;border-bottom:2px solid #111;padding-bottom:14px;margin-bottom:18px}h1,h2,p{margin:0 0 8px}.meta{color:#555;font-size:13px;line-height:1.45}.summary{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:16px 0}.box{border:1px solid #111;padding:12px}.box strong{display:block;font-size:18px;margin-top:4px}table{width:100%;border-collapse:collapse;margin-top:12px;font-size:12px}th,td{border-bottom:1px solid #ddd;padding:7px 6px;text-align:left}th{background:#f2f2f2}td:nth-child(n+6){text-align:right}td:last-child{text-align:left}@media print{body{padding:0}table{font-size:11px}}</style></head><body><header><div><h1>${escapeHtml(site?.nom || "Maquis")}</h1><p>${escapeHtml(site?.ville || "")} ${escapeHtml(site?.pays || "")}</p><p class="meta">${filtreMeta}</p></div><div><h2>Gestion des commandes</h2><p class="meta">Imprimé le ${escapeHtml(formatDateTimeDdMmYyyy(new Date()))}</p></div></header><div class="summary"><div class="box">Lignes affichées<strong>${fmt(orders.length)}</strong></div><div class="box">Total (liste)<strong>${fmt(totalListe)} FCFA</strong></div><div class="box">Journée affichée<strong>${escapeHtml(formatDateDdMmYyyy(date))}</strong></div></div><table><thead><tr><th>Numéro</th><th>Table / client</th><th>Serveur</th><th>Statut</th><th>Type</th><th>Articles</th><th>Montant</th><th>Heure</th></tr></thead><tbody>${rows}</tbody></table><script>window.onload=function(){window.print();}</script></body></html>`);
+  const detailAppendix = orders.map((o) => orderPrintDetailBlock(o)).join("");
+  ticketWindow.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>Commandes filtrées</title><style>body{font-family:Arial,sans-serif;color:#111;padding:28px}header{display:flex;justify-content:space-between;gap:18px;border-bottom:2px solid #111;padding-bottom:14px;margin-bottom:18px}h1,h2,p{margin:0 0 8px}.meta{color:#555;font-size:13px;line-height:1.45}.summary{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:16px 0}.box{border:1px solid #111;padding:12px}.box strong{display:block;font-size:18px;margin-top:4px}table{width:100%;border-collapse:collapse;margin-top:12px;font-size:12px}th,td{border-bottom:1px solid #ddd;padding:7px 6px;text-align:left;vertical-align:top}th{background:#f2f2f2}td:nth-child(7){text-align:right}.order-art-cell{max-width:280px;font-size:10.5px;line-height:1.35}@media print{body{padding:0}table{font-size:11px}}</style></head><body><header><div><h1>${escapeHtml(site?.nom || "Maquis")}</h1><p>${escapeHtml(site?.ville || "")} ${escapeHtml(site?.pays || "")}</p><p class="meta">${filtreMeta}</p></div><div><h2>Gestion des commandes</h2><p class="meta">Imprimé le ${escapeHtml(formatDateTimeDdMmYyyy(new Date()))}</p></div></header><div class="summary"><div class="box">Lignes affichées<strong>${fmt(orders.length)}</strong></div><div class="box">Total (liste)<strong>${fmt(totalListe)} FCFA</strong></div><div class="box">Journée affichée<strong>${escapeHtml(formatDateDdMmYyyy(date))}</strong></div></div><table><thead><tr><th>Numéro</th><th>Table / client</th><th>Serveur</th><th>Statut</th><th>Type</th><th>Articles (résumé)</th><th>Montant</th><th>Heure</th></tr></thead><tbody>${rows}</tbody></table><h3 style="margin-top:22px;font-size:14px;border-top:2px solid #111;padding-top:14px">Détail par commande</h3>${detailAppendix}<script>window.onload=function(){window.print();}</script></body></html>`);
   ticketWindow.document.close();
 }
 
@@ -4616,10 +4714,10 @@ function renderOrdersManagement() {
       return `<tr>
         <td>#${escapeHtml(order.factureNumber || String(order.id))}</td>
         <td>${escapeHtml(order.table || order.client || "Comptoir")}</td>
-        <td>${escapeHtml(order.server || order.serveur || "Client QR")}</td>
+        <td>${escapeHtml(orderServerDisplay(order))}</td>
         <td>${escapeHtml(orderStatus(order))}</td>
         <td>${orderType(order) === "a-emporter" ? "A emporter" : "Sur place"}</td>
-        <td style="text-align:right">${fmt((order.lignes || []).length)}</td>
+        <td style="text-align:left;max-width:min(360px,48vw);font-size:0.82rem;line-height:1.35;vertical-align:top" class="order-art-cell">${orderManagementArticlesCell(order)}</td>
         <td style="text-align:right">${fmt(orderTotal(order))} FCFA</td>
         <td>${escapeHtml(orderTime(order))}</td>
         <td>
@@ -7949,6 +8047,10 @@ function ensureOrder(clientName, date, note, selectedOrderIdOverride = undefined
     order.client = clientName.trim() || order.client;
     order.date = date;
     order.note = note.trim();
+    if (!String(order.server || "").trim() && !String(order.serveur || "").trim()) {
+      order.server = sessionUser || "Serveur";
+      order.serveur = order.server;
+    }
   }
   activeOrderId = order.id;
   return order;
@@ -8086,6 +8188,8 @@ async function finalizeOrder(orderId = activeOrderId) {
     paiementDetails: splitPaymentDetails(paymentMix.details, calcNet(line), orderTotal),
     debiteur: paymentMix.creditName,
     creditIssuedBy: creditIssuedBy || undefined,
+    server: order.server || order.serveur || sessionUser || "",
+    serveur: order.server || order.serveur || sessionUser || "",
     note: line.note || order.note || "",
   }));
   state.ventes = [...ventes, ...state.ventes];
@@ -8387,6 +8491,19 @@ function stockMovementDateValue(item) {
   return String(item.date || item.createdAt || "").slice(0, 10);
 }
 
+/** Libellé « Utilisateur » pour la traçabilité : ne pas attribuer la vente à la personne qui consulte l’écran. */
+function formatStockMovementUser(item) {
+  const raw = String(item?.user ?? "").trim();
+  const reason = String(item?.reason ?? "");
+  if (reason.includes("Approvisionnement (historique)")) {
+    if (raw && !/^admin$/i.test(raw) && raw !== "Historique" && raw !== "-") return raw;
+    return "Cumul catalogue sans bon de livraison";
+  }
+  if (!raw || raw === "-") return "Non renseigné";
+  if (/^admin$/i.test(raw)) return "Import / identifiant système hérité";
+  return raw;
+}
+
 function stockMovements() {
   const siteId = currentSiteId();
   const multiSite = multiSiteActive();
@@ -8416,8 +8533,8 @@ function stockMovements() {
         type: "entree",
         qty: Number(item.entrees) || 0,
         unit: "Bouteille",
-        reason: "Approvisionnement (historique)",
-        user: item.lastReapproBy || item.createdBy || "Historique",
+        reason: "Approvisionnement (historique — cumul sans détail livraison)",
+        user: item.lastReapproBy || item.createdBy || "",
       });
     }
     // item.sorties is a cumulative accounting counter — individual ventes are already listed below
@@ -8443,7 +8560,7 @@ function stockMovements() {
       qty: (Number(vente.qty) || 0) * packSize,
       unit: "Bouteille",
       reason: `Vente ${vente.factureNumber || ""}`.trim(),
-      user: vente.server || vente.serveur || sessionUser || "-",
+      user: vente.server || vente.serveur || vente.creditIssuedBy || "",
     });
   });
   return movements;
@@ -8453,17 +8570,21 @@ function renderStockMovements() {
   const start = document.getElementById("stock-move-start")?.value || "";
   const end = document.getElementById("stock-move-end")?.value || "";
   const type = document.getElementById("stock-move-type")?.value || "all";
-  const movements = stockMovements().filter((item) => {
+  const inPeriod = (item) => {
     const date = stockMovementDateValue(item);
-    return (!start || date >= start) && (!end || date <= end) && (type === "all" || item.type === type);
-  }).sort((a, b) => String(b.date).localeCompare(String(a.date)));
-  const entree = movements.filter((item) => item.type === "entree").reduce((sum, item) => sum + item.qty, 0);
-  const sortie = movements.filter((item) => item.type === "sortie").reduce((sum, item) => sum + item.qty, 0);
+    return (!start || date >= start) && (!end || date <= end);
+  };
+  const allInPeriod = stockMovements().filter(inPeriod);
+  const movements = allInPeriod
+    .filter((item) => type === "all" || item.type === type)
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  const entreePeriod = allInPeriod.filter((item) => item.type === "entree").reduce((sum, item) => sum + item.qty, 0);
+  const sortiePeriod = allInPeriod.filter((item) => item.type === "sortie").reduce((sum, item) => sum + item.qty, 0);
   document.getElementById("stock-movement-count").textContent = `${fmt(movements.length)} mouvement(s)`;
   document.getElementById("stock-movement-summary").innerHTML = `
-    <div class="pdj-kpi"><span class="kpi-label">Mouvements</span><strong class="pdj-val amber">${fmt(movements.length)}</strong></div>
-    <div class="pdj-kpi"><span class="kpi-label">Entrees</span><strong class="pdj-val amber">${fmt(entree)}</strong></div>
-    <div class="pdj-kpi"><span class="kpi-label">Sorties</span><strong class="pdj-val red">${fmt(sortie)}</strong></div>
+    <div class="pdj-kpi"><span class="kpi-label">Lignes affichées</span><strong class="pdj-val amber">${fmt(movements.length)}</strong></div>
+    <div class="pdj-kpi"><span class="kpi-label">Entrées (période)</span><strong class="pdj-val amber">${fmt(entreePeriod)}</strong></div>
+    <div class="pdj-kpi"><span class="kpi-label">Sorties (période)</span><strong class="pdj-val red">${fmt(sortiePeriod)}</strong></div>
   `;
   document.getElementById("stock-movement-list").innerHTML = movements.length
     ? movements.map((item) => `<tr>
@@ -8473,7 +8594,7 @@ function renderStockMovements() {
       <td style="text-align:right">${fmt(item.qty)}</td>
       <td>${escapeHtml(item.unit)}</td>
       <td>${escapeHtml(item.reason)}</td>
-      <td>${escapeHtml(item.user)}</td>
+      <td>${escapeHtml(formatStockMovementUser(item))}</td>
     </tr>`).join("")
     : `<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:32px">Aucun mouvement trouve</td></tr>`;
 }
