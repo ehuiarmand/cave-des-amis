@@ -827,12 +827,14 @@ def merge_auth_users_scoped(
                 continue
             pwd = str(pu.get("password", "")).strip()
             nhash = hash_password(pwd) if pwd else hash_password("serveuse123")
+            dn_new = str(pu.get("displayName", "") or "").strip()[:120]
             merged[un] = {
                 "username": un,
                 "passwordHash": nhash,
                 "role": new_role,
                 "allowedSiteIds": nu_allowed,
                 "twoFactorEnabled": False,
+                "displayName": dn_new,
             }
             continue
 
@@ -858,14 +860,22 @@ def merge_auth_users_scoped(
         nu_allowed = clamp_sites(pu.get("allowedSiteIds", exist.get("allowedSiteIds")))
         nu_allowed = [x for x in nu_allowed if str(x) in allowed] or sorted(allowed)[:1]
 
+        if s_role == "serveuse":
+            new_role = str(exist.get("role", "serveuse"))
+            nu_allowed = [str(x) for x in (exist.get("allowedSiteIds") or []) if str(x) in site_set]
+            if not nu_allowed:
+                nu_allowed = sorted(allowed)[:1]
+
         pwd = str(pu.get("password", "")).strip()
         password_hash = hash_password(pwd) if pwd else exist["passwordHash"]
+        dn = str(pu.get("displayName", exist.get("displayName", "")) or "").strip()[:120]
         entry: dict[str, Any] = {
             "username": un,
             "passwordHash": password_hash,
             "role": new_role,
             "allowedSiteIds": nu_allowed,
             "twoFactorEnabled": bool(exist.get("twoFactorEnabled", False)),
+            "displayName": dn,
         }
         if exist.get("twoFactorSecret"):
             entry["twoFactorSecret"] = exist["twoFactorSecret"]
@@ -1353,6 +1363,7 @@ class DataStore:
                             "role": u["role"],
                             "allowedSiteIds": u.get("allowedSiteIds", []),
                             "twoFactorEnabled": bool(u.get("twoFactorEnabled", False)),
+                            "displayName": str(u.get("displayName", "") or "").strip()[:120],
                         }
                         for u in self._state["auth"]["users"]
                     ],
@@ -1391,6 +1402,7 @@ class DataStore:
                     "role": u["role"],
                     "allowedSiteIds": u.get("allowedSiteIds", []),
                     "twoFactorEnabled": bool(u.get("twoFactorEnabled", False)),
+                    "displayName": str(u.get("displayName", "") or "").strip()[:120],
                 }
                 for u in self._state["auth"]["users"]
                 if user_visible_in_public_state(u, session)
@@ -1773,26 +1785,37 @@ class DataStore:
             return {"orders": json.loads(json.dumps(orders)), "totalDue": total_due, "totalPaid": total_paid}
 
     def verify_credentials(self, username: str, password: str) -> dict[str, Any] | None:
+        un_in = str(username or "").strip()
         with self._lock:
             all_site_ids = [site["id"] for site in self._state["sites"]]
             for user in self._state["auth"]["users"]:
-                if hmac.compare_digest(username, user["username"]) and verify_password(password, user.get("passwordHash", "")):
-                    if password_needs_upgrade(user.get("passwordHash", "")):
-                        user["passwordHash"] = hash_password(password)
+                stored = str(user.get("username", ""))
+                if not stored:
+                    continue
+                try:
+                    user_match = hmac.compare_digest(stored.lower(), un_in.lower())
+                except (TypeError, ValueError):
+                    user_match = stored.lower() == un_in.lower()
+                if not user_match:
+                    continue
+                if not verify_password(password, user.get("passwordHash", "")):
+                    continue
+                if password_needs_upgrade(user.get("passwordHash", "")):
+                    user["passwordHash"] = hash_password(password)
+                    self._write(self._state)
+                allowed = [sid for sid in user.get("allowedSiteIds", all_site_ids) if sid in all_site_ids] or all_site_ids[:1]
+                role = str(user.get("role", ""))
+                if str(user.get("username", "")).strip().lower() == "admin":
+                    role = "superadmin"
+                    allowed = list(all_site_ids)
+                    prev_sites = [str(x) for x in (user.get("allowedSiteIds") or [])]
+                    if user.get("role") != "superadmin" or prev_sites != [str(x) for x in all_site_ids]:
+                        user["role"] = "superadmin"
+                        user["allowedSiteIds"] = list(all_site_ids)
                         self._write(self._state)
-                    allowed = [sid for sid in user.get("allowedSiteIds", all_site_ids) if sid in all_site_ids] or all_site_ids[:1]
-                    role = str(user.get("role", ""))
-                    if str(user.get("username", "")).strip().lower() == "admin":
-                        role = "superadmin"
-                        allowed = list(all_site_ids)
-                        prev_sites = [str(x) for x in (user.get("allowedSiteIds") or [])]
-                        if user.get("role") != "superadmin" or prev_sites != [str(x) for x in all_site_ids]:
-                            user["role"] = "superadmin"
-                            user["allowedSiteIds"] = list(all_site_ids)
-                            self._write(self._state)
-                    elif role == "superadmin":
-                        allowed = list(all_site_ids)
-                    return {"username": user["username"], "role": role, "allowedSiteIds": allowed}
+                elif role == "superadmin":
+                    allowed = list(all_site_ids)
+                return {"username": user["username"], "role": role, "allowedSiteIds": allowed}
         return None
 
     def update_state(self, payload: dict[str, Any], session: dict[str, Any]) -> dict[str, Any]:
@@ -1868,12 +1891,14 @@ class DataStore:
                         if username.strip().lower() == "admin" or role == "superadmin":
                             allowed = list(site_ids)
                         existing = existing_by_name.get(username, {})
+                        dn_sup = str(user_data.get("displayName", existing.get("displayName", "")) or "").strip()[:120]
                         user_entry: dict[str, Any] = {
                             "username": username,
                             "passwordHash": password_hash,
                             "role": role,
                             "allowedSiteIds": allowed,
                             "twoFactorEnabled": existing.get("twoFactorEnabled", False),
+                            "displayName": dn_sup,
                         }
                         if existing.get("twoFactorSecret"):
                             user_entry["twoFactorSecret"] = existing["twoFactorSecret"]
@@ -2357,13 +2382,14 @@ class AppHandler(BaseHTTPRequestHandler):
                 audit_log("login_failed", {"ip": ip, "username": username})
                 self.send_json(HTTPStatus.UNAUTHORIZED, {"error": "Identifiants invalides."})
                 return
+            canon = str(user.get("username", "")).strip()
             with store._lock:
-                user_data = next((u for u in store._state["auth"]["users"] if u["username"] == username), None)
+                user_data = next((u for u in store._state["auth"]["users"] if u["username"] == canon), None)
                 has_2fa = bool(user_data and user_data.get("twoFactorEnabled") and user_data.get("twoFactorSecret"))
             if REQUIRE_2FA_FOR_PRIVILEGED and privileged_role_requires_2fa_policy(user["role"]) and not has_2fa:
                 audit_log(
                     "login_denied_2fa_required",
-                    {"ip": ip, "username": username, "role": user.get("role", "")},
+                    {"ip": ip, "username": canon, "role": user.get("role", "")},
                 )
                 self.send_json(
                     HTTPStatus.FORBIDDEN,
@@ -2373,10 +2399,10 @@ class AppHandler(BaseHTTPRequestHandler):
                     cache_control="no-store",
                 )
                 return
-            login_rate_limit_success(ip, username)
-            audit_log("login_success", {"ip": ip, "username": username})
+            login_rate_limit_success(ip, canon)
+            audit_log("login_success", {"ip": ip, "username": canon})
             if has_2fa:
-                pre_auth = create_pre_auth_token(username)
+                pre_auth = create_pre_auth_token(canon)
                 self.send_json(HTTPStatus.OK, {"needsTwoFactor": True, "preAuthToken": pre_auth})
                 return
             token = sessions.create(user["username"], user["role"], user["allowedSiteIds"])

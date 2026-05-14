@@ -2073,7 +2073,7 @@ function syncDualZonePricingUi() {
 }
 
 function applyRoleVisibility() {
-  const restrictedPages = ["home", "stock", "charges", "params"];
+  const restrictedPages = ["home", "stock", "charges"];
   document.querySelectorAll(".nav-btn").forEach((button) => {
     const restricted = restrictedPages.includes(button.dataset.page);
     button.classList.toggle("hidden", !canManage() && restricted);
@@ -2135,7 +2135,7 @@ function renderTopbar() {
       journalDiffEl?.classList.add("hidden");
     }
   }
-  document.getElementById("session-user").textContent = sessionUser || "utilisateur";
+  document.getElementById("session-user").textContent = sessionUserDisplayLabel() || "utilisateur";
   const eff = String(sessionUser || "").trim().toLowerCase() === "admin" ? "superadmin" : currentRole;
   const roleLabel = eff === "superadmin"
     ? "super administrateur"
@@ -2146,7 +2146,7 @@ function renderTopbar() {
         : (eff || "utilisateur");
   const badge = document.getElementById("role-badge");
   badge.textContent = roleLabel;
-  badge.title = `Compte : ${sessionUser || "—"}. Role effectif : ${roleLabel}. Les actions sensibles sont verifiees cote serveur selon ce role et les maquis autorises.`;
+  badge.title = `Compte : ${sessionUserDisplayLabel() || "—"} (${sessionUser || "—"}). Role effectif : ${roleLabel}. Les actions sensibles sont verifiees cote serveur selon ce role et les maquis autorises.`;
   const sid = currentSiteId() || "";
   const scopeEl = document.getElementById("header-site-scope");
   if (scopeEl) {
@@ -2181,7 +2181,7 @@ function renderHero() {
     guide: "Mode d'emploi accessible à toute l'équipe.",
     stock: "Les prix de vente partent du catalogue stock.",
     charges: "Les sorties d'argent restent centralisées.",
-    params: "Paramètres organisés par onglets : profil, catalogue, accès, administration.",
+    params: "Paramètres : profil personnel pour tous ; catalogue, accès et administration pour les rôles autorisés.",
   };
   const copies = {
     home: "Le serveur garde les sessions et l'état complet de l'application.",
@@ -2190,7 +2190,7 @@ function renderHero() {
     guide: "Sommaire, liens vers le guide imprimable PDF ; même les comptes serveuse peuvent consulter cette page.",
     stock: "Renseignez prix achat et prix vente pour accélérer la prise de commande.",
     charges: "Toutes les dépenses sont historisées côté serveur.",
-    params: "Profil du maquis et export JSON sous Profil ; catégories et utilisateurs ont leur propre onglet.",
+    params: "Onglet Profil : mon compte (nom affiché, mot de passe) pour tous ; réglages du maquis réservés au gérant ou aux administrateurs.",
   };
   document.getElementById("hero-title").textContent = titles[currentPage];
   document.getElementById("hero-copy").textContent = copies[currentPage];
@@ -2790,6 +2790,36 @@ function normalizeSaleFormats(item = {}) {
 function primarySaleFormat(item = {}) {
   const formats = normalizeSaleFormats(item);
   return formats.find((format) => format.quantite === 1) || formats[0] || null;
+}
+
+/** Prix de vente moyen par bouteille (format principal / kit). Tarif unique : prix du lieu unique ; deux zones : moyenne int./ext. */
+function stockRetailUnitPricePerBottle(item, site = currentSite()) {
+  const primary = primarySaleFormat(item);
+  const packQty = Math.max(1, Number(primary?.quantite) || Number(item.packSize) || 1);
+  let puInt = Number(primary?.prixInterieur) || 0;
+  let puExt = Number(primary?.prixExterieur) || 0;
+  if (!puInt && !puExt) {
+    const r = resolveItemPrices(item);
+    puInt = Number(r.prixInt) || 0;
+    puExt = Number(r.prixExt) || 0;
+  }
+  const dual = siteUsesDualZonePricing(site);
+  let packPrice = 0;
+  if (!dual) {
+    packPrice = puInt || puExt || 0;
+  } else {
+    const a = Math.max(0, puInt);
+    const b = Math.max(0, puExt) || a;
+    packPrice = a > 0 && b > 0 && a !== b ? (a + b) / 2 : (a || b);
+  }
+  return packPrice > 0 ? packPrice / packQty : 0;
+}
+
+/** Valorisation stock PDV : bouteilles en stock × prix de vente unitaire (pas casiers × prix d'achat). */
+function stockRetailValueFcfa(item, site = currentSite()) {
+  const btl = stockActuel(item);
+  const unit = stockRetailUnitPricePerBottle(item, site);
+  return Math.round(Math.max(0, btl) * unit);
 }
 
 function saleFormatLabel(format) {
@@ -4545,6 +4575,10 @@ function renderSrCart() {
 
 function openSaisieRapide() {
   syncDualZonePricingUi();
+  const ctx = document.getElementById("sr-order-context-wrap");
+  if (ctx) ctx.classList.add("hidden");
+  const titleEl = document.getElementById("sr-modal-title");
+  if (titleEl) titleEl.textContent = "Saisie rapide";
   srCart = [];
   const searchEl = document.getElementById("sr-search");
   if (searchEl) searchEl.value = "";
@@ -4556,64 +4590,137 @@ function openSaisieRapide() {
 
 async function submitSaisieRapide() {
   if (!srCart.length) { showToast("Ajoutez au moins un article."); return; }
-  const date = pdjCalendarDate();
-  if (!assertJournalAllowsSalesOrToast(date, currentSiteId())) return;
+  const orderCtxWrap = document.getElementById("sr-order-context-wrap");
+  const orderFormMode = Boolean(orderCtxWrap && !orderCtxWrap.classList.contains("hidden"));
   const btn = document.getElementById("sr-submit-btn");
   if (btn) { btn.disabled = true; btn.textContent = "Validation..."; }
   try {
-  const clientName = `Saisie rapide · ${sessionUser || "Serveuse"}`;
-  const location = document.getElementById("sr-location")?.value || "Intérieur";
-  state.nextId = state.nextId || {};
-  state.nextId.commande = (Number(state.nextId.commande) || 0) + 1;
-  const order = {
-    id: state.nextId.commande,
-    siteId: currentSiteId(),
-    client: clientName,
-    date,
-    createdAt: new Date().toISOString(),
-    status: "Servi",
-    type: "sur-place",
-    server: sessionUser || "Serveuse",
-    note: "",
-    lignes: [],
-  };
-  const errors = [];
-  for (const item of srCart) {
-    const product = findKnownProduct(item.article);
-    if (!product) { errors.push(item.article); continue; }
-    const bottles = item.qty * item.packSize;
-    const avail = stockAvailabilityForLine(product.article, bottles, order.id, null);
-    if (!avail.stockItem || avail.available < bottles) {
-      errors.push(`${item.article} (stock insuffisant : ${fmt(avail.available)} btl)`);
-      continue;
+    if (orderFormMode) {
+      const date = document.getElementById("sr-date")?.value?.trim() || today();
+      if (!assertJournalAllowsSalesOrToast(date, currentSiteId())) return;
+      state.nextId = state.nextId || {};
+      state.nextId.ligneCommande = Number(state.nextId.ligneCommande) || 0;
+      const selectedOrderId = Number(document.getElementById("sr-order-select")?.value) || 0;
+      const creatingNewOrder = !selectedOrderId;
+      const order = ensureOrder(
+        document.getElementById("sr-client")?.value ?? "",
+        date,
+        document.getElementById("sr-note")?.value ?? "",
+        selectedOrderId,
+      );
+      const errors = [];
+      let added = 0;
+      for (const item of srCart) {
+        const product = findKnownProduct(item.article);
+        if (!product) { errors.push(item.article); continue; }
+        const packSize = Math.max(1, Number(item.packSize) || 1);
+        const bottles = item.qty * packSize;
+        const avail = stockAvailabilityForLine(product.article, bottles, order.id, null);
+        if (!avail.stockItem || avail.available < bottles) {
+          errors.push(`${item.article} (stock insuffisant : ${fmt(avail.available)} btl)`);
+          continue;
+        }
+        state.nextId.ligneCommande += 1;
+        const loc = item.location || document.getElementById("sr-location")?.value || "Intérieur";
+        const line = {
+          id: state.nextId.ligneCommande,
+          date,
+          article: product.article,
+          cat: product.cat || "Autres",
+          location: loc,
+          formatQuantite: packSize,
+          prix: item.prix,
+          qty: item.qty,
+          remise: 0,
+          paiement: "A regler",
+          note: "",
+        };
+        order.lignes.push(line);
+        recordStaffAudit("create", "commande_ligne", `Ligne ajoutee · commande #${order.id} · ${order.client || ""}`, `${line.article} · ${fmt(calcNet(line))} FCFA`);
+        added += 1;
+      }
+      if (!added) {
+        if (creatingNewOrder && !(order.lignes && order.lignes.length)) {
+          state.commandes = (state.commandes || []).filter((o) => o.id !== order.id);
+          if (activeOrderId === order.id) activeOrderId = null;
+        }
+        showToast(errors.length ? `Aucune ligne ajoutee : ${errors.join(", ")}` : "Aucune ligne valide.");
+        return;
+      }
+      await persistState();
+      closeModal("modal-saisie-rapide");
+      srCart = [];
+      const vSel = document.getElementById("v-order-select");
+      const srSel = document.getElementById("sr-order-select");
+      if (vSel && srSel) vSel.value = srSel.value;
+      const vDate = document.getElementById("v-date");
+      if (vDate) vDate.value = document.getElementById("sr-date")?.value || "";
+      const vClient = document.getElementById("v-client");
+      if (vClient) vClient.value = document.getElementById("sr-client")?.value || "";
+      const vNote = document.getElementById("v-note");
+      if (vNote) vNote.value = document.getElementById("sr-note")?.value || "";
+      syncFinalizeButtonJournalState();
+      renderVentesPage();
+      const warn = errors.length ? ` (${errors.length} ligne(s) ignoree(s))` : "";
+      showToast(`${added} article(s) ajoute(s) a la commande.${warn}`);
+      return;
     }
-    state.nextId.ligneCommande = (Number(state.nextId.ligneCommande) || 0) + 1;
-    order.lignes.push({
-      id: state.nextId.ligneCommande,
+
+    const date = pdjCalendarDate();
+    if (!assertJournalAllowsSalesOrToast(date, currentSiteId())) return;
+    const clientName = `Saisie rapide · ${sessionUser || "Serveuse"}`;
+    state.nextId = state.nextId || {};
+    state.nextId.commande = (Number(state.nextId.commande) || 0) + 1;
+    const order = {
+      id: state.nextId.commande,
+      siteId: currentSiteId(),
+      client: clientName,
       date,
-      article: product.article,
-      cat: product.cat || "Autres",
-      location,
-      formatQuantite: item.packSize,
-      prix: item.prix,
-      qty: item.qty,
-      remise: 0,
-      paiement: "A regler",
-    });
-  }
-  if (!order.lignes.length) {
-    showToast(errors.length ? `Aucune ligne ajoutee : ${errors.join(", ")}` : "Aucune ligne valide.");
-    return;
-  }
-  state.commandes = state.commandes || [];
-  state.commandes.unshift(order);
-  activeOrderId = order.id;
-  await persistState({ commandes: state.commandes, nextId: state.nextId });
-  closeModal("modal-saisie-rapide");
-  srCart = [];
-  renderVentesPage();
-  const warn = errors.length ? ` (${errors.length} article(s) ignores : stock insuffisant)` : "";
-  showToast(`Commande creee : ${order.lignes.length} article(s) pour ${clientName}.${warn}`);
+      createdAt: new Date().toISOString(),
+      status: "Servi",
+      type: "sur-place",
+      server: sessionUser || "Serveuse",
+      note: "",
+      lignes: [],
+    };
+    const errors = [];
+    for (const item of srCart) {
+      const product = findKnownProduct(item.article);
+      if (!product) { errors.push(item.article); continue; }
+      const bottles = item.qty * item.packSize;
+      const avail = stockAvailabilityForLine(product.article, bottles, order.id, null);
+      if (!avail.stockItem || avail.available < bottles) {
+        errors.push(`${item.article} (stock insuffisant : ${fmt(avail.available)} btl)`);
+        continue;
+      }
+      state.nextId.ligneCommande = (Number(state.nextId.ligneCommande) || 0) + 1;
+      const loc = item.location || document.getElementById("sr-location")?.value || "Intérieur";
+      order.lignes.push({
+        id: state.nextId.ligneCommande,
+        date,
+        article: product.article,
+        cat: product.cat || "Autres",
+        location: loc,
+        formatQuantite: item.packSize,
+        prix: item.prix,
+        qty: item.qty,
+        remise: 0,
+        paiement: "A regler",
+      });
+    }
+    if (!order.lignes.length) {
+      showToast(errors.length ? `Aucune ligne ajoutee : ${errors.join(", ")}` : "Aucune ligne valide.");
+      return;
+    }
+    state.commandes = state.commandes || [];
+    state.commandes.unshift(order);
+    activeOrderId = order.id;
+    await persistState({ commandes: state.commandes, nextId: state.nextId });
+    closeModal("modal-saisie-rapide");
+    srCart = [];
+    renderVentesPage();
+    const warn = errors.length ? ` (${errors.length} article(s) ignores : stock insuffisant)` : "";
+    showToast(`Commande creee : ${order.lignes.length} article(s) pour ${clientName}.${warn}`);
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = "Valider la commande"; }
   }
@@ -4645,6 +4752,9 @@ function renderVentesPage() {
   }
   document.getElementById("articles-list").innerHTML = recordsForSite(state.stock).map((item) => `<option value="${escapeHtml(item.article)}">`).join("");
   if (document.getElementById("modal-vente")?.classList.contains("open")) renderVenteArticlePicker();
+  if (document.getElementById("modal-saisie-rapide")?.classList.contains("open")) {
+    renderSrMenu(document.getElementById("sr-search")?.value || "");
+  }
   renderOrdersManagement();
   renderQrAlertBadge();
   renderOrders();
@@ -5355,7 +5465,7 @@ function renderStock() {
     const actuel = stockActuel(item);
     const frigo = stockFrigo(item);
     const reserve = stockReserve(item);
-    const valeur = casesFromBottles(actuel, item) * (Number(item.prixAchat) || 0);
+    const valeur = stockRetailValueFcfa(item, site);
     totalValue += valeur;
     const seuilFrigo = Number(item.seuilMin) || globalSeuil;
     const isFrigoLow = isFrigoLowForAlert(frigo, seuilFrigo);
@@ -5581,6 +5691,15 @@ function editUser(username) {
   renderEditableUserSites(user);
 }
 
+/** Libellé affiché dans l'en-tête : nom complet si renseigné, sinon identifiant. */
+function sessionUserDisplayLabel() {
+  const sn = String(sessionUser || "").trim();
+  if (!sn || !state) return sn;
+  const u = (state.auth?.users || []).find((x) => String(x.username || "").trim().toLowerCase() === sn.toLowerCase());
+  const full = String(u?.displayName || "").trim();
+  return full || sn;
+}
+
 function roleLabel(role, username = "") {
   if (String(username || "").trim().toLowerCase() === "admin") return "Super administrateur";
   if (role === "superadmin") return "Super administrateur";
@@ -5615,7 +5734,7 @@ function renderUsersList() {
       <div class="site-row">
         <div>
           <p class="list-item-title">${escapeHtml(user.username)}${twoFaBadge}</p>
-          <p class="list-item-sub">${roleLabel(user.role, user.username)} · ${siteNames}</p>
+          <p class="list-item-sub">${user.displayName ? `${escapeHtml(String(user.displayName).trim())} · ` : ""}${roleLabel(user.role, user.username)} · ${siteNames}</p>
         </div>
         <div class="line-actions">
           ${canEdit ? `<button type="button" class="mini-btn" data-edit-user="${escapeHtml(user.username)}">Modifier</button>` : ""}
@@ -5897,13 +6016,75 @@ function loadParamsForm() {
   renderSitesList();
   refreshRestoreBackupUi().catch(() => {});
   renderStaffAuditLog();
+  syncUserAccountPanel();
+}
+
+function syncUserAccountPanel() {
+  const sn = String(sessionUser || "").trim();
+  const me = sn && state ? (state.auth?.users || []).find((u) => String(u.username || "").trim().toLowerCase() === sn.toLowerCase()) : null;
+  const userEl = document.getElementById("ua-username");
+  const nameEl = document.getElementById("ua-display-name");
+  const pw = document.getElementById("ua-password");
+  const pwc = document.getElementById("ua-password-confirm");
+  if (userEl) userEl.value = me?.username || sn || "";
+  if (nameEl) nameEl.value = String(me?.displayName || "").trim();
+  if (pw) pw.value = "";
+  if (pwc) pwc.value = "";
+}
+
+async function saveMyUserProfile() {
+  const sn = String(sessionUser || "").trim();
+  if (!sn || !state) {
+    showToast("Session requise.");
+    return;
+  }
+  const me = (state.auth.users || []).find((u) => String(u.username || "").trim().toLowerCase() === sn.toLowerCase());
+  if (!me) {
+    showToast("Compte introuvable.");
+    return;
+  }
+  const displayName = String(document.getElementById("ua-display-name")?.value || "").trim().slice(0, 120);
+  const pw1 = String(document.getElementById("ua-password")?.value || "");
+  const pw2 = String(document.getElementById("ua-password-confirm")?.value || "");
+  if (pw1 || pw2) {
+    if (pw1 !== pw2) {
+      showToast("Les mots de passe ne correspondent pas.");
+      return;
+    }
+    if (pw1.length < 6) {
+      showToast("Mot de passe trop court (6 caracteres minimum).");
+      return;
+    }
+  }
+  const payload = {
+    username: me.username,
+    role: me.role,
+    allowedSiteIds: [...(me.allowedSiteIds || [])],
+    displayName,
+    ...(pw1 ? { password: pw1 } : {}),
+  };
+  recordStaffAudit("update", "profil_utilisateur", `Profil ${me.username}`, displayName ? `Nom affiche : ${displayName}` : "Mise a jour");
+  await persistState({ auth: { users: [payload] } });
+  document.getElementById("ua-password").value = "";
+  document.getElementById("ua-password-confirm").value = "";
+  renderTopbar();
+  showToast(pw1 ? "Profil enregistre. Si la session se ferme, reconnectez-vous avec le nouveau mot de passe." : "Profil enregistre.");
 }
 
 function populateOrderSelect() {
   const orders = recordsForSite(state.commandes).map((order) => ({ value: String(order.id), label: order.client || `Commande ${order.id}` }));
   const options = [{ value: "", label: "Nouvelle commande" }, ...orders];
-  document.getElementById("v-order-select").innerHTML = options.map((option) => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`).join("");
-  document.getElementById("v-order-select").value = activeOrderId ? String(activeOrderId) : "";
+  const html = options.map((option) => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`).join("");
+  const vSel = document.getElementById("v-order-select");
+  if (vSel) {
+    vSel.innerHTML = html;
+    vSel.value = activeOrderId ? String(activeOrderId) : "";
+  }
+  const srSel = document.getElementById("sr-order-select");
+  if (srSel) {
+    srSel.innerHTML = html;
+    srSel.value = activeOrderId ? String(activeOrderId) : "";
+  }
   syncFinalizeButtonJournalState();
 }
 
@@ -5927,6 +6108,28 @@ function openOrderEditor(orderId = null, lineId = null) {
   const order = orderId ? recordsForSite(state.commandes).find((item) => item.id === orderId) : null;
   const line = order && lineId ? order.lignes.find((item) => item.id === lineId) : null;
   populateOrderSelect();
+  if (!lineId) {
+    const ctx = document.getElementById("sr-order-context-wrap");
+    if (ctx) ctx.classList.remove("hidden");
+    const titleEl = document.getElementById("sr-modal-title");
+    if (titleEl) titleEl.textContent = order ? "Ajouter des articles" : "Nouvelle commande";
+    const srDate = document.getElementById("sr-date");
+    if (srDate) srDate.value = order?.date || pdjCalendarDate();
+    const srClient = document.getElementById("sr-client");
+    if (srClient) srClient.value = order?.client || "";
+    const srOrderSel = document.getElementById("sr-order-select");
+    if (srOrderSel) srOrderSel.value = order ? String(order.id) : "";
+    const srNote = document.getElementById("sr-note");
+    if (srNote) srNote.value = order?.note || "";
+    srCart = [];
+    const searchEl = document.getElementById("sr-search");
+    if (searchEl) searchEl.value = "";
+    renderSrMenu("");
+    renderSrCart();
+    openModal("modal-saisie-rapide");
+    window.requestAnimationFrame(() => searchEl?.focus());
+    return;
+  }
   document.getElementById("v-date").value = line?.date || order?.date || pdjCalendarDate();
   document.getElementById("v-client").value = order?.client || "";
   document.getElementById("v-order-select").value = order ? String(order.id) : "";
@@ -7390,8 +7593,10 @@ function renderPurchaseOrders() {
   }).join("");
 }
 
-function ensureOrder(clientName, date, note) {
-  const selectedOrderId = Number(document.getElementById("v-order-select").value) || activeOrderId;
+function ensureOrder(clientName, date, note, selectedOrderIdOverride = undefined) {
+  const selectedOrderId = selectedOrderIdOverride !== undefined && selectedOrderIdOverride !== null
+    ? Number(selectedOrderIdOverride) || 0
+    : (Number(document.getElementById("v-order-select")?.value) || activeOrderId);
   let order = selectedOrderId ? recordsForSite(state.commandes).find((item) => item.id === selectedOrderId) : null;
   if (!order) {
     order = {
@@ -8861,7 +9066,7 @@ function printStockReport() {
   let alertCount = 0;
   const rows = items.map((item) => {
     const actuel = stockActuel(item);
-    const valeur = casesFromBottles(actuel, item) * (Number(item.prixAchat) || 0);
+    const valeur = stockRetailValueFcfa(item, site);
     totalValue += valeur;
     const alert = isStockBelowArticleSeuilForAlert(actuel, item.seuilMin);
     if (alert) alertCount += 1;
@@ -10876,6 +11081,23 @@ function takeOverOrder(orderId) {
 function attachEvents() {
   installFcfaThousandsDelegation();
   document.getElementById("login-form").addEventListener("submit", handleLoginSubmit);
+  const loginUsernameEl = document.getElementById("login-username");
+  if (loginUsernameEl) {
+    loginUsernameEl.addEventListener("input", () => {
+      const el = loginUsernameEl;
+      const start = el.selectionStart;
+      const end = el.selectionEnd;
+      const upper = el.value.toUpperCase();
+      if (el.value !== upper) {
+        el.value = upper;
+        try {
+          el.setSelectionRange(start, end);
+        } catch (_) {
+          /* ignore */
+        }
+      }
+    });
+  }
   document.getElementById("logout-btn").addEventListener("click", () => logout());
   document.getElementById("site-switcher").addEventListener("change", () => {
     const siteId = document.getElementById("site-switcher").value;
@@ -10915,6 +11137,30 @@ function attachEvents() {
   document.getElementById("saisie-rapide-btn")?.addEventListener("click", openSaisieRapide);
   document.getElementById("sr-submit-btn")?.addEventListener("click", () => submitSaisieRapide().catch(handleApiError));
   document.getElementById("sr-search")?.addEventListener("input", (e) => renderSrMenu(e.target.value));
+  document.getElementById("sr-order-select")?.addEventListener("change", () => {
+    const srSel = document.getElementById("sr-order-select");
+    const vSel = document.getElementById("v-order-select");
+    if (!srSel) return;
+    const id = Number(srSel.value) || null;
+    activeOrderId = id;
+    if (vSel) vSel.value = srSel.value;
+    const order = id ? recordsForSite(state.commandes).find((o) => o.id === id) : null;
+    const srClient = document.getElementById("sr-client");
+    const srDate = document.getElementById("sr-date");
+    const srNote = document.getElementById("sr-note");
+    if (order && srClient && srDate && srNote) {
+      srClient.value = order.client || srClient.value;
+      srDate.value = order.date || srDate.value;
+      srNote.value = order.note != null ? order.note : srNote.value;
+    }
+    const vDate = document.getElementById("v-date");
+    if (vDate && srDate) vDate.value = srDate.value || vDate.value;
+    const vClient = document.getElementById("v-client");
+    if (vClient && srClient) vClient.value = srClient.value;
+    const vNote = document.getElementById("v-note");
+    if (vNote && srNote) vNote.value = srNote.value;
+    syncFinalizeButtonJournalState();
+  });
   document.getElementById("sr-location")?.addEventListener("change", () => {
     renderSrMenu(document.getElementById("sr-search")?.value || "");
     renderSrCart();
@@ -11164,6 +11410,7 @@ document.getElementById("fab-btn").addEventListener("click", () => {
   document.getElementById("s-price-location-value").addEventListener("input", commitStockPriceInput);
   document.getElementById("save-charge-btn").addEventListener("click", () => saveCharge().catch(handleApiError));
   document.getElementById("save-params-btn").addEventListener("click", () => saveParams().catch(handleApiError));
+  document.getElementById("save-user-profile-btn")?.addEventListener("click", () => saveMyUserProfile().catch(handleApiError));
   document.getElementById("print-sales-history-btn").addEventListener("click", printSalesHistory);
   document.getElementById("print-stock-report-btn").addEventListener("click", printStockReport);
   document.getElementById("export-stock-excel-btn").addEventListener("click", exportStockExcel);
