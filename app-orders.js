@@ -196,7 +196,7 @@ function creditFirstOpenedLabelByDebtor(sourceState = state) {
     let ts;
     let hasTime = false;
     if (sold) {
-      const d = new Date(sold);
+      const d = parseFlexibleDateTime(sold);
       if (!Number.isNaN(d.getTime())) {
         ts = d.getTime();
         hasTime = true;
@@ -205,7 +205,7 @@ function creditFirstOpenedLabelByDebtor(sourceState = state) {
     if (ts == null) {
       const day = String(v.date || "").trim().slice(0, 10);
       if (/^\d{4}-\d{2}-\d{2}$/.test(day)) {
-        ts = new Date(`${day}T12:00:00`).getTime();
+        ts = parseFlexibleDateTime(`${day}T12:00:00`).getTime();
         hasTime = false;
       }
     }
@@ -382,6 +382,38 @@ function pad2(n) {
   return String(n).padStart(2, "0");
 }
 
+/**
+ * Parse une date/heure pour l'affichage : ISO avec Z ou décalage explicite → instant correct ;
+ * ISO sans fuseau (ex. ancien enregistrement serveur) → même heure « murale » que le fuseau du navigateur
+ * (évite le décalage quand ES interprète sans Z comme UTC).
+ */
+function parseFlexibleDateTime(input) {
+  if (input == null || input === "") return new Date(NaN);
+  if (input instanceof Date) return input;
+  const s = String(input).trim();
+  if (!s) return new Date(NaN);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    const [y, m, d] = s.split("-").map(Number);
+    return new Date(y, m - 1, d, 12, 0, 0);
+  }
+  if (/[zZ]$/.test(s) || /[+-]\d{2}:\d{2}$/.test(s) || /[+-]\d{4}$/.test(s)) {
+    const t = Date.parse(s);
+    return new Date(Number.isFinite(t) ? t : NaN);
+  }
+  const m = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?/.exec(s);
+  if (m) {
+    const y = Number(m[1]);
+    const mo = Number(m[2]) - 1;
+    const da = Number(m[3]);
+    const h = Number(m[4]);
+    const mi = Number(m[5]);
+    const se = Number(m[6] || 0);
+    return new Date(y, mo, da, h, mi, se);
+  }
+  const t = Date.parse(s);
+  return new Date(Number.isFinite(t) ? t : NaN);
+}
+
 /** yyyy-mm-dd + delta jours (fuseau local, midi pour limiter les bugs DST). */
 function addCalendarDaysIso(isoDateFragment, deltaDays) {
   const d = String(isoDateFragment ?? "").trim().slice(0, 10);
@@ -413,7 +445,7 @@ function formatDateDdMmYyyy(input) {
   const str = String(input).trim();
   const dOnly = str.slice(0, 10);
   if (/^\d{4}-\d{2}-\d{2}$/.test(dOnly)) return isoDateToDdMmYyyy(dOnly);
-  const d = input instanceof Date ? input : new Date(input);
+  const d = input instanceof Date ? input : parseFlexibleDateTime(input);
   if (Number.isNaN(d.getTime())) return str || "—";
   return `${pad2(d.getDate())}-${pad2(d.getMonth() + 1)}-${d.getFullYear()}`;
 }
@@ -426,26 +458,25 @@ function formatVentesCountFr(count) {
   return `${n} ventes`;
 }
 
-/** jj-mm-aaaa HH:mm (fuseau local). */
+/** jj-mm-aaaa HH:mm (fuseau local du navigateur). */
 function formatDateTimeDdMmYyyy(input) {
   if (input == null || input === "") return "—";
-  const d = input instanceof Date ? input : new Date(input);
+  const d = input instanceof Date ? input : parseFlexibleDateTime(input);
   if (Number.isNaN(d.getTime())) return String(input);
   return `${pad2(d.getDate())}-${pad2(d.getMonth() + 1)}-${d.getFullYear()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
 
-/** Valeur pour input[type=datetime-local] (fuseau local). */
+/** Valeur pour input[type=datetime-local] (heure locale réelle, sans bug de fuseau). */
 function datetimeLocalNow() {
   const d = new Date();
-  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
-  return d.toISOString().slice(0, 16);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
 
 function formatCreditPaidAt(p) {
   const raw = String(p?.paidAt || p?.createdAt || "").trim();
   if (raw) {
     try {
-      const d = new Date(raw);
+      const d = parseFlexibleDateTime(raw);
       if (!Number.isNaN(d.getTime())) {
         return formatDateTimeDdMmYyyy(d);
       }
@@ -535,7 +566,7 @@ function ventesCreditBreakdownForDebtor(debtorKey) {
     const creditFcfa = creditPortionOnVente(v);
     if (creditFcfa <= 0) return;
     const sold = String(v.soldAt || v.createdAt || "").trim();
-    const ts = sold ? new Date(sold).getTime() : NaN;
+    const ts = sold ? parseFlexibleDateTime(sold).getTime() : NaN;
     out.push({ v, creditFcfa, ts: Number.isFinite(ts) ? ts : 0 });
   });
   out.sort((a, b) => a.ts - b.ts);
@@ -558,11 +589,11 @@ function openCreditDebtorOpenedDetailModal(debtorRaw) {
   const first = rows[0].v;
   const firstMoment = String(first.soldAt || first.createdAt || "").trim();
   const firstLabel = firstMoment
-    ? formatDateTimeDdMmYyyy(new Date(firstMoment))
+    ? formatDateTimeDdMmYyyy(parseFlexibleDateTime(firstMoment))
     : `${formatDateDdMmYyyy(first.date)} (heure non renseignée)`;
   const tableRows = rows.map(({ v, creditFcfa }) => {
     const enc = String(v.soldAt || v.createdAt || "").trim();
-    const encLabel = enc ? formatDateTimeDdMmYyyy(new Date(enc)) : `${formatDateDdMmYyyy(v.date)} (heure non renseignée)`;
+    const encLabel = enc ? formatDateTimeDdMmYyyy(parseFlexibleDateTime(enc)) : `${formatDateDdMmYyyy(v.date)} (heure non renseignée)`;
     const note = String(v.note || "").trim();
     return `<tr>
       <td class="muted" style="white-space:nowrap;font-size:0.88rem">${escapeHtml(encLabel)}</td>
