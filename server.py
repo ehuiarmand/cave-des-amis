@@ -1677,7 +1677,7 @@ class DataStore:
                         raise ValueError(f"Stock insuffisant pour {article_label}. Disponible: {available_merge}.")
                 existing_order.setdefault("lignes", []).extend(lignes)
                 existing_order["date"] = time.strftime("%Y-%m-%d")
-                existing_order["updatedAt"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+                existing_order["updatedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
                 if note.strip():
                     existing_order["note"] = f"{existing_order.get('note', '')} | {note.strip()}".strip(" |")
                 self._write(self._state)
@@ -1692,7 +1692,7 @@ class DataStore:
                 "siteId": site_id,
                 "client": client_label,
                 "date": time.strftime("%Y-%m-%d"),
-                "createdAt": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "createdAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 "status": "En attente",
                 "type": "sur-place",
                 "server": "Client QR",

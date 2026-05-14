@@ -646,8 +646,8 @@ function openCreditPaymentDetailModal(recoveryId) {
   if (titleEl) titleEl.textContent = `Versement — ${debtorDisplayKey(p.debiteur)}`;
   const paidRaw = String(p.paidAt || "").trim();
   const createdRaw = String(p.createdAt || "").trim();
-  const paidIso = paidRaw ? formatDateTimeDdMmYyyy(new Date(paidRaw)) : "—";
-  const createdIso = createdRaw ? formatDateTimeDdMmYyyy(new Date(createdRaw)) : "—";
+  const paidIso = paidRaw ? formatDateTimeDdMmYyyy(paidRaw) : "—";
+  const createdIso = createdRaw ? formatDateTimeDdMmYyyy(createdRaw) : "—";
   body.innerHTML = `
     <dl class="audit-detail-dl">
       <div><dt>Client (débiteur)</dt><dd><strong>${escapeHtml(debtorDisplayKey(p.debiteur))}</strong></dd></div>
@@ -4276,7 +4276,7 @@ function orderTime(order) {
     const fromVente = String(v?.soldAt || v?.createdAt || "").trim();
     if (fromVente.includes("T")) {
       try {
-        const d = new Date(fromVente);
+        const d = parseFlexibleDateTime(fromVente);
         if (!Number.isNaN(d.getTime())) return timeFromDate(d);
       } catch (_) {
         /* ignore */
@@ -4286,7 +4286,7 @@ function orderTime(order) {
   const raw = String(order?.createdAt || order?.updatedAt || order?.date || "");
   if (raw.includes("T")) {
     try {
-      const d = new Date(raw);
+      const d = parseFlexibleDateTime(raw);
       if (!Number.isNaN(d.getTime())) return timeFromDate(d);
     } catch (_) {
       /* ignore */
@@ -6757,7 +6757,7 @@ async function saveCreditRecovery() {
   let paidAtIso = new Date().toISOString();
   let dateCalendar = today();
   if (dtInput) {
-    const parsed = new Date(dtInput);
+    const parsed = parseFlexibleDateTime(dtInput);
     if (!Number.isNaN(parsed.getTime())) {
       paidAtIso = parsed.toISOString();
       dateCalendar = dtInput.slice(0, 10);
