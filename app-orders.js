@@ -81,6 +81,7 @@ let currentQrLinkInt = "";
 let currentQrLinkExt = "";
 let pendingFinalizeOrderId = null;
 let liveSyncTimer = null;
+let appLiveClockTimer = null;
 let qrAlertCount = 0;
 let knownQrOrderIds = new Set();
 let flashingQrOrderIds = new Set();
@@ -205,7 +206,7 @@ function creditFirstOpenedLabelByDebtor(sourceState = state) {
     if (ts == null) {
       const day = String(v.date || "").trim().slice(0, 10);
       if (/^\d{4}-\d{2}-\d{2}$/.test(day)) {
-        ts = parseFlexibleDateTime(`${day}T12:00:00`).getTime();
+        ts = parseDateTimeLocalInput(`${day}T12:00:00`).getTime();
         hasTime = false;
       }
     }
@@ -383,9 +384,9 @@ function pad2(n) {
 }
 
 /**
- * Parse une date/heure pour l'affichage : ISO avec Z ou décalage explicite → instant correct ;
- * ISO sans fuseau (ex. ancien enregistrement serveur) → même heure « murale » que le fuseau du navigateur
- * (évite le décalage quand ES interprète sans Z comme UTC).
+ * Horodatages JSON (soldAt, createdAt, paidAt…) : avec Z ou décalage explicite → instant correct.
+ * Sans fuseau (ex. anciennes données) : composantes lues en UTC (comme toISOString() / serveur gmtime en Z),
+ * puis affichage converti par le navigateur vers le fuseau local de l'appareil.
  */
 function parseFlexibleDateTime(input) {
   if (input == null || input === "") return new Date(NaN);
@@ -408,17 +409,29 @@ function parseFlexibleDateTime(input) {
     const h = Number(m[4]);
     const mi = Number(m[5]);
     const se = Number(m[6] || 0);
-    return new Date(y, mo, da, h, mi, se);
+    return new Date(Date.UTC(y, mo, da, h, mi, se));
   }
   const t = Date.parse(s);
   return new Date(Number.isFinite(t) ? t : NaN);
+}
+
+/** Valeur d'input[type=datetime-local] : heure « murale » du fuseau de cet appareil (sans Z). */
+function parseDateTimeLocalInput(input) {
+  if (input == null || input === "") return new Date(NaN);
+  if (input instanceof Date) return input;
+  const s = String(input).trim();
+  const m = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?/.exec(s);
+  if (m) {
+    return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]), Number(m[6] || 0));
+  }
+  return new Date(NaN);
 }
 
 /** yyyy-mm-dd + delta jours (fuseau local, midi pour limiter les bugs DST). */
 function addCalendarDaysIso(isoDateFragment, deltaDays) {
   const d = String(isoDateFragment ?? "").trim().slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || !Number.isFinite(deltaDays) || deltaDays === 0) return d;
-  const dt = new Date(`${d}T12:00:00`);
+  const dt = parseDateTimeLocalInput(`${d}T12:00:00`);
   dt.setDate(dt.getDate() + deltaDays);
   return `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}`;
 }
@@ -464,6 +477,12 @@ function formatDateTimeDdMmYyyy(input) {
   const d = input instanceof Date ? input : parseFlexibleDateTime(input);
   if (Number.isNaN(d.getTime())) return String(input);
   return `${pad2(d.getDate())}-${pad2(d.getMonth() + 1)}-${d.getFullYear()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+/** Heure locale (HH:mm), affichage homogène (fuseaux à décalage fractionné inclus). */
+function formatLocalHourMinute(d) {
+  if (!(d instanceof Date) || Number.isNaN(d.getTime())) return "--:--";
+  return new Intl.DateTimeFormat("fr-FR", { hour: "2-digit", minute: "2-digit", hour12: false, hourCycle: "h23" }).format(d);
 }
 
 /** Valeur pour input[type=datetime-local] (heure locale réelle, sans bug de fuseau). */
@@ -4270,14 +4289,13 @@ function orderTotal(order) {
 }
 
 function orderTime(order) {
-  const timeFromDate = (d) => `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
   if (order?._isPaid && Array.isArray(order.lignes) && order.lignes.length) {
     const v = order.lignes[0];
     const fromVente = String(v?.soldAt || v?.createdAt || "").trim();
     if (fromVente.includes("T")) {
       try {
         const d = parseFlexibleDateTime(fromVente);
-        if (!Number.isNaN(d.getTime())) return timeFromDate(d);
+        if (!Number.isNaN(d.getTime())) return formatLocalHourMinute(d);
       } catch (_) {
         /* ignore */
       }
@@ -4287,7 +4305,7 @@ function orderTime(order) {
   if (raw.includes("T")) {
     try {
       const d = parseFlexibleDateTime(raw);
-      if (!Number.isNaN(d.getTime())) return timeFromDate(d);
+      if (!Number.isNaN(d.getTime())) return formatLocalHourMinute(d);
     } catch (_) {
       /* ignore */
     }
@@ -6275,6 +6293,46 @@ function stopLiveSync() {
   liveSyncTimer = null;
 }
 
+function updateAppLiveClock() {
+  const timeEl = document.getElementById("topbar-live-clock-time");
+  const zoneEl = document.getElementById("topbar-live-clock-zone");
+  if (!timeEl) return;
+  const now = new Date();
+  timeEl.textContent = new Intl.DateTimeFormat("fr-FR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+    hourCycle: "h23",
+  }).format(now);
+  if (zoneEl) {
+    try {
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+      const offMin = -now.getTimezoneOffset();
+      const sign = offMin >= 0 ? "+" : "-";
+      const ah = Math.floor(Math.abs(offMin) / 60);
+      const am = Math.abs(offMin) % 60;
+      const offStr = am ? `${sign}${ah}h${pad2(am)}` : `${sign}${ah}h`;
+      zoneEl.textContent = `${tz ? ` · ${tz}` : ""} (UTC${offStr})`;
+    } catch (_) {
+      zoneEl.textContent = "";
+    }
+  }
+}
+
+function startAppLiveClock() {
+  stopAppLiveClock();
+  updateAppLiveClock();
+  appLiveClockTimer = window.setInterval(updateAppLiveClock, 1000);
+}
+
+function stopAppLiveClock() {
+  if (appLiveClockTimer != null) {
+    clearInterval(appLiveClockTimer);
+    appLiveClockTimer = null;
+  }
+}
+
 async function syncStateSilently() {
   if (!state || modalIsOpen()) return;
   if (!["ventes", "home", "stock", "pdj", "commandes"].includes(currentPage)) return;
@@ -6757,7 +6815,7 @@ async function saveCreditRecovery() {
   let paidAtIso = new Date().toISOString();
   let dateCalendar = today();
   if (dtInput) {
-    const parsed = parseFlexibleDateTime(dtInput);
+    const parsed = parseDateTimeLocalInput(dtInput);
     if (!Number.isNaN(parsed.getTime())) {
       paidAtIso = parsed.toISOString();
       dateCalendar = dtInput.slice(0, 10);
@@ -10946,6 +11004,7 @@ async function logout() {
     console.error(error);
   }
   stopLiveSync();
+  stopAppLiveClock();
   state = null;
   sessionUser = null;
   currentRole = null;
@@ -11051,6 +11110,7 @@ async function bootstrapAuthenticatedApp(opts = {}) {
   navigate(currentPage);
   renderQrAlertBadge();
   startLiveSync();
+  startAppLiveClock();
 }
 
 function handleApiError(error) {

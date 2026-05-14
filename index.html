@@ -103,6 +103,10 @@
           <p id="hero-copy" class="hero-copy">Suivez les ventes, le stock et les charges.</p>
         </div>
         <div class="topbar-actions">
+          <div class="topbar-live-clock" id="topbar-live-clock" title="Heure de cet appareil (fuseau systeme) — les horaires enregistres sont convertis pour ce fuseau.">
+            <span id="topbar-live-clock-time" class="topbar-live-clock-time" aria-live="polite">--:--:--</span>
+            <span id="topbar-live-clock-zone" class="topbar-live-clock-zone"> </span>
+          </div>
           <button type="button" id="topbar-more-btn" class="topbar-more-btn" aria-label="Menu rapide">⋯</button>
           <select id="site-switcher" class="site-switcher" aria-label="Maquis actif"></select>
           <p id="header-site-scope" class="muted" style="font-size:0.72rem;margin:6px 0 0;text-align:right;max-width:260px;line-height:1.35"></p>
@@ -2175,6 +2179,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=149"></script>
+  <script src="./app-orders.js?v=151"></script>
 </body>
 </html>
