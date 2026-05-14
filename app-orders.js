@@ -29,6 +29,8 @@ const CHARGE_CATEGORIES = ["Loyer", "Salaires", "Électricité", "Eau", "Gaz / C
 const PDJ_REQUIRE_CASH_OPENING = true;
 /** Brouillon saisi dans « Montant en caisse à l'ouverture » : réinjecté si le panneau est re-rendu (ex. sync live ~4 s) pendant la saisie. */
 const pdjOpeningCashDraftBySiteDate = {};
+/** Brouillon « espèces à la fermeture » + reprise des saisies frigo/réserve si le bloc clôture est re-rendu pendant la saisie. */
+const pdjClosingCashDraftBySiteDate = {};
 function pdjOpeningCashDraftKey(siteId, dateStr) {
   return `${String(siteId || "").trim()}|${String(dateStr || "").trim().slice(0, 10)}`;
 }
@@ -3771,6 +3773,27 @@ function renderDailyStockCheck() {
   const closingSeed = seedFromClose && typeof seedFromClose.closingCashFcfa === "number"
     ? Math.round(Number(seedFromClose.closingCashFcfa))
     : null;
+  const closingDraftKey = pdjOpeningCashDraftKey(currentSiteId(), dStr);
+  const prevClosingEl = document.getElementById("pdj-closing-cash");
+  if (prevClosingEl) pdjClosingCashDraftBySiteDate[closingDraftKey] = prevClosingEl.value;
+  const domFrigo = new Map();
+  const domReserve = new Map();
+  const prevStockBox = document.getElementById("pdj-stock-check");
+  if (prevStockBox) {
+    prevStockBox.querySelectorAll("[data-check-frigo]").forEach((el) => {
+      const raw = el.getAttribute("data-check-frigo");
+      if (raw != null && raw !== "") domFrigo.set(Number(raw), el.value);
+    });
+    prevStockBox.querySelectorAll("[data-check-reserve]").forEach((el) => {
+      const raw = el.getAttribute("data-check-reserve");
+      if (raw != null && raw !== "") domReserve.set(Number(raw), el.value);
+    });
+  }
+  let closingValForInput = "";
+  if (prevClosingEl) closingValForInput = prevClosingEl.value;
+  else if (Object.prototype.hasOwnProperty.call(pdjClosingCashDraftBySiteDate, closingDraftKey)) {
+    closingValForInput = pdjClosingCashDraftBySiteDate[closingDraftKey];
+  } else if (closingSeed != null) closingValForInput = String(closingSeed);
   const rows = items.map((item) => {
     const closedCheckItem = closed ? (closed.items || []).find((ci) => Number(ci.id) === Number(item.id)) : null;
     const stockAtOpen = stockOpeningFromDayBook(item, dayBook)
@@ -3779,8 +3802,11 @@ function renderDailyStockCheck() {
     const sortiesToday = todaySortiesBottlesForArticle(item.article, dStr);
     const remaining = Math.max(0, stockAtOpen - sortiesToday); // restant théorique
     const seedCi = seedFromClose ? (seedFromClose.items || []).find((ci) => Number(ci.id) === Number(item.id)) : null;
-    const frigoVal = seedCi != null ? Math.max(0, Number(seedCi.frigo) || 0) : stockFrigo(item);
-    const reserveVal = seedCi != null ? Math.max(0, Number(seedCi.reserve) || 0) : stockReserve(item);
+    const idn = Number(item.id);
+    let frigoVal = seedCi != null ? Math.max(0, Number(seedCi.frigo) || 0) : stockFrigo(item);
+    let reserveVal = seedCi != null ? Math.max(0, Number(seedCi.reserve) || 0) : stockReserve(item);
+    if (domFrigo.has(idn)) frigoVal = Math.max(0, Number(domFrigo.get(idn)) || 0);
+    if (domReserve.has(idn)) reserveVal = Math.max(0, Number(domReserve.get(idn)) || 0);
     const gap = (frigoVal + reserveVal) - remaining;
     return `<tr>
         <td>${escapeHtml(item.article)}</td>
@@ -3802,6 +3828,7 @@ function renderDailyStockCheck() {
       </div>`
     : "";
   const openedLabel = dayBook?.openedAt ? formatDateTimeDdMmYyyy(dayBook.openedAt) : "—";
+  const hadClosingFocus = document.activeElement?.id === "pdj-closing-cash";
   container.innerHTML = `
       ${correctionBanner}
       <div class="inline-card" style="margin-bottom:12px">
@@ -3817,7 +3844,7 @@ function renderDailyStockCheck() {
         <div class="form-grid two-cols" style="margin-top:10px">
           <div class="form-group">
             <label for="pdj-closing-cash">Montant espèces dénombrées à la fermeture (FCFA)</label>
-            <input id="pdj-closing-cash" type="number" min="0" step="1" placeholder="Comptage réel en caisse" value="${closingSeed != null ? String(closingSeed) : ""}">
+            <input id="pdj-closing-cash" type="number" min="0" step="1" placeholder="Comptage réel en caisse" value="${escapeHtml(closingValForInput)}">
           </div>
         </div>
       </div>
@@ -3837,6 +3864,18 @@ function renderDailyStockCheck() {
         </tr></thead>
         <tbody>${rows}</tbody>
       </table></div>`;
+  if (hadClosingFocus) {
+    const neu = document.getElementById("pdj-closing-cash");
+    if (neu) {
+      neu.focus();
+      const L = neu.value.length;
+      try {
+        neu.setSelectionRange(L, L);
+      } catch (_) {
+        /* ignore */
+      }
+    }
+  }
 }
 
 function renderDashboard() {
@@ -8087,6 +8126,7 @@ async function closeAccountingDay() {
   const pdjMapClose = { ...(state.pdjWorkDateBySite || {}) };
   if (pdjMapClose[sidClose] === dStr) delete pdjMapClose[sidClose];
   await persistState({ stock: state.stock, stockChecks: state.stockChecks, pdjWorkDateBySite: pdjMapClose });
+  delete pdjClosingCashDraftBySiteDate[pdjOpeningCashDraftKey(sidClose, dStr)];
   renderStock();
   renderPointDuJour();
   const cashHint = cashEcartEspeces === 0 ? "" : ` Écart espèces : ${cashEcartEspeces > 0 ? "+" : ""}${fmt(cashEcartEspeces)} FCFA.`;
@@ -11298,10 +11338,18 @@ document.getElementById("fab-btn").addEventListener("click", () => {
   });
   document.getElementById("page-pdj")?.addEventListener("input", (event) => {
     const t = event.target;
-    if (!t || t.id !== "pdj-opening-cash") return;
-    const sid = currentSiteId();
-    const d = pdjCalendarDate();
-    pdjOpeningCashDraftBySiteDate[pdjOpeningCashDraftKey(sid, d)] = t.value;
+    if (!t) return;
+    if (t.id === "pdj-opening-cash") {
+      const sid = currentSiteId();
+      const d = pdjCalendarDate();
+      pdjOpeningCashDraftBySiteDate[pdjOpeningCashDraftKey(sid, d)] = t.value;
+      return;
+    }
+    if (t.id === "pdj-closing-cash") {
+      const sid = currentSiteId();
+      const d = pdjCalendarDate();
+      pdjClosingCashDraftBySiteDate[pdjOpeningCashDraftKey(sid, d)] = t.value;
+    }
   });
   document.getElementById("pdj-stock-check")?.addEventListener("input", (event) => {
     const input = event.target.closest("[data-check-frigo],[data-check-reserve]");
