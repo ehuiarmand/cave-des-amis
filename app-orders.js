@@ -4992,7 +4992,7 @@ async function submitSaisieRapide() {
         ? recordsForSite(state.commandes).find((item) => item.id === selectedOrderId)
         : null;
       const srClientTrim = (document.getElementById("sr-client")?.value ?? "").trim();
-      if (!assertNomClientCommandeNonQrOrToast(srClientTrim, existingOrder)) return;
+      if (!assertNomClientQrCommandeOuToast(srClientTrim, existingOrder)) return;
       const order = ensureOrder(
         document.getElementById("sr-client")?.value ?? "",
         date,
@@ -5631,7 +5631,7 @@ async function confirmKit() {
   const existingOrder = selectedOrderId
     ? recordsForSite(state.commandes).find((item) => item.id === selectedOrderId)
     : null;
-  if (!assertNomClientCommandeNonQrOrToast(clientName, existingOrder)) return;
+  if (!assertNomClientQrCommandeOuToast(clientName, existingOrder)) return;
   let anyAdded = false;
   for (const article of checked) {
     const product = findKnownProduct(article);
@@ -8093,17 +8093,17 @@ function orderIsQrCommande(order) {
   return String(order?.source || "").trim() === "qr";
 }
 
-/** Hors commande QR : nom client / table obligatoire. */
-function assertNomClientCommandeNonQrOrToast(clientTrim, existingOrder) {
-  if (existingOrder && orderIsQrCommande(existingOrder)) return true;
+/** Commande creee par QR : nom client / table obligatoire pour la suite du traitement. */
+function assertNomClientQrCommandeOuToast(clientTrim, existingOrder) {
+  if (!existingOrder || !orderIsQrCommande(existingOrder)) return true;
   if (String(clientTrim || "").trim()) return true;
-  showToast("Indiquez le nom du client ou de la table (obligatoire hors commande QR).");
+  showToast("Indiquez le nom du client ou de la table (obligatoire pour les commandes creees par QR).");
   return false;
 }
 
 /** Si le formulaire vente affiche la même commande, reprend le nom client saisi avant encaissement. */
 function syncOrderClientFromVentesFormIfEditing(order) {
-  if (!order || orderIsQrCommande(order)) return;
+  if (!order) return;
   const vSel = Number(document.getElementById("v-order-select")?.value) || 0;
   if (vSel !== order.id) return;
   const t = (document.getElementById("v-client")?.value || "").trim();
@@ -8119,7 +8119,7 @@ function ensureOrder(clientName, date, note, selectedOrderIdOverride = undefined
     order = {
       id: state.nextId.commande++,
       siteId: currentSiteId(),
-      client: clientName.trim(),
+      client: clientName.trim() || `Client ${state.nextId.commande - 1}`,
       date,
       createdAt: new Date().toISOString(),
       status: "Servi",
@@ -8159,7 +8159,7 @@ async function saveOrderLine() {
     ? recordsForSite(state.commandes).find((item) => item.id === selectedOrderId)
     : null;
   const clientTrim = (document.getElementById("v-client").value || "").trim();
-  if (!assertNomClientCommandeNonQrOrToast(clientTrim, existingOrder)) return;
+  if (!assertNomClientQrCommandeOuToast(clientTrim, existingOrder)) return;
   const order = ensureOrder(document.getElementById("v-client").value, date, document.getElementById("v-note").value);
   const requestedBottles = (Number(document.getElementById("v-qty").value) || 1) * Math.max(1, Number(format?.quantite) || Number(product?.packSize) || 1);
   const availability = stockAvailabilityForLine(product.article, requestedBottles, order.id, editingLineId);
@@ -8234,8 +8234,8 @@ async function finalizeOrder(orderId = activeOrderId) {
     return;
   }
   syncOrderClientFromVentesFormIfEditing(order);
-  if (!orderIsQrCommande(order) && !String(order.client || "").trim()) {
-    showToast("Indiquez le nom du client ou de la table avant encaissement (obligatoire hors commande QR).");
+  if (orderIsQrCommande(order) && !String(order.client || "").trim()) {
+    showToast("Indiquez le nom du client ou de la table (obligatoire pour les commandes creees par QR).");
     return;
   }
   const saleDateGuard = String(order.date || today()).slice(0, 10);
@@ -8337,8 +8337,8 @@ function openFinalizeDialog(orderId = activeOrderId) {
     return;
   }
   syncOrderClientFromVentesFormIfEditing(order);
-  if (!orderIsQrCommande(order) && !String(order.client || "").trim()) {
-    showToast("Indiquez le nom du client ou de la table avant encaissement (obligatoire hors commande QR).");
+  if (orderIsQrCommande(order) && !String(order.client || "").trim()) {
+    showToast("Indiquez le nom du client ou de la table (obligatoire pour les commandes creees par QR).");
     return;
   }
   const saleD = String(order.date || today()).slice(0, 10);
