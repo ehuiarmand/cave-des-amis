@@ -998,11 +998,14 @@ function escapeHtml(value) {
 }
 
 async function apiRequest(url, options = {}) {
-  const response = await fetch(url, {
+  const { cache, ...rest } = options;
+  const init = {
     credentials: "same-origin",
-    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
-    ...options,
-  });
+    ...rest,
+    headers: { "Content-Type": "application/json", ...(rest.headers || {}) },
+  };
+  if (cache != null) init.cache = cache;
+  const response = await fetch(url, init);
   const isJson = (response.headers.get("Content-Type") || "").includes("application/json");
   const payload = isJson ? await response.json() : null;
   if (!response.ok) {
@@ -6658,7 +6661,7 @@ async function syncStateSilently() {
   if (currentPage === "stock") {
     // Full reload for stock page — delta only returns commandes, not stock/purchases
     try {
-      const fresh = await apiRequest(API.state);
+      const fresh = await apiRequest(API.state, { cache: "no-store" });
       if (fresh) {
         const _casiers = state.casiers ?? [];
         const _casierMouvements = state.casierMouvements ?? [];
@@ -6710,7 +6713,7 @@ async function syncStateSilently() {
     }
   } catch (error) {
     // Fallback: if delta endpoint fails, reload full state.
-    state = await apiRequest(API.state);
+    state = await apiRequest(API.state, { cache: "no-store" });
     if (!state.pdjWorkDateBySite || typeof state.pdjWorkDateBySite !== "object") state.pdjWorkDateBySite = {};
     delta = null;
   }
@@ -8326,6 +8329,33 @@ function readStockSaleFormats() {
   return [...byQuantity.values()].sort((a, b) => a.quantite - b.quantite);
 }
 
+/** Les champs « Prix kit » du modal peuvent différer des inputs des lignes formats ; on les impose pour éviter de ré-enregistrer d’anciens prix. */
+function mergeStockModalKitPricesIntoFormats(formats) {
+  const kitInt = Number(document.getElementById("s-prix-kit-int")?.value) || 0;
+  const kitExt = Number(document.getElementById("s-prix-kit-ext")?.value) || 0;
+  const packFromForm = Math.max(1, Number(document.getElementById("s-pack")?.value) || 1);
+  if (kitInt <= 0) return formats;
+  const ext = kitExt > 0 ? kitExt : kitInt;
+  const list = Array.isArray(formats) ? formats.slice() : [];
+  if (!list.length) {
+    return [{ quantite: packFromForm, prixInterieur: kitInt, prixExterieur: ext }];
+  }
+  const targetQty = list.some((f) => f.quantite === packFromForm) ? packFromForm : list[0].quantite;
+  let hit = false;
+  const out = list.map((f) => {
+    if (f.quantite === targetQty) {
+      hit = true;
+      return { quantite: f.quantite, prixInterieur: kitInt, prixExterieur: ext };
+    }
+    return f;
+  });
+  if (!hit) {
+    out.push({ quantite: targetQty, prixInterieur: kitInt, prixExterieur: ext });
+    out.sort((a, b) => a.quantite - b.quantite);
+  }
+  return out;
+}
+
 function addStockSaleFormat() {
   const formats = [...document.querySelectorAll("[data-format-row]")].map((row) => ({
     quantite: Math.max(1, Number(row.querySelector(".stock-format-qty")?.value) || 1),
@@ -8418,7 +8448,7 @@ async function saveStock() {
     prixAchat: Number(document.getElementById("s-prix").value) || 0,
   };
   if (siteIsSingleBrewery() && !fields.brasserie) { showToast("Brasserie unique manquante dans les paramètres du maquis."); return; }
-  fields.formatsVente = readStockSaleFormats();
+  fields.formatsVente = mergeStockModalKitPricesIntoFormats(readStockSaleFormats());
   const primaryFormat = fields.formatsVente.find((format) => format.quantite === 1) || fields.formatsVente[0];
   fields.packSize = Math.max(1, Number(primaryFormat?.quantite) || Number(document.getElementById("s-pack").value) || 1);
   fields.prixVenteInt = Number(primaryFormat?.prixInterieur) || Number(document.getElementById("s-prix-kit-int").value) || 0;

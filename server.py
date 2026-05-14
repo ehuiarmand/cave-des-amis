@@ -2281,7 +2281,7 @@ class AppHandler(BaseHTTPRequestHandler):
             if self.headers.get("If-None-Match") == etag:
                 self.send_not_modified(etag)
                 return
-            self.send_json(HTTPStatus.OK, store.public_state_for_session(session), etag=etag, cache_control="no-cache")
+            self.send_json(HTTPStatus.OK, store.public_state_for_session(session), etag=etag, cache_control="no-store")
             return
         if get_path == "/api/public/order":
             self.send_error(HTTPStatus.METHOD_NOT_ALLOWED)
