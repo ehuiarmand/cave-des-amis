@@ -1078,6 +1078,10 @@
                 <input id="ua-password-confirm" type="password" autocomplete="new-password" placeholder="Répéter si changement">
               </div>
             </div>
+            <div id="ua-2fa-block" class="ua-2fa-block" style="margin-top:16px;padding-top:16px;border-top:1px solid var(--line)">
+              <p class="muted" style="font-size:0.86rem;margin:0 0 10px;line-height:1.45">Sécurité — authentification à deux facteurs (application type Google Authenticator).</p>
+              <div id="ua-2fa-actions" class="line-actions"></div>
+            </div>
             <div class="button-stack">
               <button id="save-user-profile-btn" class="btn btn-primary" type="button">Enregistrer mon profil</button>
             </div>
@@ -1174,16 +1178,35 @@
               <h3>Export et sauvegarde</h3>
               <span class="section-meta">Comptabilite</span>
             </div>
-            <div class="form-group">
-              <label for="export-month">Periode (mois)</label>
-              <input id="export-month" type="month">
+            <div class="export-period-bar" style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin-bottom:14px">
+              <div class="form-group" style="min-width:200px;margin:0">
+                <label for="export-period-mode">Période d'export</label>
+                <select id="export-period-mode">
+                  <option value="month" selected>Mois en cours</option>
+                  <option value="week">Semaine en cours</option>
+                  <option value="custom">Période personnalisée</option>
+                  <option value="all">Tout l'historique</option>
+                </select>
+              </div>
+              <div id="export-period-custom" class="form-grid two-cols hidden" style="gap:12px;margin:0;min-width:280px">
+                <div class="form-group" style="margin:0">
+                  <label for="export-period-start">Du</label>
+                  <input id="export-period-start" type="date">
+                </div>
+                <div class="form-group" style="margin:0">
+                  <label for="export-period-end">Au</label>
+                  <input id="export-period-end" type="date">
+                </div>
+              </div>
+              <p id="export-period-label" class="muted" style="margin:0;font-size:0.82rem;flex:1;min-width:140px;padding-bottom:6px"></p>
             </div>
             <div class="button-stack">
-              <button id="export-ventes-csv-btn" class="btn btn-outline" type="button">Exporter les ventes (CSV)</button>
-              <button id="export-charges-csv-btn" class="btn btn-outline" type="button">Exporter les charges (CSV)</button>
-              <button id="export-btn" class="btn btn-outline" type="button">Sauvegarde JSON complete</button>
+              <button id="export-ventes-excel-btn" class="btn btn-outline" type="button">Exporter les ventes (Excel)</button>
+              <button id="export-charges-excel-btn" class="btn btn-outline" type="button">Exporter les charges (Excel)</button>
+              <button id="export-compta-excel-btn" class="btn btn-primary" type="button">Exporter ventes + charges (Excel)</button>
+              <button id="export-btn" class="btn btn-outline" type="button">Sauvegarde technique (JSON)</button>
             </div>
-            <p class="muted" style="font-size:0.82rem;margin-top:10px">Les fichiers CSV incluent date, libelle, montant, categorie, paiement et serveur lorsque disponible.</p>
+            <p class="muted" style="font-size:0.82rem;margin-top:10px">Les exports Excel respectent la période choisie ci-dessus (comme sur le tableau de bord). La sauvegarde JSON exporte tout le maquis (restauration technique).</p>
           </article>
         </div>
 
@@ -2286,6 +2309,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=203"></script>
+  <script src="./app-orders.js?v=205"></script>
 </body>
 </html>

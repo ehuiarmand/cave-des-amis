@@ -186,10 +186,28 @@ function renderHome2FAAlert() {
     setParamsSubTab("acces");
   });
   el.querySelector("[data-goto-params-acces-2fa]")?.addEventListener("click", () => {
-    navigate("params");
-    setParamsSubTab("acces");
-    setTimeout(() => document.querySelector("[data-setup-2fa]")?.focus(), 200);
+    openMyAccount2FASetup();
   });
+}
+
+function openMyAccount2FASetup() {
+  const sn = String(sessionUser || "").trim();
+  if (!sn) {
+    showToast("Session requise.");
+    return;
+  }
+  navigate("params");
+  setParamsSubTab("profil");
+  syncUserAccountPanel();
+  const panel = document.getElementById("user-account-panel");
+  panel?.scrollIntoView({ behavior: "smooth", block: "start" });
+  const btn = document.querySelector(`[data-setup-2fa-self="${CSS.escape(sn)}"]`)
+    || document.getElementById("ua-2fa-setup-btn");
+  if (btn) {
+    btn.focus();
+    return;
+  }
+  setupTwoFactor(sn).catch(handleApiError);
 }
 
 function csvEscapeCell(value) {
@@ -208,28 +226,104 @@ function downloadCsvFile(filename, headerRow, dataRows) {
   URL.revokeObjectURL(link.href);
 }
 
-function exportMonthPickerValue() {
-  const raw = document.getElementById("export-month")?.value || today().slice(0, 7);
-  return String(raw).slice(0, 7);
+function downloadExcelFile(filename, sheetName, headerRow, dataRows) {
+  if (typeof XLSX === "undefined") {
+    showToast("Bibliothèque Excel non chargée. Rechargez la page (Ctrl+F5).");
+    return false;
+  }
+  const objects = dataRows.map((row) => {
+    const o = {};
+    headerRow.forEach((key, i) => { o[key] = row[i]; });
+    return o;
+  });
+  const ws = XLSX.utils.json_to_sheet(objects);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, sheetName.slice(0, 31));
+  XLSX.writeFile(wb, filename.endsWith(".xlsx") ? filename : `${filename}.xlsx`);
+  return true;
 }
 
-function monthRangeFromPicker(yyyyMm) {
-  const [y, m] = String(yyyyMm).split("-").map(Number);
-  const last = new Date(y, m, 0).getDate();
-  return { start: `${yyyyMm}-01`, end: `${yyyyMm}-${pad2(last)}` };
+function downloadExcelWorkbook(filename, sheets) {
+  if (typeof XLSX === "undefined") {
+    showToast("Bibliothèque Excel non chargée. Rechargez la page (Ctrl+F5).");
+    return false;
+  }
+  const wb = XLSX.utils.book_new();
+  sheets.forEach(({ name, header, rows }) => {
+    const objects = rows.map((row) => {
+      const o = {};
+      header.forEach((key, i) => { o[key] = row[i]; });
+      return o;
+    });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(objects), name.slice(0, 31));
+  });
+  XLSX.writeFile(wb, filename.endsWith(".xlsx") ? filename : `${filename}.xlsx`);
+  return true;
 }
 
 function exportFileSlug() {
   return (currentSite()?.nom || "maquis").replace(/[^\w-]+/gi, "_").replace(/_+/g, "_") || "maquis";
 }
 
-function exportCsvVentesMonth() {
-  const ym = exportMonthPickerValue();
-  const { start, end } = monthRangeFromPicker(ym);
-  const rows = recordsForSite(state.ventes).filter((v) => {
-    const d = String(v.date || "").slice(0, 10);
-    return d >= start && d <= end;
+function periodFromControls(prefix) {
+  const mode = document.getElementById(`${prefix}-period-mode`)?.value || "month";
+  if (mode === "all") {
+    return { start: null, end: null, mode, label: "Tout l'historique" };
+  }
+  if (mode === "month") {
+    const { start, end } = monthPeriodBounds(new Date());
+    const mois = new Date().toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
+    return { start, end, mode, label: `Mois en cours (${mois})` };
+  }
+  if (mode === "week") {
+    const { start, end } = weekPeriodBounds(new Date());
+    return { start, end, mode, label: `Semaine en cours (${formatPeriodLabel(start, end)})` };
+  }
+  const { start, end } = dateRangeFromDom(`${prefix}-period-start`, `${prefix}-period-end`, today());
+  return { start, end, mode, label: formatPeriodLabel(start, end) };
+}
+
+function syncPeriodCustomUi(prefix) {
+  const mode = document.getElementById(`${prefix}-period-mode`)?.value || "month";
+  document.getElementById(`${prefix}-period-custom`)?.classList.toggle("hidden", mode !== "custom");
+  const label = document.getElementById(`${prefix}-period-label`);
+  if (label) label.textContent = periodFromControls(prefix).label;
+}
+
+function initPeriodDom(prefix) {
+  const { start } = monthPeriodBounds(new Date());
+  const startEl = document.getElementById(`${prefix}-period-start`);
+  const endEl = document.getElementById(`${prefix}-period-end`);
+  if (startEl && !startEl.value) startEl.value = start;
+  if (endEl && !endEl.value) endEl.value = today();
+  syncPeriodCustomUi(prefix);
+}
+
+function exportPeriod() {
+  return periodFromControls("export");
+}
+
+function recordsInPeriod(records, dateGetter, period) {
+  if (!period?.start || !period?.end) return records;
+  return records.filter((r) => {
+    const d = String(dateGetter(r) || "").slice(0, 10);
+    return d >= period.start && d <= period.end;
   });
+}
+
+function exportPeriodFileBase(period, kind) {
+  const slug = exportFileSlug();
+  if (period.mode === "all") return `${kind}_tout_${slug}`;
+  if (period.mode === "month" && period.start) {
+    const ym = period.start.slice(0, 7);
+    const mi = Number(ym.slice(5, 7)) - 1;
+    return `${kind}_${CSV_MONTH_FR[mi] || ym}-${ym.slice(0, 4)}_${slug}`;
+  }
+  return `${kind}_${period.start}_${period.end}_${slug}`;
+}
+
+function ventesExportRowsForPeriod(period) {
+  const rows = recordsInPeriod(recordsForSite(state.ventes), (v) => saleDateValue(v), period);
   const header = ["date", "article", "categorie", "quantite", "prix_unitaire", "remise", "montant_net", "paiement", "serveur", "table"];
   const data = rows.map((v) => [
     formatDateDdMmYyyy(v.date),
@@ -243,19 +337,11 @@ function exportCsvVentesMonth() {
     v.server || v.serveur || "",
     v.table || v.client || "",
   ]);
-  const mi = Number(ym.slice(5, 7)) - 1;
-  const fname = `ventes_${CSV_MONTH_FR[mi] || ym}-${ym.slice(0, 4)}_${exportFileSlug()}.csv`;
-  downloadCsvFile(fname, header, data);
-  showToast(`${rows.length} vente(s) exportee(s).`);
+  return { rows, header, data };
 }
 
-function exportCsvChargesMonth() {
-  const ym = exportMonthPickerValue();
-  const { start, end } = monthRangeFromPicker(ym);
-  const rows = recordsForSite(state.charges).filter((c) => {
-    const d = String(c.date || "").slice(0, 10);
-    return d >= start && d <= end;
-  });
+function chargesExportRowsForPeriod(period) {
+  const rows = recordsInPeriod(recordsForSite(state.charges), (c) => c.date, period);
   const header = ["date", "libelle", "montant", "categorie", "paiement"];
   const data = rows.map((c) => [
     formatDateDdMmYyyy(c.date),
@@ -264,11 +350,43 @@ function exportCsvChargesMonth() {
     c.cat || "Autres",
     c.paiement,
   ]);
-  const mi = Number(ym.slice(5, 7)) - 1;
-  const fname = `charges_${CSV_MONTH_FR[mi] || ym}-${ym.slice(0, 4)}_${exportFileSlug()}.csv`;
-  downloadCsvFile(fname, header, data);
-  showToast(`${rows.length} charge(s) exportee(s).`);
+  return { rows, header, data };
 }
+
+function exportExcelVentesMonth() {
+  const period = exportPeriod();
+  const { rows, header, data } = ventesExportRowsForPeriod(period);
+  const fname = `${exportPeriodFileBase(period, "ventes")}.xlsx`;
+  if (downloadExcelFile(fname, "Ventes", header, data)) {
+    showToast(`${rows.length} vente(s) exportée(s) — ${period.label}.`);
+  }
+}
+
+function exportExcelChargesMonth() {
+  const period = exportPeriod();
+  const { rows, header, data } = chargesExportRowsForPeriod(period);
+  const fname = `${exportPeriodFileBase(period, "charges")}.xlsx`;
+  if (downloadExcelFile(fname, "Charges", header, data)) {
+    showToast(`${rows.length} charge(s) exportée(s) — ${period.label}.`);
+  }
+}
+
+function exportExcelComptaMonth() {
+  const period = exportPeriod();
+  const ventes = ventesExportRowsForPeriod(period);
+  const charges = chargesExportRowsForPeriod(period);
+  const fname = `${exportPeriodFileBase(period, "compta")}.xlsx`;
+  if (downloadExcelWorkbook(fname, [
+    { name: "Ventes", header: ventes.header, rows: ventes.data },
+    { name: "Charges", header: charges.header, rows: charges.data },
+  ])) {
+    showToast(`Excel : ${ventes.rows.length} vente(s), ${charges.rows.length} charge(s) — ${period.label}.`);
+  }
+}
+
+/** @deprecated compat — redirige vers Excel */
+function exportCsvVentesMonth() { exportExcelVentesMonth(); }
+function exportCsvChargesMonth() { exportExcelChargesMonth(); }
 
 function touchStockItemUpdated(item) {
   if (!item) return;
@@ -2167,39 +2285,16 @@ function dashboardPeriodMode() {
 }
 
 function dashboardPeriod() {
-  const mode = dashboardPeriodMode();
-  if (mode === "all") {
-    return { start: null, end: null, mode, label: "Tout l'historique" };
-  }
-  if (mode === "month") {
-    const { start, end } = monthPeriodBounds(new Date());
-    const mois = new Date().toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
-    return { start, end, mode, label: `Mois en cours (${mois})` };
-  }
-  if (mode === "week") {
-    const { start, end } = weekPeriodBounds(new Date());
-    return { start, end, mode, label: `Semaine en cours (${formatPeriodLabel(start, end)})` };
-  }
-  const { start, end } = dateRangeFromDom("dashboard-period-start", "dashboard-period-end", today());
-  return { start, end, mode, label: formatPeriodLabel(start, end) };
+  return periodFromControls("dashboard");
 }
 
 function recordsInDashboardPeriod(records, dateGetter) {
-  const { start, end } = dashboardPeriod();
-  if (!start || !end) return records;
-  return records.filter((r) => {
-    const d = String(dateGetter(r) || "").slice(0, 10);
-    return d >= start && d <= end;
-  });
+  return recordsInPeriod(records, dateGetter, dashboardPeriod());
 }
 
 function syncDashboardPeriodCustomUi() {
-  const mode = dashboardPeriodMode();
-  document.getElementById("dashboard-period-custom")?.classList.toggle("hidden", mode !== "custom");
-  const label = document.getElementById("dashboard-period-label");
-  if (label) label.textContent = dashboardPeriod().label;
+  syncPeriodCustomUi("dashboard");
 }
-
 
 function showObjectifFormulaTip() {
   const site = currentSite();
@@ -2213,12 +2308,11 @@ function showObjectifFormulaTip() {
 }
 
 function initDashboardPeriodDom() {
-  const { start, end } = monthPeriodBounds(new Date());
-  const startEl = document.getElementById("dashboard-period-start");
-  const endEl = document.getElementById("dashboard-period-end");
-  if (startEl && !startEl.value) startEl.value = start;
-  if (endEl && !endEl.value) endEl.value = today();
-  syncDashboardPeriodCustomUi();
+  initPeriodDom("dashboard");
+}
+
+function initExportPeriodDom() {
+  initPeriodDom("export");
 }
 
 function ventesForDateRange(start, end) {
@@ -7499,6 +7593,7 @@ function loadParamsForm() {
   refreshRestoreBackupUi().catch(() => {});
   renderStaffAuditLog();
   syncUserAccountPanel();
+  syncPeriodCustomUi("export");
 }
 
 function syncUserAccountPanel() {
@@ -7512,6 +7607,18 @@ function syncUserAccountPanel() {
   if (nameEl) nameEl.value = String(me?.displayName || "").trim();
   if (pw) pw.value = "";
   if (pwc) pwc.value = "";
+  const twoFaHost = document.getElementById("ua-2fa-actions");
+  if (twoFaHost && me) {
+    twoFaHost.innerHTML = me.twoFactorEnabled
+      ? `<span class="badge badge-green">2FA activé</span>`
+        + ` <button type="button" class="mini-btn" id="ua-2fa-disable-btn" data-disable-2fa="${escapeHtml(me.username)}">Désactiver le 2FA</button>`
+      : `<button type="button" class="btn btn-primary" id="ua-2fa-setup-btn" data-setup-2fa-self="${escapeHtml(me.username)}">Activer le 2FA sur mon compte</button>`;
+    document.getElementById("ua-2fa-setup-btn")?.addEventListener("click", () => {
+      setupTwoFactor(me.username).catch(handleApiError);
+    });
+  } else if (twoFaHost) {
+    twoFaHost.innerHTML = "";
+  }
 }
 
 async function saveMyUserProfile() {
@@ -12900,7 +13007,9 @@ async function enable2FA() {
     state = await apiRequest(API.state);
     closeModal("modal-2fa");
     renderUsersList();
-    showToast(`2FA active pour "${username}".`);
+    syncUserAccountPanel();
+    renderHome2FAAlert();
+    showToast(`2FA activé pour "${username}".`);
   } catch (error) {
     showToast(error.message || "Code invalide ou expire.");
   }
@@ -12911,7 +13020,9 @@ async function disableTwoFactor(username) {
     await apiRequest(API.twoFaDisable, { method: "POST", body: JSON.stringify({ username }) });
     state = await apiRequest(API.state);
     renderUsersList();
-    showToast(`2FA desactive pour "${username}".`);
+    syncUserAccountPanel();
+    renderHome2FAAlert();
+    showToast(`2FA désactivé pour "${username}".`);
   } catch (error) {
     showToast(error.message || "Erreur lors de la desactivation 2FA.");
   }
@@ -13071,8 +13182,7 @@ async function bootstrapAuthenticatedApp(opts = {}) {
   if (consigneDateEl) consigneDateEl.value = pdjCalendarDate();
   const creditDt = document.getElementById("credit-datetime");
   if (creditDt) creditDt.value = datetimeLocalNow();
-  const exportMonth = document.getElementById("export-month");
-  if (exportMonth && !exportMonth.value) exportMonth.value = today().slice(0, 7);
+  initExportPeriodDom();
   document.getElementById("stock-move-start").value = today().slice(0, 8) + "01";
   document.getElementById("stock-move-end").value = today();
   populateOrderSelect();
@@ -13237,6 +13347,10 @@ function attachEvents() {
   });
   ["dashboard-period-start", "dashboard-period-end"].forEach((id) => {
     document.getElementById(id)?.addEventListener("change", renderDashboard);
+  });
+  document.getElementById("export-period-mode")?.addEventListener("change", () => syncPeriodCustomUi("export"));
+  ["export-period-start", "export-period-end"].forEach((id) => {
+    document.getElementById(id)?.addEventListener("change", () => syncPeriodCustomUi("export"));
   });
   // Saisie rapide
   document.getElementById("saisie-rapide-btn")?.addEventListener("click", openSaisieRapide);
@@ -13615,8 +13729,9 @@ document.getElementById("fab-btn").addEventListener("click", () => {
   document.getElementById("reappro-case-size-select").addEventListener("change", updateReapproPrixInfo);
   document.getElementById("enable-2fa-btn").addEventListener("click", () => enable2FA().catch(handleApiError));
   document.getElementById("export-btn")?.addEventListener("click", exportData);
-  document.getElementById("export-ventes-csv-btn")?.addEventListener("click", exportCsvVentesMonth);
-  document.getElementById("export-charges-csv-btn")?.addEventListener("click", exportCsvChargesMonth);
+  document.getElementById("export-ventes-excel-btn")?.addEventListener("click", exportExcelVentesMonth);
+  document.getElementById("export-charges-excel-btn")?.addEventListener("click", exportExcelChargesMonth);
+  document.getElementById("export-compta-excel-btn")?.addEventListener("click", exportExcelComptaMonth);
   document.getElementById("top-journal-close-btn")?.addEventListener("click", () => {
     navigate("pdj");
     showToast("Cloturez la journee comptable depuis cette page.");
