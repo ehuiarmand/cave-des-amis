@@ -3240,6 +3240,16 @@ function renderPointDuJour() {
   const caEncaisse = Object.entries(totalsJour).reduce((sum, [method, amount]) => String(method).includes("dit client") ? sum : sum + amount, 0);
   const remisesJour = ventesJour.reduce((sum, v) => sum + (Number(v.remise) || 0), 0);
 
+  const recouvrementJour = creditRecoveriesForSite().filter((r) => String(r.date || "").slice(0, 10) === dStr);
+  const caRecouvrement = recouvrementJour.reduce((sum, r) => sum + (Number(r.montant) || 0), 0);
+  const caEncaisseTotal = caEncaisse + caRecouvrement;
+
+  const totalsJourAvecRecouvrement = Object.fromEntries(Object.entries(totalsJour).filter(([method]) => !String(method).includes("dit client")));
+  recouvrementJour.forEach((r) => {
+    const m = r.paiement || "Espèces";
+    totalsJourAvecRecouvrement[m] = (totalsJourAvecRecouvrement[m] || 0) + (Number(r.montant) || 0);
+  });
+
   const pdjDateEl = document.getElementById("pdj-date");
   if (pdjDateEl) {
     const t = today();
@@ -3248,7 +3258,7 @@ function renderPointDuJour() {
       : formatDateDdMmYyyy(new Date());
   }
   renderCashOpeningPanel();
-  document.getElementById("pdj-ca").textContent = `${fmt(caEncaisse)} FCFA`;
+  document.getElementById("pdj-ca").textContent = `${fmt(caEncaisseTotal)} FCFA`;
   document.getElementById("pdj-creances").textContent = `${fmt(caCreances)} FCFA`;
   document.getElementById("pdj-nb").textContent = String(ventesJour.length);
   document.getElementById("pdj-remises").textContent = `${fmt(remisesJour)} FCFA`;
@@ -3257,44 +3267,46 @@ function renderPointDuJour() {
   renderSalesByProduct(ventesJour);
   renderBreakdown(
     "pdj-pay-chart",
-    Object.fromEntries(Object.entries(totalsJour).filter(([method]) => !String(method).includes("dit client"))),
-    /*
-    ventesJour.filter((v) => !isCreditSale(v)).reduce((acc, v) => {
-      let categorie = v.paiement;
-      // Regrouper les services de mobile money
-      if (categorie === "Orange Money" || categorie === "MTN MoMo") {
-        categorie = "Mobile Money";
-      }
-      acc[categorie] = (acc[categorie] || 0) + calcNet(v);
-      return acc;
-    }, {}),
-    */
-    caEncaisse,
+    totalsJourAvecRecouvrement,
+    caEncaisseTotal,
     dStr === today() ? "Aucun encaissement enregistre aujourd'hui." : `Aucun encaissement pour le ${formatDateDdMmYyyy(dStr)}.`,
   );
 
   const sorted = ventesJour.slice().sort((a, b) => b.date.localeCompare(a.date));
-  document.getElementById("pdj-ventes-list").innerHTML = sorted.length
-    ? sorted.map((v) => `
-        <article class="list-item">
-          <div>
-            <p class="list-item-title">${escapeHtml(v.article)}</p>
-            <p class="list-item-sub">${escapeHtml(v.cat)} · ${fmt(v.qty)} x ${fmt(v.prix)} FCFA${v.remise ? ` · -${fmt(v.remise)}` : ""} · ${escapeHtml(v.paiement)}</p>
-          </div>
-          <div class="list-side">
-            <div>
-              <p class="list-item-amount" style="${isCreance(v) ? "color:#ff8e82" : ""}">${fmt(calcNet(v))} FCFA</p>
-              <p class="list-item-date">${v.factureNumber ? escapeHtml(v.factureNumber) : escapeHtml(formatDateDdMmYyyy(dStr))}</p>
-            </div>
-          </div>
-        </article>
-      `).join("")
-    : emptyState(
-      dStr === today() ? "Aucune vente aujourd'hui" : `Aucune vente le ${formatDateDdMmYyyy(dStr)}`,
-      dStr === today()
-        ? "Les ventes du jour apparaissent ici dès qu'elles sont enregistrées."
-        : "Les ventes de cette date apparaîtront ici.",
-    );
+  const recouvrementItems = recouvrementJour.map((r) => `
+    <article class="list-item">
+      <div>
+        <p class="list-item-title">Remboursement crédit — ${escapeHtml(debtorDisplayKey(r.debiteur))}</p>
+        <p class="list-item-sub">Recouvrement · ${escapeHtml(r.paiement || "Espèces")}${r.note ? ` · ${escapeHtml(r.note)}` : ""}</p>
+      </div>
+      <div class="list-side">
+        <div>
+          <p class="list-item-amount" style="color:#72d7a9">${fmt(r.montant)} FCFA</p>
+          <p class="list-item-date">${escapeHtml(formatDateDdMmYyyy(dStr))}</p>
+        </div>
+      </div>
+    </article>
+  `).join("");
+  const ventesItems = sorted.map((v) => `
+    <article class="list-item">
+      <div>
+        <p class="list-item-title">${escapeHtml(v.article)}</p>
+        <p class="list-item-sub">${escapeHtml(v.cat)} · ${fmt(v.qty)} x ${fmt(v.prix)} FCFA${v.remise ? ` · -${fmt(v.remise)}` : ""} · ${escapeHtml(v.paiement)}</p>
+      </div>
+      <div class="list-side">
+        <div>
+          <p class="list-item-amount" style="${isCreance(v) ? "color:#ff8e82" : ""}">${fmt(calcNet(v))} FCFA</p>
+          <p class="list-item-date">${v.factureNumber ? escapeHtml(v.factureNumber) : escapeHtml(formatDateDdMmYyyy(dStr))}</p>
+        </div>
+      </div>
+    </article>
+  `).join("");
+  document.getElementById("pdj-ventes-list").innerHTML = (recouvrementItems + ventesItems) || emptyState(
+    dStr === today() ? "Aucune vente aujourd'hui" : `Aucune vente le ${formatDateDdMmYyyy(dStr)}`,
+    dStr === today()
+      ? "Les ventes du jour apparaissent ici dès qu'elles sont enregistrées."
+      : "Les ventes de cette date apparaîtront ici.",
+  );
   renderDailyStockCheck();
   renderPastClosuresForReopen();
 }
@@ -7290,12 +7302,16 @@ async function saveCreditRecovery() {
   try {
     if (creditRecoveryIsDuplicateInSite(nameNorm, applied, method, paidAtIso)) {
       showToast("Ce versement est déjà enregistré (doublon évité).");
+      _creditRecoverySaveInFlight = false;
+      if (saveBtn) saveBtn.disabled = false;
       return;
     }
     const fp = `${nameNorm}|${applied}|${method}|${paidAtIso}`;
     const now = Date.now();
     if (fp === _lastCreditRecoverySaveFingerprint && now - _lastCreditRecoverySaveFingerprintAt < CREDIT_RECOVERY_SAVE_DEDUPE_MS) {
       showToast("Versement déjà pris en compte.");
+      _creditRecoverySaveInFlight = false;
+      if (saveBtn) saveBtn.disabled = false;
       return;
     }
 
@@ -7324,10 +7340,13 @@ async function saveCreditRecovery() {
     renderCreditRecovery();
     renderDashboard();
     renderPointDuJour();
-  } finally {
+  } catch (err) {
     _creditRecoverySaveInFlight = false;
     if (saveBtn) saveBtn.disabled = false;
+    throw err;
   }
+  _creditRecoverySaveInFlight = false;
+  if (saveBtn) saveBtn.disabled = false;
 }
 
 function purchaseOrdersForSite() {
