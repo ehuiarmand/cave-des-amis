@@ -2727,6 +2727,10 @@ function canManage() {
   return canAnyAdmin() || currentRole === "manager";
 }
 
+function isGerantRole() {
+  return currentRole === "manager";
+}
+
 /** Suppression des charges : administrateurs uniquement (pas la gérante / manager). */
 function canDeleteCharge() {
   return canAnyAdmin();
@@ -2952,8 +2956,22 @@ function applyRoleVisibility() {
       roleSelect.value = "serveuse";
     }
   }
+  syncGerantParamsAccess();
   maybeAdjustParamsSubTab();
   updatePdjRoleVisibility();
+}
+
+/** Gérant : Paramètres limités à Mon compte + Export (pas config maquis, users, admin). */
+function syncGerantParamsAccess() {
+  const gerant = isGerantRole();
+  document.querySelector("#page-params .params-subtabs")?.classList.toggle("hidden-by-role", gerant);
+  document.querySelectorAll("#page-params [data-subtab-params]").forEach((btn) => {
+    const tab = btn.dataset.subtabParams;
+    btn.classList.toggle("hidden-by-role", gerant && tab !== "profil");
+  });
+  if (gerant && currentPage === "params" && paramsSubTab !== "profil") {
+    setParamsSubTab("profil");
+  }
 }
 
 function renderTopbar() {
