@@ -13,6 +13,8 @@ __pycache__/
 # Outils / extraits locaux
 _apk_extract/
 .cursor/
+!.cursor/rules/
+!.cursor/rules/**
 .claude/
 
 # Données runtime (ne pas versionner)

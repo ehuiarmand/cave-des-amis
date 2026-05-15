@@ -97,6 +97,7 @@ let purchaseDraftLines = [];
 /** Après fermeture du modal « nouveau casier » sans enregistrer, on annule la reprise commande achat. */
 let pendingPurchaseCasierResume = false;
 let sessionDeadlineUnix = null;
+let csrfToken = null;
 
 function applySessionTimingFromApi(payload) {
   if (!payload) {
@@ -104,6 +105,9 @@ function applySessionTimingFromApi(payload) {
   }
   if ("globalSuperadmin" in payload) {
     globalSuperadmin = payload.globalSuperadmin;
+  }
+  if (typeof payload.csrfToken === "string" && payload.csrfToken.trim()) {
+    csrfToken = payload.csrfToken.trim();
   }
   if (typeof payload.sessionDeadlineUnix !== "number" || payload.sessionDeadlineUnix <= 0) {
     sessionDeadlineUnix = null;
@@ -1093,10 +1097,15 @@ function escapeHtml(value) {
 
 async function apiRequest(url, options = {}) {
   const { cache, ...rest } = options;
+  const method = String(rest.method || "GET").toUpperCase();
+  const headers = { "Content-Type": "application/json", ...(rest.headers || {}) };
+  if (csrfToken && ["POST", "PUT", "PATCH", "DELETE"].includes(method)) {
+    headers["X-CSRF-Token"] = csrfToken;
+  }
   const init = {
     credentials: "same-origin",
     ...rest,
-    headers: { "Content-Type": "application/json", ...(rest.headers || {}) },
+    headers,
   };
   if (cache != null) init.cache = cache;
   const response = await fetch(url, init);
@@ -11785,6 +11794,7 @@ async function logout() {
   allowedSiteIds = [];
   globalSuperadmin = null;
   sessionDeadlineUnix = null;
+  csrfToken = null;
   activeOrderId = null;
   editingLineId = null;
   pendingFinalizeOrderId = null;

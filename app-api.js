@@ -61,6 +61,7 @@ let state = null;
 let currentPage = "home";
 let currentFilter = "all";
 let sessionUser = null;
+let csrfToken = null;
 
 function fmt(number) {
   return new Intl.NumberFormat("fr-FR").format(Math.round(Number(number) || 0));
@@ -111,12 +112,17 @@ function escapeHtml(value) {
 }
 
 async function apiRequest(url, options = {}) {
+  const method = String(options.method || "GET").toUpperCase();
+  const headers = {
+    "Content-Type": "application/json",
+    ...(options.headers || {}),
+  };
+  if (csrfToken && ["POST", "PUT", "PATCH", "DELETE"].includes(method)) {
+    headers["X-CSRF-Token"] = csrfToken;
+  }
   const response = await fetch(url, {
     credentials: "same-origin",
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.headers || {}),
-    },
+    headers,
     ...options,
   });
 
@@ -653,6 +659,9 @@ async function handleLoginSubmit(event) {
       body: JSON.stringify({ username, password }),
     });
     sessionUser = payload.username;
+    if (typeof payload.csrfToken === "string" && payload.csrfToken.trim()) {
+      csrfToken = payload.csrfToken.trim();
+    }
     errorNode.textContent = "";
     setAuthVisible(true);
     await bootstrapAuthenticatedApp();
@@ -672,6 +681,7 @@ async function logout() {
     console.error(error);
   }
   sessionUser = null;
+  csrfToken = null;
   state = null;
   setAuthVisible(false);
   document.getElementById("login-password").value = "";
@@ -786,6 +796,9 @@ async function init() {
   try {
     const session = await apiRequest(API.session);
     sessionUser = session.username;
+    if (typeof session.csrfToken === "string" && session.csrfToken.trim()) {
+      csrfToken = session.csrfToken.trim();
+    }
     setAuthVisible(true);
     await bootstrapAuthenticatedApp();
   } catch (error) {

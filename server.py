@@ -173,10 +173,24 @@ def _merge_pdj_work_date_map_session(
 
 def session_timing_fields(sess: dict[str, Any]) -> dict[str, Any]:
     out: dict[str, Any] = {}
-    for key in ("sessionCreatedAt", "sessionDeadlineUnix", "sessionAbsoluteSeconds", "sessionIdleSeconds"):
+    for key in (
+        "sessionCreatedAt",
+        "sessionDeadlineUnix",
+        "sessionAbsoluteSeconds",
+        "sessionIdleSeconds",
+        "csrfToken",
+    ):
         if key in sess:
             out[key] = sess[key]
     return out
+
+
+def cookie_secure_flag() -> bool:
+    return _env_first("MAQUIS_MANAGER_COOKIE_SECURE", "TDB_BAR_COOKIE_SECURE", default="").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1146,6 +1160,7 @@ class SessionManager:
                 "globalSuperadmin": gs,
                 "createdAt": now,
                 "lastActivityAt": now,
+                "csrfToken": secrets.token_urlsafe(24),
             }
         return token
 
@@ -1164,6 +1179,7 @@ class SessionManager:
             "role": sess["role"],
             "allowedSiteIds": list(sess.get("allowedSiteIds") or []),
             "globalSuperadmin": bool(sess.get("globalSuperadmin")),
+            "csrfToken": str(sess.get("csrfToken") or ""),
             "sessionCreatedAt": created,
             "sessionDeadlineUnix": deadline,
             "sessionAbsoluteSeconds": self.absolute_seconds,
@@ -1189,6 +1205,8 @@ class SessionManager:
                 audit_log("session_expired_idle", {"username": str(session.get("username", ""))})
                 return None
             session["lastActivityAt"] = now
+            if not str(session.get("csrfToken") or "").strip():
+                session["csrfToken"] = secrets.token_urlsafe(24)
             return self._session_public_view(session)
 
     def clear(self, token: str | None) -> None:
@@ -2391,6 +2409,8 @@ class AppHandler(BaseHTTPRequestHandler):
             session = self.require_session()
             if session is None:
                 return
+            if not self.require_csrf(session):
+                return
             if not session_is_superadmin(session, all_site_ids=store.all_site_ids()):
                 self.send_json(HTTPStatus.FORBIDDEN, {"error": "Acces refuse."})
                 return
@@ -2405,6 +2425,8 @@ class AppHandler(BaseHTTPRequestHandler):
         if post_path == "/api/admin/restore-site-from-backup":
             session = self.require_session()
             if session is None:
+                return
+            if not self.require_csrf(session):
                 return
             if not session_is_superadmin(session, all_site_ids=store.all_site_ids()):
                 self.send_json(HTTPStatus.FORBIDDEN, {"error": "Acces refuse."})
@@ -2427,6 +2449,8 @@ class AppHandler(BaseHTTPRequestHandler):
             session = self.require_session()
             if session is None:
                 return
+            if not self.require_csrf(session):
+                return
             if not session_is_superadmin(session, all_site_ids=store.all_site_ids()):
                 self.send_json(HTTPStatus.FORBIDDEN, {"error": "Acces refuse."})
                 return
@@ -2435,8 +2459,9 @@ class AppHandler(BaseHTTPRequestHandler):
             except ValueError as error:
                 self.send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
                 return
-            except OSError as error:
-                self.send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": f"Ecriture disque : {error}"})
+            except OSError:
+                audit_log("create_manual_backup_failed", {"ip": self.client_ip(), "username": session.get("username", "")})
+                self.send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "Sauvegarde impossible. Reessayez plus tard."})
                 return
             audit_log(
                 "create_manual_backup",
@@ -2576,6 +2601,8 @@ class AppHandler(BaseHTTPRequestHandler):
             session = self.require_session()
             if session is None:
                 return
+            if not self.require_csrf(session):
+                return
             payload = self.read_json()
             target = str(payload.get("username", session["username"])).strip()
             with store._lock:
@@ -2607,6 +2634,8 @@ class AppHandler(BaseHTTPRequestHandler):
         if post_path == "/api/2fa/enable":
             session = self.require_session()
             if session is None:
+                return
+            if not self.require_csrf(session):
                 return
             payload = self.read_json()
             target = str(payload.get("username", session["username"])).strip()
@@ -2640,6 +2669,8 @@ class AppHandler(BaseHTTPRequestHandler):
         if post_path == "/api/2fa/disable":
             session = self.require_session()
             if session is None:
+                return
+            if not self.require_csrf(session):
                 return
             payload = self.read_json()
             target = str(payload.get("username", session["username"])).strip()
@@ -2675,6 +2706,8 @@ class AppHandler(BaseHTTPRequestHandler):
             session = self.require_session()
             if session is None:
                 return
+            if not self.require_csrf(session):
+                return
             if not session_is_superadmin(session, all_site_ids=store.all_site_ids()):
                 self.send_json(HTTPStatus.FORBIDDEN, {"error": "Seul le super administrateur peut reinitialiser l'application."})
                 return
@@ -2685,6 +2718,8 @@ class AppHandler(BaseHTTPRequestHandler):
         if post_path == "/api/purge-maquis":
             session = self.require_session()
             if session is None:
+                return
+            if not self.require_csrf(session):
                 return
             if not session_is_superadmin(session, all_site_ids=store.all_site_ids()):
                 self.send_json(HTTPStatus.FORBIDDEN, {"error": "Seul le super administrateur peut purger un maquis."})
@@ -2708,7 +2743,7 @@ class AppHandler(BaseHTTPRequestHandler):
     def do_OPTIONS(self) -> None:
         self.send_response(HTTPStatus.NO_CONTENT)
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-CSRF-Token")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
         self.end_headers()
 
@@ -2717,6 +2752,8 @@ class AppHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/state":
             session = self.require_session()
             if session is None:
+                return
+            if not self.require_csrf(session):
                 return
             payload = self.read_json()
             try:
@@ -2799,6 +2836,23 @@ class AppHandler(BaseHTTPRequestHandler):
             return None
         return session
 
+    def require_csrf(self, session: dict[str, Any]) -> bool:
+        expected = str(session.get("csrfToken") or "").strip()
+        if not expected:
+            return True
+        provided = (self.headers.get("X-CSRF-Token") or "").strip()
+        if provided and hmac.compare_digest(provided, expected):
+            return True
+        audit_log(
+            "csrf_rejected",
+            {"ip": self.client_ip(), "username": str(session.get("username", ""))},
+        )
+        self.send_json(
+            HTTPStatus.FORBIDDEN,
+            {"error": "Requete refusee. Rechargez la page puis reconnectez-vous si le probleme persiste."},
+        )
+        return False
+
     def session_token(self) -> str | None:
         cookie_header = self.headers.get("Cookie")
         if not cookie_header:
@@ -2842,15 +2896,16 @@ class AppHandler(BaseHTTPRequestHandler):
             self.send_header("ETag", etag)
         if use_gzip:
             self.send_header("Content-Encoding", "gzip")
+        secure = "; Secure" if cookie_secure_flag() else ""
         if cookie:
             self.send_header(
                 "Set-Cookie",
-                f"{SESSION_COOKIE}={cookie}; Path=/; HttpOnly; SameSite=Lax; Max-Age={SESSION_ABSOLUTE_SECONDS}",
+                f"{SESSION_COOKIE}={cookie}; Path=/; HttpOnly; SameSite=Lax{secure}; Max-Age={SESSION_ABSOLUTE_SECONDS}",
             )
         if clear_cookie:
             self.send_header(
                 "Set-Cookie",
-                f"{SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
+                f"{SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax{secure}; Max-Age=0",
             )
         self.end_headers()
         self.wfile.write(body)
