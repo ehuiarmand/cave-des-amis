@@ -524,12 +524,12 @@ function formatCreditRecoveryNote(p) {
   return String(p?.note ?? "").trim() || CREDIT_RECOVERY_DEFAULT_NOTE;
 }
 
-/** Versements visibles dans l’historique recouvrement : uniquement pour les débiteurs qui ont encore un reste à payer (dette non totalement réglée). */
+/** Versements visibles dans l’historique recouvrement : débiteur encore dû, ou ayant eu du crédit en vente (historique conservé après solde). */
 function isCreditRecoveryVisibleInHistoryUi(p, sourceState = state) {
-  const dueMap = creditOutstandingMap(sourceState);
   const dk = debtorDisplayKey(p.debiteur);
-  const remaining = Math.round(Number(dueMap[dk]) || 0);
-  return remaining > 0;
+  const remaining = Math.round(Number(creditOutstandingMap(sourceState)[dk]) || 0);
+  if (remaining > 0) return true;
+  return issuedCreditTotalForDebtor(dk, sourceState) > 0;
 }
 
 function creditRecoveriesForHistoryUi(sourceState = state) {
@@ -563,8 +563,8 @@ function buildCreditRecoveryHistoryHtml() {
   const hasHiddenBecauseSoldes = allSite.length > 0 && payments.length === 0;
   if (!payments.length) {
     const emptyMsg = hasHiddenBecauseSoldes
-      ? "Aucun versement affiché : pour ce maquis, toutes les dettes suivies ici sont soldées. L’historique par client réapparaît dès qu’un débiteur a de nouveau un reste à payer. Les enregistrements restent pris en compte pour les totaux."
-      : "Aucun versement enregistré pour ce maquis. Après « Enregistrer le versement », chaque paiement apparaît ici avec date, montant et mode (tant que le client a encore une dette ouverte).";
+      ? "Aucun versement affiché pour ce maquis (aucune ligne recouvrement liée à des ventes « crédit client » connues)."
+      : "Aucun versement enregistré pour ce maquis. Après « Enregistrer le versement », chaque paiement apparaît ici avec date, montant et mode.";
     return `<div class="credit-history-section" style="margin-top:18px">
       <p class="eyebrow" style="margin-bottom:8px">Historique des paiements</p>
       <p class="muted" style="font-size:0.9rem">${emptyMsg}</p>
@@ -608,6 +608,16 @@ function creditPortionOnVente(v) {
   });
   if (!creditAmount && isAReglerPaiement(v.paiement)) creditAmount = net;
   return Math.max(0, creditAmount);
+}
+
+/** Total crédit « émis » (ventes) pour un débiteur sur le maquis courant — pour l'historique recouvrement même dette soldée. */
+function issuedCreditTotalForDebtor(debtorKey, sourceState = state) {
+  const dk = debtorDisplayKey(debtorKey);
+  return recordsForSite(sourceState?.ventes || []).reduce((sum, v) => {
+    const debtorName = debtorDisplayKey(v.debiteur || v.client || "Client inconnu");
+    if (debtorName !== dk) return sum;
+    return sum + creditPortionOnVente(v);
+  }, 0);
 }
 
 /** Ventes à crédit pour un débiteur (ordre chronologique d'encaissement). */
