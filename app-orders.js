@@ -8185,7 +8185,11 @@ function checkAutoClotureSchedule() {
   const mm = Number(parts[1]);
   if (Number.isNaN(hh) || Number.isNaN(mm)) return;
   const now = new Date();
-  if (now.getHours() < hh || (now.getHours() === hh && now.getMinutes() < mm)) return;
+  const configuredMins = hh * 60 + mm;
+  const currentMins = now.getHours() * 60 + now.getMinutes();
+  // Ne declenche que dans la fenetre [heure_config, heure_config + 60 min[
+  // Evite une cloture tardive si le navigateur s'ouvre apres l'heure configuree
+  if (currentMins < configuredMins || currentMins >= configuredMins + 60) return;
   const dStr = workingDate();
   if (!dStr) return;
   if (stockCheckForSiteDate(dStr, currentSiteId())) return;

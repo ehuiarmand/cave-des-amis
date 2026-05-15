@@ -3203,10 +3203,18 @@ def _server_auto_close_site(site_id: str, d_str: str) -> None:
 
 def _auto_cloture_check() -> None:
     """Vérifie toutes les minutes si une clôture automatique est due."""
+    def _to_mins(hhmm: str) -> int:
+        try:
+            h, m = hhmm[:5].split(":")
+            return int(h) * 60 + int(m)
+        except Exception:
+            return -1
+
     try:
         now = time.localtime()
         today_str = time.strftime("%Y-%m-%d", now)
         current_hhmm = time.strftime("%H:%M", now)
+        current_mins = _to_mins(current_hhmm)
 
         to_close: list[tuple[str, str]] = []
         with store._lock:
@@ -3222,7 +3230,12 @@ def _auto_cloture_check() -> None:
                 if not site_id or not site.get("autoClotureEnabled"):
                     continue
                 cloture_time = str(site.get("autoClotureTime") or "")
-                if len(cloture_time) < 5 or current_hhmm < cloture_time[:5]:
+                if len(cloture_time) < 5:
+                    continue
+                cloture_mins = _to_mins(cloture_time)
+                # Ne déclenche que dans la fenêtre [heure_config, heure_config + 60 min[
+                # Evite une clôture intempestive si le serveur redémarre des heures après
+                if current_mins < cloture_mins or current_mins >= cloture_mins + 60:
                     continue
                 closed_dates = closed_by_site.get(site_id, set())
                 unclosed = sorted(
