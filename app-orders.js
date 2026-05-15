@@ -103,9 +103,15 @@ function orderSaisieMode(order) {
   return "Commande";
 }
 
+function reapproTargetMultiplier(site = currentSite()) {
+  const m = Number(site?.reapproTargetMultiplier);
+  return Number.isFinite(m) && m >= 1 && m <= 10 ? m : 2;
+}
+
 function stockRowStatusKey(item, site) {
   const actuel = stockActuel(item);
   const seuilArticle = Number(item.seuilMin) || 0;
+  const mult = reapproTargetMultiplier(site);
   if (actuel <= 0) return "rupture";
   if (isStockBelowArticleSeuilForAlert(actuel, seuilArticle)) return "critique";
   const frigo = stockFrigo(item);
@@ -113,7 +119,7 @@ function stockRowStatusKey(item, site) {
   if (isFrigoLowForAlert(frigo, seuilFrigo)) return "faible";
   if (
     seuilArticle > 0
-    && (stockAlertInclusiveSeuil(site) ? actuel <= seuilArticle * 2 : actuel < seuilArticle * 2)
+    && (stockAlertInclusiveSeuil(site) ? actuel <= seuilArticle * mult : actuel < seuilArticle * mult)
   ) return "faible";
   return "ok";
 }
@@ -164,17 +170,26 @@ function renderHome2FAAlert() {
   const selfNo2fa = state?.auth?.users?.find(
     (u) => String(u.username) === String(sessionUser) && !u.twoFactorEnabled,
   );
-  if (n > 0 && canManage()) {
+  if (selfNo2fa && canManage()) {
     el.classList.remove("hidden");
-    el.innerHTML = `<strong>Securite :</strong> ${n} compte${n > 1 ? "s" : ""} sans 2FA actif — <button type="button" class="linkish-btn" data-goto-params-acces>Voir dans Parametres</button>`;
-    el.querySelector("[data-goto-params-acces]")?.addEventListener("click", () => {
-      navigate("params");
-      setParamsSubTab("acces");
-    });
+    el.innerHTML = `<strong>Sécurité :</strong> votre compte n'a pas le 2FA activé — <button type="button" class="linkish-btn linkish-btn--emph" data-goto-params-acces-2fa>Activer maintenant</button>`;
+  } else if (n > 0 && canManage()) {
+    el.classList.remove("hidden");
+    el.innerHTML = `<strong>Sécurité :</strong> ${n} compte${n > 1 ? "s" : ""} sans 2FA actif — <button type="button" class="linkish-btn" data-goto-params-acces>Voir dans Paramètres</button>`;
   } else {
     el.classList.add("hidden");
     el.innerHTML = "";
+    return;
   }
+  el.querySelector("[data-goto-params-acces]")?.addEventListener("click", () => {
+    navigate("params");
+    setParamsSubTab("acces");
+  });
+  el.querySelector("[data-goto-params-acces-2fa]")?.addEventListener("click", () => {
+    navigate("params");
+    setParamsSubTab("acces");
+    setTimeout(() => document.querySelector("[data-setup-2fa]")?.focus(), 200);
+  });
 }
 
 function csvEscapeCell(value) {
@@ -339,6 +354,18 @@ function monthPeriodBounds(refDate = new Date()) {
   const daysInMonth = new Date(y, m + 1, 0).getDate();
   const end = `${y}-${pad2(m + 1)}-${pad2(daysInMonth)}`;
   return { start, end, daysInMonth };
+}
+
+function weekPeriodBounds(refDate = new Date()) {
+  const d = new Date(refDate.getFullYear(), refDate.getMonth(), refDate.getDate());
+  const day = d.getDay();
+  const diffMon = (day + 6) % 7;
+  const mon = new Date(d);
+  mon.setDate(d.getDate() - diffMon);
+  const sun = new Date(mon);
+  sun.setDate(mon.getDate() + 6);
+  const iso = (dt) => `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}`;
+  return { start: iso(mon), end: iso(sun) };
 }
 
 function ventesEncaisseesForMonth(ventes, refDate = new Date()) {
@@ -1129,6 +1156,11 @@ function paymentLabel(item) {
   return item?.paiement || "";
 }
 
+function isCreditClientPayment(method) {
+  const m = String(method || "").toLowerCase();
+  return m.includes("dit client") || m.includes("à régler") || m.includes("a regler");
+}
+
 function paymentTotals(list) {
   return (list || []).reduce((acc, item) => {
     if (Array.isArray(item.paiementDetails) && item.paiementDetails.length) {
@@ -1140,6 +1172,34 @@ function paymentTotals(list) {
     }
     return acc;
   }, {});
+}
+
+/** Encaissements réels (hors crédit client émis) — aligné PDJ. */
+function paymentTotalsEncaissements(list) {
+  return (list || []).reduce((acc, item) => {
+    if (Array.isArray(item.paiementDetails) && item.paiementDetails.length) {
+      item.paiementDetails.forEach((detail) => {
+        if (isCreditClientPayment(detail.method)) return;
+        acc[detail.method] = (acc[detail.method] || 0) + (Number(detail.amount) || 0);
+      });
+    } else if (!isCreditClientPayment(item.paiement)) {
+      acc[item.paiement] = (acc[item.paiement] || 0) + calcNet(item);
+    }
+    return acc;
+  }, {});
+}
+
+function creditClientEmittedTotal(list) {
+  return (list || []).reduce((sum, item) => {
+    if (Array.isArray(item.paiementDetails) && item.paiementDetails.length) {
+      item.paiementDetails.forEach((detail) => {
+        if (isCreditClientPayment(detail.method)) sum += Number(detail.amount) || 0;
+      });
+    } else if (isCreditClientPayment(item.paiement)) {
+      sum += calcNet(item);
+    }
+    return sum;
+  }, 0);
 }
 
 function stockLegacyTotal(item) {
@@ -2116,6 +2176,10 @@ function dashboardPeriod() {
     const mois = new Date().toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
     return { start, end, mode, label: `Mois en cours (${mois})` };
   }
+  if (mode === "week") {
+    const { start, end } = weekPeriodBounds(new Date());
+    return { start, end, mode, label: `Semaine en cours (${formatPeriodLabel(start, end)})` };
+  }
   const { start, end } = dateRangeFromDom("dashboard-period-start", "dashboard-period-end", today());
   return { start, end, mode, label: formatPeriodLabel(start, end) };
 }
@@ -2134,6 +2198,18 @@ function syncDashboardPeriodCustomUi() {
   document.getElementById("dashboard-period-custom")?.classList.toggle("hidden", mode !== "custom");
   const label = document.getElementById("dashboard-period-label");
   if (label) label.textContent = dashboardPeriod().label;
+}
+
+
+function showObjectifFormulaTip() {
+  const site = currentSite();
+  const objectif = Number(site?.objectifCA) || 0;
+  const msg = objectif > 0
+    ? `Objectif mensuel : ${fmt(objectif)} FCFA.\n`
+      + `CA compté : ventes finalisées du 1er au dernier jour du mois calendaire, hors « Crédit client ».\n`
+      + `% = CA encaissé du mois ÷ objectif. Reste et rythmes/jour sur jours restants du mois.`
+    : "Définissez un objectif dans Paramètres > Objectifs & facturation.";
+  showToast(msg, { durationMs: 12000 });
 }
 
 function initDashboardPeriodDom() {
@@ -5004,29 +5080,47 @@ function renderDashboard() {
   const alerts = stockAlertItemsForDashboard();
   document.getElementById("stock-alerts").innerHTML = stockAlertRuleHtml + (alerts.length
     ? `<div class="stock-alerts-toolbar">
-          <button type="button" class="mini-btn" data-stock-alert-propose-all>Toutes les alertes</button>
-          <button type="button" class="mini-btn" data-stock-alert-propose-selected>Selection cochée</button>
-          <button type="button" class="mini-btn mini-btn--soft" data-stock-alert-check-all>Tout cocher</button>
-          <button type="button" class="mini-btn mini-btn--soft" data-stock-alert-uncheck-all>Tout décocher</button>
+          <button type="button" class="mini-btn" data-stock-alert-propose-all aria-label="Proposer commande pour toutes les alertes stock">Toutes les alertes</button>
+          <button type="button" class="mini-btn" data-stock-alert-propose-selected aria-label="Proposer commande pour la sélection cochée">Sélection cochée</button>
+          <button type="button" class="mini-btn mini-btn--soft" data-stock-alert-check-all aria-label="Cocher toutes les alertes stock">Tout cocher</button>
+          <button type="button" class="mini-btn mini-btn--soft" data-stock-alert-uncheck-all aria-label="Décocher toutes les alertes stock">Tout décocher</button>
         </div>
-        ${alerts.map((item) => `<article class="list-item">
+        ${alerts.map((item) => {
+      const art = escapeHtml(item.article);
+      const act = stockActuel(item);
+      const seuil = Number(item.seuilMin) || 0;
+      const gravite = act <= 0 ? "Rupture" : `Sous seuil (${fmt(act)}/${fmt(seuil)} btl)`;
+      return `<article class="list-item stock-alert-item${act <= 0 ? " stock-alert-item--rupture" : ""}">
         <label style="display:flex;align-items:flex-start;gap:12px;cursor:pointer;flex:1;min-width:0;margin:0">
-          <input type="checkbox" class="stock-alert-pick" data-stock-alert-pick="${item.id}" aria-label="Inclure ${escapeHtml(item.article)} dans une proposition groupee">
+          <input type="checkbox" class="stock-alert-pick" data-stock-alert-pick="${item.id}" aria-label="Inclure ${art} dans une proposition groupée">
           <div style="min-width:0">
-            <p class="list-item-title">${escapeHtml(item.article)}</p>
-            <p class="list-item-sub">${escapeHtml(item.cat)}</p>
+            <p class="list-item-title">${art}</p>
+            <p class="list-item-sub">${escapeHtml(item.cat)} · ${gravite}</p>
           </div>
         </label>
         <div class="list-side">
           <div>
-            <p class="list-item-amount" style="color:#ff8e82">${fmt(stockActuel(item))} bouteilles</p>
-            <p class="list-item-date">Seuil: ${fmt(item.seuilMin)}</p>
+            <p class="list-item-amount" style="color:#ff8e82">${fmt(act)} bouteilles</p>
+            <p class="list-item-date">Seuil : ${fmt(seuil)}</p>
           </div>
-          <button type="button" class="mini-btn" data-propose-purchase="${item.id}">Proposer commande</button>
+          <button type="button" class="mini-btn" data-propose-purchase="${item.id}" aria-label="Proposer commande pour ${art}">Commander · ${art}</button>
         </div>
-      </article>`).join("")}`
+      </article>`;
+    }).join("")}`
     : emptyState("Tout va bien", "Aucune alerte stock critique pour le moment."));
-  renderBreakdown("pay-chart", paymentTotals(ventes), caTotal, "Aucun paiement disponible.");
+  const encTotals = paymentTotalsEncaissements(ventes);
+  const encTotal = Object.values(encTotals).reduce((s, v) => s + v, 0);
+  const creditEmitted = creditClientEmittedTotal(ventes);
+  document.getElementById("pay-chart-credit-foot")?.remove();
+  renderBreakdown("pay-chart", encTotals, encTotal, "Aucun encaissement sur la période.");
+  if (creditEmitted > 0) {
+    const foot = document.createElement("p");
+    foot.id = "pay-chart-credit-foot";
+    foot.className = "muted";
+    foot.style.cssText = "font-size:0.78rem;margin-top:10px";
+    foot.innerHTML = `Crédit client émis sur la période : <strong>${fmt(creditEmitted)} FCFA</strong> (non compté en encaissements).`;
+    document.getElementById("pay-chart")?.insertAdjacentElement("afterend", foot);
+  }
   renderDashboardCasierKpis(stock);
   renderDashboardProductRank(ventes);
   syncMobileBottomBadges();
@@ -5099,11 +5193,12 @@ function suggestReapproLots(article) {
   if (lotType(item) === "unite") return { manque: 0, lots: 0, detail: "" };
   const stock = stockActuel(item);
   const seuil = Math.max(0, Number(item.seuilMin) || 0);
-  const target = seuil * 2;
+  const mult = reapproTargetMultiplier();
+  const target = seuil * mult;
   const manque = Math.max(0, target - stock);
   const cs = Math.max(1, caseSize(item));
   const detail = seuil > 0
-    ? `Calcul : cible ${fmt(target)} btl (2 x seuil ${fmt(seuil)}) - stock ${fmt(stock)} = ${fmt(manque)} btl a couvrir ; lots arrondis au casier de ${fmt(cs)} btl.`
+    ? `Calcul : cible ${fmt(target)} btl (${fmt(mult)} × seuil ${fmt(seuil)}) − stock ${fmt(stock)} = ${fmt(manque)} btl à couvrir ; lots arrondis au casier de ${fmt(cs)} btl.`
     : "";
   return { manque, lots: Math.ceil(manque / cs), detail };
 }
@@ -5111,16 +5206,27 @@ function suggestReapproLots(article) {
 function suggestPurchaseCases(stockItem) {
   const seuil = Math.max(0, Number(stockItem?.seuilMin) || Number(currentSite()?.seuilStock) || 5);
   const actuel = stockActuel(stockItem);
-  const target = Math.max(seuil * 2, seuil); // remonter au moins à 2x le seuil
+  const mult = reapproTargetMultiplier();
+  const target = Math.max(seuil * mult, seuil);
   const deficitBottles = Math.max(0, target - actuel);
   const cs = Math.max(1, Number(caseSize(stockItem)) || 24);
   const cases = Math.max(1, Math.ceil(deficitBottles / cs));
   return { cases, caseSize: cs };
 }
 
+function stockAlertSeverityRank(item) {
+  const actuel = stockActuel(item);
+  const seuil = Math.max(0, Number(item.seuilMin) || 0);
+  if (actuel <= 0) return 0;
+  if (seuil <= 0) return 50;
+  return actuel / seuil;
+}
+
 function stockAlertItemsForDashboard() {
   const stock = recordsForSite(state.stock);
-  return stock.filter((item) => isStockBelowArticleSeuilForAlert(stockActuel(item), item.seuilMin));
+  return stock
+    .filter((item) => isStockBelowArticleSeuilForAlert(stockActuel(item), item.seuilMin))
+    .sort((a, b) => stockAlertSeverityRank(a) - stockAlertSeverityRank(b));
 }
 
 /** Badges verts type WhatsApp sur la barre du bas (commandes QR, alertes stock). */
@@ -7112,7 +7218,7 @@ function renderUsersList() {
             : canDelete ? `<button type="button" class="mini-btn" data-delete-user="${escapeHtml(user.username)}">Supprimer</button>` : ""}
           ${user.twoFactorEnabled
             ? `<button type="button" class="mini-btn" data-disable-2fa="${escapeHtml(user.username)}">Desactiver 2FA</button>`
-            : `<button type="button" class="mini-btn" data-setup-2fa="${escapeHtml(user.username)}">Activer 2FA</button>`}
+            : `<button type="button" class="mini-btn mini-btn--warn" data-setup-2fa="${escapeHtml(user.username)}">Activer 2FA</button>`}
         </div>
       </div>
     `;
@@ -7366,6 +7472,8 @@ function loadParamsForm() {
   document.getElementById("p-gerant").value = site?.gerant || "";
   document.getElementById("p-obj").value = site?.objectifCA || 500000;
   document.getElementById("p-seuil").value = site?.seuilStock || 5;
+  const pReappro = document.getElementById("p-reappro-mult");
+  if (pReappro) pReappro.value = String(reapproTargetMultiplier(site));
   document.getElementById("p-prefixe").value = site?.prefixeFacture || "";
   const pSmsQr = document.getElementById("p-sms-qr");
   if (pSmsQr) pSmsQr.value = site?.smsQrAlert || "";
@@ -10084,6 +10192,7 @@ async function saveParams() {
     singleBreweryOnly,
     singleBreweryName: singleBreweryOnly ? singleBreweryName : "",
     stockAlertInclusiveSeuil: Boolean(document.getElementById("p-stock-alert-inclusive-seuil")?.checked),
+    reapproTargetMultiplier: Math.min(10, Math.max(1, Number(document.getElementById("p-reappro-mult")?.value) || 2)),
   } : item);
   await persistState({ sites: updatedSites, categories: cleanCategories });
   populateCategorySelects();
@@ -13121,6 +13230,7 @@ function attachEvents() {
     document.getElementById(id).addEventListener("change", renderOrdersManagement);
   });
   initDashboardPeriodDom();
+  document.getElementById("obj-formula-tip")?.addEventListener("click", showObjectifFormulaTip);
   document.getElementById("dashboard-period-mode")?.addEventListener("change", () => {
     syncDashboardPeriodCustomUi();
     renderDashboard();

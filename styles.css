@@ -2771,6 +2771,56 @@ textarea { font: inherit; }
   line-height: 1.45;
 }
 
+.dashboard-zone { margin-bottom: 22px; }
+.dashboard-zone-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 12px;
+}
+.dashboard-zone--alertes .dashboard-alerts-card {
+  border-color: rgba(197, 79, 65, 0.35);
+  box-shadow: 0 0 0 1px rgba(197, 79, 65, 0.08);
+}
+.stock-alert-item--rupture { border-left: 3px solid #f44336; padding-left: 10px; }
+.dashboard-objectif-card { margin-top: 14px; }
+.info-tip-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.15rem;
+  height: 1.15rem;
+  margin-left: 6px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--mm-surface);
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+  vertical-align: middle;
+}
+.info-tip-btn:hover { color: var(--mm-primary-dark); border-color: var(--mm-primary); }
+.linkish-btn--emph { color: #c54f41; text-decoration: underline; }
+.mini-btn--warn {
+  border-color: rgba(197, 79, 65, 0.55);
+  background: rgba(197, 79, 65, 0.12);
+  color: #c54f41;
+}
+.kpi-label { color: #616161; }
+.btn:focus-visible,
+.mini-btn:focus-visible,
+.linkish-btn:focus-visible,
+.tab:focus-visible,
+.icon-btn:focus-visible,
+.info-tip-btn:focus-visible {
+  outline: 2px solid var(--mm-primary);
+  outline-offset: 2px;
+}
+
 .top-journal-close-btn {
   display: block;
   margin-top: 6px;

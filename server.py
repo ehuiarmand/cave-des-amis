@@ -102,6 +102,21 @@ REQUIRE_2FA_FOR_PRIVILEGED = _env_first(
     "MAQUIS_MANAGER_REQUIRE_2FA_ADMINS",
     default="0",
 ).lower() in ("1", "true", "yes", "on")
+STATE_PUT_LIST_KEYS = (
+    "ventes", "stock", "commandes", "stockChecks", "stockEntrees", "stockLosses",
+    "dayBooks", "purchaseOrders", "supplierPrices", "casiers", "casierMouvements",
+    "creditRecoveries", "consignes", "charges", "staffAuditLog",
+)
+MAX_STATE_LIST_ROWS = 50_000
+
+
+def validate_state_put_payload(payload: Any) -> None:
+    if not isinstance(payload, dict):
+        raise ValueError("Payload invalide.")
+    for key in STATE_PUT_LIST_KEYS:
+        rows = payload.get(key)
+        if isinstance(rows, list) and len(rows) > MAX_STATE_LIST_ROWS:
+            raise ValueError(f"Trop de lignes dans « {key} » (max {MAX_STATE_LIST_ROWS}).")
 
 # Libellé « émetteur » dans les applis OTP (QR 2FA) : indépendant du nom du maquis dans les paramètres.
 TOTP_APP_LABEL = (
@@ -117,7 +132,18 @@ TOTP_APP_LABEL = (
 
 def privileged_role_requires_2fa_policy(role: str) -> bool:
     r = str(role or "").strip().lower()
-    return r in ("superadmin", "admin")
+    return r in ("superadmin", "admin", "manager")
+
+
+def session_missing_required_2fa(session: dict[str, Any], auth_users: list[dict[str, Any]]) -> bool:
+    if not REQUIRE_2FA_FOR_PRIVILEGED:
+        return False
+    if not privileged_role_requires_2fa_policy(str(session.get("role", ""))):
+        return False
+    u = next((x for x in auth_users if x.get("username") == session.get("username")), None)
+    if not u:
+        return False
+    return not (bool(u.get("twoFactorEnabled")) and bool(u.get("twoFactorSecret")))
 
 
 def _today_iso_local() -> str:
@@ -414,6 +440,7 @@ def make_site(
         "prefixeFacture": prefixe_facture,
         "dualZonePricing": dual_zone_pricing,
         "stockAlertInclusiveSeuil": False,
+        "reapproTargetMultiplier": 2,
     }
 
 
@@ -975,9 +1002,16 @@ def session_may_configure_2fa_for_other(
         return True
     if str(session.get("username", "")) == str(target_username):
         return True
-    if session.get("role") == "manager":
-        return True
     tu = next((u for u in auth_users if u.get("username") == target_username), None)
+    if session.get("role") == "manager":
+        if not tu:
+            return False
+        tr = str(tu.get("role", "")).strip().lower()
+        if tr not in ("serveuse", "serveur"):
+            return False
+        ts = {str(x) for x in (tu.get("allowedSiteIds") or [])}
+        ss = {str(x) for x in (session.get("allowedSiteIds") or [])}
+        return bool(ts and ss and ts <= ss)
     if not tu:
         return False
     ts = {str(x) for x in (tu.get("allowedSiteIds") or [])}
@@ -1226,6 +1260,7 @@ class SessionManager:
                     continue
                 if str(sess.get("username", "")).strip().lower() == un:
                     self._sessions.pop(tok, None)
+            audit_log("sessions_invalidated", {"username": un, "reason": "explicit"})
 
 
 class DataStore:
@@ -1478,11 +1513,11 @@ class DataStore:
     def public_state_for_session(self, session: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
             full = self.public_state()
+            site_ids = [str(s["id"]) for s in self._state["sites"] if s.get("id")]
             if session_is_superadmin(session, all_site_ids=site_ids):
                 payload = dict(full)
                 payload["adminBackups"] = json.loads(json.dumps(self.list_backups()))
                 return payload
-            site_ids = [str(s["id"]) for s in self._state["sites"] if s.get("id")]
             allowed = session_allowed_sites(session, site_ids)
             if not allowed and site_ids:
                 allowed = {site_ids[0]}
@@ -1547,9 +1582,18 @@ class DataStore:
             since_raw = str(since or "").strip()
             if not since_raw:
                 since_raw = "1970-01-01T00:00:00Z"
+            site_ids_all = [str(s["id"]) for s in self._state.get("sites", []) if s.get("id")]
+            allowed_sites: set[str] | None = None
+            if session is not None and not session_is_superadmin(session, all_site_ids=site_ids_all):
+                allowed_sites = session_allowed_sites(session, site_ids_all)
+                if not allowed_sites and site_ids_all:
+                    allowed_sites = {site_ids_all[0]}
             commandes = []
             for order in self._state.get("commandes", []) or []:
-                if site_id and order.get("siteId") != site_id:
+                osid = str(order.get("siteId") or "")
+                if allowed_sites is not None and osid not in allowed_sites:
+                    continue
+                if site_id and osid != site_id:
                     continue
                 # Focus on QR sourced orders (most frequent changes).
                 if order.get("source") != "qr":
@@ -2299,8 +2343,11 @@ def invalidate_sessions_on_auth_changes(
             ou.get("passwordHash") != nu.get("passwordHash")
             or str(ou.get("role", "")) != str(nu.get("role", ""))
             or sites_old != sites_new
+            or bool(ou.get("twoFactorEnabled")) != bool(nu.get("twoFactorEnabled"))
+            or str(ou.get("twoFactorSecret") or "") != str(nu.get("twoFactorSecret") or "")
         ):
             sessions.invalidate_all_for_username(un)
+            audit_log("sessions_invalidated", {"username": un, "reason": "auth_or_2fa_change"})
 
 
 class AppHandler(BaseHTTPRequestHandler):
@@ -2684,10 +2731,26 @@ class AppHandler(BaseHTTPRequestHandler):
             with store._lock:
                 for u in store._state["auth"]["users"]:
                     if u["username"] == target:
+                        target_role = str(u.get("role", ""))
+                        if REQUIRE_2FA_FOR_PRIVILEGED and privileged_role_requires_2fa_policy(target_role):
+                            self.send_json(
+                                HTTPStatus.FORBIDDEN,
+                                {"error": "La desactivation du 2FA est interdite pour les comptes administrateur et gerant."},
+                            )
+                            return
                         u.pop("twoFactorSecret", None)
                         u.pop("twoFactorSecretPending", None)
                         u["twoFactorEnabled"] = False
                         store._write(store._state)
+                        sessions.invalidate_all_for_username(target)
+                        audit_log(
+                            "2fa_disabled",
+                            {
+                                "ip": self.client_ip(),
+                                "target": target,
+                                "by": str(session.get("username", "")),
+                            },
+                        )
                         self.send_json(HTTPStatus.OK, {"ok": True})
                         return
                 self.send_json(HTTPStatus.NOT_FOUND, {"error": "Utilisateur introuvable."})
@@ -2712,6 +2775,10 @@ class AppHandler(BaseHTTPRequestHandler):
                 self.send_json(HTTPStatus.FORBIDDEN, {"error": "Seul le super administrateur peut reinitialiser l'application."})
                 return
             payload = store.reset()
+            audit_log(
+                "app_reset",
+                {"ip": self.client_ip(), "username": str(session.get("username", "")), "role": str(session.get("role", ""))},
+            )
             self.send_json(HTTPStatus.OK, payload)
             return
 
@@ -2732,6 +2799,15 @@ class AppHandler(BaseHTTPRequestHandler):
             except ValueError as error:
                 self.send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
                 return
+            audit_log(
+                "purge_maquis",
+                {
+                    "ip": self.client_ip(),
+                    "username": str(session.get("username", "")),
+                    "siteId": target,
+                    "keepStockCatalog": keep_cat,
+                },
+            )
             self.send_json(HTTPStatus.OK, payload)
             return
 
@@ -2757,6 +2833,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 return
             payload = self.read_json()
             try:
+                validate_state_put_payload(payload)
                 updated = store.update_state(payload, session)
             except ValueError as error:
                 self.send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
@@ -2767,6 +2844,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     "ip": self.client_ip(),
                     "username": str(session.get("username", "")),
                     "role": str(session.get("role", "")),
+                    "globalSuperadmin": bool(session.get("globalSuperadmin")),
                     "sections": sorted(str(k) for k in (payload or {}).keys()),
                 },
             )
@@ -2833,6 +2911,20 @@ class AppHandler(BaseHTTPRequestHandler):
         session = sessions.get(token)
         if session is None:
             self.send_json(HTTPStatus.UNAUTHORIZED, {"authenticated": False, "error": "Session invalide ou expiree."}, clear_cookie=True)
+            return None
+        with store._lock:
+            auth_users = list(store._state.get("auth", {}).get("users", []))
+        if session_missing_required_2fa(session, auth_users):
+            sessions.clear(token)
+            self.send_json(
+                HTTPStatus.UNAUTHORIZED,
+                {
+                    "authenticated": False,
+                    "error": "La double authentification (2FA) est obligatoire. Activez le 2FA puis reconnectez-vous.",
+                    "requires2FA": True,
+                },
+                clear_cookie=True,
+            )
             return None
         return session
 

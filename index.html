@@ -228,14 +228,17 @@
         </article>
       </section>
 
-      <section id="page-home" class="page active">
+      <section id="page-home" class="page active" aria-label="Tableau de bord">
         <div id="home-2fa-alert" class="home-security-banner hidden" role="alert"></div>
+        <div class="dashboard-zone dashboard-zone--kpi">
+        <h2 class="dashboard-zone-title">Indicateurs</h2>
         <div class="dashboard-period-bar" style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin-bottom:14px">
           <div class="form-group" style="min-width:200px;margin:0">
-            <label for="dashboard-period-mode">Periode des indicateurs</label>
+            <label for="dashboard-period-mode">Période des indicateurs</label>
             <select id="dashboard-period-mode">
               <option value="month" selected>Mois en cours</option>
-              <option value="custom">Periode personnalisee</option>
+              <option value="week">Semaine en cours</option>
+              <option value="custom">Période personnalisée</option>
               <option value="all">Tout l'historique</option>
             </select>
           </div>
@@ -254,32 +257,30 @@
         <p id="dashboard-kpi-period-foot" class="muted" style="font-size:0.8rem;margin:-6px 0 12px"></p>
         <div class="kpi-grid">
           <article class="kpi">
-            <p class="kpi-label" title="Somme des montants nets des ventes finalisees pour la periode selectionnee (prix x quantite - remise).">CA net</p>
+            <p class="kpi-label" title="Somme des montants nets des ventes finalisées pour la période sélectionnée (prix × quantité − remise).">CA net</p>
             <h3 id="kpi-ca" class="kpi-value amber">0</h3>
             <p class="kpi-foot">FCFA</p>
           </article>
           <article class="kpi">
-            <p class="kpi-label" title="Total des charges enregistrees pour la periode selectionnee.">Charges</p>
+            <p class="kpi-label" title="Total des charges enregistrées pour la période sélectionnée.">Charges</p>
             <h3 id="kpi-charges" class="kpi-value red">0</h3>
             <p class="kpi-foot">FCFA</p>
           </article>
           <article class="kpi">
-            <p class="kpi-label" title="CA net moins charges pour la periode selectionnee.">Benefice</p>
+            <p class="kpi-label" title="CA net moins charges pour la période sélectionnée.">Bénéfice</p>
             <h3 id="kpi-benefice" class="kpi-value">0</h3>
             <p class="kpi-foot">FCFA</p>
           </article>
           <article class="kpi">
-            <p class="kpi-label" title="Nombre de ventes finalisees sur la periode selectionnee.">Transactions</p>
+            <p class="kpi-label" title="Nombre de ventes finalisées sur la période sélectionnée.">Transactions</p>
             <h3 id="kpi-nb" class="kpi-value amber">0</h3>
             <p class="kpi-foot">ventes</p>
           </article>
         </div>
-
-        <div class="dashboard-grid">
-          <article class="card spotlight-card">
+        <article class="card spotlight-card dashboard-objectif-card">
             <div class="card-head">
               <div>
-                <p class="eyebrow">Objectif mensuel</p>
+                <p class="eyebrow">Objectif mensuel <button type="button" class="info-tip-btn" id="obj-formula-tip" aria-label="Comment est calculé l'objectif mensuel" title="Formule de calcul">?</button></p>
                 <h3 id="obj-pct">0%</h3>
               </div>
               <p id="obj-val" class="muted">/ 500 000 FCFA</p>
@@ -290,10 +291,26 @@
             <p id="obj-detail" class="muted" style="font-size:0.82rem;line-height:1.45;margin-top:10px"></p>
           </article>
 
+        </div>
+
+        <div class="dashboard-zone dashboard-zone--alertes">
+          <h2 class="dashboard-zone-title">Alertes prioritaires</h2>
+          <article class="card dashboard-alerts-card">
+            <div class="section-head">
+              <h3>Alertes stock</h3>
+              <span class="section-meta">Triées par gravité</span>
+            </div>
+            <div id="stock-alerts"></div>
+          </article>
+        </div>
+
+        <div class="dashboard-zone dashboard-zone--analyse">
+          <h2 class="dashboard-zone-title">Analyse</h2>
+        <div class="dashboard-grid">
           <article class="card">
             <div class="section-head">
-              <h3>Ventes par categorie</h3>
-              <span class="section-meta">Repartition</span>
+              <h3>Ventes par catégorie</h3>
+              <span class="section-meta">Répartition</span>
             </div>
             <div id="cat-chart"></div>
           </article>
@@ -316,14 +333,6 @@
 
           <article class="card">
             <div class="section-head">
-              <h3>Alertes stock</h3>
-              <span class="section-meta">Priorités</span>
-            </div>
-            <div id="stock-alerts"></div>
-          </article>
-
-          <article class="card">
-            <div class="section-head">
               <h3>Casiers physiques</h3>
               <span class="section-meta">État du parc</span>
             </div>
@@ -339,10 +348,11 @@
           <article class="card">
             <div class="section-head">
               <h3>Modes de paiement</h3>
-              <span class="section-meta">Encaissements</span>
+              <span class="section-meta">Encaissés (hors crédit)</span>
             </div>
             <div id="pay-chart"></div>
           </article>
+        </div>
         </div>
       </section>
 
@@ -1111,6 +1121,11 @@
               <div class="form-group">
                 <label for="p-seuil">Seuil alerte stock</label>
                 <input id="p-seuil" type="number" placeholder="5">
+              </div>
+              <div class="form-group">
+                <label for="p-reappro-mult">Cible réappro (× seuil article)</label>
+                <input id="p-reappro-mult" type="number" min="1" max="10" step="0.5" placeholder="2" title="Stock cible = seuil × ce multiplicateur (défaut 2)">
+                <p class="muted" style="font-size:0.82rem;margin-top:6px">Ex. 2 = remonter à 2× le seuil minimum. Paramétrable par maquis.</p>
               </div>
               <div class="form-group" style="grid-column:1/-1">
                 <label class="checkbox-label" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer">
@@ -2271,6 +2286,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=202"></script>
+  <script src="./app-orders.js?v=203"></script>
 </body>
 </html>
