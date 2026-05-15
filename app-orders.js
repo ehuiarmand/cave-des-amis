@@ -2015,10 +2015,13 @@ function isPdjBrowseConsultationOnly() {
 function pdjCalendarDate() {
   const sid = currentSiteId();
   const t = today();
-  const view = String(pdjViewDateBySite[sid] || "").trim().slice(0, 10);
-  if (view && /^\d{4}-\d{2}-\d{2}$/.test(view) && view <= t) return view;
   const forced = String(state?.pdjWorkDateBySite?.[sid] || "").trim().slice(0, 10);
   const hasForced = Boolean(forced && /^\d{4}-\d{2}-\d{2}$/.test(forced) && forced <= t);
+
+  if (isPdjBrowseConsultationOnly()) {
+    const view = String(pdjViewDateBySite[sid] || "").trim().slice(0, 10);
+    if (view && /^\d{4}-\d{2}-\d{2}$/.test(view) && view <= t) return view;
+  }
 
   if (canAnyAdmin()) {
     const el = document.getElementById("pdj-work-date");
@@ -2030,32 +2033,6 @@ function pdjCalendarDate() {
     return workingDate();
   }
 
-  // #region agent log
-  if (sid) {
-    const _now = Date.now();
-    globalThis.__pdjCalDbgLast = globalThis.__pdjCalDbgLast || 0;
-    if (_now - globalThis.__pdjCalDbgLast > 8000) {
-      globalThis.__pdjCalDbgLast = _now;
-      fetch("http://127.0.0.1:7725/ingest/d031651a-daea-460d-8400-58dc731a515d", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "dee456" },
-        body: JSON.stringify({
-          sessionId: "dee456",
-          hypothesisId: "C",
-          location: "app-orders.js:pdjCalendarDate",
-          message: "pdj_non_admin",
-          data: {
-            sid,
-            forced,
-            keys: state?.pdjWorkDateBySite ? Object.keys(state.pdjWorkDateBySite) : [],
-            role: String(currentRole || ""),
-          },
-          timestamp: _now,
-        }),
-      }).catch(() => {});
-    }
-  }
-  // #endregion
   if (hasForced) return forced;
   return workingDate();
 }
@@ -2068,10 +2045,7 @@ function syncPdjWorkDateInput() {
   const sid = currentSiteId();
   const forced = String(state?.pdjWorkDateBySite?.[sid] || "").trim().slice(0, 10);
   const useForced = forced && /^\d{4}-\d{2}-\d{2}$/.test(forced) && forced <= t;
-  if (useForced) {
-    const cur = String(el.value || "").trim();
-    if (!cur || cur > t || !/^\d{4}-\d{2}-\d{2}$/.test(cur)) el.value = forced;
-  } else if (!el.value || el.value > t) el.value = workingDate();
+  el.value = useForced ? forced : workingDate();
   const workDate = pdjCalendarDate();
   syncVentesJournalDateInputsFromPdj(workDate, { force: false });
   if (currentPage === "ventes") renderVentesPage();
@@ -2167,14 +2141,19 @@ async function persistPdjWorkDateFromSuperPicker() {
     return;
   }
   await persistState({ pdjWorkDateBySite: map });
-  setPdjBrowseDate(map[siteId] || null);
+  pdjBrowseConsultationOnly = false;
+  delete pdjViewDateBySite[siteId];
+  if (el) el.value = map[siteId] || workingDate();
   recordStaffAudit(
     "update",
     "pdj_date_serveur",
     "Journee comptable imposee (toutes sessions)",
     `${siteId} -> ${map[siteId] || "mode automatique"}`,
   );
+  ventesDomPdjStamp = "";
   syncPdjWorkDateInput();
+  applyPdjWorkDateToVentesAndOrderDom();
+  syncVentesJournalDateInputsFromPdj(pdjCalendarDate(), { force: true });
   renderTopbar();
   renderOrdersManagement();
   if (currentPage === "pdj") renderPointDuJour();
@@ -7716,7 +7695,7 @@ async function syncStateSilently() {
     const incPdj = delta.pdjWorkDateBySite;
     const prevPdj = state.pdjWorkDateBySite || {};
     skipPdjFullRender = currentPage === "pdj" && !hadCmdDelta && shallowEqualPdjWorkDateMaps(prevPdj, incPdj);
-    state.pdjWorkDateBySite = { ...incPdj };
+    state.pdjWorkDateBySite = { ...prevPdj, ...incPdj };
     applyPdjWorkDateToVentesAndOrderDom();
     syncPdjWorkDateInput();
     // #region agent log
@@ -12915,6 +12894,7 @@ async function bootstrapAuthenticatedApp(opts = {}) {
   populateSelect("c-cat", CHARGE_CATEGORIES);
   populateSelect("c-pay", CHARGE_PAYMENT_METHODS);
   ventesDomPdjStamp = "";
+  syncPdjWorkDateInput();
   syncVentesJournalDateInputsFromPdj(pdjCalendarDate(), { force: true });
   document.getElementById("c-date").value = today();
   const consigneDateEl = document.getElementById("consigne-date");
@@ -13041,6 +13021,8 @@ function attachEvents() {
     if (!canAccessSite(siteId)) return;
     state.activeSiteId = siteId;
     activeOrderId = null;
+    pdjBrowseConsultationOnly = false;
+    delete pdjViewDateBySite[siteId];
     knownQrOrderIds = new Set(qrOrdersForCurrentSite(state).map((item) => item.id));
     clearQrAlert();
     syncPdjWorkDateInput();
@@ -13370,8 +13352,9 @@ document.getElementById("fab-btn").addEventListener("click", () => {
   });
   document.getElementById("print-pdj-serveuse-btn")?.addEventListener("click", printPdjDayControl);
   document.getElementById("pdj-work-date")?.addEventListener("change", () => {
-    const raw = document.getElementById("pdj-work-date")?.value?.trim() || "";
-    setPdjBrowseDate(raw || null, { consultationOnly: false });
+    pdjBrowseConsultationOnly = false;
+    delete pdjViewDateBySite[currentSiteId()];
+    ventesDomPdjStamp = "";
     syncPdjWorkDateInput();
     renderTopbar();
     renderOrdersManagement();
