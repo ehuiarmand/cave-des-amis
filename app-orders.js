@@ -8749,14 +8749,17 @@ async function persistStatePatch(patch) {
   if (!patch || typeof patch !== "object") throw new Error("persistStatePatch: patch invalide.");
   const keys = Object.keys(patch);
   if (!keys.length) throw new Error("persistStatePatch: patch vide.");
+  const _activeSiteId = state.activeSiteId;
   const _casiers = state.casiers ?? [];
   const _casierMouvements = state.casierMouvements ?? [];
   const _consignes = state.consignes ?? [];
   const _supplierPrices = state.supplierPrices ?? [];
   const _stockChecks = patch.stockChecks ?? [];
+  // Toujours inclure activeSiteId pour eviter que le serveur renvoie son ancienne valeur stockee
+  const fullPatch = patch.activeSiteId !== undefined ? patch : { activeSiteId: _activeSiteId, ...patch };
   state = await apiRequest(API.state, {
     method: "PUT",
-    body: JSON.stringify(patch),
+    body: JSON.stringify(fullPatch),
   });
   if (!state.casiers?.length && _casiers.length) state.casiers = _casiers;
   if (!state.casierMouvements?.length && _casierMouvements.length) state.casierMouvements = _casierMouvements;
