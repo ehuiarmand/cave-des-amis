@@ -593,7 +593,7 @@ function buildCreditRecoveryHistoryHtml() {
         <tbody>${rows}</tbody>
       </table>
     </div>
-    <p class="muted" style="font-size:0.78rem;margin-top:8px;line-height:1.4">Seuls les versements des clients ayant encore un reste à payer sont listés. Dès qu’une dette est entièrement réglée, ses paiements disparaissent de cet historique (les données restent enregistrées).</p>
+    <p class="muted" style="font-size:0.78rem;margin-top:8px;line-height:1.4">Liste des versements pour les clients ayant eu du crédit sur les ventes de ce maquis (y compris après solde complet). Les encaissements sans vente « crédit client » correspondante ne s’affichent pas ici.</p>
   </div>`;
 }
 
@@ -7166,7 +7166,7 @@ function renderCreditRecovery() {
   if (!entries.length) {
     list.innerHTML = `
       <div class="muted" style="margin-bottom:14px;padding:12px;border:1px solid var(--border);border-radius:8px;font-size:0.92rem">
-        <strong>Aucun solde débiteur actif</strong> — soit tous les crédits sont soldés, soit aucune vente n’a été encaissée en « Crédit client » pour ce maquis. L’historique des versements ne s’affiche que pour les clients qui ont encore un reste à payer ; il est donc vide tant que toutes les dettes sont réglées.
+        <strong>Aucun solde débiteur actif</strong> — soit tous les crédits sont soldés, soit aucune vente n’a été encaissée en « Crédit client » pour ce maquis. Les versements enregistrés restent visibles dans l’historique ci‑dessous pour les clients concernés.
       </div>
       ${historyHtml}`;
     return;
@@ -7240,13 +7240,19 @@ function creditRecoveryIsDuplicateInSite(nameNorm, applied, method, paidAtIso, s
 async function saveCreditRecovery() {
   const name = (document.getElementById("credit-name")?.value || "").trim();
   const nameNorm = debtorDisplayKey(name);
-  const montant = Math.round(Number(document.getElementById("credit-amount")?.value) || 0);
+  const amountRaw = document.getElementById("credit-amount")?.value;
+  const montant = Math.round(Number(digitsOnlyFcfaString(String(amountRaw ?? ""))) || Number(amountRaw) || 0);
   const method = document.getElementById("credit-method")?.value || "Espèces";
   const dtInput = document.getElementById("credit-datetime")?.value?.trim() || "";
   const noteRaw = (document.getElementById("credit-note")?.value || "").trim();
   const note = noteRaw || CREDIT_RECOVERY_DEFAULT_NOTE;
   if (!name) { showToast("Le nom du client débiteur est obligatoire."); return; }
   if (montant <= 0) { showToast("Entrez un montant valide."); return; }
+  const siteId = currentSiteId();
+  if (!siteId) {
+    showToast("Maquis actif non défini : sélectionnez un maquis avant d'enregistrer un versement.");
+    return;
+  }
 
   let paidAtIso = new Date().toISOString();
   let dateCalendar = today();
@@ -7259,9 +7265,18 @@ async function saveCreditRecovery() {
   }
 
   const dueMap = creditOutstandingMap();
-  const remaining = Number(dueMap[nameNorm]) || 0;
-  const applied = remaining > 0 ? Math.min(montant, Math.round(remaining)) : montant;
-  if (remaining > 0 && applied <= 0) { showToast("Ce client n'a plus de crédit en cours."); return; }
+  const remaining = Math.round(Number(dueMap[nameNorm]) || 0);
+  if (remaining <= 0) {
+    showToast(
+      "Aucun solde « crédit client » en cours pour ce nom sur ce maquis. Vérifiez l'orthographe (identique aux ventes) et le maquis sélectionné.",
+    );
+    return;
+  }
+  const applied = Math.min(montant, remaining);
+  if (applied <= 0) {
+    showToast("Ce client n'a plus de crédit en cours.");
+    return;
+  }
 
   if (_creditRecoverySaveInFlight) {
     showToast("Enregistrement en cours…");
@@ -7286,7 +7301,7 @@ async function saveCreditRecovery() {
 
     const row = {
       id: state.nextId.creditRecovery++,
-      siteId: currentSiteId(),
+      siteId,
       date: dateCalendar,
       paidAt: paidAtIso,
       debiteur: nameNorm,
