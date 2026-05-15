@@ -1541,6 +1541,38 @@ function formatMarginFcfa(value) {
   return `<span class="${cls}">${sign}${fmt(rounded)}</span>`;
 }
 
+/**
+ * Marge brute sur un ensemble de lignes de vente : CA net − (prix achat / btl × bouteilles vendues).
+ * Lignes sans article catalogue ou sans prix d'achat : exclus du total (voir excludedLines).
+ */
+function grossMarginFromVenteLines(ventesList) {
+  let marge = 0;
+  let excludedLines = 0;
+  for (const v of ventesList || []) {
+    const si = stockItemForArticle(v.article);
+    const paBtl = prixAchatParBouteille(si);
+    if (!si || paBtl <= 0) {
+      excludedLines += 1;
+      continue;
+    }
+    const bottles = lineBottleQty(v, si);
+    marge += calcNet(v) - paBtl * bottles;
+  }
+  return { margeBrute: Math.round(marge), excludedLines };
+}
+
+/** Bénéfice opérationnel estimé PDJ : marge brute ventes − charges (hors recouvrement anciennes créances). */
+function pdjEstimatedBenefitFromSales(ventesList, chargesTotal) {
+  const { margeBrute, excludedLines } = grossMarginFromVenteLines(ventesList);
+  const charges = Math.round(Number(chargesTotal) || 0);
+  return {
+    margeBrute,
+    beneficeEstime: margeBrute - charges,
+    excludedLines,
+    charges,
+  };
+}
+
 function categoryList() {
   const custom = Array.isArray(state?.categories) ? state.categories : [];
   const cleanedCustom = custom.map((cat) => String(cat || "").trim()).filter(Boolean);
@@ -11287,7 +11319,7 @@ function printPdjProvisionalReport(reportDateStr) {
   const creditEmisJour = creditIssuedOnDate(reportDateStr);
   const caCreances = totalCreditOutstanding();
   const chargesTotal = chargesJour.reduce((sum, c) => sum + Number(c.montant || 0), 0);
-  const benefice = caEncaisseTotal - chargesTotal;
+  const { margeBrute, beneficeEstime, excludedLines } = pdjEstimatedBenefitFromSales(ventesJour, chargesTotal);
   const dayBook = dayBookFor(reportDateStr, currentSiteId());
   const openingCash = Number(dayBook?.openingCashFcfa) || 0;
   const especesVentes = Number(totauxJour["Espèces"]) || Number(totauxJour["EspÃ¨ces"]) || 0;
@@ -11419,8 +11451,10 @@ function printPdjProvisionalReport(reportDateStr) {
     <div>
       <div class="summary-box">
         <div class="row"><span>CA encaisse (jour)</span><strong>${fmt(caEncaisseTotal)} FCFA</strong></div>
+        <div class="row" title="Somme (prix vente net − prix achat / bouteille × qté bouteilles) sur les ventes du jour."><span>Marge brute (ventes)</span><strong>${fmt(margeBrute)} FCFA</strong></div>
         ${chargesTotal ? `<div class="row"><span>Charges du jour</span><strong>- ${fmt(chargesTotal)} FCFA</strong></div>` : ""}
-        <div class="row"><span>Benefice estime</span><strong>${fmt(benefice)} FCFA</strong></div>
+        <div class="row" title="Marge brute moins charges. Le recouvrement crédit n’entre pas dans la marge."><span>Bénéfice estimé</span><strong style="color:${beneficeEstime >= 0 ? "#2a9d5c" : "#c0392b"}">${fmt(beneficeEstime)} FCFA</strong></div>
+        ${excludedLines ? `<p style="font-size:10px;color:#c0392b;margin:6px 0 0;line-height:1.35">${excludedLines} ligne(s) sans prix d’achat catalogue : marge incomplète. Indiquez le prix d’achat du casier dans le catalogue stock.</p>` : ""}
       </div>
       <div style="margin-top:10px;border:1px solid #ccc;padding:8px 12px">
         <div style="font-size:10px;font-weight:700;margin-bottom:6px">Controle gerant</div>
@@ -11484,7 +11518,7 @@ function printDayClosure(reportDateStr) {
   const caCreances = caCreancesRestantes;
   const creditEmisJourPrint = closed.caCreancesEmisesJour ?? creditIssuedOnDate(dStr);
   const chargesTotal = chargesJour.reduce((sum, c) => sum + Number(c.montant || 0), 0);
-  const benefice = caEncaisse - chargesTotal;
+  const { margeBrute, beneficeEstime, excludedLines } = pdjEstimatedBenefitFromSales(ventesJour, chargesTotal);
   const gaps = (closed.items || []).filter((ci) => ci.ecart !== 0).length;
   const cashCloseRows =
     typeof closed.openingCashFcfa === "number"
@@ -11632,9 +11666,11 @@ function printDayClosure(reportDateStr) {
     <div>
       <div class="summary-box">
         <div class="row"><span>CA encaisse</span><strong>${fmt(caEncaisse)} FCFA</strong></div>
+        <div class="row" title="Somme (prix vente net − prix achat / bouteille × qté bouteilles) sur les ventes du jour."><span>Marge brute (ventes)</span><strong>${fmt(margeBrute)} FCFA</strong></div>
         ${chargesTotal ? `<div class="row"><span>Charges du jour</span><strong>- ${fmt(chargesTotal)} FCFA</strong></div>` : ""}
         ${chargesJour.map((c) => `<div class="row" style="font-size:10px;color:#555;padding-left:12px"><span>${escapeHtml(c.lib || c.libelle || c.cat || c.categorie || "Charge")}</span><span>${fmt(c.montant)} FCFA</span></div>`).join("")}
-        <div class="row"><span>Benefice net</span><strong style="color:${benefice >= 0 ? "#2a9d5c" : "#c0392b"}">${fmt(benefice)} FCFA</strong></div>
+        <div class="row" title="Marge brute moins charges (hors effet de trésorerie créances)."><span>Bénéfice estimé</span><strong style="color:${beneficeEstime >= 0 ? "#2a9d5c" : "#c0392b"}">${fmt(beneficeEstime)} FCFA</strong></div>
+        ${excludedLines ? `<p style="font-size:10px;color:#c0392b;margin:6px 0 0;line-height:1.35">${excludedLines} ligne(s) sans prix d’achat catalogue : marge incomplète.</p>` : ""}
       </div>
       <div style="margin-top:10px;border:1px solid #ccc;padding:8px 12px">
         <div style="font-size:10px;text-transform:uppercase;font-weight:700;margin-bottom:6px">Versement</div>
