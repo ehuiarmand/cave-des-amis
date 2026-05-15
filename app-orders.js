@@ -10774,6 +10774,7 @@ async function saveCharge() {
 
 async function saveParams() {
   const site = currentSite();
+  if (!site) { showToast("Erreur : maquis introuvable. Rechargez la page."); return; }
   const dualPricingChecked = Boolean(document.getElementById("p-dual-zone-pricing")?.checked);
   const singleBreweryOnly = Boolean(document.getElementById("p-single-br-enabled")?.checked);
   const singleBreweryName = String(document.getElementById("p-single-br-name")?.value || "").trim();
@@ -10802,11 +10803,9 @@ async function saveParams() {
     autoClotureTime: String(document.getElementById("p-auto-cloture-time")?.value || "23:00").slice(0, 5),
   } : item);
   await persistState({ sites: updatedSites, categories: cleanCategories });
-  populateCategorySelects();
-  loadParamsForm();
-  renderTopbar();
-  renderSiteSwitcher();
-  renderHero();
+  try { populateCategorySelects(); } catch (e) { console.error(e); }
+  try { loadParamsForm(); } catch (e) { console.error(e); }
+  try { renderTopbar(); renderSiteSwitcher(); renderHero(); } catch (e) { console.error(e); }
   showToast("Parametres sauvegardes.");
 }
 
