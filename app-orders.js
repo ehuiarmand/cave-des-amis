@@ -8173,35 +8173,49 @@ function syncAutoClotureTimeVisibility() {
 
 function startAutoClotureSchedule() {
   stopAutoClotureSchedule();
-  autoClotureTimer = window.setInterval(checkAutoClotureSchedule, 60_000);
+  _scheduleNextAutoClotureTimeout();
 }
 
 function stopAutoClotureSchedule() {
   if (autoClotureTimer != null) {
-    clearInterval(autoClotureTimer);
+    clearTimeout(autoClotureTimer);
     autoClotureTimer = null;
   }
 }
 
-function checkAutoClotureSchedule() {
+// Calcule les ms jusqu'à l'heure configurée (aujourd'hui ou demain si déjà passée)
+// et programme un setTimeout unique — jamais de polling toutes les minutes.
+function _scheduleNextAutoClotureTimeout() {
   if (!state || !sessionUser) return;
-  if (!canManagePdjAccounting()) return;
   const site = currentSite();
   if (!site?.autoClotureEnabled || !site?.autoClotureTime) return;
   const parts = String(site.autoClotureTime).split(":");
   const hh = Number(parts[0]);
   const mm = Number(parts[1]);
   if (Number.isNaN(hh) || Number.isNaN(mm)) return;
+
   const now = new Date();
-  const configuredMins = hh * 60 + mm;
-  const currentMins = now.getHours() * 60 + now.getMinutes();
-  // Ne declenche que dans la fenetre [heure_config, heure_config + 60 min[
-  // Evite une cloture tardive si le navigateur s'ouvre apres l'heure configuree
-  if (currentMins < configuredMins || currentMins >= configuredMins + 60) return;
+  const target = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hh, mm, 0, 0);
+  // Si l'heure est déjà passée aujourd'hui, viser demain
+  if (target <= now) target.setDate(target.getDate() + 1);
+
+  const msUntil = target.getTime() - now.getTime();
+  console.info(`[auto-cloture] Prochain déclenchement dans ${Math.round(msUntil / 60000)} min (${target.toLocaleTimeString()})`);
+  autoClotureTimer = window.setTimeout(() => {
+    _triggerAutoClotureNow();
+    // Reprogrammer pour le lendemain
+    _scheduleNextAutoClotureTimeout();
+  }, msUntil);
+}
+
+function _triggerAutoClotureNow() {
+  if (!state || !sessionUser) return;
+  if (!canManagePdjAccounting()) return;
+  const site = currentSite();
+  if (!site?.autoClotureEnabled) return;
   const dStr = workingDate();
   if (!dStr) return;
   if (stockCheckForSiteDate(dStr, currentSiteId())) return;
-  // Ne pas reclore un jour réouvert manuellement (boucle infinie réouverture→auto-clôture)
   if (_autoClotureManualReopened.has(`${currentSiteId()}|${dStr}`)) return;
   const dayBookCurrent = dayBookFor(dStr);
   if (dayBookCurrent?.manualReopenedAt) return;
@@ -11021,6 +11035,8 @@ async function saveParams() {
   try { populateCategorySelects(); } catch (e) { console.error(e); }
   try { loadParamsForm(); } catch (e) { console.error(e); }
   try { renderTopbar(); renderSiteSwitcher(); renderHero(); } catch (e) { console.error(e); }
+  // Recalcule le timer si l'heure de cloture automatique a change
+  try { startAutoClotureSchedule(); } catch (e) { console.error(e); }
   showToast("Parametres sauvegardes.");
 }
 
