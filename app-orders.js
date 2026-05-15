@@ -118,6 +118,33 @@ function creditRecoveriesForSite(sourceState = state) {
   return (sourceState?.creditRecoveries || []).filter((p) => rowMatchesSite(p, siteId, multiSite));
 }
 
+/** Date comptable d'un versement recouvrement (jour du paiement, pas seulement le champ date). */
+function creditRecoveryAccountingDate(r) {
+  const paid = String(r?.paidAt || "").trim();
+  if (paid.length >= 10) return paid.slice(0, 10);
+  const d = String(r?.date || "").trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(d) ? d.slice(0, 10) : "";
+}
+
+function creditRecoveriesForPdjDate(dStr, sourceState = state) {
+  const day = String(dStr || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return [];
+  return creditRecoveriesForSite(sourceState).filter((r) => creditRecoveryAccountingDate(r) === day);
+}
+
+function isEspecesPaymentMethod(method) {
+  const k = normalizePaymentMethodKey(method).replace(/\s/g, "");
+  return k === "especes" || k === normalizePaymentMethodKey("Espèces").replace(/\s/g, "");
+}
+
+/** Encaissements espèces issus du recouvrement crédit pour une journée PDJ. */
+function especesFromCreditRecoveriesForDate(dStr, sourceState = state) {
+  return creditRecoveriesForPdjDate(dStr, sourceState).reduce((sum, r) => {
+    if (!isEspecesPaymentMethod(r.paiement)) return sum;
+    return sum + (Number(r.montant) || 0);
+  }, 0);
+}
+
 function normalizePaymentMethodKey(method) {
   return String(method || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim();
 }
@@ -136,6 +163,20 @@ function isAReglerPaiement(paiement) {
 function debtorDisplayKey(name) {
   const raw = String(name || "").trim();
   return raw ? raw.toUpperCase() : "CLIENT INCONNU";
+}
+
+/** Somme des restes à payer (tous débiteurs, toutes dates) — aligné sur « Total dû » du recouvrement. */
+function totalCreditOutstanding(sourceState = state) {
+  return Object.values(creditOutstandingMap(sourceState)).reduce((sum, n) => sum + (Number(n) || 0), 0);
+}
+
+/** Montant crédit / à régler émis sur les ventes d'une date comptable (sans déduire les remboursements). */
+function creditIssuedOnDate(dStr, sourceState = state) {
+  const day = String(dStr || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return 0;
+  return recordsForSite(sourceState?.ventes || [])
+    .filter((v) => String(v.date || "").slice(0, 10) === day)
+    .reduce((sum, v) => sum + creditPortionOnVente(v), 0);
 }
 
 function creditOutstandingMap(sourceState = state) {
@@ -771,6 +812,9 @@ function openCreditPaymentDetailModal(recoveryId) {
   const createdRaw = String(p.createdAt || "").trim();
   const paidIso = paidRaw ? formatDateTimeDdMmYyyy(paidRaw) : "—";
   const createdIso = createdRaw ? formatDateTimeDdMmYyyy(createdRaw) : "—";
+  const deleteBtn = canManage()
+    ? `<div class="button-stack" style="margin-top:16px"><button type="button" class="btn btn-danger" data-delete-credit-recovery="${escapeHtml(String(p.id))}">Supprimer ce versement (doublon)</button></div>`
+    : "";
   body.innerHTML = `
     <dl class="audit-detail-dl">
       <div><dt>Client (débiteur)</dt><dd><strong>${escapeHtml(debtorDisplayKey(p.debiteur))}</strong></dd></div>
@@ -785,8 +829,40 @@ function openCreditPaymentDetailModal(recoveryId) {
       <label>Note</label>
       <div class="audit-detail-block">${escapeHtml(formatCreditRecoveryNote(p))}</div>
     </div>
-    <p class="muted" style="font-size:0.82rem;margin-top:10px">Heure affichée selon l'horloge de cet appareil (fuseau local).</p>`;
+    <p class="muted" style="font-size:0.82rem;margin-top:10px">Heure affichée selon l'horloge de cet appareil (fuseau local).</p>
+    ${deleteBtn}`;
   openModal("modal-credit-detail");
+}
+
+async function deleteCreditRecovery(recoveryId) {
+  if (!canManage()) {
+    showToast("Reserve aux gerants et administrateurs.");
+    return;
+  }
+  const id = Number(recoveryId);
+  const row = creditRecoveriesForSite().find((x) => Number(x.id) === id);
+  if (!row) {
+    showToast("Versement introuvable pour ce maquis.");
+    return;
+  }
+  const label = `${debtorDisplayKey(row.debiteur)} · ${fmt(row.montant)} FCFA · ${formatCreditPaidAt(row)}`;
+  if (!window.confirm(`Supprimer ce versement de recouvrement ?\n\n${label}\n\nLe reste à payer du client sera recalculé.`)) {
+    return;
+  }
+  state.creditRecoveries = (state.creditRecoveries || []).filter((x) => Number(x.id) !== id);
+  recordStaffAudit(
+    "delete",
+    "credit_recovery",
+    `Suppression versement credit · ${debtorDisplayKey(row.debiteur)}`,
+    `${fmt(row.montant)} FCFA · ${row.paiement || ""} · id ${id}`,
+  );
+  await persistState({ creditRecoveries: state.creditRecoveries, staffAuditLog: state.staffAuditLog, nextId: state.nextId });
+  closeModal("modal-credit-detail");
+  renderCreditRecovery();
+  renderDashboard();
+  renderPointDuJour();
+  if (currentPage === "ventes") renderVentesPage();
+  showToast("Versement supprime. Les totaux ont ete recalcules.");
 }
 
 function calcNet(item) {
@@ -3236,11 +3312,12 @@ function renderPointDuJour() {
   const dStr = pdjCalendarDate();
   const ventesJour = recordsForSite(state.ventes).filter((v) => v.date.slice(0, 10) === dStr);
   const totalsJour = paymentTotals(ventesJour);
-  const caCreances = Object.entries(totalsJour).reduce((sum, [method, amount]) => String(method).includes("dit client") ? sum + amount : sum, 0);
+  const creditEmisJour = creditIssuedOnDate(dStr);
+  const caCreances = totalCreditOutstanding();
   const caEncaisse = Object.entries(totalsJour).reduce((sum, [method, amount]) => String(method).includes("dit client") ? sum : sum + amount, 0);
   const remisesJour = ventesJour.reduce((sum, v) => sum + (Number(v.remise) || 0), 0);
 
-  const recouvrementJour = creditRecoveriesForSite().filter((r) => String(r.date || "").slice(0, 10) === dStr);
+  const recouvrementJour = creditRecoveriesForPdjDate(dStr);
   const caRecouvrement = recouvrementJour.reduce((sum, r) => sum + (Number(r.montant) || 0), 0);
   const caEncaisseTotal = caEncaisse + caRecouvrement;
 
@@ -3260,6 +3337,15 @@ function renderPointDuJour() {
   renderCashOpeningPanel();
   document.getElementById("pdj-ca").textContent = `${fmt(caEncaisseTotal)} FCFA`;
   document.getElementById("pdj-creances").textContent = `${fmt(caCreances)} FCFA`;
+  const pdjCreancesSub = document.getElementById("pdj-creances-sub");
+  if (pdjCreancesSub) {
+    pdjCreancesSub.textContent = creditEmisJour > 0
+      ? `Crédits émis ce jour : ${fmt(creditEmisJour)} FCFA (après remboursements, reste ci-dessus)`
+      : caCreances > 0
+        ? "Solde dû tous clients (recouvrement)"
+        : "";
+    pdjCreancesSub.classList.toggle("hidden", !creditEmisJour && !(caCreances > 0));
+  }
   document.getElementById("pdj-nb").textContent = String(ventesJour.length);
   document.getElementById("pdj-remises").textContent = `${fmt(remisesJour)} FCFA`;
   document.getElementById("pdj-ventes-count").textContent = formatVentesCountFr(ventesJour.length);
@@ -4051,6 +4137,7 @@ function renderDailyStockCheck() {
   const ventesJour = recordsForSite(state.ventes).filter((v) => v.date.slice(0, 10) === dStr);
   const totauxJourOpen = paymentTotals(ventesJour);
   const especesVentes = Number(totauxJourOpen["Espèces"]) || Number(totauxJourOpen["EspÃ¨ces"]) || 0;
+  const especesRecouvrement = especesFromCreditRecoveriesForDate(dStr);
   const chargesJour = recordsForSite(state.charges).filter((c) => (c.date || "").slice(0, 10) === dStr);
   const especesCharges = chargesJour.reduce((sum, c) => (
     normalizePaymentMethodKey(c.paiement) === normalizePaymentMethodKey("Espèces")
@@ -4059,8 +4146,8 @@ function renderDailyStockCheck() {
       : sum
   ), 0);
   const openingCash = Number(dayBook?.openingCashFcfa) || 0;
-  /** Théorique caisse = fonds d'ouverture + encaissements espèces du jour (les charges espèces ne sont pas déduites : souvent payées hors caisse du jour). */
-  const expectedEspeces = openingCash + especesVentes;
+  /** Théorique caisse = ouverture + ventes espèces + recouvrements crédit en espèces (charges non déduites). */
+  const expectedEspeces = openingCash + especesVentes + especesRecouvrement;
   const closingSeed = seedFromClose && typeof seedFromClose.closingCashFcfa === "number"
     ? Math.round(Number(seedFromClose.closingCashFcfa))
     : null;
@@ -4130,7 +4217,7 @@ function renderDailyStockCheck() {
         <strong>Fermeture caisse (espèces)</strong>
         <p class="muted" style="margin-top:6px;font-size:0.88rem;line-height:1.45">
           Théorique en caisse : <strong>${fmt(expectedEspeces)} FCFA</strong>
-          (ouverture ${fmt(openingCash)} + ventes espèces ${fmt(especesVentes)}).
+          (ouverture ${fmt(openingCash)} + ventes espèces ${fmt(especesVentes)}${especesRecouvrement > 0 ? ` + recouvrement crédit espèces ${fmt(especesRecouvrement)}` : ""}).
           ${especesCharges > 0
     ? `Dépenses du jour enregistrées en espèces : <strong>${fmt(especesCharges)} FCFA</strong> — montant informatif, non déduit du théorique (souvent réglé hors caisse de la journée).`
     : "Aucune dépense en espèces enregistrée à cette date pour ce maquis."}
@@ -7336,7 +7423,15 @@ async function saveCreditRecovery() {
     document.getElementById("credit-note").value = "";
     const creditDt = document.getElementById("credit-datetime");
     if (creditDt) creditDt.value = datetimeLocalNow();
-    showToast("Versement enregistré.");
+    const pdjDay = pdjCalendarDate();
+    const payDay = creditRecoveryAccountingDate(row);
+    const cashHint = isEspecesPaymentMethod(method)
+      ? " Compté dans la caisse espèces du point du jour si la date correspond."
+      : " Compté dans le CA encaissé (PDJ) ; les paiements mobile/carte ne augmentent pas la caisse espèces.";
+    const dayHint = payDay && payDay !== pdjDay
+      ? ` Journée PDJ affichée : ${formatDateDdMmYyyy(pdjDay)} — versement rattaché au ${formatDateDdMmYyyy(payDay)}.`
+      : "";
+    showToast(`Versement enregistré.${cashHint}${dayHint}`);
     renderCreditRecovery();
     renderDashboard();
     renderPointDuJour();
@@ -8884,8 +8979,10 @@ function closureCashSnapshot(dStr) {
   const ventesJour = recordsForSite(state.ventes).filter((v) => v.date.slice(0, 10) === dStr);
   const totauxJour = paymentTotals(ventesJour);
   const caEncaisse = Object.entries(totauxJour).reduce((sum, [m, a]) => String(m).includes("dit client") ? sum : sum + a, 0);
-  const caCreances = Object.entries(totauxJour).reduce((sum, [m, a]) => String(m).includes("dit client") ? sum + a : sum, 0);
+  const creditEmisJour = creditIssuedOnDate(dStr);
+  const caCreances = totalCreditOutstanding();
   const especesVentes = Number(totauxJour["Espèces"]) || Number(totauxJour["EspÃ¨ces"]) || 0;
+  const especesRecouvrement = especesFromCreditRecoveriesForDate(dStr);
   const chargesJour = recordsForSite(state.charges).filter((c) => (c.date || "").slice(0, 10) === dStr);
   const especesCharges = chargesJour.reduce((sum, c) => (
     normalizePaymentMethodKey(c.paiement) === normalizePaymentMethodKey("Espèces")
@@ -8895,8 +8992,8 @@ function closureCashSnapshot(dStr) {
   ), 0);
   const dayBook = dayBookFor(dStr, currentSiteId());
   const openingCash = Number(dayBook?.openingCashFcfa) || 0;
-  /** Même règle que l'écran PDJ : théorique = ouverture + ventes espèces (charges non déduites). */
-  const expectedEspecesCash = openingCash + especesVentes;
+  /** Même règle que l'écran PDJ : théorique = ouverture + ventes espèces + recouvrement crédit espèces. */
+  const expectedEspecesCash = openingCash + especesVentes + especesRecouvrement;
   const closingRaw = document.getElementById("pdj-closing-cash")?.value;
   const closingCashFcfa = closingRaw === undefined || closingRaw === null || String(closingRaw).trim() === ""
     ? expectedEspecesCash
@@ -8958,8 +9055,10 @@ async function closeAccountingDay() {
   const ventesJour = recordsForSite(state.ventes).filter((v) => v.date.slice(0, 10) === dStr);
   const totauxJour = paymentTotals(ventesJour);
   const caEncaisse = Object.entries(totauxJour).reduce((sum, [m, a]) => String(m).includes("dit client") ? sum : sum + a, 0);
-  const caCreances = Object.entries(totauxJour).reduce((sum, [m, a]) => String(m).includes("dit client") ? sum + a : sum, 0);
+  const creditEmisJour = creditIssuedOnDate(dStr);
+  const caCreances = totalCreditOutstanding();
   const especesVentes = Number(totauxJour["Espèces"]) || Number(totauxJour["EspÃ¨ces"]) || 0;
+  const especesRecouvrement = especesFromCreditRecoveriesForDate(dStr);
   const chargesJour = recordsForSite(state.charges).filter((c) => (c.date || "").slice(0, 10) === dStr);
   const especesCharges = chargesJour.reduce((sum, c) => (
     normalizePaymentMethodKey(c.paiement) === normalizePaymentMethodKey("Espèces")
@@ -8968,8 +9067,8 @@ async function closeAccountingDay() {
       : sum
   ), 0);
   const openingCash = Number(dayBook?.openingCashFcfa) || 0;
-  /** Même règle que l'écran PDJ : théorique = ouverture + ventes espèces (charges non déduites). */
-  const expectedEspecesCash = openingCash + especesVentes;
+  /** Même règle que l'écran PDJ : théorique = ouverture + ventes espèces + recouvrement crédit espèces. */
+  const expectedEspecesCash = openingCash + especesVentes + especesRecouvrement;
   const cashEcartEspeces = closingCashFcfa - expectedEspecesCash;
 
   const existingCloseCheck = stockCheckForSiteDate(dStr, currentSiteId());
@@ -9046,6 +9145,7 @@ async function closeAccountingDay() {
     especesChargesJour: especesCharges,
     caEncaisse,
     caCreances,
+    caCreancesEmisesJour: creditEmisJour,
     nbVentes: ventesJour.length,
     totauxJour,
     items: checkedItems,
@@ -9063,8 +9163,8 @@ async function closeAccountingDay() {
     });
   const cashBlock = [
     `Date: ${formatDateDdMmYyyy(dStr)}`,
-    `CA encaisse: ${fmt(caEncaisse)} FCFA · Creances: ${fmt(caCreances)} FCFA · Nb ventes: ${fmt(ventesJour.length)}`,
-    `Caisse especes: ouverture ${fmt(openingCash)} · ventes ${fmt(especesVentes)} · depenses jour espèces (info) ${fmt(especesCharges)} · theorique ${fmt(expectedEspecesCash)} · denombre ${fmt(closingCashFcfa)} · ecart ${cashEcartEspeces > 0 ? "+" : ""}${fmt(cashEcartEspeces)}`,
+    `CA encaisse: ${fmt(caEncaisse)} FCFA · Reste a recouvrer: ${fmt(caCreances)} FCFA · Credits emis jour: ${fmt(creditEmisJour)} FCFA · Nb ventes: ${fmt(ventesJour.length)}`,
+    `Caisse especes: ouverture ${fmt(openingCash)} · ventes ${fmt(especesVentes)} · recouvrement credit especes ${fmt(especesFromCreditRecoveriesForDate(dStr))} · depenses jour espèces (info) ${fmt(especesCharges)} · theorique ${fmt(expectedEspecesCash)} · denombre ${fmt(closingCashFcfa)} · ecart ${cashEcartEspeces > 0 ? "+" : ""}${fmt(cashEcartEspeces)}`,
   ].join("\n");
   const stockBlock = gapLines.length
     ? `\n\nEcarts stock (${gapLines.length}):\n${gapLines.join("\n")}`
@@ -9586,18 +9686,8 @@ function printDayClosure() {
     });
   });
 
-  // Créances par débiteur
-  const creancesMap = {};
-  ventesJour.forEach((v) => {
-    const details = v.paiementDetails?.length ? v.paiementDetails : [{ method: v.paiement || "", amount: calcNet(v) }];
-    details.forEach((d) => {
-      if (d.method === "Crédit client" && Number(d.amount) > 0) {
-        const nom = v.debiteur?.trim() || v.client?.trim() || "Client inconnu";
-        creancesMap[nom] = (creancesMap[nom] || 0) + Number(d.amount);
-      }
-    });
-  });
-  const creancesEntries = Object.entries(creancesMap);
+  const creancesEntries = Object.entries(creditOutstandingMap()).sort((a, b) => b[1] - a[1]);
+  const caCreancesRestantes = totalCreditOutstanding();
 
   const totauxJour = closed.totauxJour || paymentTotals(ventesJour);
   const tEspeces = totauxJour["Espèces"] || 0;
@@ -9607,7 +9697,8 @@ function printDayClosure() {
   const tCarte = totauxJour["Carte"] || 0;
   const tCredit = totauxJour["Crédit client"] || 0;
   const caEncaisse = closed.caEncaisse || 0;
-  const caCreances = closed.caCreances || 0;
+  const caCreances = caCreancesRestantes;
+  const creditEmisJourPrint = closed.caCreancesEmisesJour ?? creditIssuedOnDate(reportDateStr);
   const chargesTotal = chargesJour.reduce((sum, c) => sum + Number(c.montant || 0), 0);
   const benefice = caEncaisse - chargesTotal;
   const gaps = (closed.items || []).filter((ci) => ci.ecart !== 0).length;
@@ -9749,7 +9840,7 @@ function printDayClosure() {
       ${tCarte ? `<div class="box-row"><span>Carte</span><strong>${fmt(tCarte)} FCFA</strong></div>` : ""}
       ${tCredit ? `<div class="box-row"><span>Credit client</span><strong>${fmt(tCredit)} FCFA</strong></div>` : ""}
       <div class="box-row total"><span>Total encaisse</span><strong>${fmt(caEncaisse)} FCFA</strong></div>
-      ${caCreances ? `<div class="box-row" style="color:#c0392b;font-weight:700;margin-top:6px;border-top:1px solid #f0c0b0;padding-top:5px"><span>A regler (creances)</span><strong>${fmt(caCreances)} FCFA</strong></div>${creancesEntries.map(([nom, montant]) => `<div class="box-row" style="padding-left:14px;font-size:10px;color:#c0392b"><span>↳ ${escapeHtml(nom)}</span><span>${fmt(montant)} FCFA</span></div>`).join("")}` : ""}
+      ${caCreances ? `<div class="box-row" style="color:#c0392b;font-weight:700;margin-top:6px;border-top:1px solid #f0c0b0;padding-top:5px"><span>Reste a recouvrer</span><strong>${fmt(caCreances)} FCFA</strong></div>${creancesEntries.map(([nom, montant]) => `<div class="box-row" style="padding-left:14px;font-size:10px;color:#c0392b"><span>↳ ${escapeHtml(nom)}</span><span>${fmt(montant)} FCFA</span></div>`).join("")}` : ""}
       ${cashCloseRows}
     </div>
     <div>
@@ -12869,6 +12960,15 @@ document.getElementById("fab-btn").addEventListener("click", () => {
       const creditDt = document.getElementById("credit-datetime");
       if (creditDt) creditDt.value = datetimeLocalNow();
       showToast("Client sélectionné pour encaissement.");
+    });
+  }
+  const creditDetailBody = document.getElementById("credit-detail-body");
+  if (creditDetailBody) {
+    creditDetailBody.addEventListener("click", (event) => {
+      const delBtn = event.target.closest("[data-delete-credit-recovery]");
+      if (!delBtn) return;
+      const rid = delBtn.getAttribute("data-delete-credit-recovery") || "";
+      deleteCreditRecovery(rid).catch(handleApiError);
     });
   }
 }
