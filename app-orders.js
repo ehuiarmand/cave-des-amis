@@ -99,6 +99,33 @@ let pendingPurchaseCasierResume = false;
 let sessionDeadlineUnix = null;
 let csrfToken = null;
 
+function isLocalDevHost() {
+  const host = String(location.hostname || "").toLowerCase();
+  return host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host === "::1";
+}
+
+/** Issue #2 : masquer l'export JSON header en production (localhost ou superadmin global). */
+function shouldShowLocalJsonBackupUi() {
+  return isLocalDevHost() || canGlobalSuperAdmin();
+}
+
+function monthPeriodBounds(refDate = new Date()) {
+  const y = refDate.getFullYear();
+  const m = refDate.getMonth();
+  const start = `${y}-${pad2(m + 1)}-01`;
+  const daysInMonth = new Date(y, m + 1, 0).getDate();
+  const end = `${y}-${pad2(m + 1)}-${pad2(daysInMonth)}`;
+  return { start, end, daysInMonth };
+}
+
+function ventesEncaisseesForMonth(ventes, refDate = new Date()) {
+  const { start, end } = monthPeriodBounds(refDate);
+  return ventes.filter((v) => {
+    const d = String(v.date || "").slice(0, 10);
+    return d >= start && d <= end && !String(v.paiement || "").includes("dit client");
+  });
+}
+
 function applySessionTimingFromApi(payload) {
   if (!payload) {
     return;
@@ -3559,6 +3586,11 @@ async function recordCashOpening() {
     showToast("Montant d'ouverture invalide.");
     return;
   }
+  if (amount === 0 && !window.confirm(
+    "Fonds de caisse à 0 FCFA.\n\nConfirmer l'ouverture de journée sans espèces en caisse ?",
+  )) {
+    return;
+  }
   state.dayBooks = state.dayBooks || [];
   const siteId = currentSiteId();
   const dateStr = pdjCalendarDate();
@@ -4283,16 +4315,37 @@ function renderDashboard() {
   const chargesTotal = charges.reduce((sum, charge) => sum + Number(charge.montant || 0), 0);
   const benefice = caTotal - chargesTotal;
   const objectif = Number(site?.objectifCA) || 0;
-  const pct = objectif > 0 ? Math.min(100, Math.round((caTotal / objectif) * 100)) : 0;
+  const now = new Date();
+  const { start: monthStart, end: monthEnd, daysInMonth } = monthPeriodBounds(now);
+  const ventesMois = ventesEncaisseesForMonth(ventes, now);
+  const caMois = ventesMois.reduce((sum, vente) => sum + calcNet(vente), 0);
+  const pct = objectif > 0 ? Math.min(100, Math.round((caMois / objectif) * 100)) : 0;
+  const reste = Math.max(0, objectif - caMois);
+  const todayIso = today();
+  const dayOfMonth = Math.min(daysInMonth, Number(todayIso.slice(8, 10)) || now.getDate());
+  const daysLeft = Math.max(0, daysInMonth - dayOfMonth);
+  const rythmeActuel = dayOfMonth > 0 ? Math.round(caMois / dayOfMonth) : 0;
+  const rythmeNecessaire = daysLeft > 0 ? Math.round(reste / daysLeft) : (reste > 0 ? reste : 0);
+  const enAvance = rythmeActuel >= rythmeNecessaire || reste <= 0;
   document.getElementById("kpi-ca").textContent = fmt(caTotal);
   document.getElementById("kpi-charges").textContent = fmt(chargesTotal);
   const beneficeNode = document.getElementById("kpi-benefice");
   beneficeNode.textContent = fmt(benefice);
   beneficeNode.className = `kpi-value ${benefice >= 0 ? "green" : "red"}`;
   document.getElementById("kpi-nb").textContent = String(ventes.length);
-  document.getElementById("obj-pct").textContent = `${pct}%`;
+  document.getElementById("obj-pct").textContent = `${pct}% atteint`;
   document.getElementById("obj-val").textContent = `/ ${fmt(objectif)} FCFA`;
   document.getElementById("obj-bar").style.width = `${pct}%`;
+  const objDetail = document.getElementById("obj-detail");
+  if (objDetail) {
+    objDetail.innerHTML = objectif > 0
+      ? `${fmt(caMois)} FCFA encaissés depuis le ${isoDateToDdMmYyyy(monthStart)}<br>`
+        + `Objectif : ${fmt(objectif)} FCFA · Reste : ${fmt(reste)} FCFA<br>`
+        + `${daysLeft} jour${daysLeft > 1 ? "s" : ""} restant${daysLeft > 1 ? "s" : ""} dans le mois<br>`
+        + `Rythme nécessaire : ${fmt(rythmeNecessaire)} FCFA/jour · `
+        + `<span class="${enAvance ? "green" : "red"}">Rythme actuel : ${fmt(rythmeActuel)} FCFA/jour</span>`
+      : `<span class="muted">Définissez un objectif mensuel dans Paramètres.</span>`;
+  }
   renderBreakdown("cat-chart", ventes.reduce((acc, vente) => ((acc[vente.cat] = (acc[vente.cat] || 0) + calcNet(vente)), acc), {}), caTotal, "Aucune vente finalisee.");
   const stockAlertRuleHtml = stockAlertInclusiveSeuil(site)
     ? `<p class="muted" style="font-size:0.78rem;margin:0 0 10px;line-height:1.35">Regle alertes pour ce maquis : le stock (bouteilles) est signale lorsqu'il est <strong>inferieur ou egal</strong> au seuil minimum de l'article (option activee dans Parametres &gt; Profil).</p>`
@@ -9080,6 +9133,19 @@ async function closeAccountingDay() {
   const expectedEspecesCash = openingCash + especesVentes + especesRecouvrement;
   const cashEcartEspeces = closingCashFcfa - expectedEspecesCash;
 
+  const recapCloture = [
+    `Date : ${formatDateDdMmYyyy(dStr)}`,
+    `CA encaissé : ${fmt(caEncaisse)} FCFA`,
+    `Reste à recouvrer (crédit) : ${fmt(caCreances)} FCFA`,
+    `Ventes du jour : ${ventesJour.length}`,
+    `Caisse espèces : théorique ${fmt(expectedEspecesCash)} · dénombré ${fmt(closingCashFcfa)} · écart ${cashEcartEspeces > 0 ? "+" : ""}${fmt(cashEcartEspeces)}`,
+  ].join("\n");
+  if (!window.confirm(
+    `Confirmer la clôture de journée ?\n\nCette opération enregistre le stock et la caisse pour la date choisie.\n\n${recapCloture}`,
+  )) {
+    return;
+  }
+
   const existingCloseCheck = stockCheckForSiteDate(dStr, currentSiteId());
   const checkedItems = items.map((item) => {
     const frigo = Math.max(0, Number(document.querySelector(`[data-check-frigo="${item.id}"]`)?.value) || 0);
@@ -10040,6 +10106,12 @@ async function deleteStockItem(id) {
 
 async function deleteCharge(id) {
   const ch = (state.charges || []).find((item) => item.id === id);
+  const label = ch
+    ? `${ch.lib} · ${fmt(ch.montant)} FCFA · ${formatDateDdMmYyyy(ch.date)}`
+    : `Dépense #${id}`;
+  if (!window.confirm(`Supprimer cette dépense ?\n\n${label}\n\nAction irréversible.`)) {
+    return;
+  }
   recordStaffAudit("delete", "charge", ch ? `${ch.lib} · ${fmt(ch.montant)} FCFA` : `Depense #${id}`, ch ? `${ch.cat} · ${formatDateDdMmYyyy(ch.date)} · ${ch.paiement}` : "");
   state.charges = state.charges.filter((item) => item.id !== id);
   await persistState();
@@ -10206,6 +10278,11 @@ async function savePerte() {
   if (!item) return;
   if (qty > stockActuel(item)) {
     showToast(`Stock insuffisant (${fmt(stockActuel(item))} btl disponibles).`);
+    return;
+  }
+  if (!window.confirm(
+    `Enregistrer une perte de ${fmt(qty)} btl sur « ${item.article} » ?\n\nMotif : ${motif}${notes ? `\nNote : ${notes}` : ""}`,
+  )) {
     return;
   }
   item.sorties = (Number(item.sorties) || 0) + qty;
@@ -11883,6 +11960,7 @@ async function bootstrapAuthenticatedApp(opts = {}) {
   document.getElementById("stock-move-end").value = today();
   populateOrderSelect();
   renderTopbar();
+  applyProductionUiGuards();
   renderDashboard();
   renderVentesPage();
   renderStock();
@@ -12983,8 +13061,16 @@ document.getElementById("fab-btn").addEventListener("click", () => {
   }
 }
 
+function applyProductionUiGuards() {
+  const jsonBtn = document.getElementById("top-backup-download-btn");
+  if (jsonBtn) {
+    jsonBtn.classList.toggle("hidden", !shouldShowLocalJsonBackupUi());
+  }
+}
+
 async function init() {
   attachEvents();
+  applyProductionUiGuards();
   setAuthVisible(false);
   try {
     const session = await apiRequest(API.session);

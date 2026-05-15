@@ -56,6 +56,28 @@ Application de gestion multi-maquis : stock, ventes, PDJ, recouvrement crédit, 
 2. Recouvrement : « Total dû » ≈ PDJ « Reste à recouvrer » ; versement espèces reflété au théorique caisse du jour comptable.
 3. Ctrl+F5 + redémarrage `python server.py` si le serveur a changé.
 
+## Backlog GitHub (recommandations issues)
+
+Dépôt : [github.com/ehuiarmand/cave-des-amis/issues](https://github.com/ehuiarmand/cave-des-amis/issues)
+
+Chaque issue contient **Problème**, **Solution recommandée** et **Critères d'acceptance**. Pour appliquer une recommandation :
+
+1. Lire l'issue (corps + commentaires) — API : `https://api.github.com/repos/ehuiarmand/cave-des-amis/issues/{num}`
+2. Implémenter la solution en respectant les critères (cases à cocher)
+3. Référencer l'issue dans le message de commit : `fix: … (#8)`
+4. Ne pas fermer l'issue sur GitHub sauf demande explicite de l'utilisateur
+
+| Priorité | # | Sujet |
+|----------|---|--------|
+| CRITIQUE | 2 | Masquer « JSON local » en production |
+| CRITIQUE | 3 | Confirmation suppression charge |
+| CRITIQUE | 4 | Confirmation perte stock |
+| CRITIQUE | 5 | Alerte comptes sans 2FA |
+| IMPORTANT | 6–11 | PDJ, ventes TABLE, charges, stock |
+| UTILE | 12–15 | Filtres stock, guide, export CSV, objectif mensuel |
+
+Issues déjà traitées dans le code local : voir commits récents ou comparer avec les critères d'acceptance.
+
 ## Documentation complémentaire
 
 - `README-ROBUSTESSE.md` — sync, anti brute-force, SQLite, sauvegardes
