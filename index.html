@@ -171,8 +171,8 @@
               <strong id="pdj-nb" class="pdj-val amber">0</strong>
             </div>
             <div class="pdj-kpi">
-              <span class="kpi-label">Remises accordées</span>
-              <strong id="pdj-remises" class="pdj-val red">0 FCFA</strong>
+              <span class="kpi-label">Promotions actives</span>
+              <strong id="pdj-remises" class="pdj-val amber">0</strong>
             </div>
           </div>
           <div id="pdj-pay-chart"></div>
@@ -1568,14 +1568,11 @@
         <span class="muted">Facture</span>
         <strong id="v-preview">0 FCFA</strong>
       </div>
+      <input id="v-remise" type="hidden" value="0">
       <details class="form-collapse">
-        <summary>Options (remise, note)</summary>
+        <summary>Note serveur (optionnel)</summary>
         <div class="form-group">
-          <label for="v-remise">Remise</label>
-          <input id="v-remise" type="number" value="0" placeholder="0">
-        </div>
-        <div class="form-group">
-          <label for="v-note">Note serveur</label>
+          <label for="v-note">Note</label>
           <input id="v-note" type="text" placeholder="ex: sans glacons, client presse">
         </div>
       </details>
@@ -1934,10 +1931,12 @@
           <input id="s-seuil" type="number" value="5" placeholder="5">
         </div>
         <div class="form-group">
-          <label for="s-prix">Prix achat / lot (FCFA)</label>
+          <label for="s-prix">Prix achat du casier (FCFA)</label>
           <input id="s-prix" type="number" placeholder="ex: 12000">
+          <p class="form-hint">Prix payé pour le casier ou carton entier — le coût par bouteille est calculé automatiquement.</p>
         </div>
       </div>
+      <div id="stock-marge-preview" class="stock-marge-preview hidden" aria-live="polite"></div>
       <div class="form-grid two-cols">
         <div class="form-group">
           <label for="s-frigo">Stock dans le frigo (bouteilles)</label>
@@ -1957,6 +1956,16 @@
           <button id="add-sale-format-btn" class="mini-btn" type="button">+ Format</button>
         </div>
         <div id="sale-formats-list" class="sale-formats-list"></div>
+      </div>
+      <div class="form-group" id="stock-promotions-section">
+        <div class="section-head compact-head">
+          <div>
+            <label>Promotions programmées</label>
+            <p class="form-hint">Prix promo entre deux dates — le tarif catalogue reprend automatiquement après la fin.</p>
+          </div>
+          <button id="add-stock-promo-btn" class="mini-btn" type="button">+ Promotion</button>
+        </div>
+        <div id="stock-promotions-list" class="stock-promotions-list"></div>
       </div>
       <div class="form-grid two-cols hidden" id="legacy-stock-price-fields">
         <div class="form-group">
@@ -2309,6 +2318,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=206"></script>
+  <script src="./app-orders.js?v=208"></script>
 </body>
 </html>

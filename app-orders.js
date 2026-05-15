@@ -1504,6 +1504,42 @@ function casesFromBottles(bottles, item = {}) {
   return Math.round((value / caseSize(item)) * 100) / 100;
 }
 
+/** Prix d'achat unitaire (casier ÷ bouteilles par casier). */
+function prixAchatParBouteille(item = {}) {
+  const paCasier = Number(item?.prixAchat) || 0;
+  if (paCasier <= 0) return 0;
+  return paCasier / Math.max(1, caseSize(item));
+}
+
+/** Bénéfice par bouteille vendue (zone int ou ext). null si données incomplètes. */
+function stockMarginPerBottle(item = {}, zone = "int", site = currentSite(), asOfDate = today()) {
+  const pa = prixAchatParBouteille(item);
+  if (pa <= 0) return null;
+  const primary = primarySaleFormat(item, asOfDate);
+  const packQty = Math.max(1, Number(primary?.quantite) || Number(item.packSize) || 1);
+  const { prixInt, prixExt } = resolveItemPrices(item, asOfDate);
+  const packPrice = zone === "ext"
+    ? (Number(primary?.prixExterieur) || prixExt)
+    : (Number(primary?.prixInterieur) || prixInt);
+  if (packPrice <= 0) return null;
+  return packPrice / packQty - pa;
+}
+
+/** Bénéfice sur un casier complet (marge unitaire × bouteilles/casier). */
+function stockMarginPerCase(item = {}, zone = "int", site = currentSite(), asOfDate = today()) {
+  const m = stockMarginPerBottle(item, zone, site, asOfDate);
+  if (m == null) return null;
+  return m * caseSize(item);
+}
+
+function formatMarginFcfa(value) {
+  if (value == null || !Number.isFinite(value)) return "—";
+  const rounded = Math.round(value);
+  const cls = rounded >= 0 ? "margin-positive" : "margin-negative";
+  const sign = rounded >= 0 ? "+" : "";
+  return `<span class="${cls}">${sign}${fmt(rounded)}</span>`;
+}
+
 function categoryList() {
   const custom = Array.isArray(state?.categories) ? state.categories : [];
   const cleanedCustom = custom.map((cat) => String(cat || "").trim()).filter(Boolean);
@@ -3673,24 +3709,63 @@ function bindMobileMoreSheet() {
   });
 }
 
-function resolveItemPrices(item) {
-  const primary = primarySaleFormat(item);
-  const prixInt = Number(primary?.prixInterieur) || Number(item.prixVenteInt) || Number(item.prixKitInt) || Number(item.prixBouteille) || Number(item.prixVente) || 0;
-  const prixExt = Number(primary?.prixExterieur) || Number(item.prixVenteExt) || Number(item.prixKitExt) || Number(item.prixBouteille) || Number(item.prixVente) || prixInt;
-  return { prixInt, prixExt };
+function ventePriceContextDate() {
+  const v = String(document.getElementById("v-date")?.value || "").trim();
+  return v.length >= 10 ? v.slice(0, 10) : today();
 }
 
-function normalizeSaleFormats(item = {}) {
-  const rawFormats = Array.isArray(item.formatsVente) ? item.formatsVente : [];
-  const formats = rawFormats.map((format) => ({
+function normalizePromotions(item = {}) {
+  return (Array.isArray(item.promotions) ? item.promotions : [])
+    .map((p, index) => ({
+      id: Number(p.id) || index + 1,
+      libelle: String(p.libelle || p.nom || "Promotion").trim() || "Promotion",
+      dateDebut: String(p.dateDebut || p.dateEffet || "").slice(0, 10),
+      dateFin: String(p.dateFin || "").slice(0, 10),
+      formatsVente: normalizeSaleFormatsFromRaw(p.formatsVente || [], p),
+    }))
+    .filter((p) => p.dateDebut && p.formatsVente.length)
+    .sort((a, b) => a.dateDebut.localeCompare(b.dateDebut));
+}
+
+function activePromotion(item = {}, asOfDate) {
+  const d = String(asOfDate || today()).slice(0, 10);
+  const applicable = normalizePromotions(item).filter((p) => {
+    if (p.dateDebut > d) return false;
+    if (p.dateFin && p.dateFin < d) return false;
+    return true;
+  });
+  if (!applicable.length) return null;
+  return applicable[applicable.length - 1];
+}
+
+function upcomingPromotion(item = {}, asOfDate) {
+  const d = String(asOfDate || today()).slice(0, 10);
+  return normalizePromotions(item).find((p) => p.dateDebut > d) || null;
+}
+
+function promotionBadgeHtml(item, asOfDate = today()) {
+  const active = activePromotion(item, asOfDate);
+  if (active) {
+    const fin = active.dateFin ? ` → ${formatDateDdMmYyyy(active.dateFin)}` : "";
+    return `<span class="badge badge-amber" title="${escapeHtml(active.libelle)}${fin}">Promo</span>`;
+  }
+  const next = upcomingPromotion(item, asOfDate);
+  if (next) {
+    return `<span class="badge" title="${escapeHtml(next.libelle)}">Promo ${formatDateDdMmYyyy(next.dateDebut)}</span>`;
+  }
+  return "";
+}
+
+function normalizeSaleFormatsFromRaw(rawFormats, fallbackItem = {}) {
+  const formats = (Array.isArray(rawFormats) ? rawFormats : []).map((format) => ({
     quantite: Math.max(1, Number(format.quantite ?? format.qty ?? format.packSize) || 1),
     prixInterieur: Number(format.prixInterieur ?? format.prixInt ?? format.prixVenteInt) || 0,
     prixExterieur: Number(format.prixExterieur ?? format.prixExt ?? format.prixVenteExt) || 0,
   })).filter((format) => format.prixInterieur > 0);
   if (!formats.length) {
-    const packSize = Math.max(1, Number(item.packSize) || 1);
-    const prixInt = Number(item.prixVenteInt) || Number(item.prixKitInt) || Number(item.prixBouteille) || Number(item.prixVente) || 0;
-    const prixExt = Number(item.prixVenteExt) || Number(item.prixKitExt) || Number(item.prixBouteille) || Number(item.prixVente) || prixInt;
+    const packSize = Math.max(1, Number(fallbackItem.packSize) || 1);
+    const prixInt = Number(fallbackItem.prixVenteInt) || Number(fallbackItem.prixKitInt) || Number(fallbackItem.prixBouteille) || Number(fallbackItem.prixVente) || 0;
+    const prixExt = Number(fallbackItem.prixVenteExt) || Number(fallbackItem.prixKitExt) || Number(fallbackItem.prixBouteille) || Number(fallbackItem.prixVente) || prixInt;
     if (prixInt > 0) formats.push({ quantite: packSize, prixInterieur: prixInt, prixExterieur: prixExt || prixInt });
   }
   return formats
@@ -3698,14 +3773,31 @@ function normalizeSaleFormats(item = {}) {
     .sort((a, b) => a.quantite - b.quantite);
 }
 
-function primarySaleFormat(item = {}) {
-  const formats = normalizeSaleFormats(item);
+function baseSaleFormats(item = {}) {
+  return normalizeSaleFormatsFromRaw(item.formatsVente, item);
+}
+
+function resolveItemPrices(item, asOfDate) {
+  const primary = primarySaleFormat(item, asOfDate);
+  const prixInt = Number(primary?.prixInterieur) || Number(item.prixVenteInt) || Number(item.prixKitInt) || Number(item.prixBouteille) || Number(item.prixVente) || 0;
+  const prixExt = Number(primary?.prixExterieur) || Number(item.prixVenteExt) || Number(item.prixKitExt) || Number(item.prixBouteille) || Number(item.prixVente) || prixInt;
+  return { prixInt, prixExt };
+}
+
+function normalizeSaleFormats(item = {}, asOfDate) {
+  const promo = activePromotion(item, asOfDate);
+  if (promo) return promo.formatsVente.slice();
+  return baseSaleFormats(item);
+}
+
+function primarySaleFormat(item = {}, asOfDate) {
+  const formats = normalizeSaleFormats(item, asOfDate);
   return formats.find((format) => format.quantite === 1) || formats[0] || null;
 }
 
 /** Prix de vente moyen par bouteille (format principal / kit). Tarif unique : prix du lieu unique ; deux zones : moyenne int./ext. */
-function stockRetailUnitPricePerBottle(item, site = currentSite()) {
-  const primary = primarySaleFormat(item);
+function stockRetailUnitPricePerBottle(item, site = currentSite(), asOfDate = today()) {
+  const primary = primarySaleFormat(item, asOfDate);
   const packQty = Math.max(1, Number(primary?.quantite) || Number(item.packSize) || 1);
   let puInt = Number(primary?.prixInterieur) || 0;
   let puExt = Number(primary?.prixExterieur) || 0;
@@ -3727,9 +3819,9 @@ function stockRetailUnitPricePerBottle(item, site = currentSite()) {
 }
 
 /** Valorisation stock PDV : bouteilles en stock × prix de vente unitaire (pas casiers × prix d'achat). */
-function stockRetailValueFcfa(item, site = currentSite()) {
+function stockRetailValueFcfa(item, site = currentSite(), asOfDate = today()) {
   const btl = stockActuel(item);
-  const unit = stockRetailUnitPricePerBottle(item, site);
+  const unit = stockRetailUnitPricePerBottle(item, site, asOfDate);
   return Math.round(Math.max(0, btl) * unit);
 }
 
@@ -3746,13 +3838,14 @@ function formatPrice(format, location, siteOverride = undefined) {
   return String(loc).startsWith("Ext") ? Number(format.prixExterieur) || 0 : Number(format.prixInterieur) || 0;
 }
 
-function knownProducts() {
+function knownProducts(asOfDate) {
+  const priceDate = String(asOfDate || today()).slice(0, 10);
   const map = new Map();
   recordsForSite(state.stock).forEach((item) => {
-    const formatsVente = normalizeSaleFormats(item);
-    const primary = primarySaleFormat(item);
+    const formatsVente = normalizeSaleFormats(item, priceDate);
+    const primary = primarySaleFormat(item, priceDate);
     const packSize = Math.max(1, Number(primary?.quantite) || Number(item.packSize) || 1);
-    const { prixInt, prixExt } = resolveItemPrices(item);
+    const { prixInt, prixExt } = resolveItemPrices(item, priceDate);
     map.set(item.article.toLowerCase(), {
       article: item.article,
       cat: item.cat,
@@ -3780,12 +3873,17 @@ function knownProducts() {
   return [...map.values()];
 }
 
-function findKnownProduct(name) {
+function findKnownProduct(name, asOfDate) {
   const value = name.trim().toLowerCase();
   if (!value) return null;
-  return knownProducts().find((item) => item.article.toLowerCase() === value)
-    || knownProducts().find((item) => item.article.toLowerCase().includes(value))
+  const list = knownProducts(asOfDate ?? ventePriceContextDate());
+  return list.find((item) => item.article.toLowerCase() === value)
+    || list.find((item) => item.article.toLowerCase().includes(value))
     || null;
+}
+
+function catalogItemForPricing(article, asOfDate) {
+  return stockItemForArticle(article) || findKnownProduct(article, asOfDate);
 }
 
 function updateKitInfo(product = findKnownProduct(document.getElementById("v-article").value)) {
@@ -3830,7 +3928,7 @@ function syncKnownProduct() {
     updateVentePreview();
     return;
   }
-  const fixedPrice = productPrice(product, document.getElementById("v-location").value);
+  const fixedPrice = productPrice(product, document.getElementById("v-location").value, ventePriceContextDate());
   document.getElementById("v-prix").value = String(fixedPrice || "");
   updateVentePreview();
 }
@@ -3839,7 +3937,7 @@ function syncKnownProduct() {
 function productsForVentePicker(query) {
   // Only show articles that exist in the current stock catalogue (not deleted articles from sales history)
   const catalogueIds = new Set(recordsForSite(state.stock).map((i) => i.article.toLowerCase()));
-  const items = knownProducts()
+  const items = knownProducts(ventePriceContextDate())
     .filter((p) => catalogueIds.has(p.article.toLowerCase()))
     .sort((a, b) => a.article.localeCompare(b.article, "fr"));
   const q = query.trim().toLowerCase();
@@ -3869,40 +3967,48 @@ function renderVenteArticlePicker() {
     wrap.innerHTML = `${hint}<p class="muted" style="padding:12px;font-size:0.88rem">Aucun produit ne correspond.</p>`;
     return;
   }
+  const priceDay = ventePriceContextDate();
   wrap.innerHTML = hint + list.map((p) => {
     const stockItem = stockItemForArticle(p.article);
     const avail = stockItem ? availableStock(stockItem) : null;
     const avLabel = avail == null ? "—" : `${fmt(avail)} btl`;
     const enc = encodeURIComponent(p.article);
+    const pu = productPrice(p, "Intérieur", priceDay);
+    const promo = stockItem && activePromotion(stockItem, priceDay) ? " · Promo" : "";
     return `<button type="button" class="vente-picker-row" data-vente-pick="${enc}">
       <span class="vente-picker-name">${escapeHtml(p.article)}</span>
-      <span class="vente-picker-meta">${escapeHtml(p.cat || "—")} · Stock ${avLabel}</span>
+      <span class="vente-picker-meta">${escapeHtml(p.cat || "—")} · ${fmt(pu)} FCFA${promo} · Stock ${avLabel}</span>
     </button>`;
   }).join("");
 }
 
-function productPrice(product, location) {
+function productPrice(product, location, asOfDate) {
   if (!product) return 0;
-  const format = selectedSaleFormat(product);
+  const format = selectedSaleFormat(product, asOfDate);
   if (format) return formatPrice(format, location);
   return String(location).startsWith("Ext") ? Number(product.prixExt) || 0 : Number(product.prixInt) || 0;
 }
 
-function populateSaleFormatSelect(product, selectedQuantity = null) {
+function populateSaleFormatSelect(product, selectedQuantity = null, asOfDate) {
   const select = document.getElementById("v-format");
   if (!select) return;
-  const formats = product ? normalizeSaleFormats(product) : [];
+  const stockItem = product?.article ? stockItemForArticle(product.article) : null;
+  const priceItem = stockItem || product;
+  const formats = priceItem ? normalizeSaleFormats(priceItem, asOfDate || ventePriceContextDate()) : [];
   select.innerHTML = formats.length
     ? formats.map((format) => `<option value="${format.quantite}">${escapeHtml(saleFormatLabel(format))}</option>`).join("")
     : `<option value="1">Unite</option>`;
   if (selectedQuantity) select.value = String(selectedQuantity);
 }
 
-function selectedSaleFormat(product) {
+function selectedSaleFormat(product, asOfDate) {
   if (!product) return null;
-  const formats = normalizeSaleFormats(product);
+  const stockItem = stockItemForArticle(product.article);
+  const priceItem = stockItem || product;
+  const d = asOfDate || ventePriceContextDate();
+  const formats = normalizeSaleFormats(priceItem, d);
   const selected = Number(document.getElementById("v-format")?.value) || 0;
-  return formats.find((format) => format.quantite === selected) || primarySaleFormat(product);
+  return formats.find((format) => format.quantite === selected) || primarySaleFormat(priceItem, d);
 }
 
 function renderBreakdown(targetId, collection, total, emptyMessage) {
@@ -3933,7 +4039,7 @@ function renderPointDuJour() {
   const creditEmisJour = creditIssuedOnDate(dStr);
   const caCreances = totalCreditOutstanding();
   const caEncaisse = Object.entries(totalsJour).reduce((sum, [method, amount]) => String(method).includes("dit client") ? sum : sum + amount, 0);
-  const remisesJour = ventesJour.reduce((sum, v) => sum + (Number(v.remise) || 0), 0);
+  const promosActives = recordsForSite(state.stock).filter((item) => activePromotion(item, dStr)).length;
 
   const recouvrementJour = creditRecoveriesForPdjDate(dStr);
   const caRecouvrement = recouvrementJour.reduce((sum, r) => sum + (Number(r.montant) || 0), 0);
@@ -3976,7 +4082,7 @@ function renderPointDuJour() {
     pdjCreancesSub.classList.toggle("hidden", !creditEmisJour && !(caCreances > 0));
   }
   document.getElementById("pdj-nb").textContent = String(ventesJour.length);
-  document.getElementById("pdj-remises").textContent = `${fmt(remisesJour)} FCFA`;
+  document.getElementById("pdj-remises").textContent = String(promosActives);
   document.getElementById("pdj-ventes-count").textContent = formatVentesCountFr(ventesJour.length);
 
   const { start: boissonsStart, end: boissonsEnd } = pdjBoissonsPeriod();
@@ -6663,7 +6769,7 @@ function renderKitProducts() {
     if (info) info.textContent = "Saisissez un prix pour voir les produits disponibles.";
     return;
   }
-  const products = knownProducts().filter((p) => {
+  const products = knownProducts(ventePriceContextDate()).filter((p) => {
     const pInt = Number(p.prixInt) || Number(p.prix) || 0;
     const pExt = Number(p.prixExt) || pInt;
     const unitPrice = String(location).startsWith("Ext") ? pExt : pInt;
@@ -6766,14 +6872,17 @@ function replaceLineContext() {
 }
 
 /** Format catalogue aligné sur la ligne (qté / casier déjà saisis). */
-function saleFormatForLine(line, product) {
-  const formats = normalizeSaleFormats(product);
+function saleFormatForLine(line, product, asOfDate) {
+  const stockItem = stockItemForArticle(product?.article || line?.article);
+  const priceItem = stockItem || product;
+  const d = asOfDate || line?.date || today();
+  const formats = normalizeSaleFormats(priceItem, d);
   const wantQty = Math.max(1, Number(line.formatQuantite) || Number(line.packSize) || 1);
-  return formats.find((f) => f.quantite === wantQty) || primarySaleFormat(product);
+  return formats.find((f) => f.quantite === wantQty) || primarySaleFormat(priceItem, d);
 }
 
-function replaceLineCatalogPrice(line, product) {
-  const format = saleFormatForLine(line, product);
+function replaceLineCatalogPrice(line, product, orderDate) {
+  const format = saleFormatForLine(line, product, orderDate);
   return formatPrice(format, line.location || "Intérieur");
 }
 
@@ -6804,10 +6913,10 @@ function renderReplacePicker(query) {
   const picker = document.getElementById("replace-picker");
   const ctx = replaceLineContext();
   if (!picker || !ctx) return;
-  const { line } = ctx;
+  const { line, order } = ctx;
   const q = (query || "").toLowerCase().trim();
   const currentKey = String(line.article || "").toLowerCase();
-  const products = knownProducts().filter((p) => {
+  const products = knownProducts(order?.date || today()).filter((p) => {
     if (p.article.toLowerCase() === currentKey) return false;
     return !q || p.article.toLowerCase().includes(q) || (p.cat || "").toLowerCase().includes(q);
   }).slice(0, 24);
@@ -6817,7 +6926,7 @@ function renderReplacePicker(query) {
   }
   picker.innerHTML = products.map((p) => {
     const enc = encodeURIComponent(p.article);
-    const prix = replaceLineCatalogPrice(line, p);
+    const prix = replaceLineCatalogPrice(line, p, order?.date);
     const stockItem = stockItemForArticle(p.article);
     const avail = stockItem ? availableStock(stockItem) : null;
     const avLabel = avail == null ? "—" : `${fmt(avail)} btl`;
@@ -6845,12 +6954,12 @@ async function confirmReplace(newArticleName) {
     showToast("Choisissez un produit different.");
     return;
   }
-  const newProduct = findKnownProduct(article);
+  const newProduct = findKnownProduct(article, order.date);
   if (!newProduct) {
     showToast("Produit introuvable.");
     return;
   }
-  const format = saleFormatForLine(line, newProduct);
+  const format = saleFormatForLine(line, newProduct, order.date);
   const formatQty = Math.max(1, Number(format?.quantite) || 1);
   const prix = formatPrice(format, line.location || "Intérieur");
   if (prix <= 0) {
@@ -7042,7 +7151,7 @@ function renderStock() {
     const actuel = stockActuel(item);
     const frigo = stockFrigo(item);
     const reserve = stockReserve(item);
-    const valeur = stockRetailValueFcfa(item, site);
+    const valeur = stockRetailValueFcfa(item, site, today());
     totalValue += valeur;
     const seuilFrigo = Number(item.seuilMin) || globalSeuil;
     const isFrigoLow = isFrigoLowForAlert(frigo, seuilFrigo);
@@ -7060,7 +7169,14 @@ function renderStock() {
     else statusBadge = `<span class="stock-ok-badge">✓ OK</span>`;
 
     const packSize = Math.max(1, Number(item.packSize) || 1);
-    const { prixInt, prixExt } = resolveItemPrices(item);
+    const priceDay = today();
+    const { prixInt, prixExt } = resolveItemPrices(item, priceDay);
+    const paBtl = prixAchatParBouteille(item);
+    const margeInt = stockMarginPerBottle(item, "int", site, priceDay);
+    const margeExt = stockMarginPerBottle(item, "ext", site, priceDay);
+    const margeCasInt = stockMarginPerCase(item, "int", site, priceDay);
+    const margeCasExt = stockMarginPerCase(item, "ext", site, priceDay);
+    const promoBadge = promotionBadgeHtml(item, priceDay);
     const packCell = packSize > 1 ? `<span class="badge badge-amber">Kit de ${packSize}</span>` : `<span style="color:var(--muted)">Unite</span>`;
     const itemCaseSize = caseSize(item);
     const majIso = stockItemLastUpdatedAt(item);
@@ -7070,7 +7186,7 @@ function renderStock() {
 
     const D = "scd"; // classe colonne detail
     return `<tr class="${isAlert ? "stock-row-alert" : ""}">
-      <td>${escapeHtml(item.article)}</td>
+      <td>${escapeHtml(item.article)} ${promoBadge}</td>
       <td class="${D}">${escapeHtml(item.cat)}</td>
       <td class="${D}" style="text-align:center">${packCell}</td>
       <td class="${D}" style="text-align:center">${fmt(itemCaseSize)}</td>
@@ -7082,10 +7198,17 @@ function renderStock() {
       <td style="text-align:right"><strong>${fmt(actuel)}</strong></td>
       <td style="text-align:right">${fmt(item.seuilMin)}</td>
       <td class="${D}" style="text-align:right">${fmt(item.prixAchat || 0)} / cas.</td>
+      <td class="${D}" style="text-align:right">${paBtl > 0 ? fmt(Math.round(paBtl)) : "—"}</td>
       ${dualPricing
       ? `<td class="${D}" style="text-align:right">${fmt(prixInt)}</td>
-      <td class="${D}" style="text-align:right">${fmt(prixExt)}</td>`
-      : `<td class="${D}" style="text-align:right">${fmt(prixInt)}</td>`}
+      <td class="${D}" style="text-align:right">${fmt(prixExt)}</td>
+      <td class="${D}" style="text-align:right">${formatMarginFcfa(margeInt)}</td>
+      <td class="${D}" style="text-align:right">${formatMarginFcfa(margeExt)}</td>
+      <td class="${D}" style="text-align:right">${formatMarginFcfa(margeCasInt)}</td>
+      <td class="${D}" style="text-align:right">${formatMarginFcfa(margeCasExt)}</td>`
+      : `<td class="${D}" style="text-align:right">${fmt(prixInt)}</td>
+      <td class="${D}" style="text-align:right">${formatMarginFcfa(margeInt)}</td>
+      <td class="${D}" style="text-align:right">${formatMarginFcfa(margeCasInt)}</td>`}
       <td class="${D}" style="text-align:right">${fmt(valeur)}</td>
       <td>${statusBadge}</td>
       <td class="stock-maj-cell ${majClass}" title="${escapeHtml(majIso || "")}">${escapeHtml(majLabel)}</td>
@@ -7123,10 +7246,17 @@ function renderStock() {
             <th class="th-blue" style="text-align:right">Stk Actuel</th>
             <th class="th-orange" style="text-align:right">Seuil</th>
             <th class="th-orange scd" style="text-align:right">Prix Achat / cas.</th>
+            <th class="th-orange scd" style="text-align:right">PA / btl.</th>
             ${dualPricing
             ? `<th class="th-orange scd" style="text-align:right">Prix Vente Int.</th>
-            <th class="th-orange scd" style="text-align:right">Prix Vente Ext.</th>`
-            : `<th class="th-orange scd" style="text-align:right">Prix vente</th>`}
+            <th class="th-orange scd" style="text-align:right">Prix Vente Ext.</th>
+            <th class="th-orange scd" style="text-align:right">Marge / btl. Int.</th>
+            <th class="th-orange scd" style="text-align:right">Marge / btl. Ext.</th>
+            <th class="th-orange scd" style="text-align:right">Marge / cas. Int.</th>
+            <th class="th-orange scd" style="text-align:right">Marge / cas. Ext.</th>`
+            : `<th class="th-orange scd" style="text-align:right">Prix vente</th>
+            <th class="th-orange scd" style="text-align:right">Marge / btl.</th>
+            <th class="th-orange scd" style="text-align:right">Marge / cas.</th>`}
             <th class="th-blue scd" style="text-align:right">Valeur Stk</th>
             <th class="th-blue">Statut</th>
             <th class="th-blue">MAJ</th>
@@ -9387,8 +9517,9 @@ function ensureOrder(clientName, date, note, selectedOrderIdOverride = undefined
 
 async function saveOrderLine() {
   const article = document.getElementById("v-article").value.trim();
-  const product = findKnownProduct(article);
-  const format = selectedSaleFormat(product);
+  const date = document.getElementById("v-date").value || today();
+  const product = findKnownProduct(article, date);
+  const format = selectedSaleFormat(product, date);
   const prix = formatPrice(format, document.getElementById("v-location").value);
   if (!article || !product || prix <= 0) {
     showToast("Choisissez un article du stock avec un prix catalogue.");
@@ -9396,7 +9527,6 @@ async function saveOrderLine() {
   }
   const selectedOrderId = Number(document.getElementById("v-order-select").value) || activeOrderId;
   const creatingNewOrder = !selectedOrderId;
-  const date = document.getElementById("v-date").value || today();
   if (!assertJournalAllowsSalesOrToast(date, currentSiteId())) return;
   const existingOrder = selectedOrderId
     ? recordsForSite(state.commandes).find((item) => item.id === selectedOrderId)
@@ -9423,7 +9553,7 @@ async function saveOrderLine() {
     formatQuantite: Math.max(1, Number(format?.quantite) || Number(product?.packSize) || 1),
     prix,
     qty: Number(document.getElementById("v-qty").value) || 1,
-    remise: Number(document.getElementById("v-remise").value) || 0,
+    remise: 0,
     paiement: "A regler",
     note: document.getElementById("v-note").value.trim(),
   };
@@ -9675,6 +9805,170 @@ function renderStockSaleFormats(formats = [{ quantite: 1, prixInterieur: "", pri
       <button type="button" class="mini-btn" data-remove-sale-format="${index}" ${rows.length <= 1 ? "disabled" : ""}>Retirer</button>
     </div>
   `).join("");
+  renderStockMargePreview();
+}
+
+function readPromoFormatsFromRow(promoRow) {
+  const dual = siteUsesDualZonePricing();
+  const byQuantity = new Map();
+  [...promoRow.querySelectorAll("[data-promo-format-row]")].forEach((fRow) => {
+    const quantite = Math.max(1, Number(fRow.querySelector(".promo-format-qty")?.value) || 1);
+    const prixInterieur = Number(fRow.querySelector(".promo-format-int")?.value) || 0;
+    const prixExterieur = dual
+      ? (Number(fRow.querySelector(".promo-format-ext")?.value) || prixInterieur)
+      : prixInterieur;
+    if (prixInterieur > 0) byQuantity.set(quantite, { quantite, prixInterieur, prixExterieur });
+  });
+  return [...byQuantity.values()].sort((a, b) => a.quantite - b.quantite);
+}
+
+function readStockPromotions() {
+  return [...document.querySelectorAll("[data-promo-row]")].map((row) => ({
+    id: Number(row.dataset.promoId) || 0,
+    libelle: row.querySelector(".promo-libelle")?.value?.trim() || "Promotion",
+    dateDebut: row.querySelector(".promo-debut")?.value || "",
+    dateFin: row.querySelector(".promo-fin")?.value?.trim() || "",
+    formatsVente: readPromoFormatsFromRow(row),
+  })).filter((p) => p.dateDebut && p.formatsVente.length);
+}
+
+function renderStockPromotions(promotions = []) {
+  const container = document.getElementById("stock-promotions-list");
+  if (!container) return;
+  const dual = siteUsesDualZonePricing();
+  const rows = Array.isArray(promotions) ? promotions : [];
+  container.innerHTML = rows.length
+    ? rows.map((p) => {
+      const pid = Number(p.id) || Date.now() + Math.floor(Math.random() * 1000);
+      const formats = normalizeSaleFormatsFromRaw(p.formatsVente, p);
+      const formatRows = (formats.length ? formats : [{ quantite: 1, prixInterieur: "", prixExterieur: "" }]).map((format) => `
+        <div class="sale-format-row" data-promo-format-row>
+          <div class="form-group">
+            <label>Qté</label>
+            <input class="promo-format-qty" type="number" min="1" value="${escapeHtml(format.quantite || 1)}">
+          </div>
+          ${dual
+          ? `<div class="form-group"><label>Cave</label><input class="promo-format-int" type="number" min="0" value="${escapeHtml(format.prixInterieur || "")}"></div>
+          <div class="form-group"><label>Maquis</label><input class="promo-format-ext" type="number" min="0" value="${escapeHtml(format.prixExterieur || "")}"></div>`
+          : `<div class="form-group"><label>Prix vente</label><input class="promo-format-int" type="number" min="0" value="${escapeHtml(format.prixInterieur || format.prixExterieur || "")}"></div>`}
+        </div>
+      `).join("");
+      return `<div class="stock-promo-card" data-promo-row data-promo-id="${pid}">
+        <div class="form-grid two-cols">
+          <div class="form-group">
+            <label>Libellé</label>
+            <input class="promo-libelle" type="text" value="${escapeHtml(p.libelle || "")}" placeholder="ex: Promo weekend">
+          </div>
+          <div class="form-group">
+            <label>&nbsp;</label>
+            <button type="button" class="mini-btn" data-copy-catalog-to-promo="${pid}">Copier tarifs catalogue</button>
+          </div>
+        </div>
+        <div class="form-grid two-cols">
+          <div class="form-group">
+            <label>Date début</label>
+            <input class="promo-debut" type="date" value="${escapeHtml(p.dateDebut || today())}">
+          </div>
+          <div class="form-group">
+            <label>Date fin (optionnel)</label>
+            <input class="promo-fin" type="date" value="${escapeHtml(p.dateFin || "")}">
+          </div>
+        </div>
+        <p class="form-hint">Tarifs promo (mêmes formats que le catalogue)</p>
+        <div class="sale-formats-list">${formatRows}</div>
+        <button type="button" class="mini-btn stock-promo-remove" data-remove-promo="${pid}">Retirer cette promotion</button>
+      </div>`;
+    }).join("")
+    : `<p class="form-hint muted">Aucune promotion programmée. Le tarif catalogue s'applique en permanence.</p>`;
+}
+
+function addStockPromotion() {
+  renderStockPromotions([
+    ...readStockPromotions(),
+    {
+      id: Date.now(),
+      libelle: "Promotion",
+      dateDebut: today(),
+      dateFin: "",
+      formatsVente: readStockSaleFormats(),
+    },
+  ]);
+}
+
+function copyCatalogPricesToPromo(promoId) {
+  const promos = readStockPromotions();
+  const idx = promos.findIndex((p) => Number(p.id) === Number(promoId));
+  if (idx < 0) return;
+  promos[idx] = { ...promos[idx], formatsVente: readStockSaleFormats() };
+  renderStockPromotions(promos);
+  showToast("Tarifs catalogue copiés dans la promotion.");
+}
+
+function stockMarginPreviewFromDom() {
+  const cs = Math.max(1, Number(document.getElementById("s-case-size")?.value) || 24);
+  const paCasier = Number(document.getElementById("s-prix")?.value) || 0;
+  const paBtl = paCasier > 0 ? paCasier / cs : 0;
+  const dual = siteUsesDualZonePricing();
+  const rows = [...document.querySelectorAll("[data-format-row]")];
+  const priced = rows.map((row) => {
+    const q = Math.max(1, Number(row.querySelector(".stock-format-qty")?.value) || 1);
+    const int = Number(row.querySelector(".stock-format-int")?.value) || 0;
+    const ext = dual
+      ? (Number(row.querySelector(".stock-format-ext")?.value) || int)
+      : int;
+    return { q, int, ext };
+  }).filter((r) => r.int > 0);
+  const primary = priced.find((r) => r.q === 1) || priced[0];
+  let pvInt = 0;
+  let pvExt = 0;
+  let packNote = "";
+  if (primary) {
+    pvInt = primary.int / primary.q;
+    pvExt = primary.ext / primary.q;
+    if (primary.q > 1) {
+      packNote = ` (prix unitaire déduit du format ×${primary.q})`;
+    }
+  }
+  return { cs, paCasier, paBtl, pvInt, pvExt, packNote, dual };
+}
+
+function renderStockMargePreview() {
+  const host = document.getElementById("stock-marge-preview");
+  if (!host) return;
+  const { cs, paCasier, paBtl, pvInt, pvExt, packNote, dual } = stockMarginPreviewFromDom();
+  if (paCasier <= 0 && pvInt <= 0 && pvExt <= 0) {
+    host.classList.add("hidden");
+    host.innerHTML = "";
+    return;
+  }
+  host.classList.remove("hidden");
+  const lines = [];
+  if (paCasier > 0) {
+    lines.push(`<div class="margin-line"><span>Prix achat / bouteille</span><strong>${fmt(Math.round(paBtl))} FCFA</strong></div>`);
+    lines.push(`<p class="form-hint" style="margin:0 0 6px">Casier ${fmt(paCasier)} FCFA ÷ ${fmt(cs)} btl.</p>`);
+  } else {
+    lines.push(`<p class="form-hint" style="margin:0 0 6px">Renseignez le prix du casier pour voir le coût par bouteille.</p>`);
+  }
+  const addZone = (label, pv, zone) => {
+    if (pv <= 0) return;
+    const mBtl = paBtl > 0 ? pv - paBtl : null;
+    const mCas = mBtl != null ? mBtl * cs : null;
+    lines.push(`<div class="margin-line"><span>Prix vente ${label}${packNote}</span><strong>${fmt(Math.round(pv))} FCFA / btl.</strong></div>`);
+    if (mBtl != null) {
+      lines.push(`<div class="margin-line"><span>Bénéfice / bouteille (${label})</span>${formatMarginFcfa(mBtl)} FCFA</div>`);
+      lines.push(`<div class="margin-line"><span>Bénéfice / casier (${label})</span>${formatMarginFcfa(mCas)} FCFA</div>`);
+    }
+  };
+  if (dual) {
+    addZone("cave", pvInt, "int");
+    addZone("maquis", pvExt, "ext");
+  } else {
+    addZone("unitaire", pvInt || pvExt, "int");
+  }
+  if (paBtl > 0 && pvInt <= 0 && pvExt <= 0) {
+    lines.push(`<p class="form-hint" style="margin:6px 0 0">Ajoutez un prix de vente (format ×1 ou kit) pour voir le bénéfice.</p>`);
+  }
+  host.innerHTML = `<p class="stock-marge-preview-title">Rentabilité (calcul automatique)</p>${lines.join("")}`;
 }
 
 function readStockSaleFormats() {
@@ -9754,7 +10048,9 @@ function resetStockForm() {
     preservedValue: siteSingleBreweryName() || "",
   });
   renderStockSaleFormats();
+  renderStockPromotions([]);
   updateStockPriceInput();
+  renderStockMargePreview();
   document.getElementById("stock-modal-title").textContent = "Nouvel article en stock";
   document.getElementById("save-stock-btn").textContent = "Enregistrer l'article";
   syncSingleBreweryUi();
@@ -9788,8 +10084,10 @@ function openEditStock(itemId) {
     document.getElementById("s-prix-kit-ext").value = document.getElementById("s-prix-kit-int").value;
   }
   document.getElementById("s-price-location").value = "int";
-  renderStockSaleFormats(normalizeSaleFormats(item));
+  renderStockSaleFormats(baseSaleFormats(item));
+  renderStockPromotions(normalizePromotions(item));
   updateStockPriceInput();
+  renderStockMargePreview();
   document.getElementById("stock-modal-title").textContent = `Modifier : ${item.article}`;
   document.getElementById("save-stock-btn").textContent = "Enregistrer les modifications";
   syncSingleBreweryUi();
@@ -9856,6 +10154,7 @@ async function saveStock() {
   if (fields.prixVenteExt <= 0) {
     fields.prixVenteExt = fields.prixVenteInt;
   }
+  fields.promotions = readStockPromotions();
   if (editId) {
     const item = state.stock.find((i) => i.id === Number(editId));
     if (item) {
@@ -9877,6 +10176,7 @@ async function saveStock() {
       pushChange("Pack", before.packSize, item.packSize);
       pushChange("PV int", before.prixVenteInt, item.prixVenteInt);
       pushChange("PV ext", before.prixVenteExt, item.prixVenteExt);
+      pushChange("Promotions", (before.promotions || []).length, (item.promotions || []).length);
       pushChange("Init lots", before.initCases, item.initCases);
       pushChange("Stock init (btl)", before.init, item.init);
       pushChange("Frigo (btl)", before.frigo, item.frigo);
@@ -13242,8 +13542,7 @@ function handleApiError(error) {
 function updateVentePreview() {
   const prix = Number(document.getElementById("v-prix").value) || 0;
   const qty = Number(document.getElementById("v-qty").value) || 0;
-  const remise = Number(document.getElementById("v-remise").value) || 0;
-  document.getElementById("v-preview").textContent = `${fmt((prix * qty) - remise)} FCFA`;
+  document.getElementById("v-preview").textContent = `${fmt(prix * qty)} FCFA`;
 }
 
 function updatePaymentMixPreview() {
@@ -13638,6 +13937,29 @@ document.getElementById("fab-btn").addEventListener("click", () => {
   document.getElementById("finalize-done-close")?.addEventListener("click", () => closeModal("modal-finalize"));
   document.getElementById("save-stock-btn").addEventListener("click", () => saveStock().catch(handleApiError));
   document.getElementById("add-sale-format-btn").addEventListener("click", addStockSaleFormat);
+  document.getElementById("add-stock-promo-btn")?.addEventListener("click", addStockPromotion);
+  document.getElementById("stock-promotions-list")?.addEventListener("click", (e) => {
+    const copyBtn = e.target.closest("[data-copy-catalog-to-promo]");
+    if (copyBtn) {
+      copyCatalogPricesToPromo(copyBtn.dataset.copyCatalogToPromo);
+      return;
+    }
+    const removeBtn = e.target.closest("[data-remove-promo]");
+    if (removeBtn) {
+      const id = Number(removeBtn.dataset.removePromo);
+      renderStockPromotions(readStockPromotions().filter((p) => Number(p.id) !== id));
+    }
+  });
+  document.getElementById("v-date")?.addEventListener("change", () => {
+    const product = findKnownProduct(document.getElementById("v-article")?.value || "");
+    populateSaleFormatSelect(product, null, ventePriceContextDate());
+    updateKitInfo(product);
+    renderVenteArticlePicker();
+  });
+  ["s-prix", "s-case-size"].forEach((id) => {
+    document.getElementById(id)?.addEventListener("input", renderStockMargePreview);
+  });
+  document.getElementById("sale-formats-list")?.addEventListener("input", renderStockMargePreview);
   document.getElementById("s-price-location").addEventListener("change", () => {
     updateStockPriceInput();
   });
@@ -14323,7 +14645,7 @@ document.getElementById("fab-btn").addEventListener("click", () => {
       if (currentPage === "stock" && stockSubTab === "catalogue") renderStock();
     });
   }
-  ["v-prix", "v-qty", "v-remise"].forEach((id) => document.getElementById(id).addEventListener("input", updateVentePreview));
+  ["v-prix", "v-qty"].forEach((id) => document.getElementById(id)?.addEventListener("input", updateVentePreview));
   document.querySelectorAll(".finalize-pay-input").forEach((input) => input.addEventListener("input", updatePaymentMixPreview));
   document.getElementById("v-article").addEventListener("change", syncKnownProduct);
   document.getElementById("v-article").addEventListener("blur", syncKnownProduct);

@@ -2122,13 +2122,56 @@ textarea { font: inherit; }
 .stock-kpi-val.red { color: #ff8e82; }
 .stock-kpi-val.green { color: #72d7a9; }
 
+.stock-marge-preview {
+  margin: 4px 0 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(76, 175, 80, 0.08);
+  border: 1px solid rgba(76, 175, 80, 0.22);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.stock-marge-preview-title {
+  margin: 0 0 8px;
+  font-weight: 700;
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--mm-primary-dark);
+}
+
+.stock-marge-preview .margin-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin: 4px 0;
+}
+
+.margin-positive { color: #4caf50; font-weight: 700; }
+.margin-negative { color: #e57373; font-weight: 700; }
+
+.stock-promotions-list { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+
+.stock-promo-card {
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(251, 140, 0, 0.35);
+  background: rgba(251, 140, 0, 0.06);
+}
+
+.stock-promo-card .stock-promo-remove { margin-top: 8px; }
+
+.pdj-val.amber { color: #fb8c00; }
+
 .stock-table-wrap { overflow-x: auto; margin-top: 4px; }
 
 .stock-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 0.86rem;
-  min-width: 860px;
+  min-width: 1080px;
 }
 
 .stock-table th,
