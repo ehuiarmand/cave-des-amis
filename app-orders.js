@@ -297,6 +297,8 @@ function updateCloseDayButtonLabel() {
   btn.textContent = `Cloturer definitivement la journee du ${formatDateDdMmYyyy(d)}`;
 }
 let activeOrderId = null;
+/** Date PDJ affichee (consultation / impression) sans imposer la journee serveur — par maquis. */
+let pdjViewDateBySite = {};
 let currentQrLinkInt = "";
 let currentQrLinkExt = "";
 let pendingFinalizeOrderId = null;
@@ -1979,9 +1981,20 @@ function canManagePdjAccounting() {
 /** Date traitee sur le Point du jour : admin/superadmin lisent d'abord le champ date (choix local), puis la date imposee serveur si le champ est vide.
  *  Les autres roles : date imposee serveur si presente, sinon workingDate().
  *  Si la journee d'hier est encore ouverte (maquis de nuit), workingDate() peut rester sur hier. */
+function setPdjBrowseDate(dateStr) {
+  const sid = String(currentSiteId() || "");
+  if (!sid) return;
+  const t = today();
+  const d = String(dateStr || "").trim().slice(0, 10);
+  if (d && /^\d{4}-\d{2}-\d{2}$/.test(d) && d <= t) pdjViewDateBySite[sid] = d;
+  else delete pdjViewDateBySite[sid];
+}
+
 function pdjCalendarDate() {
   const sid = currentSiteId();
   const t = today();
+  const view = String(pdjViewDateBySite[sid] || "").trim().slice(0, 10);
+  if (view && /^\d{4}-\d{2}-\d{2}$/.test(view) && view <= t) return view;
   const forced = String(state?.pdjWorkDateBySite?.[sid] || "").trim().slice(0, 10);
   const hasForced = Boolean(forced && /^\d{4}-\d{2}-\d{2}$/.test(forced) && forced <= t);
 
@@ -2085,6 +2098,7 @@ async function persistPdjWorkDateFromSuperPicker() {
     return;
   }
   await persistState({ pdjWorkDateBySite: map });
+  setPdjBrowseDate(map[siteId] || null);
   recordStaffAudit(
     "update",
     "pdj_date_serveur",
@@ -3659,8 +3673,54 @@ function renderPointDuJour() {
   );
   renderDailyStockCheck();
   renderPastClosuresForReopen();
+  renderClosedDaysArchive();
   updateCloseDayButtonLabel();
   updatePdjPrintButtons();
+}
+
+function renderClosedDaysArchive() {
+  const host = document.getElementById("pdj-closed-archive");
+  if (!host) return;
+  if (!canManagePdjAccounting()) {
+    host.innerHTML = "";
+    return;
+  }
+  const siteId = currentSiteId();
+  const checks = (state.stockChecks || [])
+    .filter((sc) => sc && sc.siteId === siteId && sc.date && /^\d{4}-\d{2}-\d{2}$/.test(String(sc.date).slice(0, 10)))
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  if (!checks.length) {
+    host.innerHTML = "";
+    return;
+  }
+  const current = pdjCalendarDate();
+  const t = today();
+  host.innerHTML = `
+    <div class="section-head pdj-detail-head" style="margin-top:16px">
+      <h3 class="pdj-detail-title">Journées clôturées</h3>
+    </div>
+    <p class="muted" style="font-size:0.85rem;margin:0 0 10px;line-height:1.45">
+      Consultez ou réimprimez le rapport de clôture d'une journée passée.
+    </p>
+    <ul style="list-style:none;padding:0;margin:0;display:grid;gap:8px">
+      ${checks.map((sc) => {
+        const d = String(sc.date).slice(0, 10);
+        const active = d === current;
+        const when = sc.createdAt ? formatDateTimeDdMmYyyy(sc.createdAt) : "";
+        return `<li class="list-item" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap${active ? ";border-color:rgba(33,150,243,0.45)" : ""}">
+          <div>
+            <strong>${escapeHtml(formatDateDdMmYyyy(d))}</strong>
+            ${active ? `<span class="muted" style="font-size:0.82rem"> · affichée</span>` : ""}
+            ${when ? `<span class="muted" style="font-size:0.82rem"> · clôturée ${escapeHtml(when)}</span>` : ""}
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button type="button" class="mini-btn" data-pdj-browse-date="${escapeHtml(d)}">Afficher</button>
+            <button type="button" class="mini-btn" data-pdj-print-closure="${escapeHtml(d)}">Imprimer clôture</button>
+          </div>
+        </li>`;
+      }).join("")}
+    </ul>
+    ${current !== t ? `<button type="button" class="mini-btn" style="margin-top:10px" data-pdj-browse-today>Revenir au jour comptable actuel</button>` : ""}`;
 }
 
 /** Annule les écritures comptables (sorties / entrées) appliquées par une clôture — même logique que prevClose dans closeAccountingDay. */
@@ -3763,6 +3823,7 @@ async function reopenAccountingDay(siteId, dateStr) {
     workDateEl.value = dateStr;
     syncPdjWorkDateInput();
   }
+  setPdjBrowseDate(dateStr);
   renderStock();
   renderPointDuJour();
   showToast(`Journée du ${formatDateDdMmYyyy(dateStr)} réouverte. Corrigez le stock puis reclôturer.`);
@@ -7588,6 +7649,7 @@ async function persistState(overrides = {}) {
   const _casierMouvements = overrides.casierMouvements ?? state.casierMouvements ?? [];
   const _consignes = overrides.consignes ?? state.consignes ?? [];
   const _supplierPrices = overrides.supplierPrices ?? state.supplierPrices ?? [];
+  const _stockChecks = overrides.stockChecks ?? state.stockChecks ?? [];
   state = await apiRequest(API.state, {
     method: "PUT",
     body: JSON.stringify({
@@ -7620,6 +7682,16 @@ async function persistState(overrides = {}) {
   if (!state.casierMouvements?.length && _casierMouvements.length) state.casierMouvements = _casierMouvements;
   if (!state.consignes?.length && _consignes.length) state.consignes = _consignes;
   if (!state.supplierPrices?.length && _supplierPrices.length) state.supplierPrices = _supplierPrices;
+  if (overrides.stockChecks !== undefined && _stockChecks.length) {
+    const merged = [...(state.stockChecks || [])];
+    _stockChecks.forEach((sc) => {
+      if (!sc?.siteId || !sc?.date) return;
+      const idx = merged.findIndex((x) => x.siteId === sc.siteId && x.date === sc.date);
+      if (idx >= 0) merged[idx] = sc;
+      else merged.push(sc);
+    });
+    state.stockChecks = merged;
+  }
   lsSaveCasiers();
   renderTopbar();
 }
@@ -9581,12 +9653,18 @@ async function closeAccountingDay() {
   const sidClose = currentSiteId();
   const pdjMapClose = { ...(state.pdjWorkDateBySite || {}) };
   if (pdjMapClose[sidClose] === dStr) delete pdjMapClose[sidClose];
+  const savedStockChecks = state.stockChecks;
   await persistState({ stock: state.stock, stockChecks: state.stockChecks, pdjWorkDateBySite: pdjMapClose });
+  if (!stockCheckForSiteDate(dStr, sidClose) && savedStockChecks?.length) {
+    state.stockChecks = savedStockChecks;
+  }
   delete pdjClosingCashDraftBySiteDate[pdjOpeningCashDraftKey(sidClose, dStr)];
+  setPdjBrowseDate(dStr);
   renderStock();
+  renderDashboard();
   renderPointDuJour();
   const cashHint = cashEcartEspeces === 0 ? "" : ` Écart espèces : ${cashEcartEspeces > 0 ? "+" : ""}${fmt(cashEcartEspeces)} FCFA.`;
-  showToast(`Journée clôturée : stock conforme.${cashHint}`);
+  showToast(`Journée du ${formatDateDdMmYyyy(dStr)} clôturée.${cashHint} Vous pouvez imprimer le rapport ci-dessous.`);
 }
 
 async function saveCharge() {
@@ -10259,13 +10337,16 @@ function printPdjProvisionalReport(reportDateStr) {
   w.document.close();
 }
 
-function printDayClosure() {
-  const reportDateStr = pdjCalendarDate();
-  const closed = stockCheckForSiteDate(reportDateStr, currentSiteId());
-  if (!closed) { showToast("Journee non cloturee : utilisez « Imprimer le point du jour » pour un controle provisoire."); return; }
+function printDayClosure(reportDateStr) {
+  const dStr = String(reportDateStr || pdjCalendarDate()).slice(0, 10);
+  const closed = stockCheckForSiteDate(dStr, currentSiteId());
+  if (!closed) {
+    showToast(`Journee du ${formatDateDdMmYyyy(dStr)} non cloturee : utilisez « Imprimer le point du jour » pour un controle provisoire.`);
+    return;
+  }
   const site = currentSite();
-  const ventesJour = recordsForSite(state.ventes).filter((v) => v.date.slice(0, 10) === reportDateStr);
-  const chargesJour = recordsForSite(state.charges).filter((c) => (c.date || "").slice(0, 10) === reportDateStr);
+  const ventesJour = recordsForSite(state.ventes).filter((v) => v.date.slice(0, 10) === dStr);
+  const chargesJour = recordsForSite(state.charges).filter((c) => (c.date || "").slice(0, 10) === dStr);
 
   // Grouper les ventes par article : qty totale + montant total + par mode de paiement
   const byArticle = {};
@@ -10298,7 +10379,7 @@ function printDayClosure() {
   const tCredit = totauxJour["Crédit client"] || 0;
   const caEncaisse = closed.caEncaisse || 0;
   const caCreances = caCreancesRestantes;
-  const creditEmisJourPrint = closed.caCreancesEmisesJour ?? creditIssuedOnDate(reportDateStr);
+  const creditEmisJourPrint = closed.caCreancesEmisesJour ?? creditIssuedOnDate(dStr);
   const chargesTotal = chargesJour.reduce((sum, c) => sum + Number(c.montant || 0), 0);
   const benefice = caEncaisse - chargesTotal;
   const gaps = (closed.items || []).filter((ci) => ci.ecart !== 0).length;
@@ -10359,11 +10440,11 @@ function printDayClosure() {
     </tr>`;
   }).join("");
 
-  const dateLabel = formatDateDdMmYyyy(closed.date || reportDateStr);
+  const dateLabel = formatDateDdMmYyyy(closed.date || dStr);
   const generatedAt = formatDateTimeDdMmYyyy(closed.createdAt);
 
   const html = `<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8">
-  <title>Fiche de clôture ${formatDateDdMmYyyy(reportDateStr)}</title>
+  <title>Fiche de clôture ${formatDateDdMmYyyy(dStr)}</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: Arial, sans-serif; font-size: 11px; padding: 16px; color: #111; }
@@ -10458,7 +10539,7 @@ function printDayClosure() {
     </div>
   </div>
 
-  <div class="footer">${escapeHtml(site?.nom || "Maquis Manager")} &mdash; Fiche de clôture générée automatiquement &mdash; ${escapeHtml(formatDateDdMmYyyy(reportDateStr))}</div>
+  <div class="footer">${escapeHtml(site?.nom || "Maquis Manager")} &mdash; Fiche de clôture générée automatiquement &mdash; ${escapeHtml(formatDateDdMmYyyy(dStr))}</div>
   <script>window.onload = () => window.print();<\/script>
   </body></html>`;
 
@@ -12403,6 +12484,7 @@ async function logout() {
   sessionDeadlineUnix = null;
   csrfToken = null;
   activeOrderId = null;
+  pdjViewDateBySite = {};
   pendingFinalizeOrderId = null;
   pendingPreAuthToken = null;
   qrAlertCount = 0;
@@ -12927,11 +13009,32 @@ document.getElementById("fab-btn").addEventListener("click", () => {
   document.getElementById("print-closure-btn")?.addEventListener("click", printPdjDayControl);
   document.getElementById("print-pdj-control-btn")?.addEventListener("click", printPdjDayControl);
   document.getElementById("pdj-work-date")?.addEventListener("change", () => {
+    const raw = document.getElementById("pdj-work-date")?.value?.trim() || "";
+    setPdjBrowseDate(raw || null);
     syncPdjWorkDateInput();
     renderTopbar();
     renderOrdersManagement();
     if (currentPage === "pdj") renderPointDuJour();
     if (currentPage === "ventes") renderVentesPage();
+  });
+  document.getElementById("pdj-closed-archive")?.addEventListener("click", (e) => {
+    const printBtn = e.target.closest("[data-pdj-print-closure]");
+    if (printBtn) {
+      printDayClosure(printBtn.getAttribute("data-pdj-print-closure"));
+      return;
+    }
+    const browseBtn = e.target.closest("[data-pdj-browse-date]");
+    if (browseBtn) {
+      setPdjBrowseDate(browseBtn.getAttribute("data-pdj-browse-date"));
+      renderPointDuJour();
+      showToast(`Journée du ${formatDateDdMmYyyy(pdjCalendarDate())} affichée.`);
+      return;
+    }
+    if (e.target.closest("[data-pdj-browse-today]")) {
+      setPdjBrowseDate(null);
+      renderPointDuJour();
+      showToast("Retour au jour comptable actuel.");
+    }
   });
   document.getElementById("pdj-apply-work-date")?.addEventListener("click", () => {
     persistPdjWorkDateFromSuperPicker().catch(handleApiError);
