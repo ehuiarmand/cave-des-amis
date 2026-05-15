@@ -3061,6 +3061,16 @@ def _server_auto_close_site(site_id: str, d_str: str) -> None:
                        if str(v.get("siteId", "")) == site_id
                        and str(v.get("date", "")).startswith(d_str)]
 
+        # Ne pas clôturer automatiquement un jour sans ventes et sans caisse ouverte
+        day_books = state.get("dayBooks", [])
+        day_book_exists = any(
+            str(b.get("siteId", "")) == site_id and str(b.get("date", "")).startswith(d_str)
+            for b in day_books
+        )
+        if not ventes_jour and not day_book_exists:
+            print(f"[auto-cloture] Site {site_id} {d_str}: aucune vente ni caisse ouverte — clôture ignorée.", flush=True)
+            return
+
         # Totaux paiements
         payment_totals: dict[str, float] = {}
         for v in ventes_jour:
@@ -3076,7 +3086,6 @@ def _server_auto_close_site(site_id: str, d_str: str) -> None:
 
         ca_encaisse = sum(amt for method, amt in payment_totals.items() if "dit client" not in method.lower())
 
-        day_books = state.get("dayBooks", [])
         day_book = next((b for b in day_books
                          if str(b.get("siteId", "")) == site_id
                          and str(b.get("date", "")).startswith(d_str)), None)

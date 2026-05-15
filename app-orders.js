@@ -8202,13 +8202,18 @@ async function performAutoClotureBackground(dStr) {
   if (stockCheckForSiteDate(dStr, siteId)) return;
   const items = recordsForSite(state.stock);
   if (!items.length) return;
+  // Ne pas cloture automatiquement un jour sans ventes ni dayBook ouvert
+  const dayBook = dayBookFor(dStr, siteId);
+  const ventesJour = recordsForSite(state.ventes).filter((v) => v.date.slice(0, 10) === dStr);
+  if (!ventesJour.length && !dayBook) {
+    console.info("[auto-cloture] Jour sans ventes ni caisse ouverte — ignoré.", dStr, siteId);
+    return;
+  }
   const pendingForClose = pendingOrdersForJournalDate(dStr, siteId);
   if (pendingForClose.length) {
     showToast(`Clôture auto impossible : ${pendingForClose.length} commande(s) en attente pour le ${formatDateDdMmYyyy(dStr)}.`);
     return;
   }
-  const dayBook = dayBookFor(dStr, siteId);
-  const ventesJour = recordsForSite(state.ventes).filter((v) => v.date.slice(0, 10) === dStr);
   const totauxJour = paymentTotals(ventesJour);
   const caEncaisse = Object.entries(totauxJour).reduce((sum, [m, a]) => String(m).includes("dit client") ? sum : sum + a, 0);
   const creditEmisJour = creditIssuedOnDate(dStr);
