@@ -72,6 +72,7 @@ let globalSuperadmin = null;
 let currentPage = "home";
 let currentFilter = "all";
 let ventesSubTab = "commandes";
+let pdjSubTab = "synthese";
 let caisseInnerTab = "recouvrement";
 let stockSubTab = "catalogue";
 let paramsSubTab = "profil";
@@ -291,7 +292,7 @@ function renderStockFilterBar(allItems, site) {
 
 function updateCloseDayButtonLabel() {
   const btn = document.getElementById("close-day-btn");
-  if (!btn) return;
+  if (!btn || !canManagePdjAccounting()) return;
   const d = pdjCalendarDate();
   btn.className = "btn btn-danger";
   btn.textContent = `Cloturer definitivement la journee du ${formatDateDdMmYyyy(d)}`;
@@ -299,6 +300,8 @@ function updateCloseDayButtonLabel() {
 let activeOrderId = null;
 /** Date PDJ affichee (consultation / impression) sans imposer la journee serveur — par maquis. */
 let pdjViewDateBySite = {};
+/** true = affichage archive « Afficher » : journee deja cloturee, pas de nouvelle cloture. */
+let pdjBrowseConsultationOnly = false;
 let currentQrLinkInt = "";
 let currentQrLinkExt = "";
 let pendingFinalizeOrderId = null;
@@ -309,7 +312,7 @@ let knownQrOrderIds = new Set();
 let flashingQrOrderIds = new Set();
 /** Ignore un clic sur le fond du modal détail commande juste après ouverture (ghost click tactile). */
 let suppressOrderDetailBackdropUntil = 0;
-/** Cle site + jour PDJ : derniere valeur poussee dans v-date / orders-filter-date (evite d'ecraser le filtre a chaque sync). */
+/** Cle site + jour PDJ : derniere valeur poussee dans v-date / orders-filter-date-* (evite d'ecraser le filtre a chaque sync). */
 let ventesDomPdjStamp = "";
 let pendingPreAuthToken = null;
 let pendingReceivePurchaseId = null;
@@ -1978,16 +1981,35 @@ function canManagePdjAccounting() {
   return Boolean(sessionUser) && String(currentRole || "").trim() !== "serveuse";
 }
 
+function updatePdjRoleVisibility() {
+  const accounting = canManagePdjAccounting();
+  document.querySelectorAll(".pdj-accounting-only").forEach((node) => {
+    node.classList.toggle("hidden-by-role", !accounting);
+  });
+  document.querySelectorAll(".pdj-serveuse-print-only").forEach((node) => {
+    node.classList.toggle("hidden-by-role", accounting);
+  });
+}
+
 /** Date traitee sur le Point du jour : admin/superadmin lisent d'abord le champ date (choix local), puis la date imposee serveur si le champ est vide.
  *  Les autres roles : date imposee serveur si presente, sinon workingDate().
  *  Si la journee d'hier est encore ouverte (maquis de nuit), workingDate() peut rester sur hier. */
-function setPdjBrowseDate(dateStr) {
+function setPdjBrowseDate(dateStr, { consultationOnly = false } = {}) {
   const sid = String(currentSiteId() || "");
   if (!sid) return;
   const t = today();
   const d = String(dateStr || "").trim().slice(0, 10);
-  if (d && /^\d{4}-\d{2}-\d{2}$/.test(d) && d <= t) pdjViewDateBySite[sid] = d;
-  else delete pdjViewDateBySite[sid];
+  if (d && /^\d{4}-\d{2}-\d{2}$/.test(d) && d <= t) {
+    pdjViewDateBySite[sid] = d;
+    pdjBrowseConsultationOnly = Boolean(consultationOnly);
+  } else {
+    delete pdjViewDateBySite[sid];
+    pdjBrowseConsultationOnly = false;
+  }
+}
+
+function isPdjBrowseConsultationOnly() {
+  return Boolean(pdjBrowseConsultationOnly);
 }
 
 function pdjCalendarDate() {
@@ -2055,7 +2077,7 @@ function syncPdjWorkDateInput() {
   if (currentPage === "ventes") renderVentesPage();
 }
 
-/** Aligne v-date et orders-filter-date sur la journee PDJ active, sauf si rien n'a change (sinon la sync live efface le filtre des gerants). */
+/** Aligne v-date et orders-filter-date-* sur la journee PDJ active, sauf si rien n'a change (sinon la sync live efface le filtre des gerants). */
 function syncVentesJournalDateInputsFromPdj(workDate, { force = false } = {}) {
   const site = String(currentSiteId() || "");
   const d = String(workDate || "").trim().slice(0, 10);
@@ -2067,9 +2089,56 @@ function syncVentesJournalDateInputsFromPdj(workDate, { force = false } = {}) {
   ventesDomPdjStamp = stampKey;
   const vDateEl = document.getElementById("v-date");
   if (vDateEl) vDateEl.value = d;
-  const filterDateEl = document.getElementById("orders-filter-date");
-  if (filterDateEl) filterDateEl.value = d;
+  const filterStartEl = document.getElementById("orders-filter-date-start");
+  const filterEndEl = document.getElementById("orders-filter-date-end");
+  if (filterStartEl) filterStartEl.value = d;
+  if (filterEndEl) filterEndEl.value = d;
+  const boissonsStartEl = document.getElementById("pdj-boissons-date-start");
+  const boissonsEndEl = document.getElementById("pdj-boissons-date-end");
+  if (boissonsStartEl) boissonsStartEl.value = d;
+  if (boissonsEndEl) boissonsEndEl.value = d;
   syncFinalizeButtonJournalState();
+}
+
+function dateRangeFromDom(startId, endId, fallbackIso) {
+  let start = document.getElementById(startId)?.value?.trim().slice(0, 10) || "";
+  let end = document.getElementById(endId)?.value?.trim().slice(0, 10) || "";
+  const fallback = String(fallbackIso || "").slice(0, 10);
+  if (!start && !end) {
+    start = fallback;
+    end = fallback;
+  } else if (start && !end) {
+    end = start;
+  } else if (!start && end) {
+    start = end;
+  }
+  if (start > end) {
+    const tmp = start;
+    start = end;
+    end = tmp;
+  }
+  return { start, end };
+}
+
+function ordersPeriod() {
+  return dateRangeFromDom("orders-filter-date-start", "orders-filter-date-end", pdjCalendarDate());
+}
+
+function pdjBoissonsPeriod() {
+  return dateRangeFromDom("pdj-boissons-date-start", "pdj-boissons-date-end", pdjCalendarDate());
+}
+
+function ventesForDateRange(start, end) {
+  return recordsForSite(state.ventes).filter((v) => {
+    const d = saleDateValue(v);
+    return d >= start && d <= end;
+  });
+}
+
+function formatPeriodLabel(start, end) {
+  return start === end
+    ? formatDateDdMmYyyy(start)
+    : `${formatDateDdMmYyyy(start)} au ${formatDateDdMmYyyy(end)}`;
 }
 
 /** Met a jour les champs date des ventes / commandes selon pdjCalendarDate() (journee serveur incluse). */
@@ -2687,6 +2756,7 @@ function applyRoleVisibility() {
     }
   }
   maybeAdjustParamsSubTab();
+  updatePdjRoleVisibility();
 }
 
 function renderTopbar() {
@@ -2784,6 +2854,57 @@ function setCaisseInnerTab(tab) {
   caisseInnerTab = tab === "historique" ? "recouvrement" : tab;
   syncCaisseInnerPanels();
   syncNavActiveState();
+}
+
+function setPdjSubTab(tab, opts = {}) {
+  const allowed = ["synthese", "cloture", "ventes"];
+  pdjSubTab = allowed.includes(tab) ? tab : "synthese";
+  const isSynthese = pdjSubTab === "synthese";
+  const isCloture = pdjSubTab === "cloture";
+  const isVentes = pdjSubTab === "ventes";
+  document.getElementById("pdj-panel-synthese")?.classList.toggle("hidden", !isSynthese);
+  document.getElementById("pdj-panel-cloture")?.classList.toggle("hidden", !isCloture);
+  document.getElementById("pdj-panel-ventes")?.classList.toggle("hidden", !isVentes);
+  document.querySelectorAll("[data-subtab-pdj]").forEach((btn) => {
+    const active = btn.dataset.subtabPdj === pdjSubTab;
+    btn.classList.toggle("active", active);
+    btn.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  if (opts.scrollTop && currentPage === "pdj") {
+    document.getElementById("page-pdj")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+}
+
+function suggestPdjSubTabForDay() {
+  const dStr = pdjCalendarDate();
+  const closed = stockCheckForSiteDate(dStr, currentSiteId());
+  if (isPdjBrowseConsultationOnly() && closed) return "synthese";
+  if (closed) return "synthese";
+  if (PDJ_REQUIRE_CASH_OPENING && dayBookNeedsCashOpening(dayBookFor(dStr, currentSiteId()))) return "cloture";
+  return pdjSubTab || "synthese";
+}
+
+function updatePdjSubTabHints() {
+  const clotureBtn = document.querySelector('[data-subtab-pdj="cloture"]');
+  if (!clotureBtn) return;
+  const dStr = pdjCalendarDate();
+  const closed = stockCheckForSiteDate(dStr, currentSiteId());
+  const needsOpen = PDJ_REQUIRE_CASH_OPENING && dayBookNeedsCashOpening(dayBookFor(dStr, currentSiteId()));
+  if (isPdjBrowseConsultationOnly()) {
+    clotureBtn.title = "Consultation seule — journée clôturée";
+    clotureBtn.classList.remove("pdj-tab-attention");
+    return;
+  }
+  if (closed) {
+    clotureBtn.removeAttribute("title");
+    clotureBtn.classList.remove("pdj-tab-attention");
+  } else if (needsOpen) {
+    clotureBtn.title = "Ouverture de caisse requise";
+    clotureBtn.classList.add("pdj-tab-attention");
+  } else {
+    clotureBtn.title = "Vérification stock et clôture";
+    clotureBtn.classList.add("pdj-tab-attention");
+  }
 }
 
 function setVentesSubTab(tab) {
@@ -3272,7 +3393,11 @@ function navigate(page, opts = {}) {
   renderHero();
   renderSiteSwitcher();
   if (page === "home") renderDashboard();
-  if (page === "pdj") renderPointDuJour();
+  if (page === "pdj") {
+    if (!opts.keepPdjSubTab) pdjSubTab = suggestPdjSubTabForDay();
+    setPdjSubTab(pdjSubTab);
+    renderPointDuJour();
+  }
   if (page === "ventes") { syncPdjWorkDateInput(); setVentesSubTab(ventesSubTab); renderVentesPage(); }
   if (page === "stock") { setStockSubTab(stockSubTab); renderStock(); }
   if (page === "charges") renderCharges();
@@ -3608,9 +3733,20 @@ function renderPointDuJour() {
   const pdjDateEl = document.getElementById("pdj-date");
   if (pdjDateEl) {
     const t = today();
+    const consultLabel = isPdjBrowseConsultationOnly() ? " · consultation seule" : "";
     pdjDateEl.textContent = dStr !== t
-      ? `Journée du ${formatDateDdMmYyyy(dStr)} · aujourd'hui ${formatDateDdMmYyyy(new Date())}`
-      : formatDateDdMmYyyy(new Date());
+      ? `Journée du ${formatDateDdMmYyyy(dStr)}${consultLabel} · aujourd'hui ${formatDateDdMmYyyy(new Date())}`
+      : `${formatDateDdMmYyyy(new Date())}${consultLabel}`;
+  }
+  const consultBanner = document.getElementById("pdj-consultation-banner");
+  if (consultBanner) {
+    if (isPdjBrowseConsultationOnly()) {
+      consultBanner.classList.remove("hidden");
+      consultBanner.innerHTML = `<strong>Consultation seule</strong> — cette journée est déjà clôturée. Vous pouvez consulter et imprimer le rapport ; pour modifier, un administrateur doit d'abord <strong>réouvrir</strong> la journée.`;
+    } else {
+      consultBanner.classList.add("hidden");
+      consultBanner.innerHTML = "";
+    }
   }
   renderCashOpeningPanel();
   document.getElementById("pdj-ca").textContent = `${fmt(caEncaisseTotal)} FCFA`;
@@ -3628,7 +3764,10 @@ function renderPointDuJour() {
   document.getElementById("pdj-remises").textContent = `${fmt(remisesJour)} FCFA`;
   document.getElementById("pdj-ventes-count").textContent = formatVentesCountFr(ventesJour.length);
 
-  renderSalesByProduct(ventesJour);
+  const { start: boissonsStart, end: boissonsEnd } = pdjBoissonsPeriod();
+  renderSalesByProduct(ventesForDateRange(boissonsStart, boissonsEnd), {
+    periodLabel: formatPeriodLabel(boissonsStart, boissonsEnd),
+  });
   renderBreakdown(
     "pdj-pay-chart",
     totalsJourAvecRecouvrement,
@@ -3674,8 +3813,11 @@ function renderPointDuJour() {
   renderDailyStockCheck();
   renderPastClosuresForReopen();
   renderClosedDaysArchive();
+  updatePdjRoleVisibility();
   updateCloseDayButtonLabel();
   updatePdjPrintButtons();
+  updatePdjSubTabHints();
+  setPdjSubTab(pdjSubTab);
 }
 
 function renderClosedDaysArchive() {
@@ -3930,8 +4072,10 @@ async function recordCashOpening() {
   }
   await persistState({ dayBooks: state.dayBooks, pdjWorkDateBySite: pdjMapOpen });
   delete pdjOpeningCashDraftBySiteDate[pdjOpeningCashDraftKey(siteId, dateStr)];
+  pdjSubTab = "synthese";
   renderPointDuJour();
-  showToast("Ouverture de caisse enregistrée. Le point du jour est disponible.");
+  setPdjSubTab("synthese");
+  showToast("Ouverture de caisse enregistrée. Consultez la synthèse ou clôturez en fin de journée.");
 }
 
 function renderCashOpeningPanel() {
@@ -4141,19 +4285,29 @@ function htmlProductRankLists(top, bottom, showFlop, { flopHint } = {}) {
     </div>`;
 }
 
-function renderSalesByProduct(ventesJour) {
+function renderSalesByProduct(ventesList, { periodLabel = "" } = {}) {
   const container = document.getElementById("pdj-sales-by-product");
   const countNode = document.getElementById("pdj-sales-count");
   if (!container) return;
-  const aggregated = aggregateVentesByArticle(ventesJour);
+  const aggregated = aggregateVentesByArticle(ventesList);
   const rows = aggregated.sort((a, b) => b.ca - a.ca);
-  if (countNode) countNode.textContent = `${rows.length} article(s)`;
+  const totalBtl = rows.reduce((sum, r) => sum + r.bouteilles, 0);
+  const totalCa = rows.reduce((sum, r) => sum + r.ca, 0);
+  if (countNode) {
+    countNode.textContent = periodLabel
+      ? `${rows.length} article(s) · ${periodLabel}`
+      : `${rows.length} article(s)`;
+  }
   if (!rows.length) {
-    container.innerHTML = emptyState("Aucune vente", "Les boissons vendues aujourd'hui apparaîtront ici.");
+    const hint = periodLabel
+      ? `Aucune vente entre le ${periodLabel}.`
+      : "Les boissons vendues apparaitront ici.";
+    container.innerHTML = emptyState("Aucune vente", hint);
     return;
   }
   const { top, bottom, showFlop } = topBottomByBottles(aggregated, { hideFlopWhenSmall: true });
-  const rankHtml = htmlProductRankLists(top, bottom, showFlop, { flopHint: "ce jour" });
+  const rankHint = periodLabel ? `sur la periode (${periodLabel})` : "ce jour";
+  const rankHtml = htmlProductRankLists(top, bottom, showFlop, { flopHint: rankHint });
   container.innerHTML = `
     ${rankHtml}
     <p class="muted" style="margin:16px 0 10px;font-size:0.82rem">Détail par article (tri CA net)</p>
@@ -4174,10 +4328,88 @@ function renderSalesByProduct(ventesJour) {
             <td style="text-align:right;color:#1976d2">${fmt(r.bouteilles)}</td>
             <td style="text-align:right"><strong>${fmt(r.ca)} FCFA</strong></td>
           </tr>`).join("")}
+          <tr style="font-weight:700;background:#f5f5f5">
+            <td colspan="2">TOTAL</td>
+            <td style="text-align:right;color:#1976d2">${fmt(totalBtl)}</td>
+            <td style="text-align:right">${fmt(totalCa)} FCFA</td>
+          </tr>
         </tbody>
       </table>
     </div>
   `;
+}
+
+function printBoissonsVenduesPeriod() {
+  const { start, end } = pdjBoissonsPeriod();
+  const periodLabel = formatPeriodLabel(start, end);
+  const ventesList = ventesForDateRange(start, end);
+  const aggregated = aggregateVentesByArticle(ventesList);
+  const rows = aggregated.sort((a, b) => b.ca - a.ca);
+  if (!rows.length) {
+    showToast(`Aucune boisson vendue sur la periode ${periodLabel}.`);
+    return;
+  }
+  const site = currentSite();
+  const totalBtl = rows.reduce((sum, r) => sum + r.bouteilles, 0);
+  const totalCa = rows.reduce((sum, r) => sum + r.ca, 0);
+  const { top, bottom, showFlop } = topBottomByBottles(aggregated, { hideFlopWhenSmall: true });
+  const topRows = top.map((r, i) => `<tr><td>${i + 1}</td><td>${escapeHtml(r.article)}</td><td style="text-align:right">${fmt(r.bouteilles)}</td><td style="text-align:right">${fmt(r.ca)} FCFA</td></tr>`).join("");
+  const flopRows = showFlop
+    ? bottom.map((r, i) => `<tr><td>${i + 1}</td><td>${escapeHtml(r.article)}</td><td style="text-align:right">${fmt(r.bouteilles)}</td><td style="text-align:right">${fmt(r.ca)} FCFA</td></tr>`).join("")
+    : "";
+  const detailRows = rows.map((r) => `<tr>
+    <td>${escapeHtml(r.article)}</td>
+    <td>${escapeHtml(r.cat)}</td>
+    <td style="text-align:right">${fmt(r.bouteilles)}</td>
+    <td style="text-align:right">${fmt(r.ca)} FCFA</td>
+  </tr>`).join("");
+  const w = window.open("", "_blank", "width=900,height=900");
+  if (!w) {
+    showToast("Impossible d'ouvrir l'apercu du rapport.");
+    return;
+  }
+  w.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>Boissons vendues ${escapeHtml(periodLabel)}</title>
+  <style>
+    body{font-family:Arial,sans-serif;color:#111;padding:24px;font-size:12px}
+    h1,h2,h3{margin:0 0 8px}
+    .meta{color:#555;font-size:11px;line-height:1.45}
+    .summary{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:14px 0}
+    .box{border:1px solid #111;padding:10px 12px}
+    .box strong{display:block;font-size:16px;margin-top:4px}
+    table{width:100%;border-collapse:collapse;margin:12px 0 18px;font-size:11px}
+    th,td{border:1px solid #ddd;padding:6px 8px;text-align:left}
+    th{background:#eee}
+    td:nth-child(n+3){text-align:right}
+    .cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+    ${PDJ_PREVIEW_PRINT_CSS}
+    @media print{body{padding:12px}}
+  </style></head><body>
+  ${pdjPreviewPrintToolbarHtml()}
+  <header style="display:flex;justify-content:space-between;gap:16px;border-bottom:2px solid #111;padding-bottom:12px;margin-bottom:8px">
+    <div><h1>${escapeHtml(site?.nom || "Maquis")}</h1><p class="meta">${escapeHtml(site?.ville || "")} ${escapeHtml(site?.pays || "")}</p></div>
+    <div><h2>Boissons vendues</h2><p class="meta">Periode : ${escapeHtml(periodLabel)}<br>Imprime le ${escapeHtml(formatDateTimeDdMmYyyy(new Date()))}</p></div>
+  </header>
+  <div class="summary">
+    <div class="box">Articles distincts<strong>${fmt(rows.length)}</strong></div>
+    <div class="box">Quantite totale (btl)<strong>${fmt(totalBtl)}</strong></div>
+    <div class="box">CA net total<strong>${fmt(totalCa)} FCFA</strong></div>
+  </div>
+  <div class="cols">
+    <div><h3 style="font-size:12px;color:#1565c0">Plus vendues (qté)</h3>
+      <table><thead><tr><th>#</th><th>Article</th><th>Qté</th><th>CA</th></tr></thead><tbody>${topRows}</tbody></table>
+    </div>
+    ${showFlop ? `<div><h3 style="font-size:12px;color:#c62828">Moins vendues (qté)</h3>
+      <table><thead><tr><th>#</th><th>Article</th><th>Qté</th><th>CA</th></tr></thead><tbody>${flopRows}</tbody></table></div>` : ""}
+  </div>
+  <h3 style="font-size:13px;margin-top:8px">Detail par article (tri CA net)</h3>
+  <table>
+    <thead><tr><th>Article</th><th>Categorie</th><th>Qté (btl)</th><th>CA net</th></tr></thead>
+    <tbody>${detailRows}
+      <tr style="font-weight:700;background:#f0f0f0"><td colspan="2">TOTAL</td><td style="text-align:right">${fmt(totalBtl)}</td><td style="text-align:right">${fmt(totalCa)} FCFA</td></tr>
+    </tbody>
+  </table>
+  </body></html>`);
+  w.document.close();
 }
 
 function stockCheckForSiteDate(dateStr, siteId = currentSiteId()) {
@@ -4347,7 +4579,13 @@ function renderDailyStockCheck() {
   const container = document.getElementById("pdj-stock-check");
   const button = document.getElementById("close-day-btn");
   if (!container || !button) return;
-  const superadminCorrection = Boolean(closed && canAnyAdmin());
+  if (!canManagePdjAccounting()) {
+    container.innerHTML = "";
+    button.disabled = true;
+    return;
+  }
+  const consultationOnly = isPdjBrowseConsultationOnly() && Boolean(closed);
+  const superadminCorrection = Boolean(closed && canAnyAdmin() && !consultationOnly);
   const openingBlocked = PDJ_REQUIRE_CASH_OPENING && dayBookNeedsCashOpening(dayBook);
   const isPastDate = dStr !== today();
   const pendingBanner = closeBlockedByPending
@@ -4361,13 +4599,22 @@ function renderDailyStockCheck() {
     : "";
   button.textContent = superadminCorrection
     ? "Mettre à jour la clôture"
-    : closed && canManagePdjAccounting() && !canAnyAdmin()
+    : consultationOnly || (closed && canManagePdjAccounting() && !canAnyAdmin())
       ? "Journée clôturée"
       : closed
         ? "Revérifier la journée"
         : openingBlocked && !(isPastDate && canAnyAdmin()) && canManagePdjAccounting()
           ? "Ouverture requise"
           : "Clôturer la journée";
+  if (consultationOnly) {
+    button.disabled = true;
+    button.title = "Journée clôturée — consultation seule";
+    container.innerHTML = htmlPdjClosedStockCheckReadOnly(
+      closed,
+      "Consultation seule — cette journée est déjà clôturée. Utilisez « Imprimer clôture » ou revenez au jour comptable actuel pour travailler sur une autre date.",
+    );
+    return;
+  }
   if (!items.length) {
     container.innerHTML = emptyState("Aucun stock", "Ajoutez des articles avant de faire le point de fermeture.");
     button.disabled = closeBlockedByPending;
@@ -5185,13 +5432,14 @@ function openOrderDetailModal(orderKey) {
   openModal("modal-order-detail");
 }
 
-/** Liste et métadonnées alignées sur les filtres « Gestion des commandes » (date, statut, type). */
+/** Liste et métadonnées alignées sur les filtres « Gestion des commandes » (période, statut, type). */
 function computeOrdersManagementList() {
-  const date = document.getElementById("orders-filter-date")?.value || pdjCalendarDate();
+  const { start, end } = ordersPeriod();
   const status = document.getElementById("orders-filter-status")?.value || "all";
   const type = document.getElementById("orders-filter-type")?.value || "all";
+  const journalDay = pdjCalendarDate();
   const activeOrders = recordsForSite(state.commandes);
-  const salesToday = recordsForSite(state.ventes).filter((vente) => saleDateValue(vente) === date);
+  const salesToday = recordsForSite(state.ventes).filter((vente) => saleDateValue(vente) === journalDay);
   const paidOrders = paidOrdersFromSales();
   const baseOrders = status === "Paye"
     ? paidOrders
@@ -5199,21 +5447,25 @@ function computeOrdersManagementList() {
       ? [...activeOrders, ...paidOrders]
       : activeOrders;
   const orders = baseOrders.filter((order) => {
-    const dateOk = !date || saleDateValue(order) === date;
+    const orderDay = saleDateValue(order);
+    const dateOk = orderDay >= start && orderDay <= end;
     const statusOk = status === "all" || orderStatus(order) === status;
     const typeOk = type === "all" || orderType(order) === type;
     return dateOk && statusOk && typeOk;
   }).sort((a, b) => String(b.date).localeCompare(String(a.date)));
-  return { orders, date, status, type, activeOrders, salesToday };
+  return { orders, start, end, status, type, activeOrders, salesToday, journalDay };
 }
 
 function printOrdersManagementList() {
-  const { orders, date, status, type } = computeOrdersManagementList();
+  const { orders, start, end, status, type } = computeOrdersManagementList();
   if (!orders.length) {
-    showToast("Aucune commande a imprimer pour ces filtres.");
+    showToast("Aucune commande a imprimer pour cette periode.");
     return;
   }
   const site = currentSite();
+  const periodLab = start === end
+    ? formatDateDdMmYyyy(start)
+    : `${formatDateDdMmYyyy(start)} au ${formatDateDdMmYyyy(end)}`;
   const statusLab = status === "all" ? "Tous les statuts" : escapeHtml(status);
   const typeLab = type === "all" ? "Tous les types" : type === "a-emporter" ? "A emporter" : "Sur place";
   const totalListe = orders.reduce((sum, order) => sum + orderTotal(order), 0);
@@ -5235,16 +5487,16 @@ function printOrdersManagementList() {
     showToast("Impossible d'ouvrir l'impression.");
     return;
   }
-  const filtreMeta = `Date : ${escapeHtml(formatDateDdMmYyyy(date))} &mdash; Statut : ${statusLab} &mdash; Type : ${escapeHtml(typeLab)}`;
+  const filtreMeta = `Periode : ${escapeHtml(periodLab)} &mdash; Statut : ${statusLab} &mdash; Type : ${escapeHtml(typeLab)}`;
   const detailAppendix = orders.map((o) => orderPrintDetailBlock(o)).join("");
-  ticketWindow.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>Commandes filtrées</title><style>body{font-family:Arial,sans-serif;color:#111;padding:28px}header{display:flex;justify-content:space-between;gap:18px;border-bottom:2px solid #111;padding-bottom:14px;margin-bottom:18px}h1,h2,p{margin:0 0 8px}.meta{color:#555;font-size:13px;line-height:1.45}.summary{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:16px 0}.box{border:1px solid #111;padding:12px}.box strong{display:block;font-size:18px;margin-top:4px}table{width:100%;border-collapse:collapse;margin-top:12px;font-size:12px}th,td{border-bottom:1px solid #ddd;padding:7px 6px;text-align:left;vertical-align:top}th{background:#f2f2f2}td:nth-child(7){text-align:right}.order-art-cell{max-width:280px;font-size:10.5px;line-height:1.35}@media print{body{padding:0}table{font-size:11px}}</style></head><body><header><div><h1>${escapeHtml(site?.nom || "Maquis")}</h1><p>${escapeHtml(site?.ville || "")} ${escapeHtml(site?.pays || "")}</p><p class="meta">${filtreMeta}</p></div><div><h2>Gestion des commandes</h2><p class="meta">Imprimé le ${escapeHtml(formatDateTimeDdMmYyyy(new Date()))}</p></div></header><div class="summary"><div class="box">Lignes affichées<strong>${fmt(orders.length)}</strong></div><div class="box">Total (liste)<strong>${fmt(totalListe)} FCFA</strong></div><div class="box">Journée affichée<strong>${escapeHtml(formatDateDdMmYyyy(date))}</strong></div></div><table><thead><tr><th>Numéro</th><th>Table / client</th><th>Serveur</th><th>Statut</th><th>Type</th><th>Articles (résumé)</th><th>Montant</th><th>Heure</th></tr></thead><tbody>${rows}</tbody></table><h3 style="margin-top:22px;font-size:14px;border-top:2px solid #111;padding-top:14px">Détail par commande</h3>${detailAppendix}<script>window.onload=function(){window.print();}</script></body></html>`);
+  ticketWindow.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>Commandes filtrées</title><style>body{font-family:Arial,sans-serif;color:#111;padding:28px}header{display:flex;justify-content:space-between;gap:18px;border-bottom:2px solid #111;padding-bottom:14px;margin-bottom:18px}h1,h2,p{margin:0 0 8px}.meta{color:#555;font-size:13px;line-height:1.45}.summary{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:16px 0}.box{border:1px solid #111;padding:12px}.box strong{display:block;font-size:18px;margin-top:4px}table{width:100%;border-collapse:collapse;margin-top:12px;font-size:12px}th,td{border-bottom:1px solid #ddd;padding:7px 6px;text-align:left;vertical-align:top}th{background:#f2f2f2}td:nth-child(7){text-align:right}.order-art-cell{max-width:280px;font-size:10.5px;line-height:1.35}${PDJ_PREVIEW_PRINT_CSS}@media print{body{padding:0}table{font-size:11px}}</style></head><body>${pdjPreviewPrintToolbarHtml()}<header><div><h1>${escapeHtml(site?.nom || "Maquis")}</h1><p>${escapeHtml(site?.ville || "")} ${escapeHtml(site?.pays || "")}</p><p class="meta">${filtreMeta}</p></div><div><h2>Gestion des commandes</h2><p class="meta">Imprimé le ${escapeHtml(formatDateTimeDdMmYyyy(new Date()))}</p></div></header><div class="summary"><div class="box">Lignes affichées<strong>${fmt(orders.length)}</strong></div><div class="box">Total (liste)<strong>${fmt(totalListe)} FCFA</strong></div><div class="box">Période<strong>${escapeHtml(periodLab)}</strong></div></div><table><thead><tr><th>Numéro</th><th>Table / client</th><th>Serveur</th><th>Statut</th><th>Type</th><th>Articles (résumé)</th><th>Montant</th><th>Heure</th></tr></thead><tbody>${rows}</tbody></table><h3 style="margin-top:22px;font-size:14px;border-top:2px solid #111;padding-top:14px">Détail par commande</h3>${detailAppendix}</body></html>`);
   ticketWindow.document.close();
 }
 
 function renderOrdersManagement() {
-  const { orders, date, activeOrders, salesToday } = computeOrdersManagementList();
+  const { orders, activeOrders, salesToday, journalDay } = computeOrdersManagementList();
 
-  document.getElementById("orders-today-kpi").textContent = String(activeOrders.filter((order) => saleDateValue(order) === date).length + salesToday.length);
+  document.getElementById("orders-today-kpi").textContent = String(activeOrders.filter((order) => saleDateValue(order) === journalDay).length + salesToday.length);
   document.getElementById("orders-pending-kpi").textContent = String(activeOrders.filter((order) => orderStatus(order) === "En attente").length);
   document.getElementById("orders-ca-kpi").textContent = `${fmt(salesToday.reduce((sum, vente) => sum + calcNet(vente), 0))} FCFA`;
   document.getElementById("orders-management-table").innerHTML = orders.length
@@ -7434,6 +7686,7 @@ async function syncStateSilently() {
   if (currentPage === "pdj") {
     if (!skipPdjFullRender) {
       renderPointDuJour();
+      setPdjSubTab(pdjSubTab);
     } else {
       // #region agent log
       const _si = Date.now();
@@ -9660,11 +9913,13 @@ async function closeAccountingDay() {
   }
   delete pdjClosingCashDraftBySiteDate[pdjOpeningCashDraftKey(sidClose, dStr)];
   setPdjBrowseDate(dStr);
+  pdjSubTab = "cloture";
   renderStock();
   renderDashboard();
   renderPointDuJour();
+  setPdjSubTab("cloture", { scrollTop: true });
   const cashHint = cashEcartEspeces === 0 ? "" : ` Écart espèces : ${cashEcartEspeces > 0 ? "+" : ""}${fmt(cashEcartEspeces)} FCFA.`;
-  showToast(`Journée du ${formatDateDdMmYyyy(dStr)} clôturée.${cashHint} Vous pouvez imprimer le rapport ci-dessous.`);
+  showToast(`Journée du ${formatDateDdMmYyyy(dStr)} clôturée.${cashHint} Onglet Clôture : imprimez le rapport si besoin.`);
 }
 
 async function saveCharge() {
@@ -10141,26 +10396,47 @@ function printInvoice(factureNumber) {
 
 function updatePdjPrintButtons() {
   const headerBtn = document.getElementById("print-pdj-control-btn");
+  const serveuseBtn = document.getElementById("print-pdj-serveuse-btn");
   const closureBtn = document.getElementById("print-closure-btn");
   const dStr = pdjCalendarDate();
   const closed = stockCheckForSiteDate(dStr, currentSiteId());
-  const canPrint = canManagePdjAccounting();
+  const canPrint = Boolean(sessionUser);
+  const label = closed
+    ? `Imprimer le point du ${formatDateDdMmYyyy(dStr)} (cloture)`
+    : `Imprimer le point du ${formatDateDdMmYyyy(dStr)} (controle)`;
   if (headerBtn) {
     headerBtn.classList.toggle("hidden", !canPrint);
-    headerBtn.textContent = closed
-      ? `Imprimer le point du ${formatDateDdMmYyyy(dStr)} (cloture)`
-      : `Imprimer le point du ${formatDateDdMmYyyy(dStr)} (controle)`;
+    headerBtn.textContent = label;
+  }
+  if (serveuseBtn) {
+    serveuseBtn.textContent = closed
+      ? `Imprimer le point du ${formatDateDdMmYyyy(dStr)}`
+      : "Imprimer le point du jour";
   }
   if (closureBtn) {
-    closureBtn.classList.toggle("hidden", !closed || !canPrint);
+    closureBtn.classList.toggle("hidden", !closed || !canManagePdjAccounting());
   }
 }
 
+/** Barre d'aperçu PDJ : pas d'impression auto, bouton Imprimer à côté. */
+function pdjPreviewPrintToolbarHtml() {
+  return `<div class="print-toolbar no-print">
+    <span>Apercu du rapport — utilisez <strong>Imprimer</strong> pour lancer l'impression.</span>
+    <button type="button" onclick="window.print()">Imprimer</button>
+  </div>`;
+}
+
+const PDJ_PREVIEW_PRINT_CSS = `
+    .print-toolbar { position: sticky; top: 0; z-index: 1000; display: flex; align-items: center;
+      justify-content: space-between; flex-wrap: wrap; gap: 10px; padding: 10px 14px;
+      margin: -16px -16px 14px; background: #eef3f8; border-bottom: 1px solid #b8c5d4; font-size: 12px; }
+    .print-toolbar button { padding: 8px 18px; font-size: 13px; font-weight: 600; cursor: pointer;
+      border: none; border-radius: 6px; background: #1565c0; color: #fff; }
+    .print-toolbar button:hover { background: #0d47a1; }
+    @media print { .no-print { display: none !important; } }`;
+
 function printPdjDayControl() {
-  if (!canManagePdjAccounting()) {
-    showToast("Impression reservee au gerant ou a un administrateur.");
-    return;
-  }
+  if (!sessionUser) return;
   const reportDateStr = pdjCalendarDate();
   const closed = stockCheckForSiteDate(reportDateStr, currentSiteId());
   if (closed) {
@@ -10276,8 +10552,10 @@ function printPdjProvisionalReport(reportDateStr) {
     .summary-box { border: 2px solid #111; padding: 8px 14px; margin-top: 0; }
     .summary-box .row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 12px; border-bottom: 1px solid #eee; }
     .footer { margin-top: 14px; font-size: 9px; color: #aaa; text-align: center; }
+    ${PDJ_PREVIEW_PRINT_CSS}
     @media print { body { padding: 8px; } }
   </style></head><body>
+  ${pdjPreviewPrintToolbarHtml()}
   <div class="header">
     <div>
       <h1>${escapeHtml(site?.nom || "Maquis")}</h1>
@@ -10325,12 +10603,11 @@ function printPdjProvisionalReport(reportDateStr) {
     </div>
   </div>
   <div class="footer">${escapeHtml(site?.nom || "")} — Point provisoire — ${dateLabel}</div>
-  <script>window.onload = () => window.print();<\/script>
   </body></html>`;
 
   const w = window.open("", "_blank");
   if (!w) {
-    showToast("Impossible d'ouvrir la fenetre d'impression.");
+    showToast("Impossible d'ouvrir l'apercu du rapport.");
     return;
   }
   w.document.write(html);
@@ -10466,8 +10743,10 @@ function printDayClosure(reportDateStr) {
     .summary-box .row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 12px; border-bottom: 1px solid #eee; }
     .summary-box .row:last-child { border-bottom: none; font-weight: 700; font-size: 13px; }
     .footer { margin-top: 14px; font-size: 9px; color: #aaa; text-align: center; }
+    ${PDJ_PREVIEW_PRINT_CSS}
     @media print { body { padding: 8px; } }
   </style></head><body>
+  ${pdjPreviewPrintToolbarHtml()}
 
   <div class="header">
     <div>
@@ -10540,11 +10819,10 @@ function printDayClosure(reportDateStr) {
   </div>
 
   <div class="footer">${escapeHtml(site?.nom || "Maquis Manager")} &mdash; Fiche de clôture générée automatiquement &mdash; ${escapeHtml(formatDateDdMmYyyy(dStr))}</div>
-  <script>window.onload = () => window.print();<\/script>
   </body></html>`;
 
   const w = window.open("", "_blank");
-  if (!w) { showToast("Impossible d'ouvrir la fenetre d'impression."); return; }
+  if (!w) { showToast("Impossible d'ouvrir l'apercu du rapport."); return; }
   w.document.write(html);
   w.document.close();
 }
@@ -12485,6 +12763,7 @@ async function logout() {
   csrfToken = null;
   activeOrderId = null;
   pdjViewDateBySite = {};
+  pdjBrowseConsultationOnly = false;
   pendingFinalizeOrderId = null;
   pendingPreAuthToken = null;
   qrAlertCount = 0;
@@ -12720,7 +12999,7 @@ function attachEvents() {
     event.stopPropagation();
     openOrderDetailModal(detailBtn.getAttribute("data-order-details") || "");
   });
-  ["orders-filter-date", "orders-filter-status", "orders-filter-type"].forEach((id) => {
+  ["orders-filter-date-start", "orders-filter-date-end", "orders-filter-status", "orders-filter-type"].forEach((id) => {
     document.getElementById(id).addEventListener("change", renderOrdersManagement);
   });
   // Saisie rapide
@@ -13008,13 +13287,24 @@ document.getElementById("fab-btn").addEventListener("click", () => {
   });
   document.getElementById("print-closure-btn")?.addEventListener("click", printPdjDayControl);
   document.getElementById("print-pdj-control-btn")?.addEventListener("click", printPdjDayControl);
+  document.getElementById("print-pdj-boissons-btn")?.addEventListener("click", printBoissonsVenduesPeriod);
+  ["pdj-boissons-date-start", "pdj-boissons-date-end"].forEach((id) => {
+    document.getElementById(id)?.addEventListener("change", () => {
+      if (currentPage === "pdj") renderPointDuJour();
+    });
+  });
+  document.getElementById("print-pdj-serveuse-btn")?.addEventListener("click", printPdjDayControl);
   document.getElementById("pdj-work-date")?.addEventListener("change", () => {
     const raw = document.getElementById("pdj-work-date")?.value?.trim() || "";
-    setPdjBrowseDate(raw || null);
+    setPdjBrowseDate(raw || null, { consultationOnly: false });
     syncPdjWorkDateInput();
     renderTopbar();
     renderOrdersManagement();
-    if (currentPage === "pdj") renderPointDuJour();
+    if (currentPage === "pdj") {
+      pdjSubTab = suggestPdjSubTabForDay();
+      renderPointDuJour();
+      setPdjSubTab(pdjSubTab);
+    }
     if (currentPage === "ventes") renderVentesPage();
   });
   document.getElementById("pdj-closed-archive")?.addEventListener("click", (e) => {
@@ -13025,8 +13315,10 @@ document.getElementById("fab-btn").addEventListener("click", () => {
     }
     const browseBtn = e.target.closest("[data-pdj-browse-date]");
     if (browseBtn) {
-      setPdjBrowseDate(browseBtn.getAttribute("data-pdj-browse-date"));
+      setPdjBrowseDate(browseBtn.getAttribute("data-pdj-browse-date"), { consultationOnly: true });
+      pdjSubTab = suggestPdjSubTabForDay();
       renderPointDuJour();
+      setPdjSubTab(pdjSubTab);
       showToast(`Journée du ${formatDateDdMmYyyy(pdjCalendarDate())} affichée.`);
       return;
     }
@@ -13042,6 +13334,10 @@ document.getElementById("fab-btn").addEventListener("click", () => {
   document.getElementById("close-day-btn").addEventListener("click", () => {
     if (!canManagePdjAccounting()) {
       showToast("Clôture réservée au gérant ou à un administrateur.");
+      return;
+    }
+    if (isPdjBrowseConsultationOnly()) {
+      showToast("Consultation seule : cette journée est déjà clôturée.");
       return;
     }
     const dWork = pdjCalendarDate();
@@ -13207,6 +13503,11 @@ document.getElementById("fab-btn").addEventListener("click", () => {
   document.querySelectorAll(".nav-btn").forEach((button) => button.addEventListener("click", () => handleNavButtonClick(button)));
   bindMobileMoreSheet();
   document.getElementById("page-pdj")?.addEventListener("click", (event) => {
+    const pdjTab = event.target.closest("[data-subtab-pdj]");
+    if (pdjTab) {
+      setPdjSubTab(pdjTab.dataset.subtabPdj || "synthese");
+      return;
+    }
     if (event.target.closest("#pdj-opening-submit")) recordCashOpening().catch(handleApiError);
   });
   document.getElementById("page-pdj")?.addEventListener("input", (event) => {

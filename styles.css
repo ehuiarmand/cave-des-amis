@@ -1137,7 +1137,9 @@ textarea { font: inherit; }
 .admin-only.hidden-by-role,
 .any-admin.hidden-by-role,
 .superadmin-only.hidden-by-role,
-.global-superadmin-only.hidden-by-role {
+.global-superadmin-only.hidden-by-role,
+.pdj-accounting-only.hidden-by-role,
+.pdj-serveuse-print-only.hidden-by-role {
   display: none !important;
 }
 
@@ -2058,6 +2060,30 @@ textarea { font: inherit; }
 
 .pdj-detail-head { margin-top: 18px; margin-bottom: 10px; }
 .pdj-detail-title { font-size: 1rem; }
+
+.pdj-subtabs {
+  margin-top: 12px;
+  margin-bottom: 4px;
+}
+
+.pdj-panel {
+  padding-top: 8px;
+}
+
+.pdj-panel.hidden {
+  display: none !important;
+}
+
+.pdj-tab-attention:not(.active) {
+  border-color: rgba(211, 78, 63, 0.55);
+  color: #c54f41;
+}
+
+@media (max-width: 720px) {
+  .pdj-kpis {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
 
 .stock-kpi-bar {
   display: grid;

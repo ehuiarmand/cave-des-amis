@@ -135,6 +135,7 @@
             </div>
             <div class="pdj-head-meta">
               <span id="pdj-date" class="section-meta"></span>
+              <div id="pdj-consultation-banner" class="inline-card hidden" style="margin-top:8px;padding:10px 12px;font-size:0.82rem;line-height:1.45;border-left:3px solid var(--mm-primary);text-align:left;max-width:440px"></div>
               <button type="button" id="print-pdj-control-btn" class="btn btn-outline hidden" style="margin-top:10px" title="Imprimer le point du jour pour controle">Imprimer le point du jour</button>
               <div class="superadmin-only pdj-superadmin-date-banner" id="pdj-work-date-row">
                 <strong style="display:block;font-size:0.82rem;margin-bottom:6px;color:var(--mm-primary-dark)">Super administrateur — journée à traiter</strong>
@@ -147,7 +148,12 @@
               </div>
             </div>
           </div>
-          <div id="pdj-cash-opening" class="pdj-cash-opening"></div>
+          <div class="tabs page-subtabs pdj-subtabs" role="tablist" aria-label="Point du jour">
+            <button type="button" class="tab active" data-subtab-pdj="synthese" role="tab" aria-selected="true">Synthèse</button>
+            <button type="button" class="tab" data-subtab-pdj="cloture" role="tab" aria-selected="false">Clôture</button>
+            <button type="button" class="tab" data-subtab-pdj="ventes" role="tab" aria-selected="false">Ventes</button>
+          </div>
+          <div id="pdj-panel-synthese" class="pdj-panel">
           <div id="pdj-main-wrap" class="pdj-main-wrap">
           <div id="pdj-locked-block" class="pdj-locked-block">
           <div class="pdj-kpis">
@@ -171,21 +177,48 @@
           </div>
           <div id="pdj-pay-chart"></div>
           <div class="section-head pdj-detail-head">
-            <h3 class="pdj-detail-title">Boissons vendues (par jour)</h3>
+            <h3 class="pdj-detail-title">Boissons vendues</h3>
             <span id="pdj-sales-count" class="section-meta">0 article(s)</span>
+          </div>
+          <div class="form-grid three-cols" style="margin-bottom:12px">
+            <div class="form-group">
+              <label for="pdj-boissons-date-start">Du</label>
+              <input id="pdj-boissons-date-start" type="date">
+            </div>
+            <div class="form-group">
+              <label for="pdj-boissons-date-end">Au</label>
+              <input id="pdj-boissons-date-end" type="date">
+            </div>
+            <div class="form-group">
+              <label>&nbsp;</label>
+              <button type="button" id="print-pdj-boissons-btn" class="btn btn-outline">Imprimer la periode</button>
+            </div>
           </div>
           <div id="pdj-sales-by-product"></div>
           </div>
-          <div class="section-head pdj-detail-head">
-            <h3 class="pdj-detail-title">Vérification stock fermeture</h3>
+          </div>
+          </div>
+          <div id="pdj-panel-cloture" class="pdj-panel hidden">
+          <div id="pdj-cash-opening" class="pdj-cash-opening pdj-accounting-only"></div>
+          <div id="pdj-serveuse-print-block" class="pdj-serveuse-print-only inline-card" style="margin-bottom:14px;padding:14px 16px">
+            <p class="eyebrow" style="margin-bottom:6px">Rapport du jour</p>
+            <p class="muted" style="font-size:0.88rem;line-height:1.45;margin:0 0 12px">
+              Imprimez la synthèse des ventes du jour (contrôle ou journée déjà clôturée). La clôture et la vérification stock sont réservées au gérant.
+            </p>
+            <button type="button" id="print-pdj-serveuse-btn" class="btn btn-outline">Imprimer le point du jour</button>
+          </div>
+          <div class="section-head pdj-detail-head pdj-accounting-only">
+            <h3 class="pdj-detail-title">Fermeture &amp; stock</h3>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
               <button id="close-day-btn" class="mini-btn" type="button">Clôturer la journée</button>
               <button id="print-closure-btn" class="btn btn-outline hidden" type="button">Imprimer le rapport de clôture</button>
             </div>
           </div>
-          <div id="pdj-stock-check"></div>
-          <div id="pdj-closed-archive"></div>
-          <div id="pdj-reopen-closures"></div>
+          <div id="pdj-stock-check" class="pdj-accounting-only"></div>
+          <div id="pdj-closed-archive" class="pdj-accounting-only"></div>
+          <div id="pdj-reopen-closures" class="pdj-accounting-only"></div>
+          </div>
+          <div id="pdj-panel-ventes" class="pdj-panel hidden">
           <div class="section-head pdj-detail-head">
             <h3 class="pdj-detail-title">Détail des ventes</h3>
             <span id="pdj-ventes-count" class="section-meta">0 vente</span>
@@ -323,8 +356,12 @@
           </div>
           <div class="form-grid four-cols">
             <div class="form-group">
-              <label for="orders-filter-date">Date</label>
-              <input id="orders-filter-date" type="date">
+              <label for="orders-filter-date-start">Du</label>
+              <input id="orders-filter-date-start" type="date">
+            </div>
+            <div class="form-group">
+              <label for="orders-filter-date-end">Au</label>
+              <input id="orders-filter-date-end" type="date">
             </div>
             <div class="form-group">
               <label for="orders-filter-status">Statut</label>
@@ -2212,6 +2249,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=191"></script>
+  <script src="./app-orders.js?v=197"></script>
 </body>
 </html>
