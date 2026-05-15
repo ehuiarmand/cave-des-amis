@@ -3089,6 +3089,10 @@ def _server_auto_close_site(site_id: str, d_str: str) -> None:
         day_book = next((b for b in day_books
                          if str(b.get("siteId", "")) == site_id
                          and str(b.get("date", "")).startswith(d_str)), None)
+        # Ne pas reclore un jour réouvert manuellement (évite la boucle réouverture↔auto-clôture)
+        if day_book and day_book.get("manualReopenedAt"):
+            print(f"[auto-cloture] Site {site_id} {d_str}: réouvert manuellement — clôture auto ignorée.", flush=True)
+            return
         opening_cash = float((day_book or {}).get("openingCashFcfa") or 0)
 
         especes_ventes = payment_totals.get("Espèces", payment_totals.get("EspÃ¨ces", 0.0))

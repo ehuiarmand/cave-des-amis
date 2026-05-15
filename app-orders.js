@@ -441,6 +441,8 @@ let pendingFinalizeOrderId = null;
 let liveSyncTimer = null;
 let appLiveClockTimer = null;
 let autoClotureTimer = null;
+/** Jours réouverts manuellement : la clôture auto ne les referme pas. Clé : "siteId|date" */
+const _autoClotureManualReopened = new Set();
 let qrAlertCount = 0;
 let knownQrOrderIds = new Set();
 let flashingQrOrderIds = new Set();
@@ -4315,9 +4317,15 @@ async function reopenAccountingDay(siteId, dateStr) {
   }
   revertStockCheckLedgerEffects(check);
   state.stockChecks = (state.stockChecks || []).filter((sc) => !(sc.siteId === siteId && sc.date === dateStr));
+  // Marquer le jour comme réouvert manuellement pour bloquer la clôture auto
+  _autoClotureManualReopened.add(`${siteId}|${dateStr}`);
+  const dayBookToMark = (state.dayBooks || []).find((b) => b.siteId === siteId && b.date === dateStr);
+  if (dayBookToMark) {
+    dayBookToMark.manualReopenedAt = new Date().toISOString();
+  }
   const pdjMapReopen = { ...(state.pdjWorkDateBySite || {}) };
   if (canAnyAdmin()) pdjMapReopen[String(siteId)] = dateStr;
-  await persistState({ stock: state.stock, stockChecks: state.stockChecks, pdjWorkDateBySite: pdjMapReopen });
+  await persistState({ stock: state.stock, stockChecks: state.stockChecks, dayBooks: state.dayBooks, pdjWorkDateBySite: pdjMapReopen });
   // Auto-positionner la date de travail sur la date recouverte
   const workDateEl = document.getElementById("pdj-work-date");
   if (workDateEl && canAnyAdmin()) {
@@ -8193,6 +8201,10 @@ function checkAutoClotureSchedule() {
   const dStr = workingDate();
   if (!dStr) return;
   if (stockCheckForSiteDate(dStr, currentSiteId())) return;
+  // Ne pas reclore un jour réouvert manuellement (boucle infinie réouverture→auto-clôture)
+  if (_autoClotureManualReopened.has(`${currentSiteId()}|${dStr}`)) return;
+  const dayBookCurrent = dayBookFor(dStr);
+  if (dayBookCurrent?.manualReopenedAt) return;
   performAutoClotureBackground(dStr).catch(console.error);
 }
 
@@ -8301,6 +8313,7 @@ async function performAutoClotureBackground(dStr) {
     check,
     ...(state.stockChecks || []).filter((sc) => !(sc.siteId === check.siteId && sc.date === check.date)),
   ];
+  _autoClotureManualReopened.delete(`${siteId}|${dStr}`);
   recordStaffAudit(
     "update",
     "cloture_jour",
@@ -10904,6 +10917,10 @@ async function closeAccountingDay() {
     check,
     ...(state.stockChecks || []).filter((item) => !(item.siteId === check.siteId && item.date === check.date)),
   ];
+  // Clôture manuelle : effacer le marqueur de réouverture pour ce jour
+  _autoClotureManualReopened.delete(`${check.siteId}|${check.date}`);
+  const dayBookToUnmark = (state.dayBooks || []).find((b) => b.siteId === check.siteId && b.date === check.date);
+  if (dayBookToUnmark) delete dayBookToUnmark.manualReopenedAt;
   const gapLines = stockGaps
     .slice()
     .sort((a, b) => Math.abs(Number(b.ecart) || 0) - Math.abs(Number(a.ecart) || 0))
