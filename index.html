@@ -115,6 +115,7 @@
             <span class="top-journal-label">Journée comptable</span>
             <span id="top-journal-date" class="top-journal-date" aria-live="polite">—</span>
             <span id="top-journal-diff" class="top-journal-diff hidden" aria-live="polite"></span>
+            <button type="button" id="top-journal-close-btn" class="top-journal-close-btn hidden manager-only" title="Aller au point du jour pour clôturer">Clôturer maintenant</button>
             <div class="top-backup-strip manager-only">
               <button type="button" id="top-backup-download-btn" class="top-backup-chip" title="Télécharger une copie JSON sur cet appareil">JSON local</button>
               <button type="button" id="top-backup-server-btn" class="top-backup-chip global-superadmin-only" title="Écrire une copie dans le dossier backups/ du serveur (super administrateur global)">Sauvegarde serveur</button>
@@ -134,6 +135,7 @@
             </div>
             <div class="pdj-head-meta">
               <span id="pdj-date" class="section-meta"></span>
+              <button type="button" id="print-pdj-control-btn" class="btn btn-outline hidden" style="margin-top:10px" title="Imprimer le point du jour pour controle">Imprimer le point du jour</button>
               <div class="superadmin-only pdj-superadmin-date-banner" id="pdj-work-date-row">
                 <strong style="display:block;font-size:0.82rem;margin-bottom:6px;color:var(--mm-primary-dark)">Super administrateur — journée à traiter</strong>
                 <label for="pdj-work-date" style="display:block;font-size:0.8rem;color:var(--muted);margin-bottom:6px">Date de la journée à traiter</label>
@@ -193,6 +195,7 @@
       </section>
 
       <section id="page-home" class="page active">
+        <div id="home-2fa-alert" class="home-security-banner hidden" role="alert"></div>
         <div class="kpi-grid">
           <article class="kpi">
             <p class="kpi-label" title="Somme des montants nets des ventes finalisees pour ce maquis (prix x quantite - remise), toutes dates confondues sur l'ecran d'accueil.">CA net total</p>
@@ -237,6 +240,14 @@
               <span class="section-meta">Repartition</span>
             </div>
             <div id="cat-chart"></div>
+          </article>
+
+          <article class="card manager-only">
+            <div class="section-head">
+              <h3>Charges par type</h3>
+              <span class="section-meta">Ce maquis</span>
+            </div>
+            <div id="charges-cat-chart"></div>
           </article>
 
           <article class="card">
@@ -342,6 +353,7 @@
                 <tr>
                   <th>Numero</th>
                   <th>Table</th>
+                  <th>Mode</th>
                   <th>Serveur</th>
                   <th>Statut</th>
                   <th>Type</th>
@@ -656,6 +668,7 @@
               <button id="stock-search-clear" class="btn btn-outline" type="button">Effacer le filtre</button>
             </div>
           </div>
+          <div id="stock-filter-bar" class="stock-filter-bar" style="margin-top:12px"></div>
         </article>
         <article class="card hidden" id="stock-card-mouvements" style="margin-bottom:14px">
           <div class="section-head">
@@ -1079,8 +1092,23 @@
             </div>
             <div class="button-stack">
               <button id="save-params-btn" class="btn btn-primary" type="button">Enregistrer les paramètres</button>
-              <button id="export-btn" class="btn btn-outline" type="button">Exporter les donnees JSON</button>
             </div>
+          </article>
+          <article class="card manager-only" style="margin-top:14px">
+            <div class="section-head">
+              <h3>Export et sauvegarde</h3>
+              <span class="section-meta">Comptabilite</span>
+            </div>
+            <div class="form-group">
+              <label for="export-month">Periode (mois)</label>
+              <input id="export-month" type="month">
+            </div>
+            <div class="button-stack">
+              <button id="export-ventes-csv-btn" class="btn btn-outline" type="button">Exporter les ventes (CSV)</button>
+              <button id="export-charges-csv-btn" class="btn btn-outline" type="button">Exporter les charges (CSV)</button>
+              <button id="export-btn" class="btn btn-outline" type="button">Sauvegarde JSON complete</button>
+            </div>
+            <p class="muted" style="font-size:0.82rem;margin-top:10px">Les fichiers CSV incluent date, libelle, montant, categorie, paiement et serveur lorsque disponible.</p>
           </article>
         </div>
 
@@ -1559,13 +1587,12 @@
       </div>
       <p id="replace-current-info" class="muted" style="margin-bottom:10px"></p>
       <div class="form-group">
-        <label for="replace-search">Nouveau produit</label>
-        <input id="replace-search" type="search" placeholder="Rechercher..." autocomplete="off">
+        <label for="replace-search">Nouveau produit — clic pour remplacer</label>
+        <input id="replace-search" type="search" placeholder="Nom, categorie..." autocomplete="off">
         <div id="replace-picker" class="vente-article-picker" style="margin-top:6px"></div>
       </div>
       <div class="button-stack">
-        <button id="confirm-replace-btn" class="btn btn-primary" type="button" disabled>Confirmer le remplacement</button>
-        <button class="btn btn-outline close-modal" data-close="modal-replace-article" type="button">Annuler</button>
+        <button class="btn btn-outline close-modal" data-close="modal-replace-article" type="button">Fermer</button>
       </div>
     </div>
   </div>
@@ -2184,6 +2211,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=183"></script>
+  <script src="./app-orders.js?v=190"></script>
 </body>
 </html>

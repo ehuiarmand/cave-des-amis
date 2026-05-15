@@ -30,6 +30,26 @@
       padding-bottom: 12px;
     }
     .lead { color: var(--muted); margin: 0 0 24px; }
+    .guide-search-wrap {
+      margin-bottom: 16px;
+    }
+    .guide-search-wrap input {
+      width: 100%;
+      font: inherit;
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+    }
+    .guide-search-meta {
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin: 8px 0 0;
+    }
+    .guide-hit {
+      background: #fff3bf;
+      outline: 2px solid #e6c200;
+      border-radius: 4px;
+    }
     .toolbar.no-print {
       display: flex;
       flex-wrap: wrap;
@@ -129,6 +149,11 @@
     </div>
 
     <h1>Guide d'utilisation — Maquis Manager</h1>
+    <div class="guide-search-wrap no-print">
+      <label for="guide-search">Rechercher dans le guide</label>
+      <input id="guide-search" type="search" placeholder="Ex. : perte stock, clôture, recouvrement, 2FA…" autocomplete="off">
+      <p id="guide-search-meta" class="guide-search-meta" aria-live="polite"></p>
+    </div>
     <p class="lead">Application locale : ventes, stock, achats fournisseurs, casiers physiques, charges et paramètres multi-sites. Les ancres (<code>#consignes</code>, etc.) servent aux liens depuis la page <strong>Guide</strong> de l'application.</p>
 
     <nav class="toc no-print" aria-label="Sommaire">
@@ -285,6 +310,38 @@
         setTimeout(function () { window.print(); }, 300);
       });
     }
+    (function () {
+      var input = document.getElementById("guide-search");
+      var meta = document.getElementById("guide-search-meta");
+      if (!input) return;
+      var sections = Array.prototype.slice.call(document.querySelectorAll("h2, h3, p, li"));
+      function clearHits() {
+        document.querySelectorAll(".guide-hit").forEach(function (el) {
+          el.classList.remove("guide-hit");
+        });
+      }
+      input.addEventListener("input", function () {
+        clearHits();
+        var q = String(input.value || "").trim().toLowerCase();
+        if (!q) {
+          if (meta) meta.textContent = "";
+          return;
+        }
+        var hits = sections.filter(function (el) {
+          return el.textContent.toLowerCase().indexOf(q) !== -1;
+        });
+        if (meta) {
+          meta.textContent = hits.length
+            ? hits.length + " section(s) trouvee(s). Premiere : « " + hits[0].textContent.trim().slice(0, 80) + " »"
+            : "Aucun resultat pour « " + input.value + " »";
+        }
+        if (hits[0]) {
+          hits[0].classList.add("guide-hit");
+          hits[0].scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+        hits.slice(1, 8).forEach(function (el) { el.classList.add("guide-hit"); });
+      });
+    })();
   </script>
 </body>
 </html>

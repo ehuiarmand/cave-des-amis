@@ -77,8 +77,226 @@ let stockSubTab = "catalogue";
 let paramsSubTab = "profil";
 let stockTableCompact = true;
 let stockSearchTerm = "";
+let stockCatFilter = "all";
+let stockStatusFilter = "all";
+
+const CSV_MONTH_FR = ["janvier", "fevrier", "mars", "avril", "mai", "juin", "juillet", "aout", "septembre", "octobre", "novembre", "decembre"];
+
+function orderPhysicalTable(order) {
+  const table = String(order?.table || "").trim();
+  if (table && !/saisie\s*rapide/i.test(table)) return table;
+  const client = String(order?.client || "").trim();
+  if (client && !/saisie\s*rapide/i.test(client)) {
+    const parts = client.split("·").map((s) => s.trim()).filter(Boolean);
+    if (parts.length >= 2 && /saisie\s*rapide/i.test(parts[0])) return parts.slice(1).join(" · ") || "—";
+    if (!/saisie\s*rapide/i.test(client)) return client;
+  }
+  return table || "Comptoir";
+}
+
+function orderSaisieMode(order) {
+  if (order?.saisieMode) return String(order.saisieMode);
+  const client = String(order?.client || "");
+  if (/saisie\s*rapide/i.test(client)) return "Saisie rapide";
+  if (String(order?.source || "").trim() === "qr") return "QR client";
+  return "Commande";
+}
+
+function stockRowStatusKey(item, site) {
+  const actuel = stockActuel(item);
+  const seuilArticle = Number(item.seuilMin) || 0;
+  if (actuel <= 0) return "rupture";
+  if (isStockBelowArticleSeuilForAlert(actuel, seuilArticle)) return "critique";
+  const frigo = stockFrigo(item);
+  const seuilFrigo = Number(item.seuilMin) || Number(site?.seuilStock) || 5;
+  if (isFrigoLowForAlert(frigo, seuilFrigo)) return "faible";
+  if (
+    seuilArticle > 0
+    && (stockAlertInclusiveSeuil(site) ? actuel <= seuilArticle * 2 : actuel < seuilArticle * 2)
+  ) return "faible";
+  return "ok";
+}
+
+function stockItemLastUpdatedAt(item) {
+  const stamps = [item.updatedAt, item.lastSortieAt, item.lastEntreeAt, item.lastMajAt]
+    .map((x) => String(x || "").trim())
+    .filter((x) => x.length >= 10);
+  if (!stamps.length) return null;
+  return stamps.sort().pop();
+}
+
+function formatStockMajLabel(iso) {
+  if (!iso) return "—";
+  const d = parseFlexibleDateTime(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  const now = new Date();
+  const diffMs = now.getTime() - d.getTime();
+  const diffH = diffMs / (1000 * 60 * 60);
+  if (diffH < 24 && d.toDateString() === now.toDateString()) {
+    return `Aujourd'hui ${formatLocalHourMinute(d)}`;
+  }
+  const diffD = Math.floor(diffH / 24);
+  if (diffD === 1) return "Hier";
+  if (diffD < 7) return `Il y a ${diffD} jours`;
+  return formatDateDdMmYyyy(d);
+}
+
+function stockMajCssClass(iso, statusKey) {
+  if (!iso) return "";
+  const d = parseFlexibleDateTime(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const ageH = (Date.now() - d.getTime()) / (1000 * 60 * 60);
+  if ((statusKey === "rupture" || statusKey === "critique") && ageH > 48) return "stock-maj-stale-critical";
+  if (ageH > 24) return "stock-maj-stale";
+  return "";
+}
+
+function usersWithout2FACount() {
+  if (!canManage() || !state?.auth?.users) return 0;
+  return state.auth.users.filter((u) => !u.twoFactorEnabled).length;
+}
+
+function renderHome2FAAlert() {
+  const el = document.getElementById("home-2fa-alert");
+  if (!el) return;
+  const n = usersWithout2FACount();
+  const selfNo2fa = state?.auth?.users?.find(
+    (u) => String(u.username) === String(sessionUser) && !u.twoFactorEnabled,
+  );
+  if (n > 0 && canManage()) {
+    el.classList.remove("hidden");
+    el.innerHTML = `<strong>Securite :</strong> ${n} compte${n > 1 ? "s" : ""} sans 2FA actif — <button type="button" class="linkish-btn" data-goto-params-acces>Voir dans Parametres</button>`;
+    el.querySelector("[data-goto-params-acces]")?.addEventListener("click", () => {
+      navigate("params");
+      setParamsSubTab("acces");
+    });
+  } else {
+    el.classList.add("hidden");
+    el.innerHTML = "";
+  }
+}
+
+function csvEscapeCell(value) {
+  const s = String(value ?? "");
+  if (/[",\n\r;]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+
+function downloadCsvFile(filename, headerRow, dataRows) {
+  const lines = [headerRow.map(csvEscapeCell).join(";"), ...dataRows.map((row) => row.map(csvEscapeCell).join(";"))];
+  const blob = new Blob(["\uFEFF" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
+function exportMonthPickerValue() {
+  const raw = document.getElementById("export-month")?.value || today().slice(0, 7);
+  return String(raw).slice(0, 7);
+}
+
+function monthRangeFromPicker(yyyyMm) {
+  const [y, m] = String(yyyyMm).split("-").map(Number);
+  const last = new Date(y, m, 0).getDate();
+  return { start: `${yyyyMm}-01`, end: `${yyyyMm}-${pad2(last)}` };
+}
+
+function exportFileSlug() {
+  return (currentSite()?.nom || "maquis").replace(/[^\w-]+/gi, "_").replace(/_+/g, "_") || "maquis";
+}
+
+function exportCsvVentesMonth() {
+  const ym = exportMonthPickerValue();
+  const { start, end } = monthRangeFromPicker(ym);
+  const rows = recordsForSite(state.ventes).filter((v) => {
+    const d = String(v.date || "").slice(0, 10);
+    return d >= start && d <= end;
+  });
+  const header = ["date", "article", "categorie", "quantite", "prix_unitaire", "remise", "montant_net", "paiement", "serveur", "table"];
+  const data = rows.map((v) => [
+    formatDateDdMmYyyy(v.date),
+    v.article,
+    v.cat,
+    v.qty,
+    v.prix,
+    v.remise,
+    calcNet(v),
+    v.paiement,
+    v.server || v.serveur || "",
+    v.table || v.client || "",
+  ]);
+  const mi = Number(ym.slice(5, 7)) - 1;
+  const fname = `ventes_${CSV_MONTH_FR[mi] || ym}-${ym.slice(0, 4)}_${exportFileSlug()}.csv`;
+  downloadCsvFile(fname, header, data);
+  showToast(`${rows.length} vente(s) exportee(s).`);
+}
+
+function exportCsvChargesMonth() {
+  const ym = exportMonthPickerValue();
+  const { start, end } = monthRangeFromPicker(ym);
+  const rows = recordsForSite(state.charges).filter((c) => {
+    const d = String(c.date || "").slice(0, 10);
+    return d >= start && d <= end;
+  });
+  const header = ["date", "libelle", "montant", "categorie", "paiement"];
+  const data = rows.map((c) => [
+    formatDateDdMmYyyy(c.date),
+    c.lib,
+    c.montant,
+    c.cat || "Autres",
+    c.paiement,
+  ]);
+  const mi = Number(ym.slice(5, 7)) - 1;
+  const fname = `charges_${CSV_MONTH_FR[mi] || ym}-${ym.slice(0, 4)}_${exportFileSlug()}.csv`;
+  downloadCsvFile(fname, header, data);
+  showToast(`${rows.length} charge(s) exportee(s).`);
+}
+
+function touchStockItemUpdated(item) {
+  if (!item) return;
+  item.updatedAt = new Date().toISOString();
+  item.lastMajAt = item.updatedAt;
+  item.lastMajBy = sessionUser || "";
+}
+
+function renderStockFilterBar(allItems, site) {
+  const host = document.getElementById("stock-filter-bar");
+  if (!host) return;
+  const cats = ["all", ...new Set(allItems.map((i) => i.cat).filter(Boolean))];
+  const counts = { all: allItems.length, alert: 0, rupture: 0, faible: 0, ok: 0, critique: 0 };
+  allItems.forEach((item) => {
+    const sk = stockRowStatusKey(item, site);
+    if (sk !== "ok") counts.alert++;
+    counts[sk] = (counts[sk] || 0) + 1;
+  });
+  const catBtns = cats.map((cat) => {
+    const label = cat === "all" ? `Tous (${counts.all})` : cat;
+    const active = stockCatFilter === cat ? " active" : "";
+    return `<button type="button" class="tab stock-filter-tab${active}" data-stock-cat-filter="${escapeHtml(cat)}">${escapeHtml(label)}</button>`;
+  }).join("");
+  const statusDefs = [
+    ["alert", `En alerte (${counts.alert})`, counts.alert > 0 ? " badge-red" : ""],
+    ["rupture", `Rupture (${counts.rupture})`, ""],
+    ["faible", `Faible (${counts.faible})`, ""],
+    ["ok", `OK (${counts.ok})`, ""],
+  ];
+  const statusBtns = statusDefs.map(([key, label, extra]) => {
+    const active = stockStatusFilter === key ? " active" : "";
+    return `<button type="button" class="tab stock-filter-tab${active}${extra}" data-stock-status-filter="${key}">${escapeHtml(label)}</button>`;
+  }).join("");
+  host.innerHTML = `<div class="stock-filter-row">${catBtns}</div><div class="stock-filter-row stock-filter-row--status">${statusBtns}</div>`;
+}
+
+function updateCloseDayButtonLabel() {
+  const btn = document.getElementById("close-day-btn");
+  if (!btn) return;
+  const d = pdjCalendarDate();
+  btn.className = "btn btn-danger";
+  btn.textContent = `Cloturer definitivement la journee du ${formatDateDdMmYyyy(d)}`;
+}
 let activeOrderId = null;
-let editingLineId = null;
 let currentQrLinkInt = "";
 let currentQrLinkExt = "";
 let pendingFinalizeOrderId = null;
@@ -2467,12 +2685,22 @@ function renderTopbar() {
       journalDateEl.textContent = formatDateDdMmYyyy(j);
       if (journalDiffEl) {
         const civil = today();
+        const closeBtn = document.getElementById("top-journal-close-btn");
         if (j && j !== civil) {
-          journalDiffEl.textContent = `Jour civil : ${formatDateDdMmYyyy(civil)}`;
+          const closed = !!stockCheckForSiteDate(j, currentSiteId());
+          journalDiffEl.textContent = closed
+            ? `(journee cloturee — jour civil : ${formatDateDdMmYyyy(civil)})`
+            : `(non cloturee — jour civil : ${formatDateDdMmYyyy(civil)})`;
           journalDiffEl.classList.remove("hidden");
+          if (closeBtn && canManagePdjAccounting()) {
+            closeBtn.classList.remove("hidden");
+          } else if (closeBtn) {
+            closeBtn.classList.add("hidden");
+          }
         } else {
           journalDiffEl.textContent = "";
           journalDiffEl.classList.add("hidden");
+          closeBtn?.classList.add("hidden");
         }
       }
     } else {
@@ -3431,6 +3659,8 @@ function renderPointDuJour() {
   );
   renderDailyStockCheck();
   renderPastClosuresForReopen();
+  updateCloseDayButtonLabel();
+  updatePdjPrintButtons();
 }
 
 /** Annule les écritures comptables (sorties / entrées) appliquées par une clôture — même logique que prevClose dans closeAccountingDay. */
@@ -4046,6 +4276,7 @@ function htmlPdjClosedStockCheckReadOnly(closed, roleNoteHtml) {
 }
 
 function renderDailyStockCheck() {
+  try {
   const items = recordsForSite(state.stock).slice().sort((a, b) => a.article.localeCompare(b.article, "fr"));
   const dStr = pdjCalendarDate();
   const closed = stockCheckForSiteDate(dStr, currentSiteId());
@@ -4054,7 +4285,6 @@ function renderDailyStockCheck() {
   const closeBlockedByPending = pendingForClose.length > 0;
   const container = document.getElementById("pdj-stock-check");
   const button = document.getElementById("close-day-btn");
-  const printBtn = document.getElementById("print-closure-btn");
   if (!container || !button) return;
   const superadminCorrection = Boolean(closed && canAnyAdmin());
   const openingBlocked = PDJ_REQUIRE_CASH_OPENING && dayBookNeedsCashOpening(dayBook);
@@ -4077,7 +4307,6 @@ function renderDailyStockCheck() {
         : openingBlocked && !(isPastDate && canAnyAdmin()) && canManagePdjAccounting()
           ? "Ouverture requise"
           : "Clôturer la journée";
-  if (printBtn) printBtn.classList.toggle("hidden", !closed);
   if (!items.length) {
     container.innerHTML = emptyState("Aucun stock", "Ajoutez des articles avant de faire le point de fermeture.");
     button.disabled = closeBlockedByPending;
@@ -4112,7 +4341,6 @@ function renderDailyStockCheck() {
         "Ouverture de caisse (gérant)",
         "En attente de l'ouverture par un gérant ou un administrateur. Les serveuses peuvent consulter le reste du point du jour.",
       );
-      if (printBtn) printBtn.classList.toggle("hidden", true);
       return;
     }
     if (closed) {
@@ -4120,7 +4348,6 @@ function renderDailyStockCheck() {
         closed,
         "Lecture seule — vérification et clôture réservées au gérant ou à un administrateur.",
       );
-      if (printBtn) printBtn.classList.toggle("hidden", !closed);
       return;
     }
     const ventesJourRo = recordsForSite(state.ventes).filter((v) => v.date.slice(0, 10) === dStr);
@@ -4159,7 +4386,6 @@ function renderDailyStockCheck() {
         <tbody>${rowsOpen}</tbody>
       </table></div>
       <p class="muted" style="margin-top:8px;font-size:0.82rem">${formatVentesCountFr(ventesJourRo.length)} sur cette date — ${fmt(items.length)} ligne(s) de stock.</p>`;
-    if (printBtn) printBtn.classList.toggle("hidden", true);
     return;
   }
 
@@ -4170,7 +4396,6 @@ function renderDailyStockCheck() {
     );
     button.disabled = true;
     button.removeAttribute("title");
-    if (printBtn) printBtn.classList.toggle("hidden", !closed);
     return;
   }
 
@@ -4304,6 +4529,9 @@ function renderDailyStockCheck() {
   } else {
     button.removeAttribute("title");
   }
+  } finally {
+    updatePdjPrintButtons();
+  }
 }
 
 function renderDashboard() {
@@ -4347,6 +4575,13 @@ function renderDashboard() {
       : `<span class="muted">Définissez un objectif mensuel dans Paramètres.</span>`;
   }
   renderBreakdown("cat-chart", ventes.reduce((acc, vente) => ((acc[vente.cat] = (acc[vente.cat] || 0) + calcNet(vente)), acc), {}), caTotal, "Aucune vente finalisee.");
+  const chargesByCat = charges.reduce((acc, ch) => {
+    const k = String(ch.cat || "Autres").trim() || "Autres";
+    acc[k] = (acc[k] || 0) + Number(ch.montant || 0);
+    return acc;
+  }, {});
+  renderBreakdown("charges-cat-chart", chargesByCat, chargesTotal, "Aucune charge enregistree.");
+  renderHome2FAAlert();
   const stockAlertRuleHtml = stockAlertInclusiveSeuil(site)
     ? `<p class="muted" style="font-size:0.78rem;margin:0 0 10px;line-height:1.35">Regle alertes pour ce maquis : le stock (bouteilles) est signale lorsqu'il est <strong>inferieur ou egal</strong> au seuil minimum de l'article (option activee dans Parametres &gt; Profil).</p>`
     : `<p class="muted" style="font-size:0.78rem;margin:0 0 10px;line-height:1.35">Regle alertes pour ce maquis : le stock (bouteilles) est signale lorsqu'il est <strong>strictement inferieur</strong> au seuil minimum. Cochez « Alerter des le seuil atteint » dans Parametres &gt; Profil pour alerter des que le stock atteint le seuil (egalite incluse).</p>`;
@@ -4924,7 +5159,8 @@ function printOrdersManagementList() {
   const rows = orders.map((order) => `
     <tr>
       <td>${escapeHtml(String(order.factureNumber || order.id))}</td>
-      <td>${escapeHtml(order.table || order.client || "Comptoir")}</td>
+      <td>${escapeHtml(orderPhysicalTable(order))}</td>
+      <td>${escapeHtml(orderSaisieMode(order))}</td>
       <td>${escapeHtml(orderServerDisplay(order))}</td>
       <td>${escapeHtml(orderStatus(order))}</td>
       <td>${orderType(order) === "a-emporter" ? "A emporter" : "Sur place"}</td>
@@ -4957,7 +5193,8 @@ function renderOrdersManagement() {
       const encTitle = encBlocked ? escapeHtml(journalEncaisseBlockTitle(order)) : "";
       return `<tr>
         <td>#${escapeHtml(order.factureNumber || String(order.id))}</td>
-        <td>${escapeHtml(order.table || order.client || "Comptoir")}</td>
+        <td>${escapeHtml(orderPhysicalTable(order))}</td>
+        <td>${escapeHtml(orderSaisieMode(order))}</td>
         <td>${escapeHtml(orderServerDisplay(order))}</td>
         <td>${escapeHtml(orderStatus(order))}</td>
         <td>${orderType(order) === "a-emporter" ? "A emporter" : "Sur place"}</td>
@@ -4973,11 +5210,17 @@ function renderOrdersManagement() {
         </td>
       </tr>`;
     }).join("")
-    : `<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:44px">Aucune commande trouvee</td></tr>`;
+    : `<tr><td colspan="10" style="text-align:center;color:var(--muted);padding:44px">Aucune commande trouvee</td></tr>`;
 }
 
 function renderOrders() {
-  const orders = recordsForSite(state.commandes).slice().sort((a, b) => b.date.localeCompare(a.date));
+  const orders = recordsForSite(state.commandes).slice().sort((a, b) => {
+    if (activeOrderId) {
+      if (a.id === activeOrderId) return -1;
+      if (b.id === activeOrderId) return 1;
+    }
+    return b.date.localeCompare(a.date);
+  });
   document.getElementById("order-board").innerHTML = orders.length
     ? orders.map((order) => {
       const total = order.lignes.reduce((sum, line) => sum + calcNet(line), 0);
@@ -4999,7 +5242,7 @@ function renderOrders() {
           <div class="order-total">${fmt(total)} FCFA</div>
         </div>
         <div class="order-lines">
-          ${order.lignes.length ? order.lignes.map((line) => `<div class="order-line"><div><p class="list-item-title">${escapeHtml(line.article)}</p><p class="list-item-sub">${escapeHtml(line.cat)} · ${escapeHtml(lineQtyPriceLabel(line, stockItemForArticle(line.article)))}${line.remise ? ` · -${fmt(line.remise)}` : ""} · ${escapeHtml(line.paiement)}</p></div><div class="line-actions"><button type="button" class="mini-btn" data-edit-line="${line.id}" data-order-id="${order.id}">Modifier</button><button type="button" class="mini-btn" data-replace-line="${line.id}" data-order-id="${order.id}">Remplacer</button><button type="button" class="mini-btn" data-remove-line="${line.id}" data-order-id="${order.id}">Retirer</button></div></div>`).join("") : emptyState("Commande vide", "Ajoutez une premiere boisson a cette commande.")}
+          ${order.lignes.length ? order.lignes.map((line) => `<div class="order-line"><div><p class="list-item-title">${escapeHtml(line.article)}</p><p class="list-item-sub">${escapeHtml(line.cat)} · ${escapeHtml(lineQtyPriceLabel(line, stockItemForArticle(line.article)))}${line.remise ? ` · -${fmt(line.remise)}` : ""} · ${escapeHtml(line.paiement)}</p></div><div class="line-actions"><button type="button" class="mini-btn" data-replace-line="${line.id}" data-order-id="${order.id}">Remplacer</button><button type="button" class="mini-btn" data-remove-line="${line.id}" data-order-id="${order.id}">Retirer</button></div></div>`).join("") : emptyState("Commande vide", "Ajoutez une premiere boisson a cette commande.")}
         </div>
         <div class="order-actions">
           <button type="button" class="mini-btn" data-activate-order="${order.id}">Ouvrir la commande</button>
@@ -5253,13 +5496,15 @@ async function submitSaisieRapide() {
 
     const date = pdjCalendarDate();
     if (!assertJournalAllowsSalesOrToast(date, currentSiteId())) return;
-    const clientName = `Saisie rapide · ${sessionUser || "Serveuse"}`;
+    const tableLabel = document.getElementById("sr-client")?.value?.trim() || "Comptoir";
     state.nextId = state.nextId || {};
     state.nextId.commande = (Number(state.nextId.commande) || 0) + 1;
     const order = {
       id: state.nextId.commande,
       siteId: currentSiteId(),
-      client: clientName,
+      table: tableLabel,
+      client: tableLabel,
+      saisieMode: "Saisie rapide",
       date,
       createdAt: new Date().toISOString(),
       status: "Servi",
@@ -5863,58 +6108,136 @@ async function confirmKit() {
 // ─── REMPLACEMENT D'ARTICLE ───────────────────────────────────────────────────
 
 let replacingLine = null; // { orderId, lineId, article }
-let replaceSelectedArticle = null;
+
+function isOrderPaidForReplace(order) {
+  const s = String(orderStatus(order) || "").trim();
+  return s === "Paye" || s === "Payé" || s === "PayÃ©";
+}
+
+function replaceLineContext() {
+  if (!replacingLine) return null;
+  const order = recordsForSite(state.commandes).find((o) => o.id === replacingLine.orderId);
+  if (!order) return null;
+  const line = (order.lignes || []).find((l) => l.id === replacingLine.lineId);
+  if (!line) return null;
+  return { order, line };
+}
+
+/** Format catalogue aligné sur la ligne (qté / casier déjà saisis). */
+function saleFormatForLine(line, product) {
+  const formats = normalizeSaleFormats(product);
+  const wantQty = Math.max(1, Number(line.formatQuantite) || Number(line.packSize) || 1);
+  return formats.find((f) => f.quantite === wantQty) || primarySaleFormat(product);
+}
+
+function replaceLineCatalogPrice(line, product) {
+  const format = saleFormatForLine(line, product);
+  return formatPrice(format, line.location || "Intérieur");
+}
 
 function openReplaceModal(orderId, lineId) {
   const order = recordsForSite(state.commandes).find((o) => o.id === Number(orderId));
   if (!order) return;
+  if (isOrderPaidForReplace(order)) {
+    showToast("Commande deja encaissee : le remplacement n'est plus possible.");
+    return;
+  }
   const line = (order.lignes || []).find((l) => l.id === Number(lineId));
   if (!line) return;
   replacingLine = { orderId: Number(orderId), lineId: Number(lineId), article: line.article };
-  replaceSelectedArticle = null;
   const infoEl = document.getElementById("replace-current-info");
-  if (infoEl) infoEl.textContent = `Article actuel : ${line.article} · ${lineQtyPriceLabel(line, stockItemForArticle(line.article))}`;
+  if (infoEl) {
+    infoEl.innerHTML = `Ligne a remplacer : <strong>${escapeHtml(line.article)}</strong> · ${escapeHtml(lineQtyPriceLabel(line, stockItemForArticle(line.article)))}`
+      + `${order.client ? ` · ${escapeHtml(order.client)}` : ""}`
+      + `<br><span class="muted" style="font-size:0.82rem">Cliquez sur le nouveau produit : la ligne est mise a jour tout de suite (avant encaissement).</span>`;
+  }
   const searchEl = document.getElementById("replace-search");
   if (searchEl) searchEl.value = "";
   renderReplacePicker("");
-  const btn = document.getElementById("confirm-replace-btn");
-  if (btn) btn.disabled = true;
   openModal("modal-replace-article");
   window.requestAnimationFrame(() => searchEl?.focus());
 }
 
 function renderReplacePicker(query) {
   const picker = document.getElementById("replace-picker");
-  if (!picker) return;
+  const ctx = replaceLineContext();
+  if (!picker || !ctx) return;
+  const { line } = ctx;
   const q = (query || "").toLowerCase().trim();
-  const products = knownProducts().filter((p) =>
-    !q || p.article.toLowerCase().includes(q) || (p.cat || "").toLowerCase().includes(q)
-  ).slice(0, 24);
-  picker.innerHTML = products.map((p) => `
-    <div class="picker-item${replaceSelectedArticle === p.article ? " selected" : ""}"
-      data-pick-replace="${escapeHtml(p.article)}"
-      style="cursor:pointer;padding:8px 10px;border-radius:6px;margin-bottom:4px;background:var(--card-bg,#1e1e2e);border:1px solid ${replaceSelectedArticle === p.article ? "var(--accent)" : "var(--border)"}">
-      <strong style="font-size:0.9rem">${escapeHtml(p.article)}</strong>
-      <span class="muted" style="font-size:0.8rem;margin-left:6px">${fmt(p.prixInt)} FCFA</span>
-    </div>`).join("");
+  const currentKey = String(line.article || "").toLowerCase();
+  const products = knownProducts().filter((p) => {
+    if (p.article.toLowerCase() === currentKey) return false;
+    return !q || p.article.toLowerCase().includes(q) || (p.cat || "").toLowerCase().includes(q);
+  }).slice(0, 24);
+  if (!products.length) {
+    picker.innerHTML = `<p class="muted" style="padding:12px;font-size:0.88rem">Aucun autre produit ne correspond.</p>`;
+    return;
+  }
+  picker.innerHTML = products.map((p) => {
+    const enc = encodeURIComponent(p.article);
+    const prix = replaceLineCatalogPrice(line, p);
+    const stockItem = stockItemForArticle(p.article);
+    const avail = stockItem ? availableStock(stockItem) : null;
+    const avLabel = avail == null ? "—" : `${fmt(avail)} btl`;
+    return `<button type="button" class="vente-picker-row" data-pick-replace="${enc}">
+      <span class="vente-picker-name">${escapeHtml(p.article)}</span>
+      <span class="vente-picker-meta">${escapeHtml(p.cat || "—")} · ${fmt(prix)} FCFA · Stock ${avLabel}</span>
+    </button>`;
+  }).join("");
 }
 
-async function confirmReplace() {
-  if (!replacingLine || !replaceSelectedArticle) return;
+async function confirmReplace(newArticleName) {
+  const article = String(newArticleName || "").trim();
+  if (!replacingLine || !article) return;
   const order = recordsForSite(state.commandes).find((o) => o.id === replacingLine.orderId);
   if (!order) return;
+  if (isOrderPaidForReplace(order)) {
+    showToast("Commande deja encaissee : le remplacement n'est plus possible.");
+    closeModal("modal-replace-article");
+    replacingLine = null;
+    return;
+  }
   const line = (order.lignes || []).find((l) => l.id === replacingLine.lineId);
   if (!line) return;
-  const newProduct = findKnownProduct(replaceSelectedArticle);
-  if (!newProduct) { showToast("Produit introuvable."); return; }
+  if (article.toLowerCase() === String(line.article || "").toLowerCase()) {
+    showToast("Choisissez un produit different.");
+    return;
+  }
+  const newProduct = findKnownProduct(article);
+  if (!newProduct) {
+    showToast("Produit introuvable.");
+    return;
+  }
+  const format = saleFormatForLine(line, newProduct);
+  const formatQty = Math.max(1, Number(format?.quantite) || 1);
+  const prix = formatPrice(format, line.location || "Intérieur");
+  if (prix <= 0) {
+    showToast("Prix catalogue indisponible pour ce produit.");
+    return;
+  }
+  const requestedBottles = (Number(line.qty) || 1) * formatQty;
+  const availability = stockAvailabilityForLine(newProduct.article, requestedBottles, order.id, line.id);
+  if (!availability.stockItem || availability.available < requestedBottles) {
+    showToast(`Stock insuffisant pour ${newProduct.article}. Disponible : ${fmt(availability.available)} bouteille(s).`);
+    return;
+  }
+  const prevArticle = line.article;
+  const prevNet = calcNet(line);
   line.article = newProduct.article;
   line.cat = newProduct.cat || line.cat;
+  line.formatQuantite = formatQty;
+  line.prix = prix;
+  recordStaffAudit(
+    "update",
+    "commande_ligne",
+    `Remplacement · commande #${order.id} · ${order.client || ""}`,
+    `${prevArticle} → ${line.article} · ${fmt(prevNet)} → ${fmt(calcNet(line))} FCFA`,
+  );
   await persistState({ commandes: state.commandes });
   closeModal("modal-replace-article");
   replacingLine = null;
-  replaceSelectedArticle = null;
   renderVentesPage();
-  showToast("Article remplace.");
+  showToast(`${prevArticle} remplace par ${line.article} (${fmt(calcNet(line))} FCFA).`);
 }
 
 function qrLocationLabel(location) {
@@ -6051,11 +6374,22 @@ function printAllQrTables(rowsOverride = null) {
 
 function renderStock() {
   const allItems = recordsForSite(state.stock).slice().sort((a, b) => a.article.localeCompare(b.article, "fr"));
+  const site = currentSite();
+  renderStockFilterBar(allItems, site);
   const term = String(stockSearchTerm || "").trim().toLowerCase();
-  const items = term
+  let items = term
     ? allItems.filter((item) => String(item.article || "").toLowerCase().includes(term))
     : allItems;
-  const site = currentSite();
+  if (stockCatFilter !== "all") {
+    items = items.filter((item) => String(item.cat || "") === stockCatFilter);
+  }
+  if (stockStatusFilter !== "all") {
+    if (stockStatusFilter === "alert") {
+      items = items.filter((item) => stockRowStatusKey(item, site) !== "ok");
+    } else {
+      items = items.filter((item) => stockRowStatusKey(item, site) === stockStatusFilter);
+    }
+  }
   const dualPricing = siteUsesDualZonePricing(site);
   const globalSeuil = Number(site?.seuilStock) || 5;
   let totalValue = 0;
@@ -6087,6 +6421,10 @@ function renderStock() {
     const { prixInt, prixExt } = resolveItemPrices(item);
     const packCell = packSize > 1 ? `<span class="badge badge-amber">Kit de ${packSize}</span>` : `<span style="color:var(--muted)">Unite</span>`;
     const itemCaseSize = caseSize(item);
+    const majIso = stockItemLastUpdatedAt(item);
+    const statusKey = stockRowStatusKey(item, site);
+    const majLabel = formatStockMajLabel(majIso);
+    const majClass = stockMajCssClass(majIso, statusKey);
 
     const D = "scd"; // classe colonne detail
     return `<tr class="${isAlert ? "stock-row-alert" : ""}">
@@ -6108,6 +6446,7 @@ function renderStock() {
       : `<td class="${D}" style="text-align:right">${fmt(prixInt)}</td>`}
       <td class="${D}" style="text-align:right">${fmt(valeur)}</td>
       <td>${statusBadge}</td>
+      <td class="stock-maj-cell ${majClass}" title="${escapeHtml(majIso || "")}">${escapeHtml(majLabel)}</td>
       <td class="stock-actions-cell">
         ${isFrigoLow && reserve > 0 ? `<button type="button" class="mini-btn" data-auto-fill-fridge="${item.id}">Remplir frigo</button>` : ""}
         <button type="button" class="stock-del-btn" style="background:rgba(197,79,65,0.18);color:#ff8e82" data-perte-id="${item.id}">Perte</button>
@@ -6148,6 +6487,7 @@ function renderStock() {
             : `<th class="th-orange scd" style="text-align:right">Prix vente</th>`}
             <th class="th-blue scd" style="text-align:right">Valeur Stk</th>
             <th class="th-blue">Statut</th>
+            <th class="th-blue">MAJ</th>
             <th></th>
           </tr>
         </thead>
@@ -6711,22 +7051,13 @@ function syncFinalizeButtonJournalState() {
   btn.disabled = !id || !allow;
 }
 
-function openOrderEditor(orderId = null, lineId = null) {
+function openOrderEditor(orderId = null) {
   syncDualZonePricingUi();
   activeOrderId = orderId;
-  editingLineId = lineId;
   const order = orderId ? recordsForSite(state.commandes).find((item) => item.id === orderId) : null;
-  const line = order && lineId ? order.lignes.find((item) => item.id === lineId) : null;
-  if (lineId && (!order || !line)) {
-    showToast("Ligne ou commande introuvable.");
-    activeOrderId = null;
-    editingLineId = null;
-    populateOrderSelect();
-    return;
-  }
   populateOrderSelect();
   // Sans commande cible : saisie rapide (panier multi-articles)
-  if (!lineId && !orderId) {
+  if (!orderId) {
     const ctx = document.getElementById("sr-order-context-wrap");
     if (ctx) ctx.classList.remove("hidden");
     const titleEl = document.getElementById("sr-modal-title");
@@ -6748,29 +7079,26 @@ function openOrderEditor(orderId = null, lineId = null) {
     window.requestAnimationFrame(() => searchEl?.focus());
     return;
   }
-  if (!lineId && orderId && !order) {
+  if (orderId && !order) {
     showToast("Commande introuvable.");
     activeOrderId = null;
     populateOrderSelect();
     return;
   }
-  // Commande existante : ajout de ligne ou edition — formulaire vente (recherche catalogue)
-  document.getElementById("v-date").value = line?.date || order?.date || pdjCalendarDate();
+  // Commande existante : ajout de ligne — formulaire vente (recherche catalogue)
+  document.getElementById("v-date").value = order?.date || pdjCalendarDate();
   document.getElementById("v-client").value = order?.client || "";
   document.getElementById("v-order-select").value = order ? String(order.id) : "";
-  document.getElementById("v-article").value = line?.article || "";
-  document.getElementById("v-location").value = line?.location || "Intérieur";
-  populateSaleFormatSelect(
-    line ? findKnownProduct(line.article || "") : null,
-    line ? (line.formatQuantite || line.packSize) : null,
-  );
-  document.getElementById("v-prix").value = line?.prix ? String(line.prix) : "";
-  document.getElementById("v-qty").value = line?.qty ? String(line.qty) : "1";
-  document.getElementById("v-remise").value = line?.remise ? String(line.remise) : "0";
-  document.getElementById("v-note").value = line?.note || order?.note || "";
-  document.getElementById("save-vente-btn").textContent = line ? "Mettre a jour la ligne" : "Ajouter un article";
+  document.getElementById("v-article").value = "";
+  document.getElementById("v-location").value = "Intérieur";
+  populateSaleFormatSelect(null);
+  document.getElementById("v-prix").value = "";
+  document.getElementById("v-qty").value = "1";
+  document.getElementById("v-remise").value = "0";
+  document.getElementById("v-note").value = order?.note || "";
+  document.getElementById("save-vente-btn").textContent = "Ajouter un article";
   syncFinalizeButtonJournalState();
-  updateKitInfo(line ? findKnownProduct(line.article) : null);
+  updateKitInfo(null);
   updateVentePreview();
   const vSearch = document.getElementById("v-article-search");
   if (vSearch) vSearch.value = "";
@@ -6780,7 +7108,6 @@ function openOrderEditor(orderId = null, lineId = null) {
 }
 
 function resetOrderForm() {
-  editingLineId = null;
   document.getElementById("v-date").value = pdjCalendarDate();
   document.getElementById("v-client").value = "";
   document.getElementById("v-order-select").value = activeOrderId ? String(activeOrderId) : "";
@@ -8409,7 +8736,7 @@ async function saveOrderLine() {
   if (!assertNomClientQrCommandeOuToast(clientTrim, existingOrder)) return;
   const order = ensureOrder(document.getElementById("v-client").value, date, document.getElementById("v-note").value);
   const requestedBottles = (Number(document.getElementById("v-qty").value) || 1) * Math.max(1, Number(format?.quantite) || Number(product?.packSize) || 1);
-  const availability = stockAvailabilityForLine(product.article, requestedBottles, order.id, editingLineId);
+  const availability = stockAvailabilityForLine(product.article, requestedBottles, order.id, null);
   if (!availability.stockItem || availability.available < requestedBottles) {
     if (creatingNewOrder && !(order.lignes && order.lignes.length)) {
       state.commandes = (state.commandes || []).filter((o) => o.id !== order.id);
@@ -8419,7 +8746,7 @@ async function saveOrderLine() {
     return;
   }
   const line = {
-    id: editingLineId || state.nextId.ligneCommande++,
+    id: state.nextId.ligneCommande++,
     date,
     article: product?.article || article,
     cat: product?.cat || "Autres",
@@ -8431,15 +8758,13 @@ async function saveOrderLine() {
     paiement: "A regler",
     note: document.getElementById("v-note").value.trim(),
   };
-  const index = order.lignes.findIndex((item) => item.id === line.id);
-  if (index >= 0) order.lignes[index] = line;
-  else order.lignes.push(line);
-  recordStaffAudit(index >= 0 ? "update" : "create", "commande_ligne", `${index >= 0 ? "Ligne modifiee" : "Ligne ajoutee"} · commande #${order.id} · ${order.client || ""}`, `${line.article} · ${fmt(calcNet(line))} FCFA`);
+  order.lignes.push(line);
+  recordStaffAudit("create", "commande_ligne", `Ligne ajoutee · commande #${order.id} · ${order.client || ""}`, `${line.article} · ${fmt(calcNet(line))} FCFA`);
   await persistState();
   closeModal("modal-vente");
   resetOrderForm();
   renderVentesPage();
-  showToast(index >= 0 ? "Commande mise a jour." : "Ligne ajoutee a la commande.");
+  showToast("Ligne ajoutee a la commande.");
 }
 
 function readPaymentMix(total) {
@@ -8867,6 +9192,7 @@ async function saveStock() {
     if (item) {
       const before = JSON.parse(JSON.stringify(item));
       Object.assign(item, fields);
+      touchStockItemUpdated(item);
       const changes = [];
       const pushChange = (label, a, b) => {
         const sa = a == null ? "" : String(a);
@@ -8895,7 +9221,9 @@ async function saveStock() {
       );
     }
   } else {
-    state.stock.push({ id: state.nextId.stock++, siteId: currentSiteId(), entrees: 0, sorties: 0, createdAt: new Date().toISOString(), createdBy: sessionUser || "-", ...fields });
+    const newItem = { id: state.nextId.stock++, siteId: currentSiteId(), entrees: 0, sorties: 0, createdAt: new Date().toISOString(), createdBy: sessionUser || "-", ...fields };
+    touchStockItemUpdated(newItem);
+    state.stock.push(newItem);
     recordStaffAudit("create", "catalogue_article", `Article ajoute : ${articleName}`, `${fields.cat} · PA ${fmt(fields.prixAchat)}/cas. · vente int. ${fmt(fields.prixVenteInt)}`);
   }
   await persistState();
@@ -9459,7 +9787,6 @@ async function restoreSelectedSiteFromBackup() {
   try {
     await apiRequest(API.restoreSiteFromBackup, { method: "POST", body: JSON.stringify({ backupFile, siteId }) });
     activeOrderId = null;
-    editingLineId = null;
     await bootstrapAuthenticatedApp({ skipCasierLsRestore: true });
     lsSaveCasiers();
     showToast(`Maquis "${site.nom}" restaure depuis ${backupFile}.`);
@@ -9734,10 +10061,208 @@ function printInvoice(factureNumber) {
   ticketWindow.document.close();
 }
 
+function updatePdjPrintButtons() {
+  const headerBtn = document.getElementById("print-pdj-control-btn");
+  const closureBtn = document.getElementById("print-closure-btn");
+  const dStr = pdjCalendarDate();
+  const closed = stockCheckForSiteDate(dStr, currentSiteId());
+  const canPrint = canManagePdjAccounting();
+  if (headerBtn) {
+    headerBtn.classList.toggle("hidden", !canPrint);
+    headerBtn.textContent = closed
+      ? `Imprimer le point du ${formatDateDdMmYyyy(dStr)} (cloture)`
+      : `Imprimer le point du ${formatDateDdMmYyyy(dStr)} (controle)`;
+  }
+  if (closureBtn) {
+    closureBtn.classList.toggle("hidden", !closed || !canPrint);
+  }
+}
+
+function printPdjDayControl() {
+  if (!canManagePdjAccounting()) {
+    showToast("Impression reservee au gerant ou a un administrateur.");
+    return;
+  }
+  const reportDateStr = pdjCalendarDate();
+  const closed = stockCheckForSiteDate(reportDateStr, currentSiteId());
+  if (closed) {
+    printDayClosure();
+    return;
+  }
+  printPdjProvisionalReport(reportDateStr);
+}
+
+function printPdjProvisionalReport(reportDateStr) {
+  const site = currentSite();
+  const ventesJour = recordsForSite(state.ventes).filter((v) => v.date.slice(0, 10) === reportDateStr);
+  const chargesJour = recordsForSite(state.charges).filter((c) => (c.date || "").slice(0, 10) === reportDateStr);
+  const recouvrementJour = creditRecoveriesForPdjDate(reportDateStr);
+  const totauxJour = paymentTotals(ventesJour);
+  const caEncaisse = Object.entries(totauxJour).reduce(
+    (sum, [method, amount]) => (String(method).includes("dit client") ? sum : sum + amount),
+    0,
+  );
+  const caRecouvrement = recouvrementJour.reduce((sum, r) => sum + (Number(r.montant) || 0), 0);
+  const caEncaisseTotal = caEncaisse + caRecouvrement;
+  const creditEmisJour = creditIssuedOnDate(reportDateStr);
+  const caCreances = totalCreditOutstanding();
+  const chargesTotal = chargesJour.reduce((sum, c) => sum + Number(c.montant || 0), 0);
+  const benefice = caEncaisseTotal - chargesTotal;
+  const dayBook = dayBookFor(reportDateStr, currentSiteId());
+  const openingCash = Number(dayBook?.openingCashFcfa) || 0;
+  const especesVentes = Number(totauxJour["Espèces"]) || Number(totauxJour["EspÃ¨ces"]) || 0;
+  const especesRecouvrement = especesFromCreditRecoveriesForDate(reportDateStr);
+  const expectedEspeces = openingCash + especesVentes + especesRecouvrement;
+
+  const byArticle = {};
+  ventesJour.forEach((v) => {
+    if (!byArticle[v.article]) {
+      byArticle[v.article] = { qty: 0, montant: 0, especes: 0, wave: 0, orange: 0, mtn: 0, carte: 0, credit: 0 };
+    }
+    const entry = byArticle[v.article];
+    entry.qty += Number(v.qty) || 0;
+    entry.montant += calcNet(v);
+    const details = v.paiementDetails?.length ? v.paiementDetails : [{ method: v.paiement || "", amount: calcNet(v) }];
+    details.forEach((d) => {
+      const a = Number(d.amount) || 0;
+      if (d.method === "Espèces") entry.especes += a;
+      else if (d.method === "Wave") entry.wave += a;
+      else if (d.method === "Orange Money") entry.orange += a;
+      else if (d.method === "MTN MoMo") entry.mtn += a;
+      else if (d.method === "Carte") entry.carte += a;
+      else if (d.method === "Crédit client") entry.credit += a;
+    });
+  });
+
+  let totalQty = 0;
+  let totalMontant = 0;
+  let totalEsp = 0;
+  let totalWave = 0;
+  let totalOrange = 0;
+  let totalMtn = 0;
+  let totalCarte = 0;
+  let totalCredit = 0;
+  const ficheRows = Object.entries(byArticle)
+    .sort((a, b) => a[0].localeCompare(b[0], "fr"))
+    .map(([article, v]) => {
+      totalQty += v.qty;
+      totalMontant += v.montant;
+      totalEsp += v.especes;
+      totalWave += v.wave;
+      totalOrange += v.orange;
+      totalMtn += v.mtn;
+      totalCarte += v.carte;
+      totalCredit += v.credit;
+      return `<tr>
+      <td>${escapeHtml(article)}</td>
+      <td style="text-align:right">${fmt(v.qty)}</td>
+      <td style="text-align:right">${fmt(v.montant)}</td>
+      <td style="text-align:right">${v.wave ? fmt(v.wave) : ""}</td>
+      <td style="text-align:right">${v.orange ? fmt(v.orange) : ""}</td>
+      <td style="text-align:right">${v.mtn ? fmt(v.mtn) : ""}</td>
+      <td style="text-align:right">${v.credit ? fmt(v.credit) : ""}</td>
+      <td style="text-align:right">${v.carte ? fmt(v.carte) : ""}</td>
+      <td style="text-align:right">${v.especes ? fmt(v.especes) : ""}</td>
+    </tr>`;
+    })
+    .join("");
+
+  const paymentRows = Object.entries(totauxJour)
+    .filter(([m]) => !String(m).includes("dit client"))
+    .map(([m, a]) => `<div class="box-row"><span>${escapeHtml(m)}</span><strong>${fmt(a)} FCFA</strong></div>`)
+    .join("");
+  const recoveryRows = recouvrementJour
+    .map((r) => `<div class="box-row" style="font-size:10px"><span>${escapeHtml(debtorDisplayKey(r.debiteur))} · ${escapeHtml(r.paiement || "")}</span><strong>${fmt(r.montant)} FCFA</strong></div>`)
+    .join("");
+
+  const dateLabel = formatDateDdMmYyyy(reportDateStr);
+  const generatedAt = formatDateTimeDdMmYyyy(new Date().toISOString());
+  const html = `<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8">
+  <title>Point du jour ${dateLabel}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial, sans-serif; font-size: 11px; padding: 16px; color: #111; }
+    .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; border-bottom: 2px solid #111; padding-bottom: 8px; }
+    .header h1 { font-size: 18px; }
+    .header .meta { font-size: 10px; color: #555; text-align: right; max-width: 48%; line-height: 1.45; }
+    .banner { background: #fff8e6; border: 1px solid #e6c200; padding: 8px 10px; margin-bottom: 10px; font-size: 10px; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 0; }
+    th, td { padding: 4px 6px; border: 1px solid #ccc; text-align: left; }
+    th { background: #ddd; font-weight: 700; font-size: 9px; text-transform: uppercase; text-align: center; }
+    tr:nth-child(even) { background: #fafafa; }
+    .total-row td { font-weight: 700; background: #eee; border-top: 2px solid #333; }
+    .bottom-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px; }
+    .box { border: 1px solid #ccc; padding: 8px 12px; }
+    .box h3 { font-size: 10px; text-transform: uppercase; margin-bottom: 6px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+    .box-row { display: flex; justify-content: space-between; padding: 3px 0; font-size: 11px; gap: 8px; }
+    .summary-box { border: 2px solid #111; padding: 8px 14px; margin-top: 0; }
+    .summary-box .row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 12px; border-bottom: 1px solid #eee; }
+    .footer { margin-top: 14px; font-size: 9px; color: #aaa; text-align: center; }
+    @media print { body { padding: 8px; } }
+  </style></head><body>
+  <div class="header">
+    <div>
+      <h1>${escapeHtml(site?.nom || "Maquis")}</h1>
+      <div style="font-size:10px;margin-top:2px">POINT DU JOUR — ${dateLabel}</div>
+    </div>
+    <div class="meta">Edition : ${generatedAt}<br>Gerant : ${escapeHtml(sessionUser || "-")}<br>${ventesJour.length} vente(s) · ${recouvrementJour.length} versement(s) recouvrement</div>
+  </div>
+  <div class="banner"><strong>Journee non cloturee</strong> — document de controle provisoire. Les totaux peuvent evoluer tant que la journee n'est pas cloturee.</div>
+  <table>
+    <thead><tr>
+      <th style="text-align:left">Article</th><th>Qte</th><th>Montant</th>
+      <th>Wave</th><th>Orange</th><th>MTN</th><th>Credit</th><th>Carte</th><th>Caisse</th>
+    </tr></thead>
+    <tbody>
+      ${ficheRows || `<tr><td colspan="9" style="text-align:center;color:#888;padding:16px">Aucune vente sur cette date</td></tr>`}
+      ${ficheRows ? `<tr class="total-row"><td>TOTAL</td><td style="text-align:right">${fmt(totalQty)}</td><td style="text-align:right">${fmt(totalMontant)}</td>
+        <td style="text-align:right">${fmt(totalWave)}</td><td style="text-align:right">${fmt(totalOrange)}</td>
+        <td style="text-align:right">${fmt(totalMtn)}</td><td style="text-align:right">${fmt(totalCredit)}</td>
+        <td style="text-align:right">${fmt(totalCarte)}</td><td style="text-align:right">${fmt(totalEsp)}</td></tr>` : ""}
+    </tbody>
+  </table>
+  <div class="bottom-grid">
+    <div class="box">
+      <h3>Encaissements</h3>
+      ${paymentRows || `<div class="box-row muted">Aucun encaissement</div>`}
+      ${caRecouvrement ? `<div class="box-row" style="margin-top:6px;border-top:1px solid #eee;padding-top:6px"><span>Recouvrement credit</span><strong>${fmt(caRecouvrement)} FCFA</strong></div>` : ""}
+      ${recoveryRows}
+      <div class="box-row" style="font-weight:700;margin-top:6px"><span>Total encaisse jour</span><strong>${fmt(caEncaisseTotal)} FCFA</strong></div>
+      ${caCreances ? `<div class="box-row" style="color:#c0392b;font-weight:700"><span>Reste a recouvrer (tous clients)</span><strong>${fmt(caCreances)} FCFA</strong></div>` : ""}
+      ${creditEmisJour ? `<div class="box-row"><span>Credits emis ce jour</span><strong>${fmt(creditEmisJour)} FCFA</strong></div>` : ""}
+      ${openingCash || expectedEspeces ? `<h3 style="margin-top:10px">Caisse especes</h3>
+        <div class="box-row"><span>Ouverture</span><strong>${fmt(openingCash)} FCFA</strong></div>
+        <div class="box-row"><span>Theorique (ouv. + ventes + recouvr.)</span><strong>${fmt(expectedEspeces)} FCFA</strong></div>` : ""}
+    </div>
+    <div>
+      <div class="summary-box">
+        <div class="row"><span>CA encaisse (jour)</span><strong>${fmt(caEncaisseTotal)} FCFA</strong></div>
+        ${chargesTotal ? `<div class="row"><span>Charges du jour</span><strong>- ${fmt(chargesTotal)} FCFA</strong></div>` : ""}
+        <div class="row"><span>Benefice estime</span><strong>${fmt(benefice)} FCFA</strong></div>
+      </div>
+      <div style="margin-top:10px;border:1px solid #ccc;padding:8px 12px">
+        <div style="font-size:10px;font-weight:700;margin-bottom:6px">Controle gerant</div>
+        <div style="display:flex;justify-content:space-between"><span>Signature :</span><span style="min-width:120px;border-bottom:1px solid #999">&nbsp;</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="footer">${escapeHtml(site?.nom || "")} — Point provisoire — ${dateLabel}</div>
+  <script>window.onload = () => window.print();<\/script>
+  </body></html>`;
+
+  const w = window.open("", "_blank");
+  if (!w) {
+    showToast("Impossible d'ouvrir la fenetre d'impression.");
+    return;
+  }
+  w.document.write(html);
+  w.document.close();
+}
+
 function printDayClosure() {
   const reportDateStr = pdjCalendarDate();
   const closed = stockCheckForSiteDate(reportDateStr, currentSiteId());
-  if (!closed) { showToast("Aucune clôture enregistrée pour la journée affichée."); return; }
+  if (!closed) { showToast("Journee non cloturee : utilisez « Imprimer le point du jour » pour un controle provisoire."); return; }
   const site = currentSite();
   const ventesJour = recordsForSite(state.ventes).filter((v) => v.date.slice(0, 10) === reportDateStr);
   const chargesJour = recordsForSite(state.charges).filter((c) => (c.date || "").slice(0, 10) === reportDateStr);
@@ -10289,6 +10814,7 @@ async function savePerte() {
   consumePhysicalStock(item, qty);
   item.lastSortieAt = new Date().toISOString();
   item.lastSortieBy = sessionUser || "-";
+  touchStockItemUpdated(item);
   state.stockLosses = state.stockLosses || [];
   if (!state.nextId) state.nextId = {};
   if (state.nextId.stockLoss == null || Number.isNaN(Number(state.nextId.stockLoss))) {
@@ -11849,6 +12375,10 @@ async function handleLoginSubmit(event) {
         errorEl.textContent = "";
         setAuthVisible(true);
         await bootstrapAuthenticatedApp();
+        const me = state?.auth?.users?.find((u) => u.username === result.username);
+        if (me && !me.twoFactorEnabled) {
+          showToast("Activez la 2FA dans Parametres > Acces pour securiser votre compte.");
+        }
         showToast("Connexion réussie.");
       }
     }
@@ -11873,7 +12403,6 @@ async function logout() {
   sessionDeadlineUnix = null;
   csrfToken = null;
   activeOrderId = null;
-  editingLineId = null;
   pendingFinalizeOrderId = null;
   pendingPreAuthToken = null;
   qrAlertCount = 0;
@@ -11956,6 +12485,8 @@ async function bootstrapAuthenticatedApp(opts = {}) {
   if (consigneDateEl) consigneDateEl.value = pdjCalendarDate();
   const creditDt = document.getElementById("credit-datetime");
   if (creditDt) creditDt.value = datetimeLocalNow();
+  const exportMonth = document.getElementById("export-month");
+  if (exportMonth && !exportMonth.value) exportMonth.value = today().slice(0, 7);
   document.getElementById("stock-move-start").value = today().slice(0, 8) + "01";
   document.getElementById("stock-move-end").value = today();
   populateOrderSelect();
@@ -12026,11 +12557,28 @@ function updatePaymentMixPreview() {
 }
 
 function takeOverOrder(orderId) {
-  activeOrderId = orderId;
+  const order = recordsForSite(state.commandes).find((o) => o.id === Number(orderId));
+  if (!order) {
+    showToast("Commande introuvable.");
+    return;
+  }
+  activeOrderId = order.id;
   clearQrAlert();
-  renderOrders();
+  if (currentPage === "ventes" && ventesSubTab !== "commandes") {
+    setVentesSubTab("commandes");
+    renderVentesPage();
+  } else {
+    renderOrders();
+  }
   syncVenteFormFromActiveOrder();
-  showToast("Commande selectionnee — formulaire vente aligne. Utilisez « Ajouter un article » pour le catalogue.");
+  const label = order.client || `Commande #${order.id}`;
+  showToast(`${label} ouverte — ajoutez, remplacez ou retirez des articles ci-dessous.`);
+  window.requestAnimationFrame(() => {
+    document.getElementById("ventes-card-board")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    window.requestAnimationFrame(() => {
+      document.querySelector(".order-card.active")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    });
+  });
 }
 
 /** Aligne le formulaire vente (hors modal) sur la commande active — utile apres « Ouvrir la commande ». */
@@ -12309,12 +12857,9 @@ function attachEvents() {
   document.getElementById("replace-picker")?.addEventListener("click", (e) => {
     const item = e.target.closest("[data-pick-replace]");
     if (!item) return;
-    replaceSelectedArticle = item.dataset.pickReplace;
-    renderReplacePicker(document.getElementById("replace-search")?.value || "");
-    const btn = document.getElementById("confirm-replace-btn");
-    if (btn) btn.disabled = false;
+    const article = decodeURIComponent(item.getAttribute("data-pick-replace") || "");
+    confirmReplace(article).catch(handleApiError);
   });
-  document.getElementById("confirm-replace-btn")?.addEventListener("click", () => confirmReplace().catch(handleApiError));
   document.getElementById("generate-qr-btn").addEventListener("click", renderQrPreview);
   document.getElementById("print-all-qr-btn").addEventListener("click", () => printAllQrTables());
   document.getElementById("print-qr-int-btn").addEventListener("click", () => printQrCard("Intérieur"));
@@ -12328,7 +12873,7 @@ document.getElementById("fab-btn").addEventListener("click", () => {
         if (wrap) { resetConsigneForm(); wrap.classList.remove("hidden"); document.getElementById("consigne-client")?.focus(); }
         return;
       }
-      openOrderEditor(activeOrderId || null, null);
+      openOrderEditor(activeOrderId || null);
       return;
     }
     if (currentPage === "stock" && stockSubTab === "casiers") {
@@ -12379,7 +12924,8 @@ document.getElementById("fab-btn").addEventListener("click", () => {
     const file = e.target.files[0];
     if (file) { importStockExcel(file).catch(handleApiError); e.target.value = ""; }
   });
-  document.getElementById("print-closure-btn").addEventListener("click", printDayClosure);
+  document.getElementById("print-closure-btn")?.addEventListener("click", printPdjDayControl);
+  document.getElementById("print-pdj-control-btn")?.addEventListener("click", printPdjDayControl);
   document.getElementById("pdj-work-date")?.addEventListener("change", () => {
     syncPdjWorkDateInput();
     renderTopbar();
@@ -12432,7 +12978,26 @@ document.getElementById("fab-btn").addEventListener("click", () => {
   });
   document.getElementById("reappro-case-size-select").addEventListener("change", updateReapproPrixInfo);
   document.getElementById("enable-2fa-btn").addEventListener("click", () => enable2FA().catch(handleApiError));
-  document.getElementById("export-btn").addEventListener("click", exportData);
+  document.getElementById("export-btn")?.addEventListener("click", exportData);
+  document.getElementById("export-ventes-csv-btn")?.addEventListener("click", exportCsvVentesMonth);
+  document.getElementById("export-charges-csv-btn")?.addEventListener("click", exportCsvChargesMonth);
+  document.getElementById("top-journal-close-btn")?.addEventListener("click", () => {
+    navigate("pdj");
+    showToast("Cloturez la journee comptable depuis cette page.");
+  });
+  document.getElementById("stock-filter-bar")?.addEventListener("click", (e) => {
+    const catBtn = e.target.closest("[data-stock-cat-filter]");
+    if (catBtn) {
+      stockCatFilter = catBtn.getAttribute("data-stock-cat-filter") || "all";
+      if (currentPage === "stock") renderStock();
+      return;
+    }
+    const stBtn = e.target.closest("[data-stock-status-filter]");
+    if (stBtn) {
+      stockStatusFilter = stBtn.getAttribute("data-stock-status-filter") || "all";
+      if (currentPage === "stock") renderStock();
+    }
+  });
   document.getElementById("top-backup-download-btn")?.addEventListener("click", () => exportData());
   document.getElementById("top-backup-server-btn")?.addEventListener("click", () => createManualBackupOnServer().catch(handleApiError));
   document.getElementById("reset-btn").addEventListener("click", async () => {
@@ -12444,7 +13009,6 @@ document.getElementById("fab-btn").addEventListener("click", () => {
     try {
       state = await apiRequest(API.reset, { method: "POST", body: JSON.stringify({}) });
       activeOrderId = null;
-      editingLineId = null;
       await bootstrapAuthenticatedApp({ skipCasierLsRestore: true });
       lsSaveCasiers();
       showToast("Application reinitialisee.");
@@ -12486,7 +13050,6 @@ document.getElementById("fab-btn").addEventListener("click", () => {
         compatPut = true;
       }
       activeOrderId = null;
-      editingLineId = null;
       await bootstrapAuthenticatedApp({ skipCasierLsRestore: true });
       lsSaveCasiers();
       showToast(
@@ -12790,12 +13353,7 @@ document.getElementById("fab-btn").addEventListener("click", () => {
     }
     const addLine = event.target.closest("[data-add-line-order]");
     if (addLine) {
-      openOrderEditor(Number(addLine.dataset.addLineOrder), null);
-      return;
-    }
-    const editLine = event.target.closest("[data-edit-line]");
-    if (editLine) {
-      openOrderEditor(Number(editLine.dataset.orderId), Number(editLine.dataset.editLine));
+      openOrderEditor(Number(addLine.dataset.addLineOrder));
       return;
     }
     const removeLine = event.target.closest("[data-remove-line]");
@@ -12950,7 +13508,7 @@ document.getElementById("fab-btn").addEventListener("click", () => {
     const type = deleteButton.dataset.deleteType;
     if (type === "vente" && window.confirm("Supprimer cette vente finalisee ?")) deleteFinalSale(id).catch(handleApiError);
     if (type === "stock" && window.confirm("Supprimer cet article du stock ?")) deleteStockItem(id).catch(handleApiError);
-    if (type === "charge" && window.confirm("Supprimer cette depense ?")) deleteCharge(id).catch(handleApiError);
+    if (type === "charge") deleteCharge(id).catch(handleApiError);
   });
   document.body.addEventListener("keydown", (event) => {
     if (event.key !== "Enter" && event.key !== " ") return;

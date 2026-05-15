@@ -76,7 +76,16 @@ Chaque issue contient **Problème**, **Solution recommandée** et **Critères d'
 | IMPORTANT | 6–11 | PDJ, ventes TABLE, charges, stock |
 | UTILE | 12–15 | Filtres stock, guide, export CSV, objectif mensuel |
 
-Issues déjà traitées dans le code local : voir commits récents ou comparer avec les critères d'acceptance.
+| # | Statut local |
+|---|----------------|
+| 1 | AGENTS.md à jour |
+| 2–4, 7–8 | Sécurité / confirmations |
+| 5–6 | 2FA + journée comptable |
+| 9 | Colonnes Table / Mode ventes |
+| 10–12 | Charges, filtres stock, MAJ stock |
+| 13–15 | Guide recherche, export CSV, objectif mensuel |
+
+Après déploiement : `python server.py` + Ctrl+F5 (`app-orders.js?v=184`).
 
 ## Documentation complémentaire
 
