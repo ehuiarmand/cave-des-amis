@@ -1212,7 +1212,8 @@ function openCreditPaymentDetailModal(recoveryId) {
   const createdRaw = String(p.createdAt || "").trim();
   const paidIso = paidRaw ? formatDateTimeDdMmYyyy(paidRaw) : "—";
   const createdIso = createdRaw ? formatDateTimeDdMmYyyy(createdRaw) : "—";
-  const deleteBtn = canManage()
+  const isDoublon = creditRecoveryIsDoublon(p);
+  const deleteBtn = canManage() && isDoublon
     ? `<div class="button-stack" style="margin-top:16px"><button type="button" class="btn btn-danger" data-delete-credit-recovery="${escapeHtml(String(p.id))}">Supprimer ce versement (doublon)</button></div>`
     : "";
   body.innerHTML = `
@@ -1246,7 +1247,7 @@ async function deleteCreditRecovery(recoveryId) {
     return;
   }
   const label = `${debtorDisplayKey(row.debiteur)} · ${fmt(row.montant)} FCFA · ${formatCreditPaidAt(row)}`;
-  if (!window.confirm(`Supprimer ce versement de recouvrement ?\n\n${label}\n\nLe reste à payer du client sera recalculé.`)) {
+  if (!window.confirm(`Supprimer ce versement en doublon ?\n\n${label}\n\nCe montant sera recompte comme credit en cours pour ce client.`)) {
     return;
   }
   state.creditRecoveries = (state.creditRecoveries || []).filter((x) => Number(x.id) !== id);
@@ -8837,6 +8838,21 @@ function creditRecoveryIsDuplicateInSite(nameNorm, applied, method, paidAtIso, s
       Math.round(Number(x.montant) || 0) === applied &&
       String(x.paiement || "").trim() === m &&
       String(x.paidAt || "").trim() === payIso,
+  );
+}
+
+function creditRecoveryIsDoublon(p) {
+  const nameNorm = debtorDisplayKey(p.debiteur);
+  const amount = Math.round(Number(p.montant) || 0);
+  const method = String(p.paiement || "").trim();
+  const date = String(p.date || "").slice(0, 10);
+  return creditRecoveriesForSite().some(
+    (x) =>
+      Number(x.id) !== Number(p.id) &&
+      debtorDisplayKey(x.debiteur) === nameNorm &&
+      Math.round(Number(x.montant) || 0) === amount &&
+      String(x.paiement || "").trim() === method &&
+      String(x.date || "").slice(0, 10) === date,
   );
 }
 
