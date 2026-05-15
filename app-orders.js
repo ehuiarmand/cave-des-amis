@@ -440,6 +440,7 @@ let currentQrLinkExt = "";
 let pendingFinalizeOrderId = null;
 let liveSyncTimer = null;
 let appLiveClockTimer = null;
+let autoClotureTimer = null;
 let qrAlertCount = 0;
 let knownQrOrderIds = new Set();
 let flashingQrOrderIds = new Set();
@@ -3722,6 +3723,7 @@ function normalizePromotions(item = {}) {
       dateDebut: String(p.dateDebut || p.dateEffet || "").slice(0, 10),
       dateFin: String(p.dateFin || "").slice(0, 10),
       formatsVente: normalizeSaleFormatsFromRaw(p.formatsVente || [], p),
+      stockPromoRestant: p.stockPromoRestant != null ? Number(p.stockPromoRestant) : null,
     }))
     .filter((p) => p.dateDebut && p.formatsVente.length)
     .sort((a, b) => a.dateDebut.localeCompare(b.dateDebut));
@@ -3732,6 +3734,7 @@ function activePromotion(item = {}, asOfDate) {
   const applicable = normalizePromotions(item).filter((p) => {
     if (p.dateDebut > d) return false;
     if (p.dateFin && p.dateFin < d) return false;
+    if (p.stockPromoRestant != null && p.stockPromoRestant <= 0) return false;
     return true;
   });
   if (!applicable.length) return null;
@@ -3747,7 +3750,9 @@ function promotionBadgeHtml(item, asOfDate = today()) {
   const active = activePromotion(item, asOfDate);
   if (active) {
     const fin = active.dateFin ? ` → ${formatDateDdMmYyyy(active.dateFin)}` : "";
-    return `<span class="badge badge-amber" title="${escapeHtml(active.libelle)}${fin}">Promo</span>`;
+    const restant = active.stockPromoRestant != null ? Math.ceil(active.stockPromoRestant) : null;
+    const stockLabel = restant != null ? ` · ${fmt(restant)} cas.` : "";
+    return `<span class="badge badge-amber" title="${escapeHtml(active.libelle)}${fin}${stockLabel}">Promo${restant != null ? ` (${fmt(restant)} cas.)` : ""}</span>`;
   }
   const next = upcomingPromotion(item, asOfDate);
   if (next) {
@@ -7729,6 +7734,11 @@ function loadParamsForm() {
   if (dualZonePricingEl) dualZonePricingEl.checked = siteUsesDualZonePricing(site);
   const pStockAlertInclusive = document.getElementById("p-stock-alert-inclusive-seuil");
   if (pStockAlertInclusive) pStockAlertInclusive.checked = Boolean(site?.stockAlertInclusiveSeuil);
+  const pAutoClotureEnabled = document.getElementById("p-auto-cloture-enabled");
+  if (pAutoClotureEnabled) pAutoClotureEnabled.checked = Boolean(site?.autoClotureEnabled);
+  const pAutoClotureTime = document.getElementById("p-auto-cloture-time");
+  if (pAutoClotureTime) pAutoClotureTime.value = site?.autoClotureTime || "23:00";
+  syncAutoClotureTimeVisibility();
   const categoriesField = document.getElementById("p-categories");
   if (categoriesField) {
     const saved = Array.isArray(state?.categories) && state.categories.length ? state.categories : CATEGORIES;
@@ -8024,6 +8034,156 @@ function stopAppLiveClock() {
     clearInterval(appLiveClockTimer);
     appLiveClockTimer = null;
   }
+}
+
+function syncAutoClotureTimeVisibility() {
+  const enabled = document.getElementById("p-auto-cloture-enabled")?.checked;
+  const wrap = document.getElementById("p-auto-cloture-time-wrap");
+  if (wrap) wrap.classList.toggle("hidden", !enabled);
+}
+
+function startAutoClotureSchedule() {
+  stopAutoClotureSchedule();
+  autoClotureTimer = window.setInterval(checkAutoClotureSchedule, 60_000);
+}
+
+function stopAutoClotureSchedule() {
+  if (autoClotureTimer != null) {
+    clearInterval(autoClotureTimer);
+    autoClotureTimer = null;
+  }
+}
+
+function checkAutoClotureSchedule() {
+  if (!state || !sessionUser) return;
+  if (!canManagePdjAccounting()) return;
+  const site = currentSite();
+  if (!site?.autoClotureEnabled || !site?.autoClotureTime) return;
+  const parts = String(site.autoClotureTime).split(":");
+  const hh = Number(parts[0]);
+  const mm = Number(parts[1]);
+  if (Number.isNaN(hh) || Number.isNaN(mm)) return;
+  const now = new Date();
+  if (now.getHours() < hh || (now.getHours() === hh && now.getMinutes() < mm)) return;
+  const dStr = workingDate();
+  if (!dStr) return;
+  if (stockCheckForSiteDate(dStr, currentSiteId())) return;
+  performAutoClotureBackground(dStr).catch(console.error);
+}
+
+async function performAutoClotureBackground(dStr) {
+  if (!canManagePdjAccounting()) return;
+  const siteId = currentSiteId();
+  if (stockCheckForSiteDate(dStr, siteId)) return;
+  const items = recordsForSite(state.stock);
+  if (!items.length) return;
+  const pendingForClose = pendingOrdersForJournalDate(dStr, siteId);
+  if (pendingForClose.length) {
+    showToast(`Clôture auto impossible : ${pendingForClose.length} commande(s) en attente pour le ${formatDateDdMmYyyy(dStr)}.`);
+    return;
+  }
+  const dayBook = dayBookFor(dStr, siteId);
+  const ventesJour = recordsForSite(state.ventes).filter((v) => v.date.slice(0, 10) === dStr);
+  const totauxJour = paymentTotals(ventesJour);
+  const caEncaisse = Object.entries(totauxJour).reduce((sum, [m, a]) => String(m).includes("dit client") ? sum : sum + a, 0);
+  const creditEmisJour = creditIssuedOnDate(dStr);
+  const caCreances = totalCreditOutstanding();
+  const especesVentes = Number(totauxJour["Espèces"]) || Number(totauxJour["EspÃ¨ces"]) || 0;
+  const especesRecouvrement = especesFromCreditRecoveriesForDate(dStr);
+  const chargesJour = recordsForSite(state.charges).filter((c) => (c.date || "").slice(0, 10) === dStr);
+  const especesCharges = chargesJour.reduce((sum, c) => (
+    normalizePaymentMethodKey(c.paiement) === normalizePaymentMethodKey("Espèces")
+    || normalizePaymentMethodKey(c.paiement) === normalizePaymentMethodKey("EspÃ¨ces")
+      ? sum + (Number(c.montant) || 0) : sum
+  ), 0);
+  const openingCash = Number(dayBook?.openingCashFcfa) || 0;
+  const expectedEspecesCash = openingCash + especesVentes + especesRecouvrement;
+  const closingCashFcfa = expectedEspecesCash;
+  const cashEcartEspeces = 0;
+
+  const existingCloseCheck = stockCheckForSiteDate(dStr, siteId);
+  const checkedItems = items.map((item) => {
+    const frigo = Math.max(0, stockFrigo(item));
+    const reserve = Math.max(0, stockReserve(item));
+    const existingCloseItem = existingCloseCheck ? (existingCloseCheck.items || []).find((ci) => Number(ci.id) === Number(item.id)) : null;
+    const stockAtOpen = stockOpeningFromDayBook(item, dayBook) ?? existingCloseItem?.stockAvant ?? stockActuel(item);
+    const sortiesToday = todaySortiesBottlesForArticle(item.article, dStr);
+    const expectedRemaining = Math.max(0, stockAtOpen - sortiesToday);
+    const counted = frigo + reserve;
+    return {
+      id: item.id,
+      article: item.article,
+      cat: item.cat || "",
+      stockAvant: stockAtOpen,
+      sortiesToday,
+      expected: expectedRemaining,
+      frigo,
+      reserve,
+      counted,
+      ecart: counted - expectedRemaining,
+      stockApres: counted,
+    };
+  });
+
+  const prevClose = (state.stockChecks || []).find((sc) => sc.siteId === siteId && sc.date === dStr);
+  checkedItems.forEach((checked) => {
+    const item = state.stock.find((stockItem) => stockItem.id === checked.id);
+    if (!item) return;
+    item.frigo = checked.frigo;
+    item.reserve = checked.reserve;
+    if (prevClose) {
+      const prev = (prevClose.items || []).find((pi) => pi.id === checked.id);
+      if (prev) {
+        if (prev.sortiesToday > 0) item.sorties = Math.max(0, (Number(item.sorties) || 0) - prev.sortiesToday);
+        if (prev.ecart > 0) item.entrees = Math.max(0, (Number(item.entrees) || 0) - prev.ecart);
+        if (prev.ecart < 0) item.sorties = Math.max(0, (Number(item.sorties) || 0) - Math.abs(prev.ecart));
+      }
+    }
+    if (checked.sortiesToday > 0) {
+      item.sorties = (Number(item.sorties) || 0) + checked.sortiesToday;
+      item.lastSortieAt = new Date().toISOString();
+      item.lastSortieBy = "auto-cloture";
+    }
+    if (checked.ecart > 0) item.entrees = (Number(item.entrees) || 0) + checked.ecart;
+    if (checked.ecart < 0) item.sorties = (Number(item.sorties) || 0) + Math.abs(checked.ecart);
+  });
+
+  const check = {
+    id: Date.now(),
+    siteId,
+    date: dStr,
+    createdAt: new Date().toISOString(),
+    openedAt: dayBook?.openedAt || "",
+    openingCashFcfa: openingCash,
+    closingCashFcfa,
+    expectedEspecesCash,
+    cashEcartEspeces,
+    especesChargesJour: especesCharges,
+    caEncaisse,
+    caCreances,
+    caCreancesEmisesJour: creditEmisJour,
+    nbVentes: ventesJour.length,
+    totauxJour,
+    items: checkedItems,
+    autoClose: true,
+  };
+  state.stockChecks = [
+    check,
+    ...(state.stockChecks || []).filter((sc) => !(sc.siteId === check.siteId && sc.date === check.date)),
+  ];
+  recordStaffAudit(
+    "update",
+    "cloture_jour",
+    `Clôture automatique ${formatDateDdMmYyyy(dStr)}`,
+    `Programmée · ${new Date().toLocaleTimeString("fr-FR")} · CA ${fmt(caEncaisse)} FCFA · ${ventesJour.length} vente(s) · stock théorique`,
+  );
+  const pdjMapClose = { ...(state.pdjWorkDateBySite || {}) };
+  if (pdjMapClose[siteId] === dStr) delete pdjMapClose[siteId];
+  await persistState({ stock: state.stock, stockChecks: state.stockChecks, pdjWorkDateBySite: pdjMapClose });
+  renderDashboard();
+  renderPointDuJour();
+  renderStock();
+  showToast(`Clôture auto : journée du ${formatDateDdMmYyyy(dStr)} clôturée (stock théorique, caisse théorique).`);
 }
 
 async function syncStateSilently() {
@@ -9670,6 +9830,16 @@ async function finalizeOrder(orderId = activeOrderId) {
       stockItem.lastSortieBy = sessionUser || "Serveur";
       consumePhysicalStock(stockItem, bottles);
       drainArticleCasiers(stockItem.article, bottles, { motif: "vente", commentaire: `Facture ${factureNumber}` });
+      const saleDate = String(line.date || order.date || today()).slice(0, 10);
+      const promoForLine = activePromotion(stockItem, saleDate);
+      if (promoForLine && promoForLine.stockPromoRestant != null) {
+        const cs = Math.max(1, caseSize(stockItem));
+        const casiersSold = bottles / cs;
+        const promoIdx = (stockItem.promotions || []).findIndex((p) => Number(p.id) === promoForLine.id);
+        if (promoIdx >= 0) {
+          stockItem.promotions[promoIdx].stockPromoRestant = Math.max(0, (Number(stockItem.promotions[promoIdx].stockPromoRestant) || 0) - casiersSold);
+        }
+      }
     }
   });
 
@@ -9823,13 +9993,17 @@ function readPromoFormatsFromRow(promoRow) {
 }
 
 function readStockPromotions() {
-  return [...document.querySelectorAll("[data-promo-row]")].map((row) => ({
-    id: Number(row.dataset.promoId) || 0,
-    libelle: row.querySelector(".promo-libelle")?.value?.trim() || "Promotion",
-    dateDebut: row.querySelector(".promo-debut")?.value || "",
-    dateFin: row.querySelector(".promo-fin")?.value?.trim() || "",
-    formatsVente: readPromoFormatsFromRow(row),
-  })).filter((p) => p.dateDebut && p.formatsVente.length);
+  return [...document.querySelectorAll("[data-promo-row]")].map((row) => {
+    const srRaw = row.querySelector(".promo-stock-restant")?.value?.trim();
+    return {
+      id: Number(row.dataset.promoId) || 0,
+      libelle: row.querySelector(".promo-libelle")?.value?.trim() || "Promotion",
+      dateDebut: row.querySelector(".promo-debut")?.value || "",
+      dateFin: row.querySelector(".promo-fin")?.value?.trim() || "",
+      formatsVente: readPromoFormatsFromRow(row),
+      stockPromoRestant: srRaw !== "" && srRaw != null ? Number(srRaw) : null,
+    };
+  }).filter((p) => p.dateDebut && p.formatsVente.length);
 }
 
 function renderStockPromotions(promotions = []) {
@@ -9874,6 +10048,11 @@ function renderStockPromotions(promotions = []) {
             <input class="promo-fin" type="date" value="${escapeHtml(p.dateFin || "")}">
           </div>
         </div>
+        <div class="form-group">
+          <label>Casiers promo restants <span class="form-hint" style="display:inline">(laisser vide = illimité)</span></label>
+          <input class="promo-stock-restant" type="number" min="0" step="0.01" value="${p.stockPromoRestant != null ? escapeHtml(String(p.stockPromoRestant)) : ""}" placeholder="ex: 5">
+        </div>
+        ${p.stockPromoRestant != null && p.stockPromoRestant <= 0 ? `<p class="form-hint" style="color:var(--danger,#e53e3e);font-weight:600;">⚠ Stock promo épuisé — prix catalogue actif automatiquement.</p>` : ""}
         <p class="form-hint">Tarifs promo (mêmes formats que le catalogue)</p>
         <div class="sale-formats-list">${formatRows}</div>
         <button type="button" class="mini-btn stock-promo-remove" data-remove-promo="${pid}">Retirer cette promotion</button>
@@ -9890,6 +10069,7 @@ function addStockPromotion() {
       libelle: "Promotion",
       dateDebut: today(),
       dateFin: "",
+      stockPromoRestant: null,
       formatsVente: readStockSaleFormats(),
     },
   ]);
@@ -10618,6 +10798,8 @@ async function saveParams() {
     singleBreweryName: singleBreweryOnly ? singleBreweryName : "",
     stockAlertInclusiveSeuil: Boolean(document.getElementById("p-stock-alert-inclusive-seuil")?.checked),
     reapproTargetMultiplier: Math.min(10, Math.max(1, Number(document.getElementById("p-reappro-mult")?.value) || 2)),
+    autoClotureEnabled: Boolean(document.getElementById("p-auto-cloture-enabled")?.checked),
+    autoClotureTime: String(document.getElementById("p-auto-cloture-time")?.value || "23:00").slice(0, 5),
   } : item);
   await persistState({ sites: updatedSites, categories: cleanCategories });
   populateCategorySelects();
@@ -13407,6 +13589,7 @@ async function logout() {
   }
   stopLiveSync();
   stopAppLiveClock();
+  stopAutoClotureSchedule();
   state = null;
   sessionUser = null;
   currentRole = null;
@@ -13519,6 +13702,7 @@ async function bootstrapAuthenticatedApp(opts = {}) {
   renderQrAlertBadge();
   startLiveSync();
   startAppLiveClock();
+  startAutoClotureSchedule();
 }
 
 function handleApiError(error) {
@@ -13894,6 +14078,7 @@ function attachEvents() {
   document.getElementById("print-qr-ext-btn").addEventListener("click", () => printQrCard("Extérieur"));
   document.getElementById("new-site-single-br-enabled")?.addEventListener("change", syncSingleBreweryUi);
   document.getElementById("p-single-br-enabled")?.addEventListener("change", syncSingleBreweryUi);
+  document.getElementById("p-auto-cloture-enabled")?.addEventListener("change", syncAutoClotureTimeVisibility);
 document.getElementById("fab-btn").addEventListener("click", () => {
     if (currentPage === "ventes") {
       if (ventesSubTab === "consignes") {

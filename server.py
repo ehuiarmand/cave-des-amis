@@ -3023,6 +3023,234 @@ class AppHandler(BaseHTTPRequestHandler):
         return
 
 
+# ---------------------------------------------------------------------------
+# Clôture automatique côté serveur (background thread, toujours actif)
+# ---------------------------------------------------------------------------
+
+def _stock_frigo_py(item: dict[str, Any]) -> float:
+    if item.get("frigo") is not None:
+        return max(0.0, float(item["frigo"] or 0))
+    return max(0.0, float(item.get("init", 0) or 0) + float(item.get("entrees", 0) or 0) - float(item.get("sorties", 0) or 0))
+
+
+def _stock_reserve_py(item: dict[str, Any]) -> float:
+    if item.get("reserve") is not None:
+        return max(0.0, float(item["reserve"] or 0))
+    total = max(0.0, float(item.get("init", 0) or 0) + float(item.get("entrees", 0) or 0) - float(item.get("sorties", 0) or 0))
+    return max(0.0, total - _stock_frigo_py(item))
+
+
+def _server_auto_close_site(site_id: str, d_str: str) -> None:
+    """Clôture automatique d'un maquis pour une date donnée. Thread-safe via store._lock (RLock)."""
+    with store._lock:
+        state = store._state
+        # Vérification idempotente : déjà clôturé ?
+        if any(sc.get("siteId") == site_id and sc.get("date") == d_str for sc in state.get("stockChecks", [])):
+            return
+        # Commandes en attente ?
+        pending = [c for c in state.get("commandes", [])
+                   if str(c.get("siteId", "")) == site_id
+                   and str(c.get("date", "")).startswith(d_str)
+                   and c.get("lignes")]
+        if pending:
+            print(f"[auto-cloture] Site {site_id} {d_str}: {len(pending)} commande(s) en attente — clôture reportée.", flush=True)
+            return
+
+        site_stock = [item for item in state.get("stock", []) if str(item.get("siteId", "")) == site_id]
+        ventes_jour = [v for v in state.get("ventes", [])
+                       if str(v.get("siteId", "")) == site_id
+                       and str(v.get("date", "")).startswith(d_str)]
+
+        # Totaux paiements
+        payment_totals: dict[str, float] = {}
+        for v in ventes_jour:
+            details = v.get("paiementDetails") or []
+            if isinstance(details, list) and details:
+                for d in details:
+                    m = str(d.get("method") or "Espèces")
+                    payment_totals[m] = payment_totals.get(m, 0.0) + float(d.get("amount") or 0)
+            else:
+                m = str(v.get("paiement") or "Espèces")
+                net = max(0.0, float(v.get("prix") or 0) * float(v.get("qty") or 0) - float(v.get("remise") or 0))
+                payment_totals[m] = payment_totals.get(m, 0.0) + net
+
+        ca_encaisse = sum(amt for method, amt in payment_totals.items() if "dit client" not in method.lower())
+
+        day_books = state.get("dayBooks", [])
+        day_book = next((b for b in day_books
+                         if str(b.get("siteId", "")) == site_id
+                         and str(b.get("date", "")).startswith(d_str)), None)
+        opening_cash = float((day_book or {}).get("openingCashFcfa") or 0)
+
+        especes_ventes = payment_totals.get("Espèces", payment_totals.get("EspÃ¨ces", 0.0))
+        especes_recouvrement = sum(
+            float(r.get("montant") or 0)
+            for r in state.get("creditRecoveries", [])
+            if str(r.get("siteId", "")) == site_id
+            and str(r.get("paidAt") or r.get("date") or "").startswith(d_str)
+            and "pèces" in str(r.get("paiement") or "")
+        )
+        expected_especes = opening_cash + especes_ventes + especes_recouvrement
+        closing_cash = expected_especes
+
+        # Construire checkedItems avec valeurs théoriques
+        opening_stock_by_id: dict[str, float] = {}
+        if day_book and isinstance(day_book.get("openingStockById"), dict):
+            for k, v in day_book["openingStockById"].items():
+                try:
+                    opening_stock_by_id[str(k)] = float(v)
+                except (TypeError, ValueError):
+                    pass
+
+        prev_close = next((sc for sc in state.get("stockChecks", [])
+                           if sc.get("siteId") == site_id and sc.get("date") == d_str), None)
+
+        checked_items = []
+        for item in site_stock:
+            frigo = _stock_frigo_py(item)
+            reserve = _stock_reserve_py(item)
+            item_id_str = str(item.get("id", ""))
+            if item_id_str in opening_stock_by_id:
+                stock_at_open = opening_stock_by_id[item_id_str]
+            else:
+                stock_at_open = max(0.0, float(item.get("init") or 0) + float(item.get("entrees") or 0) - float(item.get("sorties") or 0))
+            sorties_today = sum(
+                float(v.get("qty") or 0) * max(1.0, float(v.get("formatQuantite") or v.get("packSize") or 1))
+                for v in ventes_jour
+                if v.get("article") == item.get("article")
+            )
+            expected_remaining = max(0.0, stock_at_open - sorties_today)
+            counted = frigo + reserve
+            ecart = counted - expected_remaining
+            checked_items.append({
+                "id": item["id"],
+                "article": item.get("article", ""),
+                "cat": item.get("cat", ""),
+                "stockAvant": stock_at_open,
+                "sortiesToday": sorties_today,
+                "expected": expected_remaining,
+                "frigo": frigo,
+                "reserve": reserve,
+                "counted": counted,
+                "ecart": ecart,
+                "stockApres": counted,
+            })
+
+        # Mettre à jour le stock
+        for checked in checked_items:
+            item = next((i for i in state["stock"] if i.get("id") == checked["id"]), None)
+            if not item:
+                continue
+            item["frigo"] = checked["frigo"]
+            item["reserve"] = checked["reserve"]
+            if prev_close:
+                prev_item = next((pi for pi in (prev_close.get("items") or []) if pi.get("id") == checked["id"]), None)
+                if prev_item:
+                    if float(prev_item.get("sortiesToday") or 0) > 0:
+                        item["sorties"] = max(0.0, float(item.get("sorties") or 0) - float(prev_item["sortiesToday"]))
+                    prev_ecart = float(prev_item.get("ecart") or 0)
+                    if prev_ecart > 0:
+                        item["entrees"] = max(0.0, float(item.get("entrees") or 0) - prev_ecart)
+                    elif prev_ecart < 0:
+                        item["sorties"] = max(0.0, float(item.get("sorties") or 0) - abs(prev_ecart))
+            if checked["sortiesToday"] > 0:
+                item["sorties"] = float(item.get("sorties") or 0) + checked["sortiesToday"]
+                item["lastSortieAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                item["lastSortieBy"] = "auto-cloture-serveur"
+            if checked["ecart"] > 0:
+                item["entrees"] = float(item.get("entrees") or 0) + checked["ecart"]
+            elif checked["ecart"] < 0:
+                item["sorties"] = float(item.get("sorties") or 0) + abs(checked["ecart"])
+
+        check = {
+            "id": int(time.time() * 1000),
+            "siteId": site_id,
+            "date": d_str,
+            "createdAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "openedAt": (day_book or {}).get("openedAt", ""),
+            "openingCashFcfa": opening_cash,
+            "closingCashFcfa": closing_cash,
+            "expectedEspecesCash": expected_especes,
+            "cashEcartEspeces": 0,
+            "caEncaisse": ca_encaisse,
+            "caCreances": 0,
+            "caCreancesEmisesJour": 0,
+            "nbVentes": len(ventes_jour),
+            "totauxJour": payment_totals,
+            "items": checked_items,
+            "autoClose": True,
+        }
+        state["stockChecks"] = [check] + [
+            sc for sc in state.get("stockChecks", [])
+            if not (sc.get("siteId") == site_id and sc.get("date") == d_str)
+        ]
+        pdj_map = dict(state.get("pdjWorkDateBySite") or {})
+        if pdj_map.get(site_id) == d_str:
+            pdj_map.pop(site_id, None)
+            state["pdjWorkDateBySite"] = pdj_map
+
+        store._write(state)
+
+    audit_log("auto_cloture_jour", {
+        "siteId": site_id,
+        "date": d_str,
+        "caEncaisse": ca_encaisse,
+        "nbVentes": len(ventes_jour),
+        "method": "server_background",
+    })
+    print(f"[auto-cloture] Site {site_id} clôturée pour le {d_str} (CA {ca_encaisse:.0f} FCFA, {len(ventes_jour)} ventes)", flush=True)
+
+
+def _auto_cloture_check() -> None:
+    """Vérifie toutes les minutes si une clôture automatique est due."""
+    try:
+        now = time.localtime()
+        today_str = time.strftime("%Y-%m-%d", now)
+        current_hhmm = time.strftime("%H:%M", now)
+
+        to_close: list[tuple[str, str]] = []
+        with store._lock:
+            state = store._state
+            closed_by_site: dict[str, set[str]] = {}
+            for sc in state.get("stockChecks", []):
+                sid = str(sc.get("siteId") or "")
+                if sid:
+                    closed_by_site.setdefault(sid, set()).add(str(sc.get("date") or ""))
+
+            for site in state.get("sites", []):
+                site_id = str(site.get("id") or "")
+                if not site_id or not site.get("autoClotureEnabled"):
+                    continue
+                cloture_time = str(site.get("autoClotureTime") or "")
+                if len(cloture_time) < 5 or current_hhmm < cloture_time[:5]:
+                    continue
+                closed_dates = closed_by_site.get(site_id, set())
+                unclosed = sorted(
+                    b["date"][:10]
+                    for b in state.get("dayBooks", [])
+                    if str(b.get("siteId", "")) == site_id
+                    and str(b.get("date") or "")[:10] <= today_str
+                    and len(str(b.get("date") or "")) >= 10
+                    and str(b.get("date") or "")[:10] not in closed_dates
+                )
+                if unclosed:
+                    to_close.append((site_id, unclosed[0]))
+
+        for site_id, d_str in to_close:
+            _server_auto_close_site(site_id, d_str)
+    except Exception as exc:
+        print(f"[auto-cloture] Erreur inattendue : {exc}", flush=True)
+
+
+def _start_auto_cloture_thread() -> None:
+    def loop() -> None:
+        while True:
+            time.sleep(60)
+            _auto_cloture_check()
+    threading.Thread(target=loop, daemon=True, name="auto-cloture").start()
+    print("[auto-cloture] Planificateur de clôture automatique démarré.", flush=True)
+
+
 def main() -> None:
     host = _env_first("MAQUIS_MANAGER_HOST", "TDB_BAR_HOST", default="0.0.0.0")
     requested_port = int(_env_first("MAQUIS_MANAGER_PORT", "TDB_BAR_PORT", default="8000"))
@@ -3050,6 +3278,7 @@ def main() -> None:
             message += f" Derniere erreur: {last_error}"
         raise OSError(message)
 
+    _start_auto_cloture_thread()
     print(f"Maquis Manager server running on http://127.0.0.1:{bound_port}")
     print(f"Storage mode: {STORAGE_MODE}")
     print(f"Sauvegardes automatiques dans {BACKUP_DIR} (garder jusqu'a {BACKUP_KEEP_COUNT} fichiers par type)")

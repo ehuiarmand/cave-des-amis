@@ -85,7 +85,7 @@ Chaque issue contient **Problème**, **Solution recommandée** et **Critères d'
 | 10–12 | Charges, filtres stock, MAJ stock |
 | 13–15 | Guide recherche, export CSV, objectif mensuel |
 
-Après déploiement : `python server.py` + Ctrl+F5 (`app-orders.js?v=184`).
+Après déploiement : `python server.py` + Ctrl+F5 (`app-orders.js?v=210`).
 
 ## Documentation complémentaire
 

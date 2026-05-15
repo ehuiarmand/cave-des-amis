@@ -1168,6 +1168,18 @@
                 </label>
                 <p class="muted" style="font-size:0.82rem;margin:6px 0 0 28px">Decoche pour un tarif unique sur tout le maquis.</p>
               </div>
+              <div class="form-group" style="grid-column:1/-1">
+                <label class="checkbox-label" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer">
+                  <input id="p-auto-cloture-enabled" type="checkbox" style="margin-top:3px;width:auto">
+                  <span>Clôture automatique de la journée</span>
+                </label>
+                <p class="muted" style="font-size:0.82rem;margin:6px 0 0 28px">Si activée, la journée comptable est clôturée automatiquement à l'heure choisie (stock théorique, caisse théorique). Requiert que l'application soit ouverte.</p>
+              </div>
+              <div class="form-group hidden" id="p-auto-cloture-time-wrap" style="grid-column:1/-1">
+                <label for="p-auto-cloture-time">Heure de clôture automatique</label>
+                <input id="p-auto-cloture-time" type="time" value="23:00" style="max-width:160px">
+                <p class="muted" style="font-size:0.82rem;margin-top:6px">La clôture se déclenche dès que l'heure est atteinte (vérification chaque minute).</p>
+              </div>
             </div>
             <div class="button-stack">
               <button id="save-params-btn" class="btn btn-primary" type="button">Enregistrer les paramètres</button>
@@ -2318,6 +2330,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=208"></script>
+  <script src="./app-orders.js?v=210"></script>
 </body>
 </html>
