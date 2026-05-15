@@ -8615,6 +8615,42 @@ async function persistState(overrides = {}) {
   renderTopbar();
 }
 
+/**
+ * PUT /api/state avec uniquement les clés fournies — le serveur fusionne avec l'état courant.
+ * À utiliser pour les actions qui ne touchent qu'un petit ensemble (ex. catalogue stock) :
+ * évite d'envoyer tout l'historique ventes / commandes / etc., nettement plus rapide.
+ */
+async function persistStatePatch(patch) {
+  if (!patch || typeof patch !== "object") throw new Error("persistStatePatch: patch invalide.");
+  const keys = Object.keys(patch);
+  if (!keys.length) throw new Error("persistStatePatch: patch vide.");
+  const _casiers = state.casiers ?? [];
+  const _casierMouvements = state.casierMouvements ?? [];
+  const _consignes = state.consignes ?? [];
+  const _supplierPrices = state.supplierPrices ?? [];
+  const _stockChecks = patch.stockChecks ?? [];
+  state = await apiRequest(API.state, {
+    method: "PUT",
+    body: JSON.stringify(patch),
+  });
+  if (!state.casiers?.length && _casiers.length) state.casiers = _casiers;
+  if (!state.casierMouvements?.length && _casierMouvements.length) state.casierMouvements = _casierMouvements;
+  if (!state.consignes?.length && _consignes.length) state.consignes = _consignes;
+  if (!state.supplierPrices?.length && _supplierPrices.length) state.supplierPrices = _supplierPrices;
+  if (patch.stockChecks !== undefined && _stockChecks.length) {
+    const merged = [...(state.stockChecks || [])];
+    _stockChecks.forEach((sc) => {
+      if (!sc?.siteId || !sc?.date) return;
+      const idx = merged.findIndex((x) => x.siteId === sc.siteId && x.date === sc.date);
+      if (idx >= 0) merged[idx] = sc;
+      else merged.push(sc);
+    });
+    state.stockChecks = merged;
+  }
+  lsSaveCasiers();
+  renderTopbar();
+}
+
 function renderCreditRecovery() {
   const list = document.getElementById("credit-list");
   if (!list) return;
@@ -10407,7 +10443,24 @@ async function saveStock() {
     state.stock.push(newItem);
     recordStaffAudit("create", "catalogue_article", `Article ajoute : ${articleName}`, `${fields.cat} · PA ${fmt(fields.prixAchat)}/cas. · vente int. ${fmt(fields.prixVenteInt)}`);
   }
-  await persistState();
+  const saveBtn = document.getElementById("save-stock-btn");
+  const prevBtnHtml = saveBtn ? saveBtn.innerHTML : "";
+  if (saveBtn) {
+    saveBtn.disabled = true;
+    saveBtn.textContent = "Enregistrement…";
+  }
+  try {
+    await persistStatePatch({
+      stock: state.stock,
+      nextId: state.nextId,
+      staffAuditLog: state.staffAuditLog,
+    });
+  } finally {
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.innerHTML = prevBtnHtml;
+    }
+  }
   closeModal("modal-stock");
   resetStockForm();
   populateCategorySelects();
