@@ -230,24 +230,46 @@
 
       <section id="page-home" class="page active">
         <div id="home-2fa-alert" class="home-security-banner hidden" role="alert"></div>
+        <div class="dashboard-period-bar" style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin-bottom:14px">
+          <div class="form-group" style="min-width:200px;margin:0">
+            <label for="dashboard-period-mode">Periode des indicateurs</label>
+            <select id="dashboard-period-mode">
+              <option value="month" selected>Mois en cours</option>
+              <option value="custom">Periode personnalisee</option>
+              <option value="all">Tout l'historique</option>
+            </select>
+          </div>
+          <div id="dashboard-period-custom" class="form-grid two-cols hidden" style="gap:12px;margin:0;min-width:280px">
+            <div class="form-group" style="margin:0">
+              <label for="dashboard-period-start">Du</label>
+              <input id="dashboard-period-start" type="date">
+            </div>
+            <div class="form-group" style="margin:0">
+              <label for="dashboard-period-end">Au</label>
+              <input id="dashboard-period-end" type="date">
+            </div>
+          </div>
+          <p id="dashboard-period-label" class="muted" style="margin:0;font-size:0.82rem;flex:1;min-width:140px;padding-bottom:6px"></p>
+        </div>
+        <p id="dashboard-kpi-period-foot" class="muted" style="font-size:0.8rem;margin:-6px 0 12px"></p>
         <div class="kpi-grid">
           <article class="kpi">
-            <p class="kpi-label" title="Somme des montants nets des ventes finalisees pour ce maquis (prix x quantite - remise), toutes dates confondues sur l'ecran d'accueil.">CA net total</p>
+            <p class="kpi-label" title="Somme des montants nets des ventes finalisees pour la periode selectionnee (prix x quantite - remise).">CA net</p>
             <h3 id="kpi-ca" class="kpi-value amber">0</h3>
             <p class="kpi-foot">FCFA</p>
           </article>
           <article class="kpi">
-            <p class="kpi-label" title="Total des charges enregistrees pour ce maquis (depenses, loyer, etc.).">Charges</p>
+            <p class="kpi-label" title="Total des charges enregistrees pour la periode selectionnee.">Charges</p>
             <h3 id="kpi-charges" class="kpi-value red">0</h3>
             <p class="kpi-foot">FCFA</p>
           </article>
           <article class="kpi">
-            <p class="kpi-label" title="CA net total moins total des charges (meme perimetre maquis).">Benefice</p>
+            <p class="kpi-label" title="CA net moins charges pour la periode selectionnee.">Benefice</p>
             <h3 id="kpi-benefice" class="kpi-value">0</h3>
             <p class="kpi-foot">FCFA</p>
           </article>
           <article class="kpi">
-            <p class="kpi-label" title="Nombre de lignes de vente finalisees prises en compte dans le CA net.">Transactions total</p>
+            <p class="kpi-label" title="Nombre de ventes finalisees sur la periode selectionnee.">Transactions</p>
             <h3 id="kpi-nb" class="kpi-value amber">0</h3>
             <p class="kpi-foot">ventes</p>
           </article>
@@ -2249,6 +2271,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=201"></script>
+  <script src="./app-orders.js?v=202"></script>
 </body>
 </html>

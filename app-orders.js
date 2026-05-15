@@ -2102,6 +2102,49 @@ function pdjBoissonsPeriod() {
   return dateRangeFromDom("pdj-boissons-date-start", "pdj-boissons-date-end", pdjCalendarDate());
 }
 
+function dashboardPeriodMode() {
+  return document.getElementById("dashboard-period-mode")?.value || "month";
+}
+
+function dashboardPeriod() {
+  const mode = dashboardPeriodMode();
+  if (mode === "all") {
+    return { start: null, end: null, mode, label: "Tout l'historique" };
+  }
+  if (mode === "month") {
+    const { start, end } = monthPeriodBounds(new Date());
+    const mois = new Date().toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
+    return { start, end, mode, label: `Mois en cours (${mois})` };
+  }
+  const { start, end } = dateRangeFromDom("dashboard-period-start", "dashboard-period-end", today());
+  return { start, end, mode, label: formatPeriodLabel(start, end) };
+}
+
+function recordsInDashboardPeriod(records, dateGetter) {
+  const { start, end } = dashboardPeriod();
+  if (!start || !end) return records;
+  return records.filter((r) => {
+    const d = String(dateGetter(r) || "").slice(0, 10);
+    return d >= start && d <= end;
+  });
+}
+
+function syncDashboardPeriodCustomUi() {
+  const mode = dashboardPeriodMode();
+  document.getElementById("dashboard-period-custom")?.classList.toggle("hidden", mode !== "custom");
+  const label = document.getElementById("dashboard-period-label");
+  if (label) label.textContent = dashboardPeriod().label;
+}
+
+function initDashboardPeriodDom() {
+  const { start, end } = monthPeriodBounds(new Date());
+  const startEl = document.getElementById("dashboard-period-start");
+  const endEl = document.getElementById("dashboard-period-end");
+  if (startEl && !startEl.value) startEl.value = start;
+  if (endEl && !endEl.value) endEl.value = today();
+  syncDashboardPeriodCustomUi();
+}
+
 function ventesForDateRange(start, end) {
   return recordsForSite(state.ventes).filter((v) => {
     const d = saleDateValue(v);
@@ -4902,17 +4945,23 @@ function renderDailyStockCheck() {
 }
 
 function renderDashboard() {
+  syncDashboardPeriodCustomUi();
   const site = currentSite();
-  const ventes = recordsForSite(state.ventes);
-  const charges = recordsForSite(state.charges);
+  const ventesAll = recordsForSite(state.ventes);
+  const chargesAll = recordsForSite(state.charges);
+  const ventes = recordsInDashboardPeriod(ventesAll, saleDateValue);
+  const charges = recordsInDashboardPeriod(chargesAll, (c) => c.date);
   const stock = recordsForSite(state.stock);
+  const period = dashboardPeriod();
+  const kpiFoot = document.getElementById("dashboard-kpi-period-foot");
+  if (kpiFoot) kpiFoot.textContent = `Periode : ${period.label}`;
   const caTotal = ventes.reduce((sum, vente) => sum + calcNet(vente), 0);
   const chargesTotal = charges.reduce((sum, charge) => sum + Number(charge.montant || 0), 0);
   const benefice = caTotal - chargesTotal;
   const objectif = Number(site?.objectifCA) || 0;
   const now = new Date();
   const { start: monthStart, end: monthEnd, daysInMonth } = monthPeriodBounds(now);
-  const ventesMois = ventesEncaisseesForMonth(ventes, now);
+  const ventesMois = ventesEncaisseesForMonth(ventesAll, now);
   const caMois = ventesMois.reduce((sum, vente) => sum + calcNet(vente), 0);
   const pct = objectif > 0 ? Math.min(100, Math.round((caMois / objectif) * 100)) : 0;
   const reste = Math.max(0, objectif - caMois);
@@ -4992,7 +5041,11 @@ function renderDashboardProductRank(ventesSite) {
     return;
   }
   const { top, bottom, showFlop } = topBottomByBottles(aggregated, { hideFlopWhenSmall: true });
-  const intro = `<p class="muted" style="margin:0 0 12px;font-size:0.82rem;line-height:1.4">Cumul toutes périodes — tri sur la <strong>quantité (bouteilles)</strong> par article.</p>`;
+  const period = dashboardPeriod();
+  const periodNote = period.mode === "all"
+    ? "Cumul toutes periodes"
+    : `Periode : ${escapeHtml(period.label)}`;
+  const intro = `<p class="muted" style="margin:0 0 12px;font-size:0.82rem;line-height:1.4">${periodNote} — tri sur la <strong>quantite (bouteilles)</strong> par article.</p>`;
   host.innerHTML = intro + htmlProductRankLists(top, bottom, showFlop, { flopHint: "historique site" });
 }
 
@@ -13066,6 +13119,14 @@ function attachEvents() {
   });
   ["orders-filter-date-start", "orders-filter-date-end", "orders-filter-status", "orders-filter-type"].forEach((id) => {
     document.getElementById(id).addEventListener("change", renderOrdersManagement);
+  });
+  initDashboardPeriodDom();
+  document.getElementById("dashboard-period-mode")?.addEventListener("change", () => {
+    syncDashboardPeriodCustomUi();
+    renderDashboard();
+  });
+  ["dashboard-period-start", "dashboard-period-end"].forEach((id) => {
+    document.getElementById(id)?.addEventListener("change", renderDashboard);
   });
   // Saisie rapide
   document.getElementById("saisie-rapide-btn")?.addEventListener("click", openSaisieRapide);
