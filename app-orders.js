@@ -2514,6 +2514,11 @@ function canManage() {
   return canAnyAdmin() || currentRole === "manager";
 }
 
+/** Suppression des charges : administrateurs uniquement (pas la gérante / manager). */
+function canDeleteCharge() {
+  return canAnyAdmin();
+}
+
 function canAccessSite(siteId) {
   return allowedSiteIds.includes(siteId);
 }
@@ -5542,8 +5547,7 @@ function printOrdersManagementList() {
     return;
   }
   const filtreMeta = `Periode : ${escapeHtml(periodLab)} &mdash; Statut : ${statusLab} &mdash; Type : ${escapeHtml(typeLab)}`;
-  const detailAppendix = orders.map((o) => orderPrintDetailBlock(o)).join("");
-  ticketWindow.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>Commandes filtrées</title><style>body{font-family:Arial,sans-serif;color:#111;padding:28px}header{display:flex;justify-content:space-between;gap:18px;border-bottom:2px solid #111;padding-bottom:14px;margin-bottom:18px}h1,h2,p{margin:0 0 8px}.meta{color:#555;font-size:13px;line-height:1.45}.summary{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:16px 0}.box{border:1px solid #111;padding:12px}.box strong{display:block;font-size:18px;margin-top:4px}table{width:100%;border-collapse:collapse;margin-top:12px;font-size:12px}th,td{border-bottom:1px solid #ddd;padding:7px 6px;text-align:left;vertical-align:top}th{background:#f2f2f2}td:nth-child(7){text-align:right}.order-art-cell{max-width:280px;font-size:10.5px;line-height:1.35}${PDJ_PREVIEW_PRINT_CSS}@media print{body{padding:0}table{font-size:11px}}</style></head><body>${pdjPreviewPrintToolbarHtml()}<header><div><h1>${escapeHtml(site?.nom || "Maquis")}</h1><p>${escapeHtml(site?.ville || "")} ${escapeHtml(site?.pays || "")}</p><p class="meta">${filtreMeta}</p></div><div><h2>Gestion des commandes</h2><p class="meta">Imprimé le ${escapeHtml(formatDateTimeDdMmYyyy(new Date()))}</p></div></header><div class="summary"><div class="box">Lignes affichées<strong>${fmt(orders.length)}</strong></div><div class="box">Total (liste)<strong>${fmt(totalListe)} FCFA</strong></div><div class="box">Période<strong>${escapeHtml(periodLab)}</strong></div></div><table><thead><tr><th>Numéro</th><th>Table / client</th><th>Serveur</th><th>Statut</th><th>Type</th><th>Articles (résumé)</th><th>Montant</th><th>Heure</th></tr></thead><tbody>${rows}</tbody></table><h3 style="margin-top:22px;font-size:14px;border-top:2px solid #111;padding-top:14px">Détail par commande</h3>${detailAppendix}</body></html>`);
+  ticketWindow.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>Commandes filtrées</title><style>body{font-family:Arial,sans-serif;color:#111;padding:28px}header{display:flex;justify-content:space-between;gap:18px;border-bottom:2px solid #111;padding-bottom:14px;margin-bottom:18px}h1,h2,p{margin:0 0 8px}.meta{color:#555;font-size:13px;line-height:1.45}.summary{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:16px 0}.box{border:1px solid #111;padding:12px}.box strong{display:block;font-size:18px;margin-top:4px}table{width:100%;border-collapse:collapse;margin-top:12px;font-size:12px}th,td{border-bottom:1px solid #ddd;padding:7px 6px;text-align:left;vertical-align:top}th{background:#f2f2f2}td:nth-child(7){text-align:right}.order-art-cell{max-width:280px;font-size:10.5px;line-height:1.35}${PDJ_PREVIEW_PRINT_CSS}@media print{body{padding:0}table{font-size:11px}}</style></head><body>${pdjPreviewPrintToolbarHtml()}<header><div><h1>${escapeHtml(site?.nom || "Maquis")}</h1><p>${escapeHtml(site?.ville || "")} ${escapeHtml(site?.pays || "")}</p><p class="meta">${filtreMeta}</p></div><div><h2>Gestion des commandes</h2><p class="meta">Imprimé le ${escapeHtml(formatDateTimeDdMmYyyy(new Date()))}</p></div></header><div class="summary"><div class="box">Lignes affichées<strong>${fmt(orders.length)}</strong></div><div class="box">Total (liste)<strong>${fmt(totalListe)} FCFA</strong></div><div class="box">Période<strong>${escapeHtml(periodLab)}</strong></div></div><table><thead><tr><th>Numéro</th><th>Table / client</th><th>Serveur</th><th>Statut</th><th>Type</th><th>Articles (résumé)</th><th>Montant</th><th>Heure</th></tr></thead><tbody>${rows}</tbody></table></body></html>`);
   ticketWindow.document.close();
 }
 
@@ -6872,7 +6876,7 @@ function renderCharges() {
   document.getElementById("charges-total").textContent = `${fmt(total)} FCFA`;
   const charges = chargesForSite.slice().sort((a, b) => b.date.localeCompare(a.date));
   document.getElementById("charges-list").innerHTML = charges.length
-    ? charges.map((charge) => `<article class="list-item"><div><p class="list-item-title">${escapeHtml(charge.lib)}</p><p class="list-item-sub">${escapeHtml(charge.cat)} · ${escapeHtml(charge.paiement)}</p></div><div class="list-side"><div><p class="list-item-amount" style="color:#ff8e82">${fmt(charge.montant)} FCFA</p><p class="list-item-date">${escapeHtml(formatDateDdMmYyyy(charge.date))}</p></div><button class="del-btn" type="button" data-delete-type="charge" data-id="${charge.id}">Suppr.</button></div></article>`).join("")
+    ? charges.map((charge) => `<article class="list-item"><div><p class="list-item-title">${escapeHtml(charge.lib)}</p><p class="list-item-sub">${escapeHtml(charge.cat)} · ${escapeHtml(charge.paiement)}</p></div><div class="list-side"><div><p class="list-item-amount" style="color:#ff8e82">${fmt(charge.montant)} FCFA</p><p class="list-item-date">${escapeHtml(formatDateDdMmYyyy(charge.date))}</p></div>${canDeleteCharge() ? `<button class="del-btn" type="button" data-delete-type="charge" data-id="${charge.id}">Suppr.</button>` : ""}</div></article>`).join("")
     : emptyState("Aucune charge", "Ajoutez une depense pour suivre les sorties du mois.");
   refreshCreanciersIfVisible();
 }
@@ -6933,7 +6937,7 @@ function renderCreanciers() {
         </div>
         <div class="list-side">
           <p class="list-item-amount" style="color:#ff8e82">${fmt(charge.montant)} FCFA</p>
-          <button class="del-btn" type="button" data-delete-type="charge" data-id="${charge.id}">Suppr.</button>
+          ${canDeleteCharge() ? `<button class="del-btn" type="button" data-delete-type="charge" data-id="${charge.id}">Suppr.</button>` : ""}
         </div>
       </article>`).join("")
     : emptyState("Aucune dette fournisseur en charges", "Une charge apparait quand vous receptionnez une commande au credit.");
@@ -11043,6 +11047,10 @@ async function deleteStockItem(id) {
 }
 
 async function deleteCharge(id) {
+  if (!canDeleteCharge()) {
+    showToast("Suppression des charges reservee aux administrateurs.");
+    return;
+  }
   const ch = (state.charges || []).find((item) => item.id === id);
   const label = ch
     ? `${ch.lib} · ${fmt(ch.montant)} FCFA · ${formatDateDdMmYyyy(ch.date)}`
@@ -13970,7 +13978,13 @@ document.getElementById("fab-btn").addEventListener("click", () => {
     const type = deleteButton.dataset.deleteType;
     if (type === "vente" && window.confirm("Supprimer cette vente finalisee ?")) deleteFinalSale(id).catch(handleApiError);
     if (type === "stock" && window.confirm("Supprimer cet article du stock ?")) deleteStockItem(id).catch(handleApiError);
-    if (type === "charge") deleteCharge(id).catch(handleApiError);
+    if (type === "charge") {
+      if (!canDeleteCharge()) {
+        showToast("Suppression des charges reservee aux administrateurs.");
+        return;
+      }
+      deleteCharge(id).catch(handleApiError);
+    }
   });
   document.body.addEventListener("keydown", (event) => {
     if (event.key !== "Enter" && event.key !== " ") return;
