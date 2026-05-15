@@ -4243,6 +4243,49 @@ function aggregateVentesByArticle(ventes) {
   return Object.values(byArticle);
 }
 
+/** Catalogue du maquis + ventes de la periode → vendues / non vendues. */
+function splitBoissonsVenduesNonVendues(ventesList) {
+  const sold = aggregateVentesByArticle(ventesList).sort((a, b) => b.ca - a.ca || a.article.localeCompare(b.article, "fr"));
+  const soldNames = new Set(sold.map((r) => r.article));
+  const unsold = recordsForSite(state.stock)
+    .filter((item) => item?.article && !soldNames.has(item.article))
+    .map((item) => ({
+      article: item.article,
+      cat: item.cat || item.categorie || "",
+      stockBtl: stockActuel(item),
+    }))
+    .sort((a, b) => a.article.localeCompare(b.article, "fr"));
+  return { sold, unsold };
+}
+
+function htmlBoissonsNonVenduesSection(unsold, { periodLabel = "" } = {}) {
+  if (!unsold.length) return "";
+  const periodHint = periodLabel ? ` (${escapeHtml(periodLabel)})` : "";
+  return `
+    <p class="muted" style="margin:20px 0 10px;font-size:0.82rem;line-height:1.45">
+      <strong style="color:#c62828">Non vendues</strong> sur la periode${periodHint}
+      — <strong>${unsold.length}</strong> article(s) du catalogue sans vente enregistree.
+    </p>
+    <div class="stock-table-wrap">
+      <table class="stock-table" style="min-width:520px">
+        <thead>
+          <tr>
+            <th>Article</th>
+            <th>Catégorie</th>
+            <th style="text-align:right">Stock actuel (btl)</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${unsold.map((r) => `<tr>
+            <td>${escapeHtml(r.article)}</td>
+            <td>${escapeHtml(r.cat)}</td>
+            <td style="text-align:right;color:#c62828">${fmt(r.stockBtl)}</td>
+          </tr>`).join("")}
+        </tbody>
+      </table>
+    </div>`;
+}
+
 /**
  * Top / flop par quantité (bouteilles). Si peu d'articles distincts, le flop peut être omis (showFlop=false).
  */
@@ -4289,28 +4332,35 @@ function renderSalesByProduct(ventesList, { periodLabel = "" } = {}) {
   const container = document.getElementById("pdj-sales-by-product");
   const countNode = document.getElementById("pdj-sales-count");
   if (!container) return;
-  const aggregated = aggregateVentesByArticle(ventesList);
-  const rows = aggregated.sort((a, b) => b.ca - a.ca);
-  const totalBtl = rows.reduce((sum, r) => sum + r.bouteilles, 0);
-  const totalCa = rows.reduce((sum, r) => sum + r.ca, 0);
+  const { sold, unsold } = splitBoissonsVenduesNonVendues(ventesList);
+  const totalBtl = sold.reduce((sum, r) => sum + r.bouteilles, 0);
+  const totalCa = sold.reduce((sum, r) => sum + r.ca, 0);
+  const countParts = [];
+  if (sold.length) countParts.push(`${sold.length} vendu(s)`);
+  if (unsold.length) countParts.push(`${unsold.length} non vendu(s)`);
   if (countNode) {
-    countNode.textContent = periodLabel
-      ? `${rows.length} article(s) · ${periodLabel}`
-      : `${rows.length} article(s)`;
+    const base = countParts.length ? countParts.join(" · ") : "0 article";
+    countNode.textContent = periodLabel ? `${base} · ${periodLabel}` : base;
   }
-  if (!rows.length) {
-    const hint = periodLabel
-      ? `Aucune vente entre le ${periodLabel}.`
-      : "Les boissons vendues apparaitront ici.";
-    container.innerHTML = emptyState("Aucune vente", hint);
+  if (!sold.length && !unsold.length) {
+    container.innerHTML = emptyState("Catalogue vide", "Ajoutez des articles au stock pour suivre les ventes.");
     return;
   }
-  const { top, bottom, showFlop } = topBottomByBottles(aggregated, { hideFlopWhenSmall: true });
+  const unsoldHtml = htmlBoissonsNonVenduesSection(unsold, { periodLabel });
+  if (!sold.length) {
+    container.innerHTML = `
+      <p class="muted" style="margin:0 0 12px;font-size:0.88rem;line-height:1.45">
+        Aucune vente enregistree${periodLabel ? ` sur la periode <strong>${escapeHtml(periodLabel)}</strong>` : ""}.
+      </p>
+      ${unsoldHtml}`;
+    return;
+  }
+  const { top, bottom, showFlop } = topBottomByBottles(sold, { hideFlopWhenSmall: true });
   const rankHint = periodLabel ? `sur la periode (${periodLabel})` : "ce jour";
   const rankHtml = htmlProductRankLists(top, bottom, showFlop, { flopHint: rankHint });
   container.innerHTML = `
     ${rankHtml}
-    <p class="muted" style="margin:16px 0 10px;font-size:0.82rem">Détail par article (tri CA net)</p>
+    <p class="muted" style="margin:16px 0 10px;font-size:0.82rem">Vendues — detail par article (tri CA net)</p>
     <div class="stock-table-wrap">
       <table class="stock-table" style="min-width:620px">
         <thead>
@@ -4322,58 +4372,100 @@ function renderSalesByProduct(ventesList, { periodLabel = "" } = {}) {
           </tr>
         </thead>
         <tbody>
-          ${rows.map((r) => `<tr>
+          ${sold.map((r) => `<tr>
             <td>${escapeHtml(r.article)}</td>
             <td>${escapeHtml(r.cat)}</td>
             <td style="text-align:right;color:#1976d2">${fmt(r.bouteilles)}</td>
             <td style="text-align:right"><strong>${fmt(r.ca)} FCFA</strong></td>
           </tr>`).join("")}
           <tr style="font-weight:700;background:#f5f5f5">
-            <td colspan="2">TOTAL</td>
+            <td colspan="2">TOTAL vendu</td>
             <td style="text-align:right;color:#1976d2">${fmt(totalBtl)}</td>
             <td style="text-align:right">${fmt(totalCa)} FCFA</td>
           </tr>
         </tbody>
       </table>
     </div>
-  `;
+    ${unsoldHtml}`;
 }
 
 function printBoissonsVenduesPeriod() {
   const { start, end } = pdjBoissonsPeriod();
   const periodLabel = formatPeriodLabel(start, end);
   const ventesList = ventesForDateRange(start, end);
-  const aggregated = aggregateVentesByArticle(ventesList);
-  const rows = aggregated.sort((a, b) => b.ca - a.ca);
-  if (!rows.length) {
-    showToast(`Aucune boisson vendue sur la periode ${periodLabel}.`);
+  const { sold, unsold } = splitBoissonsVenduesNonVendues(ventesList);
+  if (!sold.length && !unsold.length) {
+    showToast("Catalogue vide : aucun article a lister.");
     return;
   }
   const site = currentSite();
-  const totalBtl = rows.reduce((sum, r) => sum + r.bouteilles, 0);
-  const totalCa = rows.reduce((sum, r) => sum + r.ca, 0);
-  const { top, bottom, showFlop } = topBottomByBottles(aggregated, { hideFlopWhenSmall: true });
+  const totalBtl = sold.reduce((sum, r) => sum + r.bouteilles, 0);
+  const totalCa = sold.reduce((sum, r) => sum + r.ca, 0);
+  const { top, bottom, showFlop } = topBottomByBottles(sold, { hideFlopWhenSmall: true });
   const topRows = top.map((r, i) => `<tr><td>${i + 1}</td><td>${escapeHtml(r.article)}</td><td style="text-align:right">${fmt(r.bouteilles)}</td><td style="text-align:right">${fmt(r.ca)} FCFA</td></tr>`).join("");
   const flopRows = showFlop
     ? bottom.map((r, i) => `<tr><td>${i + 1}</td><td>${escapeHtml(r.article)}</td><td style="text-align:right">${fmt(r.bouteilles)}</td><td style="text-align:right">${fmt(r.ca)} FCFA</td></tr>`).join("")
     : "";
-  const detailRows = rows.map((r) => `<tr>
+  const detailRows = sold.map((r) => `<tr>
     <td>${escapeHtml(r.article)}</td>
     <td>${escapeHtml(r.cat)}</td>
     <td style="text-align:right">${fmt(r.bouteilles)}</td>
     <td style="text-align:right">${fmt(r.ca)} FCFA</td>
   </tr>`).join("");
+  const unsoldRows = unsold.map((r) => `<tr>
+    <td>${escapeHtml(r.article)}</td>
+    <td>${escapeHtml(r.cat)}</td>
+    <td style="text-align:right;color:#c62828">${fmt(r.stockBtl)}</td>
+  </tr>`).join("");
+  const rankColsHtml = sold.length
+    ? '<div class="cols"><div><h3 style="font-size:12px;color:#1565c0">Plus vendues (qté)</h3><table><thead><tr><th>#</th><th>Article</th><th>Qté</th><th>CA</th></tr></thead><tbody>'
+      + topRows
+      + '</tbody></table></div>'
+      + (showFlop
+        ? '<div><h3 style="font-size:12px;color:#c62828">Moins vendues (qté)</h3><table><thead><tr><th>#</th><th>Article</th><th>Qté</th><th>CA</th></tr></thead><tbody>'
+          + flopRows
+          + '</tbody></table></div>'
+        : '')
+      + '</div>'
+    : '';
+  const soldBlock = sold.length ? `
+  <div class="summary">
+    <div class="box">Articles vendus<strong>${fmt(sold.length)}</strong></div>
+    <div class="box">Quantite vendue (btl)<strong>${fmt(totalBtl)}</strong></div>
+    <div class="box">CA net vendu<strong>${fmt(totalCa)} FCFA</strong></div>
+    <div class="box">Non vendues<strong>${fmt(unsold.length)}</strong></div>
+  </div>
+  ${rankColsHtml}
+  <h3 style="font-size:13px;margin-top:8px">Vendues — detail par article (tri CA net)</h3>
+  <table>
+    <thead><tr><th>Article</th><th>Categorie</th><th>Qté (btl)</th><th>CA net</th></tr></thead>
+    <tbody>${detailRows}
+      <tr style="font-weight:700;background:#f0f0f0"><td colspan="2">TOTAL vendu</td><td style="text-align:right">${fmt(totalBtl)}</td><td style="text-align:right">${fmt(totalCa)} FCFA</td></tr>
+    </tbody>
+  </table>` : `
+  <div class="summary">
+    <div class="box">Articles vendus<strong>0</strong></div>
+    <div class="box">Non vendues<strong>${fmt(unsold.length)}</strong></div>
+  </div>
+  <p class="meta" style="margin:12px 0">Aucune vente enregistree sur cette periode.</p>`;
+  const unsoldBlock = unsold.length ? `
+  <h3 style="font-size:13px;margin-top:16px;color:#c62828">Non vendues sur la periode (${unsold.length})</h3>
+  <p class="meta" style="margin:0 0 8px">Articles du catalogue sans vente — stock actuel en bouteilles.</p>
+  <table>
+    <thead><tr><th>Article</th><th>Categorie</th><th>Stock actuel (btl)</th></tr></thead>
+    <tbody>${unsoldRows}</tbody>
+  </table>` : "";
   const w = window.open("", "_blank", "width=900,height=900");
   if (!w) {
     showToast("Impossible d'ouvrir l'apercu du rapport.");
     return;
   }
-  w.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>Boissons vendues ${escapeHtml(periodLabel)}</title>
+  w.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>Point boissons ${escapeHtml(periodLabel)}</title>
   <style>
     body{font-family:Arial,sans-serif;color:#111;padding:24px;font-size:12px}
     h1,h2,h3{margin:0 0 8px}
     .meta{color:#555;font-size:11px;line-height:1.45}
-    .summary{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:14px 0}
+    .summary{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:14px 0}
     .box{border:1px solid #111;padding:10px 12px}
     .box strong{display:block;font-size:16px;margin-top:4px}
     table{width:100%;border-collapse:collapse;margin:12px 0 18px;font-size:11px}
@@ -4387,27 +4479,10 @@ function printBoissonsVenduesPeriod() {
   ${pdjPreviewPrintToolbarHtml()}
   <header style="display:flex;justify-content:space-between;gap:16px;border-bottom:2px solid #111;padding-bottom:12px;margin-bottom:8px">
     <div><h1>${escapeHtml(site?.nom || "Maquis")}</h1><p class="meta">${escapeHtml(site?.ville || "")} ${escapeHtml(site?.pays || "")}</p></div>
-    <div><h2>Boissons vendues</h2><p class="meta">Periode : ${escapeHtml(periodLabel)}<br>Imprime le ${escapeHtml(formatDateTimeDdMmYyyy(new Date()))}</p></div>
+    <div><h2>Point boissons</h2><p class="meta">Periode : ${escapeHtml(periodLabel)}<br>Imprime le ${escapeHtml(formatDateTimeDdMmYyyy(new Date()))}</p></div>
   </header>
-  <div class="summary">
-    <div class="box">Articles distincts<strong>${fmt(rows.length)}</strong></div>
-    <div class="box">Quantite totale (btl)<strong>${fmt(totalBtl)}</strong></div>
-    <div class="box">CA net total<strong>${fmt(totalCa)} FCFA</strong></div>
-  </div>
-  <div class="cols">
-    <div><h3 style="font-size:12px;color:#1565c0">Plus vendues (qté)</h3>
-      <table><thead><tr><th>#</th><th>Article</th><th>Qté</th><th>CA</th></tr></thead><tbody>${topRows}</tbody></table>
-    </div>
-    ${showFlop ? `<div><h3 style="font-size:12px;color:#c62828">Moins vendues (qté)</h3>
-      <table><thead><tr><th>#</th><th>Article</th><th>Qté</th><th>CA</th></tr></thead><tbody>${flopRows}</tbody></table></div>` : ""}
-  </div>
-  <h3 style="font-size:13px;margin-top:8px">Detail par article (tri CA net)</h3>
-  <table>
-    <thead><tr><th>Article</th><th>Categorie</th><th>Qté (btl)</th><th>CA net</th></tr></thead>
-    <tbody>${detailRows}
-      <tr style="font-weight:700;background:#f0f0f0"><td colspan="2">TOTAL</td><td style="text-align:right">${fmt(totalBtl)}</td><td style="text-align:right">${fmt(totalCa)} FCFA</td></tr>
-    </tbody>
-  </table>
+  ${soldBlock}
+  ${unsoldBlock}
   </body></html>`);
   w.document.close();
 }
