@@ -253,12 +253,19 @@
             </div>
           </div>
           <p id="dashboard-period-label" class="muted" style="margin:0;font-size:0.82rem;flex:1;min-width:140px;padding-bottom:6px"></p>
+          <button type="button" class="mini-btn" id="dashboard-print-margins-btn" title="Récapitulatif CA, marge et charges pour la période affichée">Imprimer le point</button>
         </div>
         <p id="dashboard-kpi-period-foot" class="muted" style="font-size:0.8rem;margin:-6px 0 12px"></p>
+        <p id="dashboard-kpi-margin-hint" class="muted hidden" style="font-size:0.78rem;margin:-4px 0 12px;line-height:1.45"></p>
         <div class="kpi-grid">
           <article class="kpi">
             <p class="kpi-label" title="Somme des montants nets des ventes finalisées pour la période sélectionnée (prix × quantité − remise).">CA net</p>
             <h3 id="kpi-ca" class="kpi-value amber">0</h3>
+            <p class="kpi-foot">FCFA</p>
+          </article>
+          <article class="kpi">
+            <p class="kpi-label" title="Somme sur les ventes : montant net − (prix d’achat par bouteille × bouteilles vendues), d’après le catalogue stock.">Marge brute</p>
+            <h3 id="kpi-marge-brute" class="kpi-value green">0</h3>
             <p class="kpi-foot">FCFA</p>
           </article>
           <article class="kpi">
@@ -267,7 +274,7 @@
             <p class="kpi-foot">FCFA</p>
           </article>
           <article class="kpi">
-            <p class="kpi-label" title="CA net moins charges pour la période sélectionnée.">Bénéfice</p>
+            <p class="kpi-label" title="Marge brute moins les charges (estimation, hors impôts et frais non saisis).">Bénéfice estimé</p>
             <h3 id="kpi-benefice" class="kpi-value">0</h3>
             <p class="kpi-foot">FCFA</p>
           </article>
@@ -2330,6 +2337,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=213"></script>
+  <script src="./app-orders.js?v=214"></script>
 </body>
 </html>

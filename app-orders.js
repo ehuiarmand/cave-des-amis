@@ -5288,7 +5288,7 @@ function renderDashboard() {
   if (kpiFoot) kpiFoot.textContent = `Periode : ${period.label}`;
   const caTotal = ventes.reduce((sum, vente) => sum + calcNet(vente), 0);
   const chargesTotal = charges.reduce((sum, charge) => sum + Number(charge.montant || 0), 0);
-  const benefice = caTotal - chargesTotal;
+  const { margeBrute, beneficeEstime, excludedLines } = pdjEstimatedBenefitFromSales(ventes, chargesTotal);
   const objectif = Number(site?.objectifCA) || 0;
   const now = new Date();
   const { start: monthStart, end: monthEnd, daysInMonth } = monthPeriodBounds(now);
@@ -5303,11 +5303,26 @@ function renderDashboard() {
   const rythmeNecessaire = daysLeft > 0 ? Math.round(reste / daysLeft) : (reste > 0 ? reste : 0);
   const enAvance = rythmeActuel >= rythmeNecessaire || reste <= 0;
   document.getElementById("kpi-ca").textContent = fmt(caTotal);
+  const margeNode = document.getElementById("kpi-marge-brute");
+  if (margeNode) {
+    margeNode.textContent = fmt(margeBrute);
+    margeNode.className = `kpi-value ${margeBrute >= 0 ? "green" : "red"}`;
+  }
   document.getElementById("kpi-charges").textContent = fmt(chargesTotal);
   const beneficeNode = document.getElementById("kpi-benefice");
-  beneficeNode.textContent = fmt(benefice);
-  beneficeNode.className = `kpi-value ${benefice >= 0 ? "green" : "red"}`;
+  beneficeNode.textContent = fmt(beneficeEstime);
+  beneficeNode.className = `kpi-value ${beneficeEstime >= 0 ? "green" : "red"}`;
   document.getElementById("kpi-nb").textContent = String(ventes.length);
+  const marginHint = document.getElementById("dashboard-kpi-margin-hint");
+  if (marginHint) {
+    if (excludedLines > 0) {
+      marginHint.classList.remove("hidden");
+      marginHint.innerHTML = `${excludedLines} ligne(s) de vente sans prix d’achat catalogue dans la période : la <strong>marge brute</strong> est sous-estimée. Complétez les prix d’achat (casier) dans le stock.`;
+    } else {
+      marginHint.classList.add("hidden");
+      marginHint.textContent = "";
+    }
+  }
   document.getElementById("obj-pct").textContent = `${pct}% atteint`;
   document.getElementById("obj-val").textContent = `/ ${fmt(objectif)} FCFA`;
   document.getElementById("obj-bar").style.width = `${pct}%`;
@@ -5379,6 +5394,79 @@ function renderDashboard() {
   renderDashboardCasierKpis(stock);
   renderDashboardProductRank(ventes);
   syncMobileBottomBadges();
+}
+
+/** Récapitulatif imprimable : CA, marge brute, charges et bénéfice estimé sur la période du tableau de bord. */
+function printDashboardPeriodMarginsReport() {
+  if (!sessionUser) {
+    showToast("Connectez-vous pour imprimer.");
+    return;
+  }
+  syncDashboardPeriodCustomUi();
+  const site = currentSite();
+  const ventes = recordsInDashboardPeriod(recordsForSite(state.ventes), saleDateValue);
+  const charges = recordsInDashboardPeriod(recordsForSite(state.charges), (c) => c.date);
+  const period = dashboardPeriod();
+  const caTotal = ventes.reduce((sum, v) => sum + calcNet(v), 0);
+  const chargesTotal = charges.reduce((sum, c) => sum + Number(c.montant || 0), 0);
+  const { margeBrute, beneficeEstime, excludedLines } = pdjEstimatedBenefitFromSales(ventes, chargesTotal);
+  const encTotals = paymentTotalsEncaissements(ventes);
+  const encTotal = Object.values(encTotals).reduce((s, v) => s + v, 0);
+  const creditEmitted = creditClientEmittedTotal(ventes);
+  const generatedAt = formatDateTimeDdMmYyyy(new Date().toISOString());
+  const periodEsc = escapeHtml(period.label);
+  const siteEsc = escapeHtml(site?.nom || "Maquis");
+  const encRows = Object.entries(encTotals)
+    .map(([m, a]) => `<tr><td>${escapeHtml(m)}</td><td style="text-align:right">${fmt(a)}</td></tr>`)
+    .join("");
+  const excludedBlock = excludedLines
+    ? `<p style="color:#c0392b;font-size:12px;margin-top:12px"><strong>Attention :</strong> ${excludedLines} ligne(s) de vente sans prix d’achat catalogue — marge brute sous-estimée.</p>`
+    : "";
+  const creditBlock = creditEmitted > 0
+    ? `<p class="muted" style="font-size:11px;margin-top:8px">Crédit client émis sur la période : ${fmt(creditEmitted)} FCFA (inclus dans le CA net ; non compté dans les encaissements ci-dessous).</p>`
+    : "";
+  const html = `<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8"><title>Point période — ${siteEsc}</title>
+  <style>
+    body { font-family: Arial, sans-serif; font-size: 13px; color: #111; padding: 20px; max-width: 640px; margin: 0 auto; }
+    h1 { font-size: 20px; margin: 0 0 6px; }
+    .meta { color: #555; font-size: 11px; margin-bottom: 16px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    th, td { border: 1px solid #ccc; padding: 8px 10px; text-align: left; }
+    th { background: #eee; }
+    .tot { font-weight: 700; background: #f5f5f5; }
+    .highlight { font-size: 16px; font-weight: 700; margin-top: 16px; padding: 12px; border: 2px solid #111; }
+    .green { color: #2a9d5c; }
+    .red { color: #c0392b; }
+    .muted { color: #666; }
+    ${PDJ_PREVIEW_PRINT_CSS}
+    @media print { body { padding: 12px; } }
+  </style></head><body>
+  ${pdjPreviewPrintToolbarHtml()}
+  <h1>${siteEsc}</h1>
+  <p class="meta">Point sur la période : <strong>${periodEsc}</strong><br>Édition : ${escapeHtml(generatedAt)} · Utilisateur : ${escapeHtml(sessionUser || "—")}</p>
+  <table>
+    <tbody>
+      <tr><td>CA net (ventes, toutes modalités)</td><td style="text-align:right">${fmt(caTotal)} FCFA</td></tr>
+      <tr><td>Encaissements (hors crédit client)</td><td style="text-align:right">${fmt(encTotal)} FCFA</td></tr>
+      <tr><td>Marge brute (prix vente net − coût bouteilles)</td><td style="text-align:right" class="${margeBrute >= 0 ? "green" : "red"}">${fmt(margeBrute)} FCFA</td></tr>
+      <tr><td>Charges</td><td style="text-align:right">${fmt(chargesTotal)} FCFA</td></tr>
+      <tr class="tot"><td>Bénéfice estimé (marge − charges)</td><td style="text-align:right" class="${beneficeEstime >= 0 ? "green" : "red"}">${fmt(beneficeEstime)} FCFA</td></tr>
+    </tbody>
+  </table>
+  ${creditBlock}
+  ${excludedBlock}
+  <p class="muted" style="margin-top:18px;font-size:11px">Détail des encaissements</p>
+  <table><thead><tr><th>Mode</th><th style="text-align:right">Montant</th></tr></thead>
+  <tbody>${encRows || "<tr><td colspan=\"2\" class=\"muted\">Aucun</td></tr>"}</tbody></table>
+  <p class="muted" style="margin-top:20px;font-size:10px;text-align:center">${siteEsc} — Document indicatif — ${fmt(ventes.length)} vente(s)</p>
+  </body></html>`;
+  const w = window.open("", "_blank");
+  if (!w) {
+    showToast("Impossible d'ouvrir la fenêtre d'impression.");
+    return;
+  }
+  w.document.write(html);
+  w.document.close();
 }
 
 function renderDashboardProductRank(ventesSite) {
@@ -13929,6 +14017,7 @@ function attachEvents() {
     document.getElementById(id).addEventListener("change", renderOrdersManagement);
   });
   initDashboardPeriodDom();
+  document.getElementById("dashboard-print-margins-btn")?.addEventListener("click", printDashboardPeriodMarginsReport);
   document.getElementById("obj-formula-tip")?.addEventListener("click", showObjectifFormulaTip);
   document.getElementById("dashboard-period-mode")?.addEventListener("change", () => {
     syncDashboardPeriodCustomUi();
