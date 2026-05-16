@@ -2540,28 +2540,118 @@ function canAnyAdmin() {
 
 // ─── Planning / horaires équipe ─────────────────────────────────────────────
 let planningSubTab = "mine";
-let planningMineWeekOffset = 0;
-let planningTeamWeekOffset = 0;
 
 function canManageTeamSchedule() {
   return canManage();
 }
 
-function planningWeekBounds(offset = 0) {
-  const ref = new Date();
-  ref.setHours(12, 0, 0, 0);
-  ref.setDate(ref.getDate() + offset * 7);
-  const day = (ref.getDay() + 6) % 7;
-  const mon = new Date(ref);
-  mon.setDate(ref.getDate() - day);
+function planningIsoDate(d) {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+function planningParseIso(s) {
+  const t = String(s || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) return null;
+  const [y, m, d] = t.split("-").map(Number);
+  const dt = new Date(y, m - 1, d, 12, 0, 0, 0);
+  return Number.isNaN(dt.getTime()) ? null : dt;
+}
+
+/** Semaine calendaire (lun–dim) contenant la date de référence. */
+function planningWeekBoundsForRef(ref = new Date()) {
+  const r = new Date(ref);
+  r.setHours(12, 0, 0, 0);
+  const day = (r.getDay() + 6) % 7;
+  const mon = new Date(r);
+  mon.setDate(r.getDate() - day);
   const sun = new Date(mon);
   sun.setDate(mon.getDate() + 6);
-  const iso = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-  return { start: iso(mon), end: iso(sun), mon, sun };
+  return { start: planningIsoDate(mon), end: planningIsoDate(sun) };
+}
+
+function planningWeekBounds(offset = 0) {
+  const ref = new Date();
+  ref.setDate(ref.getDate() + offset * 7);
+  return planningWeekBoundsForRef(ref);
 }
 
 function planningWeekLabel(bounds) {
+  if (!bounds?.start || !bounds?.end) return "—";
+  if (bounds.start === bounds.end) return formatDateDdMmYyyy(bounds.start);
   return `${formatDateDdMmYyyy(bounds.start)} — ${formatDateDdMmYyyy(bounds.end)}`;
+}
+
+function planningDisplayBounds() {
+  const startEl = document.getElementById("planning-range-start");
+  const endEl = document.getElementById("planning-range-end");
+  let start = String(startEl?.value || "").slice(0, 10);
+  let end = String(endEl?.value || "").slice(0, 10);
+  if (!start || !end) {
+    const w = planningWeekBounds(0);
+    start = w.start;
+    end = w.end;
+    if (startEl) startEl.value = start;
+    if (endEl) endEl.value = end;
+  }
+  if (start > end) {
+    const tmp = start;
+    start = end;
+    end = tmp;
+    if (startEl) startEl.value = start;
+    if (endEl) endEl.value = end;
+  }
+  return { start, end };
+}
+
+function setPlanningRangeInputs(start, end) {
+  const startEl = document.getElementById("planning-range-start");
+  const endEl = document.getElementById("planning-range-end");
+  if (startEl) startEl.value = start;
+  if (endEl) endEl.value = end;
+}
+
+function setPlanningRangeToday() {
+  const d = today();
+  setPlanningRangeInputs(d, d);
+}
+
+function setPlanningRangeCurrentWeek() {
+  const w = planningWeekBounds(0);
+  setPlanningRangeInputs(w.start, w.end);
+}
+
+function setPlanningRangeCurrentMonth() {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), 1, 12, 0, 0, 0);
+  const end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 12, 0, 0, 0);
+  setPlanningRangeInputs(planningIsoDate(start), planningIsoDate(end));
+}
+
+function shiftPlanningRangeByPeriod(delta) {
+  const b = planningDisplayBounds();
+  const ds = planningParseIso(b.start);
+  const de = planningParseIso(b.end);
+  if (!ds || !de) return;
+  const span = Math.max(1, Math.round((de - ds) / 86400000) + 1);
+  const sign = delta < 0 ? -1 : 1;
+  const shift = span * sign;
+  ds.setDate(ds.getDate() + shift);
+  de.setDate(de.getDate() + shift);
+  setPlanningRangeInputs(planningIsoDate(ds), planningIsoDate(de));
+}
+
+/** Liste des jours ISO entre start et end inclus. */
+function planningDatesBetween(startIso, endIso) {
+  const out = [];
+  const s = planningParseIso(startIso);
+  const e = planningParseIso(endIso);
+  if (!s || !e) return out;
+  const cur = new Date(s);
+  while (cur <= e) {
+    out.push(planningIsoDate(cur));
+    cur.setDate(cur.getDate() + 1);
+  }
+  return out;
 }
 
 function workShiftDurationMinutes(shift) {
@@ -2627,6 +2717,218 @@ function schedulableStaffForCurrentSite() {
   });
 }
 
+/** Personnes cochées pour la rotation, dans l'ordre affiché. */
+function getRotationStaffOrder() {
+  const wrap = document.getElementById("ws-rotation-staff-list");
+  if (!wrap) return [];
+  return [...wrap.querySelectorAll(".ws-rotation-staff-cb:checked")]
+    .map((cb) => String(cb.value || "").trim())
+    .filter(Boolean);
+}
+
+/** Qui travaille ce jour (index 0 = premier jour de la période). */
+function staffUsernamesForRotationDay(dayIndex, staffOrder, workDays, teamSize) {
+  const n = staffOrder.length;
+  if (!n || workDays < 1) return [];
+  const ts = Math.max(1, Math.min(teamSize, n));
+  const block = Math.floor(dayIndex / workDays);
+  const startIdx = block % n;
+  const out = [];
+  for (let k = 0; k < ts; k++) out.push(staffOrder[(startIdx + k) % n]);
+  return [...new Set(out)];
+}
+
+function renderRotationStaffList() {
+  const wrap = document.getElementById("ws-rotation-staff-list");
+  if (!wrap) return;
+  const staff = schedulableStaffForCurrentSite();
+  const prev = new Set(getRotationStaffOrder());
+  if (!staff.length) {
+    wrap.innerHTML = `<p class="muted" style="font-size:0.86rem;margin:0">Aucune serveuse/gérante sur ce maquis.</p>`;
+    return;
+  }
+  wrap.innerHTML = staff.map((u, i) => {
+    const un = escapeHtml(u.username);
+    const label = escapeHtml(staffDisplayName(u.username));
+    const checked = prev.size ? prev.has(u.username) : true;
+    return `<label class="planning-rotation-staff-row">
+      <span class="planning-rotation-order" aria-hidden="true">${i + 1}</span>
+      <input type="checkbox" class="ws-rotation-staff-cb" value="${un}" ${checked ? "checked" : ""}>
+      <span>${label} <span class="muted">(${un})</span></span>
+      <span class="planning-rotation-move">
+        <button type="button" class="mini-btn ws-rotation-up" data-user="${un}" aria-label="Monter">↑</button>
+        <button type="button" class="mini-btn ws-rotation-down" data-user="${un}" aria-label="Descendre">↓</button>
+      </span>
+    </label>`;
+  }).join("");
+  wrap.querySelectorAll(".ws-rotation-up").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      moveRotationStaffRow(btn.dataset.user, -1);
+    });
+  });
+  wrap.querySelectorAll(".ws-rotation-down").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      moveRotationStaffRow(btn.dataset.user, 1);
+    });
+  });
+  wrap.querySelectorAll(".ws-rotation-staff-cb").forEach((cb) => {
+    cb.addEventListener("change", renderRotationPreview);
+  });
+  renderRotationPreview();
+}
+
+function moveRotationStaffRow(username, delta) {
+  const wrap = document.getElementById("ws-rotation-staff-list");
+  if (!wrap) return;
+  const rows = [...wrap.querySelectorAll(".planning-rotation-staff-row")];
+  const idx = rows.findIndex((row) => row.querySelector(".ws-rotation-staff-cb")?.value === username);
+  if (idx < 0) return;
+  const j = idx + delta;
+  if (j < 0 || j >= rows.length) return;
+  const a = rows[idx];
+  const b = rows[j];
+  if (delta < 0) wrap.insertBefore(a, b);
+  else wrap.insertBefore(b, a);
+  renderRotationPreview();
+}
+
+function renderRotationPreview() {
+  const el = document.getElementById("ws-rotation-preview");
+  if (!el) return;
+  const staff = getRotationStaffOrder();
+  const workDays = Math.max(1, Math.min(7, Number(document.getElementById("ws-rotation-work-days")?.value) || 2));
+  const teamSize = Math.max(1, Math.min(5, Number(document.getElementById("ws-rotation-team-size")?.value) || 1));
+  const bounds = planningDisplayBounds();
+  const days = planningDatesBetween(bounds.start, bounds.end);
+  if (!staff.length) {
+    el.textContent = "Cochez au moins une personne dans la rotation.";
+    return;
+  }
+  if (!days.length) {
+    el.textContent = "Choisissez une période Du / Au en haut.";
+    return;
+  }
+  if (days.length > 62) {
+    el.textContent = "Période trop longue (max. 62 jours pour la génération automatique).";
+    return;
+  }
+  if (teamSize > staff.length) {
+    el.textContent = "Réduisez « Personnes en service / jour » ou ajoutez des personnes.";
+    return;
+  }
+  const sample = days.slice(0, 4).map((date, i) => {
+    const who = staffUsernamesForRotationDay(i, staff, workDays, teamSize).map(staffDisplayName).join(" + ");
+    return `${formatDateDdMmYyyy(date)} : ${who}`;
+  }).join(" · ");
+  const restHint = staff.length >= 2 && teamSize === 1
+    ? ` Chaque personne : ${workDays} j. de suite puis repos pendant que les autres assurent.`
+    : "";
+  el.textContent = `${days.length} jour(s), ${staff.length} en rotation — aperçu : ${sample}…${restHint}`;
+}
+
+function buildRotationShiftsForPeriod({
+  startIso,
+  endIso,
+  staffOrder,
+  workDays,
+  teamSize,
+  startTime,
+  endTime,
+  siteId,
+  note,
+}) {
+  const days = planningDatesBetween(startIso, endIso);
+  const now = new Date().toISOString();
+  const out = [];
+  let nextId = Number(state.nextId?.workShift) || 100;
+  for (let i = 0; i < days.length; i++) {
+    const date = days[i];
+    const users = staffUsernamesForRotationDay(i, staffOrder, workDays, teamSize);
+    for (const username of users) {
+      out.push({
+        id: nextId++,
+        siteId,
+        username,
+        date,
+        startTime,
+        endTime,
+        note: note || "Rotation auto",
+        createdBy: sessionUser,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+  }
+  state.nextId = state.nextId || {};
+  state.nextId.workShift = nextId;
+  return out;
+}
+
+async function generatePlanningRotationFromForm() {
+  if (!canManageTeamSchedule()) {
+    showToast("Réservé au gérant ou à un administrateur.");
+    return;
+  }
+  const staffOrder = getRotationStaffOrder();
+  const workDays = Math.max(1, Math.min(7, Number(document.getElementById("ws-rotation-work-days")?.value) || 2));
+  const teamSize = Math.max(1, Math.min(5, Number(document.getElementById("ws-rotation-team-size")?.value) || 1));
+  const startTime = document.getElementById("ws-rotation-start")?.value?.trim() || "18:00";
+  const endTime = document.getElementById("ws-rotation-end")?.value?.trim() || "02:00";
+  const replace = Boolean(document.getElementById("ws-rotation-replace")?.checked);
+  const bounds = planningDisplayBounds();
+  const siteId = String(currentSiteId() || "");
+  if (!staffOrder.length) { showToast("Cochez au moins une personne."); return; }
+  if (!siteId) { showToast("Choisissez un maquis."); return; }
+  const days = planningDatesBetween(bounds.start, bounds.end);
+  if (!days.length) { showToast("Période Du / Au invalide."); return; }
+  if (days.length > 62) { showToast("Maximum 62 jours par génération."); return; }
+  if (teamSize > staffOrder.length) { showToast("Trop de personnes en service par jour."); return; }
+
+  const generated = buildRotationShiftsForPeriod({
+    startIso: bounds.start,
+    endIso: bounds.end,
+    staffOrder,
+    workDays,
+    teamSize,
+    startTime,
+    endTime,
+    siteId,
+    note: "Rotation auto",
+  });
+  const names = staffOrder.map(staffDisplayName).join(", ");
+  const msg = `Générer ${generated.length} créneau(x) du ${formatDateDdMmYyyy(bounds.start)} au ${formatDateDdMmYyyy(bounds.end)} ?\n\n`
+    + `Rotation : ${names}\n${workDays} jour(s) d'affilée · ${teamSize} en service / jour · ${startTime}–${endTime}`
+    + (replace ? "\n\nLes créneaux existants sur cette période pour ce maquis seront supprimés." : "");
+  if (!window.confirm(msg)) return;
+
+  await refreshWorkShiftsFromServer();
+  let rows = [...workShiftsAll()];
+  if (replace) {
+    rows = rows.filter((s) => {
+      const d = String(s.date || "").slice(0, 10);
+      const sid = String(s.siteId || currentSiteId() || "");
+      return !(d >= bounds.start && d <= bounds.end && sid === siteId);
+    });
+  }
+  rows = [...rows, ...generated];
+  const prevWorkShifts = workShiftsAll();
+  state.workShifts = rows;
+  try {
+    await persistStatePatch({ workShifts: rows, nextId: state.nextId });
+    await refreshWorkShiftsFromServer();
+    reconcileWorkShiftsAfterPatch(rows);
+    recordStaffAudit("create", "planning", `Rotation ${bounds.start} → ${bounds.end}`, `${staffOrder.join(", ")} · ${workDays}j/${teamSize} srv`);
+    renderPlanningTeam();
+    renderPlanningMine();
+    showToast(`${generated.length} créneaux générés.`);
+  } catch (e) {
+    state.workShifts = prevWorkShifts;
+    handleApiError(e);
+  }
+}
+
 function renderPlanningShiftRow(shift, { editable = false } = {}) {
   const mins = workShiftDurationMinutes(shift);
   const site = (state?.sites || []).find((s) => String(s.id) === String(shift.siteId));
@@ -2647,21 +2949,22 @@ function renderPlanningShiftRow(shift, { editable = false } = {}) {
 }
 
 function renderPlanningMine() {
-  const bounds = planningWeekBounds(planningMineWeekOffset);
+  const bounds = planningDisplayBounds();
   const labelEl = document.getElementById("planning-mine-week-label");
   const listEl = document.getElementById("planning-mine-list");
   const sumEl = document.getElementById("planning-mine-summary");
   if (labelEl) labelEl.textContent = planningWeekLabel(bounds);
   const rows = myWorkShiftsInWeek(bounds);
   const totalMins = rows.reduce((acc, s) => acc + workShiftDurationMinutes(s), 0);
+  const periodLab = bounds.start === bounds.end ? "ce jour" : "cette période";
   if (sumEl) {
     sumEl.textContent = rows.length
-      ? `${rows.length} créneau(x) · ${formatDurationMinutes(totalMins)} sur la semaine`
-      : "Aucun créneau planifié pour cette semaine.";
+      ? `${rows.length} créneau(x) · ${formatDurationMinutes(totalMins)} sur ${periodLab}`
+      : `Aucun créneau planifié pour ${periodLab}.`;
   }
   if (!listEl) return;
   if (!rows.length) {
-    listEl.innerHTML = emptyState("Aucun horaire", "Votre gérant n'a pas encore publié de créneaux pour cette semaine.");
+    listEl.innerHTML = emptyState("Aucun horaire", "Votre gérant n'a pas encore publié de créneaux pour cette période. Changez les dates Du / Au en haut.");
     return;
   }
   listEl.innerHTML = rows.map((s) => renderPlanningShiftRow(s)).join("");
@@ -2669,11 +2972,12 @@ function renderPlanningMine() {
 
 function renderPlanningTeam() {
   if (!canManageTeamSchedule()) return;
-  const bounds = planningWeekBounds(planningTeamWeekOffset);
+  const bounds = planningDisplayBounds();
   const labelEl = document.getElementById("planning-team-week-label");
   const listEl = document.getElementById("planning-team-list");
   if (labelEl) labelEl.textContent = planningWeekLabel(bounds);
   populateWorkShiftUserSelect();
+  renderRotationStaffList();
   const rows = teamWorkShiftsInWeek(bounds);
   if (!listEl) return;
   if (!rows.length) {
@@ -2724,7 +3028,11 @@ function resetWorkShiftForm() {
   if (editId) editId.value = "";
   if (cancelBtn) cancelBtn.classList.add("hidden");
   const dateEl = document.getElementById("ws-date");
-  if (dateEl && !dateEl.value) dateEl.value = today();
+  const dateEndEl = document.getElementById("ws-date-end");
+  const b = planningDisplayBounds();
+  const def = b.start || today();
+  if (dateEl) dateEl.value = def;
+  if (dateEndEl) dateEndEl.value = def;
   const noteEl = document.getElementById("ws-note");
   if (noteEl) noteEl.value = "";
 }
@@ -2735,12 +3043,27 @@ function startEditWorkShift(idRaw) {
   if (!shift) return;
   document.getElementById("ws-edit-id").value = String(id);
   document.getElementById("ws-user").value = shift.username;
-  document.getElementById("ws-date").value = String(shift.date || "").slice(0, 10);
+  const d = String(shift.date || "").slice(0, 10);
+  document.getElementById("ws-date").value = d;
+  const dateEndEl = document.getElementById("ws-date-end");
+  if (dateEndEl) dateEndEl.value = d;
   document.getElementById("ws-start").value = String(shift.startTime || "18:00");
   document.getElementById("ws-end").value = String(shift.endTime || "02:00");
   document.getElementById("ws-note").value = String(shift.note || "");
   document.getElementById("ws-cancel-edit-btn")?.classList.remove("hidden");
   document.getElementById("ws-save-btn")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+/** Recharge workShifts depuis le serveur (source de vérité après enregistrement). */
+async function refreshWorkShiftsFromServer() {
+  try {
+    const fresh = await apiRequest(API.state, { cache: "no-store" });
+    if (fresh && Array.isArray(fresh.workShifts)) {
+      state.workShifts = fresh.workShifts;
+    }
+  } catch {
+    /* garder l'état local */
+  }
 }
 
 /** Garde les créneaux envoyés si la réponse PUT ne les renvoie pas (serveur ancien ou fusion vide). */
@@ -2762,7 +3085,14 @@ async function saveWorkShiftFromForm() {
     return;
   }
   const username = document.getElementById("ws-user")?.value?.trim();
-  const date = document.getElementById("ws-date")?.value?.trim();
+  const dateStart = document.getElementById("ws-date")?.value?.trim();
+  const dateEndRaw = document.getElementById("ws-date-end")?.value?.trim() || dateStart;
+  let dateEnd = dateEndRaw;
+  if (dateStart && dateEnd && dateEnd < dateStart) {
+    dateEnd = dateStart;
+    const endInp = document.getElementById("ws-date-end");
+    if (endInp) endInp.value = dateStart;
+  }
   const startTime = document.getElementById("ws-start")?.value?.trim();
   const endTime = document.getElementById("ws-end")?.value?.trim();
   const note = String(document.getElementById("ws-note")?.value || "").trim().slice(0, 200);
@@ -2774,8 +3104,15 @@ async function saveWorkShiftFromForm() {
       : "Aucune serveuse/gérante sur ce maquis : Paramètres → Accès.");
     return;
   }
-  if (!date || !startTime || !endTime) { showToast("Date et heures obligatoires."); return; }
+  if (!dateStart || !startTime || !endTime) { showToast("Dates et heures obligatoires."); return; }
   if (!siteId) { showToast("Choisissez un maquis."); return; }
+  const dayList = editRaw ? [dateStart] : planningDatesBetween(dateStart, dateEnd);
+  if (!dayList.length) { showToast("Plage de dates invalide."); return; }
+  if (!editRaw && dayList.length > 31) {
+    showToast("Plage limitée à 31 jours. Réduisez la période Du / Au.");
+    return;
+  }
+  await refreshWorkShiftsFromServer();
   const now = new Date().toISOString();
   let rows = [...workShiftsAll()];
   if (editRaw) {
@@ -2786,7 +3123,7 @@ async function saveWorkShiftFromForm() {
       ...rows[idx],
       username,
       siteId,
-      date,
+      date: dateStart,
       startTime,
       endTime,
       note,
@@ -2794,32 +3131,36 @@ async function saveWorkShiftFromForm() {
       updatedBy: sessionUser,
     };
   } else {
-    const nid = Number(state.nextId?.workShift) || 100;
-    state.nextId = state.nextId || {};
-    state.nextId.workShift = nid + 1;
-    rows.push({
-      id: nid,
-      siteId,
-      username,
-      date,
-      startTime,
-      endTime,
-      note,
-      createdBy: sessionUser,
-      createdAt: now,
-      updatedAt: now,
-    });
+    for (const date of dayList) {
+      const nid = Number(state.nextId?.workShift) || 100;
+      state.nextId = state.nextId || {};
+      state.nextId.workShift = nid + 1;
+      rows.push({
+        id: nid,
+        siteId,
+        username,
+        date,
+        startTime,
+        endTime,
+        note,
+        createdBy: sessionUser,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
   }
   const prevWorkShifts = workShiftsAll();
   state.workShifts = rows;
   try {
     await persistStatePatch({ workShifts: rows, nextId: state.nextId });
+    await refreshWorkShiftsFromServer();
     reconcileWorkShiftsAfterPatch(rows);
-    recordStaffAudit(editRaw ? "update" : "create", "planning", editRaw ? `Créneau #${editRaw}` : `Créneau ${date}`, `${username} ${startTime}-${endTime}`);
+    const auditDay = editRaw ? dateStart : `${dateStart}${dayList.length > 1 ? ` → ${dateEnd}` : ""}`;
+    recordStaffAudit(editRaw ? "update" : "create", "planning", editRaw ? `Créneau #${editRaw}` : `Créneau ${auditDay}`, `${username} ${startTime}-${endTime}${dayList.length > 1 ? ` · ${dayList.length} jours` : ""}`);
     resetWorkShiftForm();
     renderPlanningTeam();
     renderPlanningMine();
-    showToast(editRaw ? "Créneau modifié." : "Créneau enregistré.");
+    showToast(editRaw ? "Créneau modifié." : (dayList.length > 1 ? `${dayList.length} créneaux enregistrés.` : "Créneau enregistré."));
   } catch (e) {
     state.workShifts = prevWorkShifts;
     handleApiError(e);
@@ -2837,6 +3178,7 @@ async function deleteWorkShift(idRaw) {
   state.workShifts = rows;
   try {
     await persistStatePatch({ workShifts: rows });
+    await refreshWorkShiftsFromServer();
     reconcileWorkShiftsAfterPatch(rows);
     recordStaffAudit("delete", "planning", `Créneau #${id}`, `${shift.username} ${shift.date}`);
     if (String(document.getElementById("ws-edit-id")?.value) === String(id)) resetWorkShiftForm();
@@ -2863,11 +3205,19 @@ function setPlanningSubTab(tab) {
   else renderPlanningTeam();
 }
 
-function renderPlanningPage() {
+function applyPlanningRangeAndRender() {
+  planningDisplayBounds();
+  renderPlanningMine();
+  if (canManageTeamSchedule()) renderPlanningTeam();
+  else renderRotationPreview();
+}
+
+async function renderPlanningPage() {
   if (!state) return;
   if (!Array.isArray(state.workShifts)) state.workShifts = [];
-  const dateEl = document.getElementById("ws-date");
-  if (dateEl && !dateEl.value) dateEl.value = today();
+  await refreshWorkShiftsFromServer();
+  if (!document.getElementById("planning-range-start")?.value) setPlanningRangeCurrentWeek();
+  resetWorkShiftForm();
   setPlanningSubTab(planningSubTab);
 }
 
@@ -2877,14 +3227,44 @@ function bindPlanningEvents() {
       if (!btn.classList.contains("hidden-by-role")) setPlanningSubTab(btn.dataset.subtabPlanning);
     });
   });
-  document.getElementById("planning-mine-prev")?.addEventListener("click", () => { planningMineWeekOffset -= 1; renderPlanningMine(); });
-  document.getElementById("planning-mine-next")?.addEventListener("click", () => { planningMineWeekOffset += 1; renderPlanningMine(); });
-  document.getElementById("planning-mine-today")?.addEventListener("click", () => { planningMineWeekOffset = 0; renderPlanningMine(); });
-  document.getElementById("planning-team-prev")?.addEventListener("click", () => { planningTeamWeekOffset -= 1; renderPlanningTeam(); });
-  document.getElementById("planning-team-next")?.addEventListener("click", () => { planningTeamWeekOffset += 1; renderPlanningTeam(); });
-  document.getElementById("planning-team-today")?.addEventListener("click", () => { planningTeamWeekOffset = 0; renderPlanningTeam(); });
+  const onRangeChange = () => applyPlanningRangeAndRender();
+  document.getElementById("planning-range-apply")?.addEventListener("click", onRangeChange);
+  document.getElementById("planning-range-today")?.addEventListener("click", () => {
+    setPlanningRangeToday();
+    onRangeChange();
+  });
+  document.getElementById("planning-range-week")?.addEventListener("click", () => {
+    setPlanningRangeCurrentWeek();
+    onRangeChange();
+  });
+  document.getElementById("planning-range-month")?.addEventListener("click", () => {
+    setPlanningRangeCurrentMonth();
+    onRangeChange();
+  });
+  document.getElementById("planning-range-prev")?.addEventListener("click", () => {
+    shiftPlanningRangeByPeriod(-1);
+    onRangeChange();
+  });
+  document.getElementById("planning-range-next")?.addEventListener("click", () => {
+    shiftPlanningRangeByPeriod(1);
+    onRangeChange();
+  });
+  document.getElementById("planning-range-start")?.addEventListener("change", onRangeChange);
+  document.getElementById("planning-range-end")?.addEventListener("change", onRangeChange);
+  document.getElementById("ws-date")?.addEventListener("change", () => {
+    const s = document.getElementById("ws-date")?.value;
+    const e = document.getElementById("ws-date-end");
+    if (e && s && (!e.value || e.value < s)) e.value = s;
+  });
   document.getElementById("ws-save-btn")?.addEventListener("click", () => saveWorkShiftFromForm().catch(handleApiError));
   document.getElementById("ws-cancel-edit-btn")?.addEventListener("click", resetWorkShiftForm);
+  ["ws-rotation-work-days", "ws-rotation-team-size", "ws-rotation-start", "ws-rotation-end"].forEach((id) => {
+    document.getElementById(id)?.addEventListener("input", renderRotationPreview);
+    document.getElementById(id)?.addEventListener("change", renderRotationPreview);
+  });
+  document.getElementById("ws-rotation-generate")?.addEventListener("click", () => {
+    generatePlanningRotationFromForm().catch(handleApiError);
+  });
 }
 
 /** Ouverture / clôture journée comptable (PDJ) : tout utilisateur connecté sauf les comptes serveuse. */
@@ -4377,7 +4757,7 @@ function navigate(page, opts = {}) {
     loadParamsForm();
     maybeAdjustParamsSubTab();
   }
-  if (page === "planning") renderPlanningPage();
+  if (page === "planning") renderPlanningPage().catch(handleApiError);
   syncFabLabelForStockPage();
   applyRoleVisibility();
 }
@@ -9775,6 +10155,14 @@ async function performAutoClotureBackground(dStr) {
 
 async function syncStateSilently() {
   if (!state || modalIsOpen()) return;
+  if (currentPage === "planning") {
+    try {
+      await refreshWorkShiftsFromServer();
+      renderPlanningMine();
+      if (canManageTeamSchedule()) renderPlanningTeam();
+    } catch { /* ignore */ }
+    return;
+  }
   if (!["ventes", "home", "stock", "pdj", "commandes"].includes(currentPage)) return;
   _tryAutoClotureIfDueNow();
   const deferRender = shouldDeferLiveSyncRender();
@@ -10114,6 +10502,16 @@ function mergeStateFromServerResponse(incoming, previous, patchedKeys = null) {
     const inc = incoming[key];
     if (!Array.isArray(inc)) return;
     const old = prev[key];
+    if (
+      key === "workShifts"
+      && patchedKeys?.has("workShifts")
+      && inc.length === 0
+      && Array.isArray(old)
+      && old.length > 0
+    ) {
+      out[key] = old;
+      return;
+    }
     if (inc.length > 0 || !Array.isArray(old) || old.length === 0) out[key] = inc;
     else out[key] = old;
   };
@@ -15911,7 +16309,7 @@ function attachEvents() {
     renderCharges();
     renderCasierPhysique();
     loadParamsForm();
-    if (currentPage === "planning") renderPlanningPage();
+    if (currentPage === "planning") renderPlanningPage().catch(handleApiError);
     resetOrderForm();
     persistState().catch(handleApiError);
   });

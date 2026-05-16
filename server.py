@@ -2224,11 +2224,24 @@ class DataStore:
                     )
                 # Patch partiel : ne remplacer une collection que si elle est dans le payload
                 # (évite d'écraser ventes/charges/etc. avec [] quand le client n'envoie que le stock).
+                if "workShifts" in payload:
+                    if str(session.get("role", "")).strip().lower() == "serveuse":
+                        raise ValueError("Modification du planning non autorisee.")
+                    auth_users_sa = list(current.get("auth", {}).get("users", []))
+                    allowed_sa = set(sid_list)
+                    current["workShifts"] = merge_work_shifts_scoped(
+                        current.get("workShifts", []),
+                        payload["workShifts"],
+                        session,
+                        allowed_sa,
+                        sid_list,
+                        auth_users_sa,
+                    )
                 _GLOBAL_PATCH_KEYS = [
                     "ventes", "stock", "commandes", "stockChecks", "dayBooks",
                     "purchaseOrders", "supplierPrices", "casiers", "casierMouvements",
                     "creditRecoveries", "consignes", "charges", "staffAuditLog",
-                    "stockEntrees", "stockLosses", "workShifts",
+                    "stockEntrees", "stockLosses",
                 ]
                 for _key in _GLOBAL_PATCH_KEYS:
                     if _key in payload:

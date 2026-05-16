@@ -1113,6 +1113,26 @@
       </section>
 
       <section id="page-planning" class="page">
+        <div class="planning-range-bar card" style="padding:12px 14px;margin-bottom:12px">
+          <div class="form-grid two-cols" style="align-items:end;margin:0">
+            <div class="form-group" style="margin:0">
+              <label for="planning-range-start">Du</label>
+              <input id="planning-range-start" type="date" style="width:100%">
+            </div>
+            <div class="form-group" style="margin:0">
+              <label for="planning-range-end">Au</label>
+              <input id="planning-range-end" type="date" style="width:100%">
+            </div>
+          </div>
+          <div class="planning-week-nav" style="margin:10px 0 0">
+            <button type="button" id="planning-range-apply" class="btn btn-primary mini-btn">Afficher</button>
+            <button type="button" id="planning-range-today" class="btn btn-outline mini-btn">Aujourd&apos;hui</button>
+            <button type="button" id="planning-range-week" class="btn btn-outline mini-btn">Cette semaine</button>
+            <button type="button" id="planning-range-month" class="btn btn-outline mini-btn">Ce mois</button>
+            <button type="button" id="planning-range-prev" class="btn btn-outline mini-btn" aria-label="Période précédente">←</button>
+            <button type="button" id="planning-range-next" class="btn btn-outline mini-btn" aria-label="Période suivante">→</button>
+          </div>
+        </div>
         <div class="tabs page-subtabs planning-subtabs" role="tablist" aria-label="Planning">
           <button type="button" class="tab active" data-subtab-planning="mine" role="tab" aria-selected="true">Mes horaires</button>
           <button type="button" class="tab manager-only" data-subtab-planning="team" role="tab">Équipe</button>
@@ -1122,12 +1142,7 @@
           <article class="card">
             <div class="section-head">
               <h3>Mes horaires</h3>
-              <span class="section-meta" id="planning-mine-week-label">Semaine</span>
-            </div>
-            <div class="planning-week-nav">
-              <button type="button" id="planning-mine-prev" class="btn btn-outline mini-btn" aria-label="Semaine précédente">←</button>
-              <button type="button" id="planning-mine-today" class="btn btn-outline mini-btn">Aujourd&apos;hui</button>
-              <button type="button" id="planning-mine-next" class="btn btn-outline mini-btn" aria-label="Semaine suivante">→</button>
+              <span class="section-meta" id="planning-mine-week-label">Période</span>
             </div>
             <div id="planning-mine-summary" class="planning-summary muted"></div>
             <div id="planning-mine-list" class="stack-list planning-shift-list"></div>
@@ -1138,23 +1153,55 @@
           <article class="card">
             <div class="section-head">
               <h3>Programme de travail</h3>
-              <span class="section-meta" id="planning-team-week-label">Semaine</span>
+              <span class="section-meta" id="planning-team-week-label">Période</span>
             </div>
             <p class="muted" style="font-size:0.86rem;margin:0 0 12px;line-height:1.45">
-              Planifiez les créneaux des serveuses et gérantes du maquis actif. Les personnes concernées voient leurs horaires dans l&apos;onglet <strong>Mes horaires</strong>.
+              Planifiez les créneaux des serveuses et gérantes du maquis actif. Les personnes concernées voient leurs horaires dans l&apos;onglet <strong>Mes horaires</strong>. Utilisez la plage <strong>Du / Au</strong> en haut pour filtrer les jours affichés.
             </p>
-            <div class="planning-week-nav">
-              <button type="button" id="planning-team-prev" class="btn btn-outline mini-btn" aria-label="Semaine précédente">←</button>
-              <button type="button" id="planning-team-today" class="btn btn-outline mini-btn">Aujourd&apos;hui</button>
-              <button type="button" id="planning-team-next" class="btn btn-outline mini-btn" aria-label="Semaine suivante">→</button>
-            </div>
             <div id="planning-team-list" class="stack-list planning-shift-list"></div>
           </article>
 
           <article class="card manager-only">
             <div class="section-head">
+              <h3>Générer une rotation</h3>
+              <span class="section-meta">Période Du / Au</span>
+            </div>
+            <p class="muted" style="font-size:0.86rem;margin:0 0 12px;line-height:1.45">
+              Exemple : ehui travaille <strong>lundi–mardi</strong>, se repose <strong>mercredi–jeudi</strong>, une autre prend le relais, puis on recommence. Cochez l&apos;ordre de rotation (après la dernière, on revient à la première).
+            </p>
+            <div id="ws-rotation-staff-list" class="planning-rotation-staff" role="group" aria-label="Ordre de rotation"></div>
+            <div class="form-grid two-cols" style="margin-top:12px">
+              <div class="form-group">
+                <label for="ws-rotation-work-days">Jours travaillés d&apos;affilée</label>
+                <input id="ws-rotation-work-days" type="number" min="1" max="7" value="2" style="width:100%">
+              </div>
+              <div class="form-group">
+                <label for="ws-rotation-team-size">Personnes en service / jour</label>
+                <input id="ws-rotation-team-size" type="number" min="1" max="5" value="1" style="width:100%" title="1 = alternance classique 2j travail / 2j repos à 2 personnes">
+              </div>
+              <div class="form-group">
+                <label for="ws-rotation-start">Heure début</label>
+                <input id="ws-rotation-start" type="time" value="18:00" style="width:100%">
+              </div>
+              <div class="form-group">
+                <label for="ws-rotation-end">Heure fin</label>
+                <input id="ws-rotation-end" type="time" value="02:00" style="width:100%">
+              </div>
+            </div>
+            <label class="planning-rotation-opt" style="display:flex;align-items:center;gap:8px;margin:12px 0;font-size:0.88rem">
+              <input type="checkbox" id="ws-rotation-replace">
+              Remplacer les créneaux déjà planifiés sur cette période (maquis actif)
+            </label>
+            <p id="ws-rotation-preview" class="planning-summary muted" style="margin-bottom:10px"></p>
+            <div class="button-stack">
+              <button type="button" id="ws-rotation-generate" class="btn btn-primary">Générer la rotation</button>
+            </div>
+          </article>
+
+          <article class="card manager-only">
+            <div class="section-head">
               <h3>Ajouter un créneau</h3>
-              <span class="section-meta">Équipe</span>
+              <span class="section-meta">Manuel</span>
             </div>
             <div class="form-grid two-cols">
               <div class="form-group">
@@ -1162,8 +1209,12 @@
                 <select id="ws-user" style="width:100%;margin-top:4px;padding:12px;border-radius:12px;border:1px solid var(--line)"></select>
               </div>
               <div class="form-group">
-                <label for="ws-date">Date</label>
+                <label for="ws-date">Du (jour)</label>
                 <input id="ws-date" type="date" style="width:100%">
+              </div>
+              <div class="form-group">
+                <label for="ws-date-end">Au (jour)</label>
+                <input id="ws-date-end" type="date" style="width:100%" title="Même jour ou plusieurs jours : un créneau par jour">
               </div>
               <div class="form-group">
                 <label for="ws-start">Début</label>
@@ -2535,6 +2586,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=262"></script>
+  <script src="./app-orders.js?v=265"></script>
 </body>
 </html>

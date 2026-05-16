@@ -2941,6 +2941,39 @@ textarea { font: inherit; }
 }
 
 /* Planning / horaires équipe */
+.planning-range-bar .form-grid {
+  gap: 10px;
+}
+.planning-rotation-staff {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.planning-rotation-staff-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  font-size: 0.88rem;
+}
+.planning-rotation-order {
+  font-weight: 700;
+  color: var(--brand);
+  min-width: 1.25rem;
+  text-align: center;
+}
+.planning-rotation-move {
+  margin-left: auto;
+  display: flex;
+  gap: 4px;
+}
+.planning-rotation-move .mini-btn {
+  padding: 4px 8px;
+  min-width: 2rem;
+}
 .planning-week-nav {
   display: flex;
   flex-wrap: wrap;
