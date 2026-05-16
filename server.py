@@ -2326,14 +2326,17 @@ class DataStore:
                     for r in (current.get(key) or [])
                     if isinstance(r, dict) and row_site(r) == sid
                 ]
+            site_nom = next((str(s.get("nom", "")) for s in current.get("sites", []) if str(s.get("id")) == sid), "")
+            safe_nom = re.sub(r"[^a-zA-Z0-9_-]", "_", site_nom)[:30].strip("_")
             safe_sid = re.sub(r"[^a-zA-Z0-9_-]", "_", sid)
-            name = f"site-{safe_sid}-{stamp}.json"
+            slug = f"{safe_nom}-{safe_sid}" if safe_nom else safe_sid
+            name = f"site-{slug}-{stamp}.json"
             dest = BACKUP_DIR / name
             dest.write_text(json.dumps(site_state, ensure_ascii=False, indent=2), encoding="utf-8")
         # Purger les anciennes sauvegardes de ce maquis (garder 40)
         try:
             safe_sid_clean = re.sub(r"[^a-zA-Z0-9_-]", "_", sid)
-            old_files = sorted(BACKUP_DIR.glob(f"site-{safe_sid_clean}-*.json"), key=lambda p: p.name, reverse=True)
+            old_files = sorted(BACKUP_DIR.glob(f"site-*-{safe_sid_clean}-*.json"), key=lambda p: p.name, reverse=True)
             for old in old_files[40:]:
                 try:
                     old.unlink()

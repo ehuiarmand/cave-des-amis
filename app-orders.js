@@ -12419,7 +12419,7 @@ async function createSiteBackupOnServer(siteId) {
   if (!canGlobalSuperAdmin()) { showToast("Reserve au super administrateur."); return; }
   const site = (state.sites || []).find((s) => s.id === siteId);
   if (!site) { showToast("Maquis introuvable."); return; }
-  if (!window.confirm(`Sauvegarder uniquement le maquis "${site.nom}" sur le serveur ?\n\nFichier : site-${siteId}-YYYYMMDD-HHMMSS.json dans backups/`)) return;
+  if (!window.confirm(`Sauvegarder uniquement le maquis "${site.nom}" sur le serveur ?\n\nFichier : site-${site.nom}-${siteId}-YYYYMMDD-HHMMSS.json dans backups/`)) return;
   try {
     const r = await apiRequest(API.createSiteBackup, { method: "POST", body: JSON.stringify({ siteId }) });
     const f = String(r?.file || "").trim();
