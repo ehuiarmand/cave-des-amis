@@ -2610,11 +2610,10 @@ function myWorkShiftsInWeek(bounds) {
 }
 
 function teamWorkShiftsInWeek(bounds) {
-  const sid = String(currentSiteId() || "");
-  return workShiftsAll()
+  return recordsForSite(workShiftsAll())
     .filter((s) => {
       const d = String(s.date || "").slice(0, 10);
-      return d >= bounds.start && d <= bounds.end && String(s.siteId || "") === sid;
+      return d >= bounds.start && d <= bounds.end;
     })
     .sort((a, b) => `${a.date}${a.startTime}`.localeCompare(`${b.date}${b.startTime}`));
 }
@@ -2744,6 +2743,19 @@ function startEditWorkShift(idRaw) {
   document.getElementById("ws-save-btn")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
+/** Garde les créneaux envoyés si la réponse PUT ne les renvoie pas (serveur ancien ou fusion vide). */
+function reconcileWorkShiftsAfterPatch(sentRows) {
+  if (!Array.isArray(sentRows) || !sentRows.length) return;
+  const got = workShiftsAll();
+  const missing = sentRows.filter(
+    (p) => !got.some((g) => Number(g.id) === Number(p.id)),
+  );
+  if (!missing.length) return;
+  const byId = new Map(got.map((s) => [Number(s.id), s]));
+  sentRows.forEach((p) => byId.set(Number(p.id), p));
+  state.workShifts = Array.from(byId.values());
+}
+
 async function saveWorkShiftFromForm() {
   if (!canManageTeamSchedule()) {
     showToast("Réservé au gérant ou à un administrateur.");
@@ -2798,14 +2810,18 @@ async function saveWorkShiftFromForm() {
       updatedAt: now,
     });
   }
+  const prevWorkShifts = workShiftsAll();
+  state.workShifts = rows;
   try {
     await persistStatePatch({ workShifts: rows, nextId: state.nextId });
+    reconcileWorkShiftsAfterPatch(rows);
     recordStaffAudit(editRaw ? "update" : "create", "planning", editRaw ? `Créneau #${editRaw}` : `Créneau ${date}`, `${username} ${startTime}-${endTime}`);
     resetWorkShiftForm();
     renderPlanningTeam();
     renderPlanningMine();
     showToast(editRaw ? "Créneau modifié." : "Créneau enregistré.");
   } catch (e) {
+    state.workShifts = prevWorkShifts;
     handleApiError(e);
   }
 }
@@ -2817,14 +2833,18 @@ async function deleteWorkShift(idRaw) {
   if (!shift) return;
   if (!window.confirm(`Supprimer le créneau du ${formatDateDdMmYyyy(shift.date)} (${shift.startTime} – ${shift.endTime}) pour ${staffDisplayName(shift.username)} ?`)) return;
   const rows = workShiftsAll().filter((s) => Number(s.id) !== id);
+  const prevWorkShifts = workShiftsAll();
+  state.workShifts = rows;
   try {
     await persistStatePatch({ workShifts: rows });
+    reconcileWorkShiftsAfterPatch(rows);
     recordStaffAudit("delete", "planning", `Créneau #${id}`, `${shift.username} ${shift.date}`);
     if (String(document.getElementById("ws-edit-id")?.value) === String(id)) resetWorkShiftForm();
     renderPlanningTeam();
     renderPlanningMine();
     showToast("Créneau supprimé.");
   } catch (e) {
+    state.workShifts = prevWorkShifts;
     handleApiError(e);
   }
 }
@@ -10208,6 +10228,9 @@ async function persistStatePatch(patch) {
     body: JSON.stringify(body),
   });
   state = mergeStateFromServerResponse(incoming, prev, patchedKeys);
+  if (Array.isArray(patch.workShifts) && patchedKeys.has("workShifts")) {
+    reconcileWorkShiftsAfterPatch(patch.workShifts);
+  }
   applyPersistStateResponseExtras(patch, _stockChecks);
 }
 
