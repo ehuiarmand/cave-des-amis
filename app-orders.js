@@ -2903,7 +2903,6 @@ async function generatePlanningRotationFromForm() {
     + (replace ? "\n\nLes créneaux existants sur cette période pour ce maquis seront supprimés." : "");
   if (!window.confirm(msg)) return;
 
-  await refreshWorkShiftsFromServer();
   let rows = [...workShiftsAll()];
   if (replace) {
     rows = rows.filter((s) => {
@@ -2917,7 +2916,6 @@ async function generatePlanningRotationFromForm() {
   state.workShifts = rows;
   try {
     await persistStatePatch({ workShifts: rows, nextId: state.nextId });
-    await refreshWorkShiftsFromServer();
     reconcileWorkShiftsAfterPatch(rows);
     recordStaffAudit("create", "planning", `Rotation ${bounds.start} → ${bounds.end}`, `${staffOrder.join(", ")} · ${workDays}j/${teamSize} srv`);
     renderPlanningTeam();
@@ -3054,12 +3052,30 @@ function startEditWorkShift(idRaw) {
   document.getElementById("ws-save-btn")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
-/** Recharge workShifts depuis le serveur (source de vérité après enregistrement). */
-async function refreshWorkShiftsFromServer() {
+/** Fusionne les créneaux serveur avec l'état local (union par id — ne jamais effacer après enregistrement). */
+function mergeWorkShiftsFromServer(serverRows, localRows) {
+  const server = Array.isArray(serverRows) ? serverRows : [];
+  const local = Array.isArray(localRows) ? localRows : [];
+  if (!server.length) return local.slice();
+  if (!local.length) return server.slice();
+  const byId = new Map();
+  local.forEach((s) => {
+    if (s?.id != null) byId.set(Number(s.id), s);
+  });
+  server.forEach((s) => {
+    if (s?.id != null) byId.set(Number(s.id), s);
+  });
+  return Array.from(byId.values());
+}
+
+/** Recharge workShifts depuis le serveur (union uniquement — ne supprime jamais les créneaux locaux). */
+async function refreshWorkShiftsFromServer({ onlyIfLocalEmpty = false } = {}) {
+  const local = workShiftsAll();
+  if (onlyIfLocalEmpty && local.length > 0) return;
   try {
     const fresh = await apiRequest(API.state, { cache: "no-store" });
     if (fresh && Array.isArray(fresh.workShifts)) {
-      state.workShifts = fresh.workShifts;
+      state.workShifts = mergeWorkShiftsFromServer(fresh.workShifts, local);
     }
   } catch {
     /* garder l'état local */
@@ -3112,7 +3128,6 @@ async function saveWorkShiftFromForm() {
     showToast("Plage limitée à 31 jours. Réduisez la période Du / Au.");
     return;
   }
-  await refreshWorkShiftsFromServer();
   const now = new Date().toISOString();
   let rows = [...workShiftsAll()];
   if (editRaw) {
@@ -3153,7 +3168,6 @@ async function saveWorkShiftFromForm() {
   state.workShifts = rows;
   try {
     await persistStatePatch({ workShifts: rows, nextId: state.nextId });
-    await refreshWorkShiftsFromServer();
     reconcileWorkShiftsAfterPatch(rows);
     const auditDay = editRaw ? dateStart : `${dateStart}${dayList.length > 1 ? ` → ${dateEnd}` : ""}`;
     recordStaffAudit(editRaw ? "update" : "create", "planning", editRaw ? `Créneau #${editRaw}` : `Créneau ${auditDay}`, `${username} ${startTime}-${endTime}${dayList.length > 1 ? ` · ${dayList.length} jours` : ""}`);
@@ -3178,7 +3192,6 @@ async function deleteWorkShift(idRaw) {
   state.workShifts = rows;
   try {
     await persistStatePatch({ workShifts: rows });
-    await refreshWorkShiftsFromServer();
     reconcileWorkShiftsAfterPatch(rows);
     recordStaffAudit("delete", "planning", `Créneau #${id}`, `${shift.username} ${shift.date}`);
     if (String(document.getElementById("ws-edit-id")?.value) === String(id)) resetWorkShiftForm();
@@ -3215,7 +3228,7 @@ function applyPlanningRangeAndRender() {
 async function renderPlanningPage() {
   if (!state) return;
   if (!Array.isArray(state.workShifts)) state.workShifts = [];
-  await refreshWorkShiftsFromServer();
+  await refreshWorkShiftsFromServer({ onlyIfLocalEmpty: true });
   if (!document.getElementById("planning-range-start")?.value) setPlanningRangeCurrentWeek();
   resetWorkShiftForm();
   setPlanningSubTab(planningSubTab);
@@ -10156,11 +10169,9 @@ async function performAutoClotureBackground(dStr) {
 async function syncStateSilently() {
   if (!state || modalIsOpen()) return;
   if (currentPage === "planning") {
-    try {
-      await refreshWorkShiftsFromServer();
-      renderPlanningMine();
-      if (canManageTeamSchedule()) renderPlanningTeam();
-    } catch { /* ignore */ }
+    /* Ne pas fusionner tout l'état : un GET partiel vide effaçait le planning après enregistrement. */
+    renderPlanningMine();
+    if (canManageTeamSchedule()) renderPlanningTeam();
     return;
   }
   if (!["ventes", "home", "stock", "pdj", "commandes"].includes(currentPage)) return;
@@ -10453,7 +10464,7 @@ function buildStatePutBody(overrides = {}) {
     body.charges = state.charges;
     body.nextId = state.nextId;
     body.staffAuditLog = state.staffAuditLog ?? [];
-    body.workShifts = state.workShifts ?? [];
+    /* workShifts : jamais en sauvegarde complète — évite d'écraser le planning (PUT partiel dédié). */
     body.auth = { users: state.auth?.users || [] };
     body.casiers = state.casiers ?? [];
     body.casierMouvements = state.casierMouvements ?? [];
@@ -10502,14 +10513,12 @@ function mergeStateFromServerResponse(incoming, previous, patchedKeys = null) {
     const inc = incoming[key];
     if (!Array.isArray(inc)) return;
     const old = prev[key];
-    if (
-      key === "workShifts"
-      && patchedKeys?.has("workShifts")
-      && inc.length === 0
-      && Array.isArray(old)
-      && old.length > 0
-    ) {
-      out[key] = old;
+    if (key === "workShifts" && Array.isArray(old) && old.length > 0) {
+      out[key] = mergeWorkShiftsFromServer(inc, old);
+      return;
+    }
+    if (key === "workShifts" && Array.isArray(inc) && inc.length > 0) {
+      out[key] = inc;
       return;
     }
     if (inc.length > 0 || !Array.isArray(old) || old.length === 0) out[key] = inc;
