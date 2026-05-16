@@ -3137,7 +3137,7 @@ function startEditWorkShift(idRaw) {
   document.getElementById("ws-save-btn")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
-/** Fusionne les créneaux serveur avec l'état local (union par id — ne jamais effacer après enregistrement). */
+/** Union par id (ajouts / mises à jour) — ne retire pas les ids absents du serveur. */
 function mergeWorkShiftsFromServer(serverRows, localRows) {
   const server = Array.isArray(serverRows) ? serverRows : [];
   const local = Array.isArray(localRows) ? localRows : [];
@@ -3153,14 +3153,27 @@ function mergeWorkShiftsFromServer(serverRows, localRows) {
   return Array.from(byId.values());
 }
 
-/** Recharge workShifts depuis le serveur (union uniquement — ne supprime jamais les créneaux locaux). */
-async function refreshWorkShiftsFromServer({ onlyIfLocalEmpty = false } = {}) {
+/** Remplace les créneaux d'un maquis par la réponse serveur (suppressions incluses). */
+function applyWorkShiftsFromServerForSite(serverRows, siteId, localRows) {
+  const sid = String(siteId || currentSiteId() || "").trim();
+  const other = (localRows || []).filter((s) => !workShiftBelongsToSite(s, sid));
+  const scoped = (serverRows || []).filter((s) => workShiftBelongsToSite(s, sid));
+  return [...other, ...scoped];
+}
+
+/** Recharge workShifts depuis le serveur. replaceSite = vérité serveur pour le maquis actif. */
+async function refreshWorkShiftsFromServer({ onlyIfLocalEmpty = false, replaceSite = false } = {}) {
   const local = workShiftsAll();
   if (onlyIfLocalEmpty && local.length > 0) return;
+  const siteId = String(currentSiteId() || "").trim();
   try {
     const fresh = await apiRequest(API.state, { cache: "no-store" });
     if (fresh && Array.isArray(fresh.workShifts)) {
-      state.workShifts = mergeWorkShiftsFromServer(fresh.workShifts, local);
+      if (replaceSite && siteId) {
+        state.workShifts = applyWorkShiftsFromServerForSite(fresh.workShifts, siteId, local);
+      } else {
+        state.workShifts = mergeWorkShiftsFromServer(fresh.workShifts, local);
+      }
     }
   } catch {
     /* garder l'état local */
@@ -3191,9 +3204,15 @@ function lsWorkShiftsStorageKey() {
 
 function lsSaveWorkShifts() {
   try {
-    const rows = workShiftsAll();
-    if (!rows.length) return;
+    const siteId = String(currentSiteId() || "").trim();
+    if (!siteId) return;
     const key = lsWorkShiftsStorageKey();
+    const rows = workShiftsForSite(siteId);
+    if (!rows.length) {
+      localStorage.removeItem(key);
+      localStorage.removeItem(`${key}_nextId`);
+      return;
+    }
     localStorage.setItem(key, JSON.stringify(rows));
     if (state?.nextId?.workShift != null) {
       localStorage.setItem(`${key}_nextId`, String(state.nextId.workShift));
@@ -3205,12 +3224,14 @@ function lsSaveWorkShifts() {
 
 function lsRestoreWorkShifts() {
   try {
+    const siteId = String(currentSiteId() || "").trim();
+    if (!siteId) return;
     const key = lsWorkShiftsStorageKey();
     const raw = localStorage.getItem(key);
     if (!raw) return;
     const list = JSON.parse(raw);
     if (!Array.isArray(list) || !list.length) return;
-    state.workShifts = mergeWorkShiftsFromServer(state.workShifts || [], list);
+    state.workShifts = applyWorkShiftsFromServerForSite(list, siteId, workShiftsAll());
     if (!state.nextId) state.nextId = {};
     const nextRaw = localStorage.getItem(`${key}_nextId`);
     if (nextRaw) {
@@ -3233,24 +3254,20 @@ function workShiftsForSessionUser(siteId = currentSiteId()) {
   return rows;
 }
 
-/** Après PUT planning : l'état local garde toujours les créneaux envoyés. */
-function applyWorkShiftsAfterSave(sentRows) {
+/** Après PUT planning : snapshot = liste envoyée ; sinon union prudente. */
+function applyWorkShiftsAfterSave(sentRows, { snapshot = false } = {}) {
   const sent = Array.isArray(sentRows) ? sentRows : [];
+  if (snapshot) {
+    state.workShifts = sent.slice();
+    lsSaveWorkShifts();
+    return;
+  }
   if (!sent.length) {
     lsSaveWorkShifts();
     return;
   }
-  state.workShifts = mergeWorkShiftsFromServer(workShiftsAll(), sent);
+  state.workShifts = mergeWorkShiftsFromServer(sent, workShiftsAll());
   reconcileWorkShiftsAfterPatch(sent);
-  const sentIds = new Set(sent.map((s) => Number(s.id)));
-  if (sent.some((s) => !workShiftsAll().some((g) => Number(g.id) === Number(s.id)))) {
-    const byId = new Map(workShiftsAll().map((s) => [Number(s.id), s]));
-    sent.forEach((s) => byId.set(Number(s.id), s));
-    state.workShifts = Array.from(byId.values());
-  }
-  if (sentIds.size > workShiftsAll().filter((s) => sentIds.has(Number(s.id))).length) {
-    state.workShifts = sent.slice();
-  }
   lsSaveWorkShifts();
 }
 
@@ -3280,42 +3297,52 @@ function validateWorkShiftsBeforeSend(rows, siteId) {
   }
 }
 
-/** Relit le serveur (sans fusion locale) et vérifie que les créneaux envoyés y sont stockés. */
-async function verifyWorkShiftsPersistedOnServer(sentRows) {
+/** Relit le serveur et vérifie créneaux conservés / supprimés pour le maquis. */
+async function verifyWorkShiftsPersistedOnServer(sentRows, { siteId, removedIds = [] } = {}) {
   const sent = Array.isArray(sentRows) ? sentRows : [];
-  if (!sent.length) return;
+  const sid = String(siteId || currentSiteId() || "").trim();
   const sentIds = new Set(sent.map((s) => Number(s.id)).filter((id) => !Number.isNaN(id)));
+  const removed = (removedIds || []).map((id) => Number(id)).filter((id) => !Number.isNaN(id));
   let serverRows = [];
   try {
     const fresh = await apiRequest(API.state, { cache: "no-store" });
     serverRows = Array.isArray(fresh?.workShifts) ? fresh.workShifts : [];
-  } catch (e) {
+  } catch {
     throw new Error("Impossible de relire le planning sur le serveur. Vérifiez la connexion.");
   }
-  const found = serverRows.filter((s) => sentIds.has(Number(s.id))).length;
-  if (found >= sentIds.size) {
-    state.workShifts = mergeWorkShiftsFromServer(serverRows, workShiftsAll());
-    return;
+  const stillThere = removed.filter((rid) => serverRows.some((s) => Number(s.id) === rid));
+  if (stillThere.length) {
+    throw new Error(
+      "La suppression n'a pas été enregistrée sur le serveur. "
+      + "Redémarrez « python server.py », faites Ctrl+F5, puis réessayez.",
+    );
   }
-  console.warn("[planning] verify failed", {
-    sent: sentIds.size,
-    found,
-    serverCount: serverRows.length,
-    siteId: currentSiteId(),
-  });
-  throw new Error(
-    `Le serveur n'a enregistré que ${found}/${sentIds.size} créneau(x). `
-    + "Redémarrez « python server.py » (version à jour), faites Ctrl+F5, puis réessayez. "
-    + "Vérifiez aussi Paramètres → Accès (personne + maquis cochés).",
-  );
+  if (sentIds.size) {
+    const found = serverRows.filter((s) => sentIds.has(Number(s.id))).length;
+    if (found < sentIds.size) {
+      throw new Error(
+        `Le serveur n'a enregistré que ${found}/${sentIds.size} créneau(x). `
+        + "Vérifiez Paramètres → Accès ou redémarrez le serveur.",
+      );
+    }
+  }
+  if (sid) {
+    state.workShifts = applyWorkShiftsFromServerForSite(serverRows, sid, workShiftsAll());
+    lsSaveWorkShifts();
+  }
 }
 
 /**
  * Sauvegarde planning : sync serveur d'abord, PUT, puis force l'état local + cache navigateur.
  * @param {boolean} snapshot — true = le serveur peut retirer les créneaux absents du payload (liste complète).
  */
-async function persistWorkShiftsPatch(siteScopedRows, { snapshot = true, skipRefresh = false, ...patchExtra } = {}) {
-  if (!skipRefresh) await refreshWorkShiftsFromServer();
+async function persistWorkShiftsPatch(siteScopedRows, {
+  snapshot = true,
+  skipRefresh = false,
+  removedIds = [],
+  ...patchExtra
+} = {}) {
+  if (!skipRefresh) await refreshWorkShiftsFromServer({ replaceSite: true });
   const siteId = String(patchExtra.activeSiteId ?? state.activeSiteId ?? currentSiteId() ?? "");
   const scoped = (siteScopedRows || []).map((r) => ({ ...r, siteId: String(r.siteId || siteId) }));
   validateWorkShiftsBeforeSend(scoped, siteId);
@@ -3329,8 +3356,8 @@ async function persistWorkShiftsPatch(siteScopedRows, { snapshot = true, skipRef
       workShifts: sent,
       workShiftsScopedSnapshot: snapshot,
     });
-    applyWorkShiftsAfterSave(sent);
-    await verifyWorkShiftsPersistedOnServer(scoped);
+    applyWorkShiftsAfterSave(sent, { snapshot });
+    await verifyWorkShiftsPersistedOnServer(scoped, { siteId, removedIds });
   } catch (e) {
     state.workShifts = prev;
     throw e;
@@ -3429,11 +3456,15 @@ async function deleteWorkShift(idRaw) {
   if (!shift) return;
   if (!window.confirm(`Supprimer le créneau du ${formatDateDdMmYyyy(shift.date)} (${shift.startTime} – ${shift.endTime}) pour ${staffDisplayName(shift.username)} ?`)) return;
   const siteId = String(shift.siteId || currentSiteId() || "");
-  await refreshWorkShiftsFromServer();
   const rows = workShiftsForSite(siteId).filter((s) => Number(s.id) !== id);
   const prevWorkShifts = workShiftsAll();
   try {
-    await persistWorkShiftsPatch(rows, { snapshot: true, skipRefresh: true, activeSiteId: siteId });
+    await persistWorkShiftsPatch(rows, {
+      snapshot: true,
+      skipRefresh: true,
+      activeSiteId: siteId,
+      removedIds: [id],
+    });
     recordStaffAudit("delete", "planning", `Créneau #${id}`, `${shift.username} ${shift.date}`);
     if (String(document.getElementById("ws-edit-id")?.value) === String(id)) resetWorkShiftForm();
     renderPlanningTeam();
@@ -3469,8 +3500,8 @@ function applyPlanningRangeAndRender() {
 async function renderPlanningPage() {
   if (!state) return;
   if (!Array.isArray(state.workShifts)) state.workShifts = [];
-  lsRestoreWorkShifts();
-  await refreshWorkShiftsFromServer();
+  await refreshWorkShiftsFromServer({ replaceSite: true });
+  if (!workShiftsForSite(currentSiteId()).length) lsRestoreWorkShifts();
   lsSaveWorkShifts();
   if (!document.getElementById("planning-range-start")?.value) setPlanningRangeCurrentWeek();
   resetWorkShiftForm();
@@ -10440,7 +10471,7 @@ async function syncStateSilently() {
   if (!state || modalIsOpen()) return;
   if (currentPage === "planning") {
     try {
-      await refreshWorkShiftsFromServer();
+      await refreshWorkShiftsFromServer({ replaceSite: true });
       lsSaveWorkShifts();
     } catch {
       /* garder l'état local */
@@ -10801,11 +10832,7 @@ function mergeStateFromServerResponse(incoming, previous, patchedKeys = null) {
     const inc = incoming[key];
     if (!Array.isArray(inc)) return;
     const old = prev[key];
-    if (key === "workShifts" && Array.isArray(old) && old.length > 0) {
-      out[key] = mergeWorkShiftsFromServer(inc, old);
-      return;
-    }
-    if (key === "workShifts" && Array.isArray(inc) && inc.length > 0) {
+    if (key === "workShifts") {
       out[key] = inc;
       return;
     }
@@ -10924,7 +10951,7 @@ async function persistStatePatch(patch) {
   });
   state = mergeStateFromServerResponse(incoming, prev, patchedKeys);
   if (Array.isArray(patch.workShifts) && patchedKeys.has("workShifts")) {
-    applyWorkShiftsAfterSave(patch.workShifts);
+    applyWorkShiftsAfterSave(patch.workShifts, { snapshot: Boolean(patch.workShiftsScopedSnapshot) });
   }
   applyPersistStateResponseExtras(patch, _stockChecks);
 }
@@ -16437,12 +16464,12 @@ async function bootstrapAuthenticatedApp(opts = {}) {
   if (!Array.isArray(state.casierMouvements)) state.casierMouvements = [];
   if (!Array.isArray(state.staffAuditLog)) state.staffAuditLog = [];
   if (!Array.isArray(state.workShifts)) state.workShifts = [];
-  const serverWs = workShiftsAll().slice();
-  lsRestoreWorkShifts();
-  if (serverWs.length) {
-    state.workShifts = mergeWorkShiftsFromServer(serverWs, workShiftsAll());
+  const siteId = String(currentSiteId() || "").trim();
+  if (siteId && workShiftsForSite(siteId).length) {
+    lsSaveWorkShifts();
+  } else {
+    lsRestoreWorkShifts();
   }
-  if (workShiftsAll().length) lsSaveWorkShifts();
   if (!state.nextId) state.nextId = {};
   if (!state.nextId.stockEntree || Number.isNaN(Number(state.nextId.stockEntree))) state.nextId.stockEntree = 100;
   if (!state.nextId.stockLoss || Number.isNaN(Number(state.nextId.stockLoss))) state.nextId.stockLoss = 100;
