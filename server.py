@@ -2081,21 +2081,19 @@ class DataStore:
             if not allowed:
                 raise ValueError("Session sans maquis autorise.")
 
-            current["ventes"] = merge_scoped_rows(current.get("ventes", []), payload.get("ventes", []), allowed, sid_list)
-            current["stock"] = merge_scoped_rows(current.get("stock", []), payload.get("stock", []), allowed, sid_list)
-            current["commandes"] = merge_scoped_rows(current.get("commandes", []), payload.get("commandes", []), allowed, sid_list)
-            current["stockChecks"] = merge_scoped_rows(current.get("stockChecks", []), payload.get("stockChecks", []), allowed, sid_list)
-            current["dayBooks"] = merge_scoped_rows(current.get("dayBooks", []), payload.get("dayBooks", []), allowed, sid_list)
-            current["purchaseOrders"] = merge_scoped_rows(current.get("purchaseOrders", []), payload.get("purchaseOrders", []), allowed, sid_list)
-            current["supplierPrices"] = merge_scoped_rows(current.get("supplierPrices", []), payload.get("supplierPrices", []), allowed, sid_list)
-            current["casiers"] = merge_scoped_rows(current.get("casiers", []), payload.get("casiers", []), allowed, sid_list)
-            current["casierMouvements"] = merge_scoped_rows(current.get("casierMouvements", []), payload.get("casierMouvements", []), allowed, sid_list)
-            current["creditRecoveries"] = merge_scoped_rows(current.get("creditRecoveries", []), payload.get("creditRecoveries", []), allowed, sid_list)
-            current["consignes"] = merge_scoped_rows(current.get("consignes", []), payload.get("consignes", []), allowed, sid_list)
-            current["charges"] = merge_scoped_rows(current.get("charges", []), payload.get("charges", []), allowed, sid_list)
-            current["staffAuditLog"] = merge_scoped_rows(current.get("staffAuditLog", []), payload.get("staffAuditLog", []), allowed, sid_list)
-            current["stockEntrees"] = merge_scoped_rows(current.get("stockEntrees", []), payload.get("stockEntrees", []), allowed, sid_list)
-            current["stockLosses"] = merge_scoped_rows(current.get("stockLosses", []), payload.get("stockLosses", []), allowed, sid_list)
+            # Ne merger une collection que si elle est explicitement presente dans le payload.
+            # Si elle est absente (patch partiel), conserver la valeur courante intacte.
+            _SCOPED_KEYS = [
+                "ventes", "stock", "commandes", "stockChecks", "dayBooks",
+                "purchaseOrders", "supplierPrices", "casiers", "casierMouvements",
+                "creditRecoveries", "consignes", "charges", "staffAuditLog",
+                "stockEntrees", "stockLosses",
+            ]
+            for _key in _SCOPED_KEYS:
+                if _key in payload:
+                    current[_key] = merge_scoped_rows(
+                        current.get(_key, []), payload[_key], allowed, sid_list
+                    )
 
             if "pdjWorkDateBySite" in payload:
                 _prev_pdj = dict(current.get("pdjWorkDateBySite") or {})

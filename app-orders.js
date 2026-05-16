@@ -4604,14 +4604,23 @@ function renderCashOpeningPanel() {
 const PRODUCT_RANK_TOP_N = 5;
 const PRODUCT_RANK_BOTTOM_N = 5;
 
-/** Agrège les lignes de vente par article (quantité en bouteilles + CA net). */
+/** Agrège les lignes de vente par article (quantité en bouteilles + CA net + stock actuel). */
 function aggregateVentesByArticle(ventes) {
   const byArticle = {};
   (ventes || []).forEach((v) => {
     const stockItem = recordsForSite(state.stock).find((s) => s.article === v.article);
     const packSize = Math.max(1, Number(v.formatQuantite) || Number(v.packSize) || Number(stockItem?.packSize) || 1);
     const key = v.article;
-    if (!byArticle[key]) byArticle[key] = { article: v.article, cat: v.cat || "", bouteilles: 0, ca: 0 };
+    if (!byArticle[key]) {
+      byArticle[key] = {
+        article: v.article,
+        cat: v.cat || "",
+        bouteilles: 0,
+        ca: 0,
+        stockBtl: stockItem != null ? stockActuel(stockItem) : null,
+        seuilMin: Number(stockItem?.seuilMin) || 0,
+      };
+    }
     byArticle[key].bouteilles += (Number(v.qty) || 0) * packSize;
     byArticle[key].ca += calcNet(v);
   });
@@ -4737,25 +4746,35 @@ function renderSalesByProduct(ventesList, { periodLabel = "" } = {}) {
     ${rankHtml}
     <p class="muted" style="margin:16px 0 10px;font-size:0.82rem">Vendues — detail par article (tri CA net)</p>
     <div class="stock-table-wrap">
-      <table class="stock-table" style="min-width:620px">
+      <table class="stock-table" style="min-width:700px">
         <thead>
           <tr>
             <th>Article</th>
             <th>Catégorie</th>
-            <th style="text-align:right">Qté (btl)</th>
+            <th style="text-align:right">Qté vendue (btl)</th>
+            <th style="text-align:right">Stock restant</th>
             <th style="text-align:right">CA net</th>
           </tr>
         </thead>
         <tbody>
-          ${sold.map((r) => `<tr>
-            <td>${escapeHtml(r.article)}</td>
-            <td>${escapeHtml(r.cat)}</td>
-            <td style="text-align:right;color:#1976d2">${fmt(r.bouteilles)}</td>
-            <td style="text-align:right"><strong>${fmt(r.ca)} FCFA</strong></td>
-          </tr>`).join("")}
+          ${sold.map((r) => {
+            const stockColor = r.stockBtl === null ? "#9e9e9e"
+              : r.stockBtl <= 0 ? "#c62828"
+              : r.stockBtl <= r.seuilMin ? "#e65100"
+              : "#388e3c";
+            const stockLabel = r.stockBtl === null ? "—" : `${fmt(r.stockBtl)} btl`;
+            return `<tr>
+              <td>${escapeHtml(r.article)}</td>
+              <td>${escapeHtml(r.cat)}</td>
+              <td style="text-align:right;color:#1976d2">${fmt(r.bouteilles)}</td>
+              <td style="text-align:right;font-weight:600;color:${stockColor}">${stockLabel}</td>
+              <td style="text-align:right"><strong>${fmt(r.ca)} FCFA</strong></td>
+            </tr>`;
+          }).join("")}
           <tr style="font-weight:700;background:#f5f5f5">
             <td colspan="2">TOTAL vendu</td>
             <td style="text-align:right;color:#1976d2">${fmt(totalBtl)}</td>
+            <td></td>
             <td style="text-align:right">${fmt(totalCa)} FCFA</td>
           </tr>
         </tbody>
