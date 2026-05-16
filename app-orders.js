@@ -15334,7 +15334,7 @@ document.getElementById("fab-btn").addEventListener("click", () => {
     closeAccountingDay().catch(handleApiError);
   });
   document.getElementById("add-user-btn").addEventListener("click", () => addUser().catch(handleApiError));
-  document.getElementById("add-site-btn").addEventListener("click", () => addSite().catch(handleApiError));
+  document.getElementById("add-site-btn")?.addEventListener("click", () => addSite().catch(handleApiError));
   document.getElementById("cancel-edit-user-btn").addEventListener("click", resetUserForm);
   document.getElementById("new-user-role").addEventListener("change", renderUserSiteCheckboxes);
   document.getElementById("save-reappro-btn").addEventListener("click", () => saveReappro().catch(handleApiError));
@@ -15378,7 +15378,7 @@ document.getElementById("fab-btn").addEventListener("click", () => {
   });
   document.getElementById("top-backup-download-btn")?.addEventListener("click", () => exportData());
   document.getElementById("top-backup-server-btn")?.addEventListener("click", () => createManualBackupOnServer().catch(handleApiError));
-  document.getElementById("reset-btn").addEventListener("click", async () => {
+  document.getElementById("reset-btn")?.addEventListener("click", async () => {
     if (!canGlobalSuperAdmin()) {
       showToast("Seul le super administrateur peut reinitialiser l'application.");
       return;
