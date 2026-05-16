@@ -713,7 +713,7 @@ def load_backup_state_payload(backup_filename: str) -> dict[str, Any]:
     path = BACKUP_DIR / name
     if not path.is_file():
         raise ValueError("Fichier de sauvegarde introuvable.")
-    if re.fullmatch(r"data-\d{8}-\d{6}(-manuel)?\.json", name):
+    if re.fullmatch(r"data-\d{8}-\d{6}(-manuel)?\.json", name) or name.endswith(".json"):
         return migrate_state(json.loads(path.read_text(encoding="utf-8")))
     if re.fullmatch(r"app-\d{8}-\d{6}(-manuel)?\.sqlite3", name):
         conn = sqlite3.connect(str(path))
@@ -724,7 +724,7 @@ def load_backup_state_payload(backup_filename: str) -> dict[str, Any]:
         if not row or not row[0]:
             raise ValueError("Sauvegarde SQLite sans etat.")
         return migrate_state(json.loads(row[0]))
-    raise ValueError("Formats acceptes : data-AAAAMMJJ-HHMMSS.json (ou -manuel) ou app-AAAAMMJJ-HHMMSS.sqlite3 (ou -manuel).")
+    raise ValueError("Formats acceptes : fichier .json ou app-AAAAMMJJ-HHMMSS.sqlite3 (ou -manuel).")
 
 
 def compute_global_superadmin(
@@ -2206,7 +2206,7 @@ class DataStore:
         BACKUP_DIR.mkdir(parents=True, exist_ok=True)
         json_rows: list[dict[str, Any]] = []
         sqlite_rows: list[dict[str, Any]] = []
-        for p in sorted(BACKUP_DIR.glob("data-*.json"), key=lambda x: x.name, reverse=True):
+        for p in sorted(BACKUP_DIR.glob("*.json"), key=lambda x: x.name, reverse=True):
             try:
                 st = p.stat()
                 json_rows.append({"name": p.name, "size": st.st_size, "mtimeIso": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(st.st_mtime))})
@@ -2294,6 +2294,54 @@ class DataStore:
                 dest.write_text(body, encoding="utf-8")
         self._prune_manual_backups(manual_keep)
         return {"ok": "true", "file": name}
+
+    def write_site_backup(self, site_id: str) -> dict[str, str]:
+        """Cree une sauvegarde uniquement pour un maquis dans backups/site-{id}-YYYYMMDD-HHMMSS.json."""
+        BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+        sid = str(site_id or "").strip()
+        if not sid:
+            raise ValueError("Maquis invalide.")
+
+        def row_site(r: Any) -> str | None:
+            if not isinstance(r, dict):
+                return None
+            v = r.get("siteId")
+            return str(v).strip() if v is not None and v != "" else None
+
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        with self._lock:
+            current = self._state
+            site_ids = [str(s.get("id")) for s in current.get("sites", []) if s.get("id")]
+            if sid not in site_ids:
+                raise ValueError("Ce maquis n'existe pas.")
+            site_state: dict[str, Any] = {
+                "sites": json.loads(json.dumps(current.get("sites", []))),
+                "activeSiteId": sid,
+                "categories": json.loads(json.dumps(current.get("categories", []))),
+                "nextId": json.loads(json.dumps(current.get("nextId", {}))),
+            }
+            for key in _SITE_SCOPED_ROW_KEYS:
+                site_state[key] = [
+                    json.loads(json.dumps(r))
+                    for r in (current.get(key) or [])
+                    if isinstance(r, dict) and row_site(r) == sid
+                ]
+            safe_sid = re.sub(r"[^a-zA-Z0-9_-]", "_", sid)
+            name = f"site-{safe_sid}-{stamp}.json"
+            dest = BACKUP_DIR / name
+            dest.write_text(json.dumps(site_state, ensure_ascii=False, indent=2), encoding="utf-8")
+        # Purger les anciennes sauvegardes de ce maquis (garder 40)
+        try:
+            safe_sid_clean = re.sub(r"[^a-zA-Z0-9_-]", "_", sid)
+            old_files = sorted(BACKUP_DIR.glob(f"site-{safe_sid_clean}-*.json"), key=lambda p: p.name, reverse=True)
+            for old in old_files[40:]:
+                try:
+                    old.unlink()
+                except OSError:
+                    pass
+        except OSError:
+            pass
+        return {"ok": "true", "file": name, "siteId": sid}
 
     def _prune_manual_backups(self, keep: int) -> None:
         try:
@@ -2486,6 +2534,31 @@ class AppHandler(BaseHTTPRequestHandler):
                 {"ip": self.client_ip(), "username": session.get("username", ""), "backupFile": bf, "siteId": site_raw},
             )
             self.send_json(HTTPStatus.OK, restored_site, cache_control="no-store")
+            return
+        if post_path == "/api/admin/create-site-backup":
+            session = self.require_session()
+            if session is None:
+                return
+            if not self.require_csrf(session):
+                return
+            if not session_is_superadmin(session, all_site_ids=store.all_site_ids()):
+                self.send_json(HTTPStatus.FORBIDDEN, {"error": "Acces refuse."})
+                return
+            body = self.read_json()
+            site_raw = str((body or {}).get("siteId", "")).strip()
+            try:
+                info = store.write_site_backup(site_raw)
+            except ValueError as error:
+                self.send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+                return
+            except OSError:
+                self.send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "Sauvegarde impossible."})
+                return
+            audit_log(
+                "create_site_backup",
+                {"ip": self.client_ip(), "username": session.get("username", ""), "siteId": site_raw, "file": info.get("file", "")},
+            )
+            self.send_json(HTTPStatus.OK, info, cache_control="no-store")
             return
         if post_path == "/api/admin/create-manual-backup":
             session = self.require_session()

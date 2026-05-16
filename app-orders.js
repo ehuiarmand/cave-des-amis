@@ -10,6 +10,7 @@ const API = {
   adminBackups: "/api/admin/backups",
   restoreSiteFromBackup: "/api/admin/restore-site-from-backup",
   createManualBackup: "/api/admin/create-manual-backup",
+  createSiteBackup: "/api/admin/create-site-backup",
   twoFaVerify: "/api/2fa/verify",
   twoFaSetup: "/api/2fa/setup",
   twoFaEnable: "/api/2fa/enable",
@@ -8485,11 +8486,17 @@ function renderSitesList() {
   }
   container.innerHTML = sites.map((site) => `
     <article class="list-item">
-      <div>
+      <div style="min-width:0;flex:1">
         <p class="list-item-title">${escapeHtml(site.nom)}</p>
         <p class="list-item-sub">${escapeHtml(site.id)}${site.ville ? " · " + escapeHtml(site.ville) : ""}${site.pays ? ", " + escapeHtml(site.pays) : ""}</p>
       </div>
+      <div class="list-side">
+        <button type="button" class="mini-btn" data-site-backup="${escapeHtml(site.id)}" title="Sauvegarder ${escapeHtml(site.nom)} sur le serveur">Sauvegarder</button>
+      </div>
     </article>`).join("");
+  container.querySelectorAll("[data-site-backup]").forEach((btn) => {
+    btn.addEventListener("click", () => createSiteBackupOnServer(btn.dataset.siteBackup));
+  });
   populatePurgeMaquisSelect();
 }
 
@@ -12406,6 +12413,21 @@ function exportData() {
   URL.revokeObjectURL(link.href);
   recordStaffAudit("export", "donnees_json", "Export JSON complet (telechargement local)", `Octets ~${blob.size}`);
   persistState({ staffAuditLog: state.staffAuditLog, nextId: state.nextId }).catch(() => {});
+}
+
+async function createSiteBackupOnServer(siteId) {
+  if (!canGlobalSuperAdmin()) { showToast("Reserve au super administrateur."); return; }
+  const site = (state.sites || []).find((s) => s.id === siteId);
+  if (!site) { showToast("Maquis introuvable."); return; }
+  if (!window.confirm(`Sauvegarder uniquement le maquis "${site.nom}" sur le serveur ?\n\nFichier : site-${siteId}-YYYYMMDD-HHMMSS.json dans backups/`)) return;
+  try {
+    const r = await apiRequest(API.createSiteBackup, { method: "POST", body: JSON.stringify({ siteId }) });
+    const f = String(r?.file || "").trim();
+    showToast(f ? `Sauvegarde maquis : ${f}` : `Sauvegarde de "${site.nom}" enregistree.`);
+    refreshRestoreBackupUi().catch(() => {});
+  } catch (error) {
+    handleApiError(error);
+  }
 }
 
 async function createManualBackupOnServer() {
