@@ -2493,6 +2493,20 @@ function canGlobalSuperAdmin() {
   return Boolean(globalSuperadmin);
 }
 
+/** Sauvegarde / restauration par maquis (admins scopés ou superadmin global). */
+function canManageMaquisBackups() {
+  if (canGlobalSuperAdmin()) return true;
+  if (!canAnyAdmin()) return false;
+  return (allowedSiteIds || []).length > 0;
+}
+
+function sitesVisibleToSession() {
+  const sites = state?.sites || [];
+  if (canGlobalSuperAdmin()) return sites;
+  const allowed = new Set((allowedSiteIds || []).map(String));
+  return sites.filter((s) => allowed.has(String(s.id)));
+}
+
 /** Le login reserve admin est toujours superadmin cote UI et controles locaux. */
 function normalizeRoleForUsername(username, role) {
   if (String(username || "").trim().toLowerCase() === "admin") return "superadmin";
@@ -3288,6 +3302,9 @@ function applyRoleVisibility() {
   document.querySelectorAll(".global-superadmin-only").forEach((node) => {
     node.classList.toggle("hidden-by-role", !canGlobalSuperAdmin());
   });
+  document.querySelectorAll(".maquis-backup-admin").forEach((node) => {
+    node.classList.toggle("hidden-by-role", !canManageMaquisBackups());
+  });
   document.querySelectorAll(".any-admin").forEach((node) => {
     node.classList.toggle("hidden-by-role", !canAnyAdmin());
   });
@@ -3884,6 +3901,10 @@ function setParamsSubTab(tab) {
   root.querySelectorAll("[data-params-panel]").forEach((panel) => {
     panel.classList.toggle("hidden", panel.dataset.paramsPanel !== tab);
   });
+  if (tab === "admin" && canManageMaquisBackups()) {
+    renderSitesList();
+    refreshRestoreBackupUi().catch(() => {});
+  }
 }
 
 function maybeAdjustParamsSubTab() {
@@ -8473,12 +8494,12 @@ function populateJournalShiftSiteSelect() {
 function renderSitesList() {
   const container = document.getElementById("sites-list");
   if (!container) return;
-  if (!canGlobalSuperAdmin()) {
+  if (!canManageMaquisBackups()) {
     container.innerHTML = "";
     populatePurgeMaquisSelect();
     return;
   }
-  const sites = state.sites || [];
+  const sites = sitesVisibleToSession();
   if (!sites.length) {
     container.innerHTML = `<p class="muted" style="text-align:center;padding:12px 0">Aucun maquis enregistre.</p>`;
     populatePurgeMaquisSelect();
@@ -12112,7 +12133,7 @@ async function refreshRestoreBackupUi() {
   const fileSel = document.getElementById("restore-backup-file");
   const siteSel = document.getElementById("restore-backup-site");
   if (!fileSel || !siteSel) return;
-  if (!canGlobalSuperAdmin()) {
+  if (!canManageMaquisBackups()) {
     if (infoEl) infoEl.textContent = "";
     return;
   }
@@ -12152,11 +12173,12 @@ async function refreshRestoreBackupUi() {
       const mode = escapeHtml(data.storageMode || "?");
       const k = escapeHtml(String(data.keepCount ?? 30));
       const note = escapeHtml(data.autoNote || "");
+      const scopedNote = escapeHtml(data.scopedNote || "");
       const via = fallbackFromState
         ? `<p class="muted" style="margin:0 0 8px">Liste obtenue via <code>/api/state</code> (<code>/api/admin/backups</code> non disponible sur ce deploiement).</p>`
         : "";
       infoEl.innerHTML =
-        `${via}${note}<br><strong>Stockage serveur&nbsp;:</strong> ${mode} · jusqu&apos;a <strong>${k}</strong> fichiers <code>data-*.json</code> et <code>app-*.sqlite3</code> conserves.<br>Pour plus de gardes&nbsp;: <code>MAQUIS_MANAGER_BACKUP_KEEP</code> (3-100), ou <code>TDB_BAR_BACKUP_KEEP</code> (ancien nom, encore accepte).`;
+        `${via}${scopedNote ? `<p class="muted" style="margin:0 0 8px">${scopedNote}</p>` : ""}${note}<br><strong>Stockage serveur&nbsp;:</strong> ${mode} · jusqu&apos;a <strong>${k}</strong> fichiers <code>data-*.json</code> et <code>app-*.sqlite3</code> conserves.<br>Pour plus de gardes&nbsp;: <code>MAQUIS_MANAGER_BACKUP_KEEP</code> (3-100), ou <code>TDB_BAR_BACKUP_KEEP</code> (ancien nom, encore accepte).`;
     }
     const jsonBk = Array.isArray(data.jsonBackups) ? data.jsonBackups : [];
     const sqlBk = Array.isArray(data.sqliteBackups) ? data.sqliteBackups : [];
@@ -12178,7 +12200,7 @@ async function refreshRestoreBackupUi() {
     if ([...fileSel.options].some((o) => o.value === prevBackup)) fileSel.value = prevBackup;
   }
 
-  const sites = state?.sites || [];
+  const sites = sitesVisibleToSession();
   siteSel.innerHTML = sites.length
     ? sites.map((s) => `<option value="${escapeHtml(s.id)}">${escapeHtml(s.nom)} (${escapeHtml(s.id)})</option>`).join("")
     : `<option value="">—</option>`;
@@ -12188,13 +12210,13 @@ async function refreshRestoreBackupUi() {
 }
 
 async function restoreSelectedSiteFromBackup() {
-  if (!canGlobalSuperAdmin()) {
-    showToast("Reserve au super administrateur.");
+  if (!canManageMaquisBackups()) {
+    showToast("Reserve aux administrateurs de maquis.");
     return;
   }
   const backupFile = document.getElementById("restore-backup-file")?.value?.trim();
   const siteId = document.getElementById("restore-backup-site")?.value?.trim();
-  const site = (state?.sites || []).find((s) => String(s.id) === siteId);
+  const site = sitesVisibleToSession().find((s) => String(s.id) === siteId);
   if (!backupFile) {
     showToast("Choisissez un fichier de sauvegarde.");
     return;
@@ -12416,8 +12438,8 @@ function exportData() {
 }
 
 async function createSiteBackupOnServer(siteId) {
-  if (!canGlobalSuperAdmin()) { showToast("Reserve au super administrateur."); return; }
-  const site = (state.sites || []).find((s) => s.id === siteId);
+  if (!canManageMaquisBackups()) { showToast("Reserve aux administrateurs de maquis."); return; }
+  const site = sitesVisibleToSession().find((s) => String(s.id) === String(siteId));
   if (!site) { showToast("Maquis introuvable."); return; }
   if (!window.confirm(`Sauvegarder uniquement le maquis "${site.nom}" sur le serveur ?\n\nFichier : site-${site.nom}-${siteId}-YYYYMMDD-HHMMSS.json dans backups/`)) return;
   try {

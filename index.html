@@ -1352,11 +1352,14 @@
             <div id="staff-audit-list"></div>
           </article>
 
-          <article class="card global-superadmin-only">
+          <article class="card maquis-backup-admin">
             <div class="section-head">
-              <h3>Multi-maquis</h3>
-              <span class="section-meta">Sites</span>
+              <h3>Sauvegarde &amp; restauration</h3>
+              <span class="section-meta">Par maquis</span>
             </div>
+            <p class="muted" style="font-size:0.85rem;margin-bottom:10px;line-height:1.45">
+              Créez une copie serveur de chaque maquis que vous administrez, puis restaurez-le en cas d&apos;erreur. Les autres maquis ne sont pas modifiés.
+            </p>
             <p class="muted" id="restore-backup-info" style="font-size:0.85rem;margin-bottom:10px;line-height:1.45"></p>
             <div class="form-grid" style="margin-bottom:12px">
               <div class="form-group">
@@ -1372,9 +1375,6 @@
               <button id="restore-site-backup-btn" class="btn btn-primary" type="button">Restaurer ce maquis depuis la sauvegarde choisie</button>
               <button id="restore-backup-refresh-btn" class="btn btn-outline" type="button">Actualiser la liste</button>
             </div>
-            <div class="button-stack" style="margin-top:12px">
-              <button id="restore-json-btn" class="btn btn-danger" type="button">Restaurer tout depuis data.json (secours)</button>
-            </div>
             <div class="section-head" style="margin-top:18px">
               <h4 style="margin:0;font-size:0.95rem">Sauvegarder par maquis</h4>
               <span class="section-meta">Cliquez pour créer un snapshot isolé</span>
@@ -1384,6 +1384,13 @@
 
           <article class="card global-superadmin-only">
             <div class="section-head">
+              <h3>Secours global</h3>
+              <span class="section-meta">Super administrateur</span>
+            </div>
+            <div class="button-stack" style="margin-bottom:14px">
+              <button id="restore-json-btn" class="btn btn-danger" type="button">Restaurer tout depuis data.json (secours)</button>
+            </div>
+            <div class="section-head" style="margin-top:8px">
               <h3>Décalage des journées comptables</h3>
               <span class="section-meta">Correction</span>
             </div>

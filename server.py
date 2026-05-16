@@ -774,6 +774,48 @@ def session_allowed_sites(session: dict[str, Any], site_ids: list[str]) -> set[s
     return {str(s) for s in (session.get("allowedSiteIds") or []) if str(s) in sid_set}
 
 
+def session_can_manage_maquis_backups(
+    session: dict[str, Any] | None,
+    *,
+    all_site_ids: list[str] | None = None,
+) -> bool:
+    """Superadmin global ou admin / superadmin scopé sur au moins un maquis."""
+    if not session:
+        return False
+    if session_is_superadmin(session, all_site_ids=all_site_ids):
+        return True
+    role = str(session.get("role", ""))
+    if role not in ("superadmin", "admin"):
+        return False
+    if all_site_ids is not None:
+        return bool(session_allowed_sites(session, all_site_ids))
+    return bool(session.get("allowedSiteIds"))
+
+
+def session_site_id_allowed_for_backup(
+    session: dict[str, Any],
+    site_id: str,
+    all_site_ids: list[str],
+) -> bool:
+    sid = str(site_id or "").strip()
+    if not sid or sid not in {str(x) for x in all_site_ids if x}:
+        return False
+    if session_is_superadmin(session, all_site_ids=all_site_ids):
+        return True
+    return sid in session_allowed_sites(session, all_site_ids)
+
+
+def site_backup_filename_matches_site(filename: str, site_id: str) -> bool:
+    """True si le fichier site-…-{id}-….json correspond au maquis donné."""
+    name = str(filename or "").lower()
+    if not name.startswith("site-"):
+        return False
+    safe_sid = re.sub(r"[^a-zA-Z0-9_-]", "_", str(site_id or "").strip())
+    if not safe_sid:
+        return False
+    return f"-{safe_sid}-" in name
+
+
 def row_effective_site_id(row: dict[str, Any], site_ids: list[str], allowed: set[str]) -> str | None:
     site_set = {str(x) for x in site_ids}
     raw = row.get("siteId")
@@ -1548,7 +1590,7 @@ class DataStore:
             pdj_full = self._state.get("pdjWorkDateBySite", {}) or {}
             pdj_filtered = {k: v for k, v in pdj_full.items() if str(k) in allowed_set}
 
-            return {
+            payload = {
                 "meta": full["meta"],
                 "sites": json.loads(json.dumps(sites)),
                 "activeSiteId": aid,
@@ -1572,6 +1614,9 @@ class DataStore:
                 "staffAuditLog": filter_site_rows(self._state.get("staffAuditLog", [])),
                 "auth": {"users": users_out},
             }
+            if session_can_manage_maquis_backups(session, all_site_ids=site_ids):
+                payload["adminBackups"] = json.loads(json.dumps(self.list_backups_for_session(session)))
+            return payload
 
     def changes(self, *, since: str, site_id: str | None = None, session: dict[str, Any] | None = None) -> dict[str, Any]:
         """Return incremental changes since an ISO timestamp (UTC)."""
@@ -2202,6 +2247,39 @@ class DataStore:
             self._write(self._state)
             return self.public_state()
 
+    def list_backups_for_session(self, session: dict[str, Any]) -> dict[str, Any]:
+        full = self.list_backups()
+        site_ids = [str(s["id"]) for s in self._state["sites"] if s.get("id")]
+        if session_is_superadmin(session, all_site_ids=site_ids):
+            return full
+        allowed = session_allowed_sites(session, site_ids)
+        if not allowed:
+            scoped = dict(full)
+            scoped["jsonBackups"] = []
+            scoped["sqliteBackups"] = []
+            scoped["scopedNote"] = (
+                "Aucun maquis autorise pour ce compte. Contactez le super administrateur."
+            )
+            return scoped
+
+        def json_visible(name: str) -> bool:
+            low = name.lower()
+            if low.startswith("site-"):
+                return any(site_backup_filename_matches_site(name, sid) for sid in allowed)
+            if low.startswith("data-"):
+                return True
+            return False
+
+        json_rows = [b for b in (full.get("jsonBackups") or []) if json_visible(str(b.get("name", "")))]
+        scoped = dict(full)
+        scoped["jsonBackups"] = json_rows
+        scoped["sqliteBackups"] = list(full.get("sqliteBackups") or [])
+        scoped["scopedNote"] = (
+            "Sauvegardes de vos maquis autorises. Les snapshots complets (data-*.json) "
+            "ne restaurent que le maquis choisi ci-dessous."
+        )
+        return scoped
+
     def list_backups(self) -> dict[str, Any]:
         BACKUP_DIR.mkdir(parents=True, exist_ok=True)
         json_rows: list[dict[str, Any]] = []
@@ -2463,11 +2541,16 @@ class AppHandler(BaseHTTPRequestHandler):
             session = self.require_session()
             if session is None:
                 return
-            if not session_is_superadmin(session, all_site_ids=store.all_site_ids()):
+            all_ids = store.all_site_ids()
+            if not session_can_manage_maquis_backups(session, all_site_ids=all_ids):
                 self.send_json(HTTPStatus.FORBIDDEN, {"error": "Acces refuse."})
                 return
             with store._lock:
-                payload = store.list_backups()
+                payload = (
+                    store.list_backups()
+                    if session_is_superadmin(session, all_site_ids=all_ids)
+                    else store.list_backups_for_session(session)
+                )
             self.send_json(HTTPStatus.OK, payload, cache_control="no-store")
             return
         if get_path == "/api/changes":
@@ -2521,12 +2604,16 @@ class AppHandler(BaseHTTPRequestHandler):
                 return
             if not self.require_csrf(session):
                 return
-            if not session_is_superadmin(session, all_site_ids=store.all_site_ids()):
+            all_ids = store.all_site_ids()
+            if not session_can_manage_maquis_backups(session, all_site_ids=all_ids):
                 self.send_json(HTTPStatus.FORBIDDEN, {"error": "Acces refuse."})
                 return
             body = self.read_json()
             bf = str((body or {}).get("backupFile", "")).strip()
             site_raw = str((body or {}).get("siteId", "")).strip()
+            if not session_site_id_allowed_for_backup(session, site_raw, all_ids):
+                self.send_json(HTTPStatus.FORBIDDEN, {"error": "Maquis non autorise."})
+                return
             try:
                 restored_site = store.restore_site_from_backup(bf, site_raw)
             except ValueError as error:
@@ -2544,11 +2631,15 @@ class AppHandler(BaseHTTPRequestHandler):
                 return
             if not self.require_csrf(session):
                 return
-            if not session_is_superadmin(session, all_site_ids=store.all_site_ids()):
+            all_ids = store.all_site_ids()
+            if not session_can_manage_maquis_backups(session, all_site_ids=all_ids):
                 self.send_json(HTTPStatus.FORBIDDEN, {"error": "Acces refuse."})
                 return
             body = self.read_json()
             site_raw = str((body or {}).get("siteId", "")).strip()
+            if not session_site_id_allowed_for_backup(session, site_raw, all_ids):
+                self.send_json(HTTPStatus.FORBIDDEN, {"error": "Maquis non autorise."})
+                return
             try:
                 info = store.write_site_backup(site_raw)
             except ValueError as error:
