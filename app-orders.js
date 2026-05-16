@@ -719,6 +719,8 @@ let pdjBrowseConsultationOnly = false;
 let currentQrLinkInt = "";
 let currentQrLinkExt = "";
 let pendingFinalizeOrderId = null;
+/** Évite double encaissement (clic répété ou réseau lent). */
+const finalizeOrderInFlight = new Set();
 let liveSyncTimer = null;
 let appLiveClockTimer = null;
 let autoClotureTimer = null;
@@ -2535,6 +2537,317 @@ function canAnyAdmin() {
   return canSuperAdmin() || canSiteAdmin();
 }
 
+
+// ─── Planning / horaires équipe ─────────────────────────────────────────────
+let planningSubTab = "mine";
+let planningMineWeekOffset = 0;
+let planningTeamWeekOffset = 0;
+
+function canManageTeamSchedule() {
+  return canManage();
+}
+
+function planningWeekBounds(offset = 0) {
+  const ref = new Date();
+  ref.setHours(12, 0, 0, 0);
+  ref.setDate(ref.getDate() + offset * 7);
+  const day = (ref.getDay() + 6) % 7;
+  const mon = new Date(ref);
+  mon.setDate(ref.getDate() - day);
+  const sun = new Date(mon);
+  sun.setDate(mon.getDate() + 6);
+  const iso = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  return { start: iso(mon), end: iso(sun), mon, sun };
+}
+
+function planningWeekLabel(bounds) {
+  return `${formatDateDdMmYyyy(bounds.start)} — ${formatDateDdMmYyyy(bounds.end)}`;
+}
+
+function workShiftDurationMinutes(shift) {
+  const d = String(shift?.date || "").slice(0, 10);
+  const st = String(shift?.startTime || "").trim();
+  const en = String(shift?.endTime || "").trim();
+  if (!d || !st || !en) return 0;
+  const [sh, sm] = st.split(":").map(Number);
+  const [eh, em] = en.split(":").map(Number);
+  let start = new Date(`${d}T${pad2(sh)}:${pad2(sm)}:00`);
+  let end = new Date(`${d}T${pad2(eh)}:${pad2(em)}:00`);
+  if (end <= start) end = new Date(end.getTime() + 24 * 60 * 60 * 1000);
+  return Math.max(0, Math.round((end - start) / 60000));
+}
+
+function formatDurationMinutes(mins) {
+  const m = Math.max(0, Math.round(Number(mins) || 0));
+  const h = Math.floor(m / 60);
+  const r = m % 60;
+  if (h && r) return `${h} h ${r} min`;
+  if (h) return `${h} h`;
+  return `${r} min`;
+}
+
+function staffDisplayName(username) {
+  const u = (state?.auth?.users || []).find(
+    (x) => String(x.username || "").trim().toLowerCase() === String(username || "").trim().toLowerCase(),
+  );
+  const dn = String(u?.displayName || "").trim();
+  return dn || String(username || "").trim() || "—";
+}
+
+function workShiftsAll() {
+  return Array.isArray(state?.workShifts) ? state.workShifts : [];
+}
+
+function myWorkShiftsInWeek(bounds) {
+  const sn = String(sessionUser || "").trim().toLowerCase();
+  return workShiftsAll()
+    .filter((s) => {
+      const d = String(s.date || "").slice(0, 10);
+      return d >= bounds.start && d <= bounds.end
+        && String(s.username || "").trim().toLowerCase() === sn;
+    })
+    .sort((a, b) => `${a.date}${a.startTime}`.localeCompare(`${b.date}${b.startTime}`));
+}
+
+function teamWorkShiftsInWeek(bounds) {
+  const sid = String(currentSiteId() || "");
+  return workShiftsAll()
+    .filter((s) => {
+      const d = String(s.date || "").slice(0, 10);
+      return d >= bounds.start && d <= bounds.end && String(s.siteId || "") === sid;
+    })
+    .sort((a, b) => `${a.date}${a.startTime}`.localeCompare(`${b.date}${b.startTime}`));
+}
+
+function schedulableStaffForCurrentSite() {
+  const sid = String(currentSiteId() || "");
+  return (state?.auth?.users || []).filter((u) => {
+    const r = String(u.role || "").trim().toLowerCase();
+    if (r !== "serveuse" && r !== "manager") return false;
+    return (u.allowedSiteIds || []).some((x) => String(x) === sid);
+  });
+}
+
+function renderPlanningShiftRow(shift, { editable = false } = {}) {
+  const mins = workShiftDurationMinutes(shift);
+  const site = (state?.sites || []).find((s) => String(s.id) === String(shift.siteId));
+  const note = String(shift.note || "").trim();
+  const actions = editable
+    ? `<div class="list-side">
+        <button type="button" class="mini-btn" data-ws-edit="${escapeHtml(String(shift.id))}">Modifier</button>
+        <button type="button" class="mini-btn del-btn" data-ws-del="${escapeHtml(String(shift.id))}">Suppr.</button>
+      </div>`
+    : "";
+  return `<article class="list-item planning-shift-item">
+    <div style="min-width:0;flex:1">
+      <p class="list-item-title">${escapeHtml(formatDateDdMmYyyy(String(shift.date || "").slice(0, 10)))} · ${escapeHtml(String(shift.startTime || ""))} – ${escapeHtml(String(shift.endTime || ""))}</p>
+      <p class="list-item-sub">${editable ? `${escapeHtml(staffDisplayName(shift.username))} · ` : ""}${escapeHtml(formatDurationMinutes(mins))}${site ? ` · ${escapeHtml(site.nom)}` : ""}${note ? ` · ${escapeHtml(note)}` : ""}</p>
+    </div>
+    ${actions}
+  </article>`;
+}
+
+function renderPlanningMine() {
+  const bounds = planningWeekBounds(planningMineWeekOffset);
+  const labelEl = document.getElementById("planning-mine-week-label");
+  const listEl = document.getElementById("planning-mine-list");
+  const sumEl = document.getElementById("planning-mine-summary");
+  if (labelEl) labelEl.textContent = planningWeekLabel(bounds);
+  const rows = myWorkShiftsInWeek(bounds);
+  const totalMins = rows.reduce((acc, s) => acc + workShiftDurationMinutes(s), 0);
+  if (sumEl) {
+    sumEl.textContent = rows.length
+      ? `${rows.length} créneau(x) · ${formatDurationMinutes(totalMins)} sur la semaine`
+      : "Aucun créneau planifié pour cette semaine.";
+  }
+  if (!listEl) return;
+  if (!rows.length) {
+    listEl.innerHTML = emptyState("Aucun horaire", "Votre gérant n'a pas encore publié de créneaux pour cette semaine.");
+    return;
+  }
+  listEl.innerHTML = rows.map((s) => renderPlanningShiftRow(s)).join("");
+}
+
+function renderPlanningTeam() {
+  if (!canManageTeamSchedule()) return;
+  const bounds = planningWeekBounds(planningTeamWeekOffset);
+  const labelEl = document.getElementById("planning-team-week-label");
+  const listEl = document.getElementById("planning-team-list");
+  if (labelEl) labelEl.textContent = planningWeekLabel(bounds);
+  const rows = teamWorkShiftsInWeek(bounds);
+  if (!listEl) return;
+  if (!rows.length) {
+    listEl.innerHTML = emptyState("Planning vide", "Ajoutez un créneau ci-dessous pour les serveuses et gérantes.");
+    return;
+  }
+  listEl.innerHTML = rows.map((s) => renderPlanningShiftRow(s, { editable: true })).join("");
+  listEl.querySelectorAll("[data-ws-edit]").forEach((btn) => {
+    btn.addEventListener("click", () => startEditWorkShift(btn.dataset.wsEdit));
+  });
+  listEl.querySelectorAll("[data-ws-del]").forEach((btn) => {
+    btn.addEventListener("click", () => deleteWorkShift(btn.dataset.wsDel));
+  });
+  populateWorkShiftUserSelect();
+}
+
+function populateWorkShiftUserSelect() {
+  const sel = document.getElementById("ws-user");
+  if (!sel) return;
+  const staff = schedulableStaffForCurrentSite();
+  const prev = sel.value;
+  sel.innerHTML = staff.length
+    ? staff.map((u) => {
+      const label = staffDisplayName(u.username);
+      return `<option value="${escapeHtml(u.username)}">${escapeHtml(label)} (${escapeHtml(u.username)})</option>`;
+    }).join("")
+    : `<option value="">— Aucune personne —</option>`;
+  if (staff.some((u) => u.username === prev)) sel.value = prev;
+  else if (staff.length) sel.value = staff[0].username;
+}
+
+function resetWorkShiftForm() {
+  const editId = document.getElementById("ws-edit-id");
+  const cancelBtn = document.getElementById("ws-cancel-edit-btn");
+  if (editId) editId.value = "";
+  if (cancelBtn) cancelBtn.classList.add("hidden");
+  const dateEl = document.getElementById("ws-date");
+  if (dateEl && !dateEl.value) dateEl.value = today();
+  const noteEl = document.getElementById("ws-note");
+  if (noteEl) noteEl.value = "";
+}
+
+function startEditWorkShift(idRaw) {
+  const id = Number(idRaw);
+  const shift = workShiftsAll().find((s) => Number(s.id) === id);
+  if (!shift) return;
+  document.getElementById("ws-edit-id").value = String(id);
+  document.getElementById("ws-user").value = shift.username;
+  document.getElementById("ws-date").value = String(shift.date || "").slice(0, 10);
+  document.getElementById("ws-start").value = String(shift.startTime || "18:00");
+  document.getElementById("ws-end").value = String(shift.endTime || "02:00");
+  document.getElementById("ws-note").value = String(shift.note || "");
+  document.getElementById("ws-cancel-edit-btn")?.classList.remove("hidden");
+  document.getElementById("ws-save-btn")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+async function saveWorkShiftFromForm() {
+  if (!canManageTeamSchedule()) {
+    showToast("Réservé au gérant ou à un administrateur.");
+    return;
+  }
+  const username = document.getElementById("ws-user")?.value?.trim();
+  const date = document.getElementById("ws-date")?.value?.trim();
+  const startTime = document.getElementById("ws-start")?.value?.trim();
+  const endTime = document.getElementById("ws-end")?.value?.trim();
+  const note = String(document.getElementById("ws-note")?.value || "").trim().slice(0, 200);
+  const editRaw = document.getElementById("ws-edit-id")?.value?.trim();
+  const siteId = String(currentSiteId() || "");
+  if (!username) { showToast("Choisissez une personne."); return; }
+  if (!date || !startTime || !endTime) { showToast("Date et heures obligatoires."); return; }
+  if (!siteId) { showToast("Choisissez un maquis."); return; }
+  const now = new Date().toISOString();
+  let rows = [...workShiftsAll()];
+  if (editRaw) {
+    const id = Number(editRaw);
+    const idx = rows.findIndex((s) => Number(s.id) === id);
+    if (idx < 0) { showToast("Créneau introuvable."); return; }
+    rows[idx] = {
+      ...rows[idx],
+      username,
+      siteId,
+      date,
+      startTime,
+      endTime,
+      note,
+      updatedAt: now,
+      updatedBy: sessionUser,
+    };
+  } else {
+    const nid = Number(state.nextId?.workShift) || 100;
+    state.nextId = state.nextId || {};
+    state.nextId.workShift = nid + 1;
+    rows.push({
+      id: nid,
+      siteId,
+      username,
+      date,
+      startTime,
+      endTime,
+      note,
+      createdBy: sessionUser,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+  try {
+    await persistStatePatch({ workShifts: rows, nextId: state.nextId });
+    recordStaffAudit(editRaw ? "update" : "create", "planning", editRaw ? `Créneau #${editRaw}` : `Créneau ${date}`, `${username} ${startTime}-${endTime}`);
+    resetWorkShiftForm();
+    renderPlanningTeam();
+    renderPlanningMine();
+    showToast(editRaw ? "Créneau modifié." : "Créneau enregistré.");
+  } catch (e) {
+    handleApiError(e);
+  }
+}
+
+async function deleteWorkShift(idRaw) {
+  if (!canManageTeamSchedule()) return;
+  const id = Number(idRaw);
+  const shift = workShiftsAll().find((s) => Number(s.id) === id);
+  if (!shift) return;
+  if (!window.confirm(`Supprimer le créneau du ${formatDateDdMmYyyy(shift.date)} (${shift.startTime} – ${shift.endTime}) pour ${staffDisplayName(shift.username)} ?`)) return;
+  const rows = workShiftsAll().filter((s) => Number(s.id) !== id);
+  try {
+    await persistStatePatch({ workShifts: rows });
+    recordStaffAudit("delete", "planning", `Créneau #${id}`, `${shift.username} ${shift.date}`);
+    if (String(document.getElementById("ws-edit-id")?.value) === String(id)) resetWorkShiftForm();
+    renderPlanningTeam();
+    renderPlanningMine();
+    showToast("Créneau supprimé.");
+  } catch (e) {
+    handleApiError(e);
+  }
+}
+
+function setPlanningSubTab(tab) {
+  planningSubTab = tab === "team" && canManageTeamSchedule() ? "team" : "mine";
+  document.querySelectorAll("[data-subtab-planning]").forEach((btn) => {
+    const active = btn.dataset.subtabPlanning === planningSubTab;
+    btn.classList.toggle("active", active);
+    btn.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  document.querySelectorAll("[data-planning-panel]").forEach((panel) => {
+    panel.classList.toggle("hidden", panel.dataset.planningPanel !== planningSubTab);
+  });
+  if (planningSubTab === "mine") renderPlanningMine();
+  else renderPlanningTeam();
+}
+
+function renderPlanningPage() {
+  if (!state) return;
+  if (!Array.isArray(state.workShifts)) state.workShifts = [];
+  const dateEl = document.getElementById("ws-date");
+  if (dateEl && !dateEl.value) dateEl.value = today();
+  setPlanningSubTab(planningSubTab);
+}
+
+function bindPlanningEvents() {
+  document.querySelectorAll("[data-subtab-planning]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (!btn.classList.contains("hidden-by-role")) setPlanningSubTab(btn.dataset.subtabPlanning);
+    });
+  });
+  document.getElementById("planning-mine-prev")?.addEventListener("click", () => { planningMineWeekOffset -= 1; renderPlanningMine(); });
+  document.getElementById("planning-mine-next")?.addEventListener("click", () => { planningMineWeekOffset += 1; renderPlanningMine(); });
+  document.getElementById("planning-mine-today")?.addEventListener("click", () => { planningMineWeekOffset = 0; renderPlanningMine(); });
+  document.getElementById("planning-team-prev")?.addEventListener("click", () => { planningTeamWeekOffset -= 1; renderPlanningTeam(); });
+  document.getElementById("planning-team-next")?.addEventListener("click", () => { planningTeamWeekOffset += 1; renderPlanningTeam(); });
+  document.getElementById("planning-team-today")?.addEventListener("click", () => { planningTeamWeekOffset = 0; renderPlanningTeam(); });
+  document.getElementById("ws-save-btn")?.addEventListener("click", () => saveWorkShiftFromForm().catch(handleApiError));
+  document.getElementById("ws-cancel-edit-btn")?.addEventListener("click", resetWorkShiftForm);
+}
+
 /** Ouverture / clôture journée comptable (PDJ) : tout utilisateur connecté sauf les comptes serveuse. */
 function canManagePdjAccounting() {
   return Boolean(sessionUser) && String(currentRole || "").trim() !== "serveuse";
@@ -2849,6 +3162,7 @@ function staffAuditEntityLabel(entity) {
     achat_fournisseur: "Commande fournisseur",
     reception_fournisseur: "Reception fournisseur",
     cloture_jour: "Clôture journée",
+    planning: "Planning / horaires",
     catalogue_article: "Article catalogue",
   };
   return map[entity] || entity;
@@ -3415,6 +3729,7 @@ function renderHero() {
     stock: "Les prix de vente partent du catalogue stock.",
     charges: "Les sorties d'argent restent centralisées.",
     params: "Paramètres : profil personnel pour tous ; catalogue, accès et administration pour les rôles autorisés.",
+    planning: "Consultez vos horaires et, si vous êtes gérant, planifiez l'équipe.",
   };
   const copies = {
     home: "Le serveur garde les sessions et l'état complet de l'application.",
@@ -3424,6 +3739,7 @@ function renderHero() {
     stock: "Renseignez prix achat et prix vente pour accélérer la prise de commande.",
     charges: "Toutes les dépenses sont historisées côté serveur.",
     params: "Onglet Profil : mon compte (nom affiché, mot de passe) pour tous ; réglages du maquis réservés au gérant ou aux administrateurs.",
+    planning: "Mes horaires : lecture pour toute l'équipe. Onglet Équipe : création des créneaux (gérant / admin).",
   };
   document.getElementById("hero-title").textContent = titles[currentPage];
   document.getElementById("hero-copy").textContent = copies[currentPage];
@@ -4022,6 +4338,7 @@ function navigate(page, opts = {}) {
     loadParamsForm();
     maybeAdjustParamsSubTab();
   }
+  if (page === "planning") renderPlanningPage();
   syncFabLabelForStockPage();
   applyRoleVisibility();
 }
@@ -4071,6 +4388,7 @@ function bindMobileMoreSheet() {
     else if (nav === "guide") navigate("guide");
     else if (nav === "charges") navigate("charges");
     else if (nav === "params") navigate("params");
+    else if (nav === "planning") navigate("planning");
     else if (nav === "logout") logout();
   });
 }
@@ -6428,6 +6746,43 @@ function orderTime(order) {
   return "--:--";
 }
 
+/** Ventes déjà créées pour une commande (idempotence après échec réseau). */
+function ventesLinkedToOrder(orderId) {
+  const oid = Number(orderId);
+  if (!oid) return [];
+  return recordsForSite(state.ventes).filter((v) => Number(v.sourceOrderId) === oid);
+}
+
+/** Empreinte client + lignes pour dédupliquer commandes actives vs factures (données sans sourceOrderId). */
+function orderPaymentFingerprint(order) {
+  const client = String(order.client || "").trim().toLowerCase();
+  const table = String(order.table || order.client || "").trim().toLowerCase();
+  const day = saleDateValue(order);
+  const lines = (order.lignes || [])
+    .map((l) => `${String(l.article || "").trim()}|${Number(l.qty) || 0}|${Number(l.prix) || 0}`)
+    .sort()
+    .join(";");
+  return `${day}|${client}|${table}|${lines}`;
+}
+
+/** Masque les commandes déjà encaissées (ventes liées) pour éviter doublon Servi + Payé. */
+function activeCommandesExcludingFinalized(commandes) {
+  const finalizedIds = new Set();
+  const paidFingerprints = new Set();
+  recordsForSite(state.ventes).forEach((v) => {
+    const sid = v.sourceOrderId;
+    if (sid != null && sid !== "") finalizedIds.add(Number(sid));
+  });
+  paidOrdersFromSales().forEach((paid) => {
+    if (paid.lignes?.length) paidFingerprints.add(orderPaymentFingerprint(paid));
+  });
+  return (commandes || []).filter((o) => {
+    if (finalizedIds.has(Number(o.id))) return false;
+    if (!o.lignes?.length) return true;
+    return !paidFingerprints.has(orderPaymentFingerprint(o));
+  });
+}
+
 function paidOrdersFromSales() {
   const paidByFacture = {};
   recordsForSite(state.ventes).forEach((v) => {
@@ -6615,7 +6970,7 @@ function computeOrdersManagementList() {
   const status = document.getElementById("orders-filter-status")?.value || "all";
   const type = document.getElementById("orders-filter-type")?.value || "all";
   const journalDay = pdjCalendarDate();
-  const activeOrders = recordsForSite(state.commandes);
+  const activeOrders = activeCommandesExcludingFinalized(recordsForSite(state.commandes));
   const salesToday = recordsForSite(state.ventes).filter((vente) => saleDateValue(vente) === journalDay);
   const paidOrders = paidOrdersFromSales();
   const baseOrders = status === "Paye"
@@ -9641,7 +9996,7 @@ const PURGE_MAQUIS_ROW_KEYS = [
 const STATE_PUT_ROW_KEYS = [
   "ventes", "stock", "commandes", "stockChecks", "stockEntrees", "stockLosses",
   "dayBooks", "purchaseOrders", "supplierPrices", "casiers", "casierMouvements",
-  "creditRecoveries", "consignes", "charges", "staffAuditLog",
+  "creditRecoveries", "consignes", "charges", "staffAuditLog", "workShifts",
 ];
 
 /**
@@ -9671,6 +10026,7 @@ function buildStatePutBody(overrides = {}) {
     body.charges = state.charges;
     body.nextId = state.nextId;
     body.staffAuditLog = state.staffAuditLog ?? [];
+    body.workShifts = state.workShifts ?? [];
     body.auth = { users: state.auth?.users || [] };
     body.casiers = state.casiers ?? [];
     body.casierMouvements = state.casierMouvements ?? [];
@@ -11035,9 +11391,30 @@ function splitPaymentDetails(details, lineTotal, orderTotal) {
 }
 
 async function finalizeOrder(orderId = activeOrderId) {
-  const order = state.commandes.find((item) => item.id === orderId);
+  const oid = Number(orderId);
+  if (!oid) return;
+  if (finalizeOrderInFlight.has(oid)) {
+    showToast("Encaissement déjà en cours, patientez…");
+    return;
+  }
+  const order = state.commandes.find((item) => item.id === oid);
   if (!order || !order.lignes.length) {
-    showToast("Aucune ligne a facturer pour ce client.");
+    const linked = ventesLinkedToOrder(oid);
+    if (linked.length) {
+      const fn = linked[0].factureNumber || "";
+      state.commandes = state.commandes.filter((item) => item.id !== oid);
+      if (activeOrderId === oid) activeOrderId = null;
+      pendingFinalizeOrderId = null;
+      try {
+        await persistStatePatch({ commandes: state.commandes });
+        renderVentesPage();
+        showToast(fn ? `Commande déjà encaissée (${fn}).` : "Commande déjà encaissée.");
+      } catch (e) {
+        handleApiError(e);
+      }
+    } else {
+      showToast("Aucune ligne a facturer pour ce client.");
+    }
     return;
   }
   syncOrderClientFromVentesFormIfEditing(order);
@@ -11065,6 +11442,27 @@ async function finalizeOrder(orderId = activeOrderId) {
       return;
     }
   }
+
+  const existingVentes = ventesLinkedToOrder(oid);
+  if (existingVentes.length) {
+    const factureNumber = existingVentes[0].factureNumber || "";
+    state.commandes = state.commandes.filter((item) => item.id !== oid);
+    if (activeOrderId === oid) activeOrderId = null;
+    pendingFinalizeOrderId = null;
+    try {
+      await persistStatePatch({ commandes: state.commandes });
+      closeModal("modal-vente");
+      closeModal("modal-finalize");
+      resetOrderForm();
+      renderVentesPage();
+      showToast(factureNumber ? `Déjà encaissée : ${factureNumber}` : "Commande déjà encaissée.");
+      if (factureNumber) showFinalizeSuccess(factureNumber);
+    } catch (e) {
+      handleApiError(e);
+    }
+    return;
+  }
+
   const paymentMethod = paymentMix.details.length > 1 ? "Mixte" : paymentMix.details[0].method;
   const site = currentSite();
   const factureNumber = `${site?.prefixeFacture || "FAC"}-${String(state.nextId.invoice++).padStart(4, "0")}`;
@@ -11072,70 +11470,106 @@ async function finalizeOrder(orderId = activeOrderId) {
   const creditIssuedBy = paymentMix.details.some((d) => isCreditClientMethod(d.method))
     ? String(sessionUser || "").trim()
     : "";
-  const ventes = order.lignes.map((line) => ({
-    id: state.nextId.vente++,
-    siteId: order.siteId || currentSiteId(),
-    factureNumber,
-    date: line.date || order.date || today(),
-    soldAt: encaisseAt,
-    client: order.client,
-    table: order.table || order.client,
-    article: line.article,
-    cat: line.cat,
-    prix: line.prix,
-    qty: line.qty,
-    formatQuantite: linePackSize(line, stockItemForArticle(line.article, siteId)),
-    packSize: linePackSize(line, stockItemForArticle(line.article, siteId)),
-    remise: line.remise,
-    paiement: paymentMethod,
-    paiementDetails: splitPaymentDetails(paymentMix.details, calcNet(line), orderTotal),
-    debiteur: paymentMix.creditName,
-    creditIssuedBy: creditIssuedBy || undefined,
-    server: order.server || order.serveur || sessionUser || "",
-    serveur: order.server || order.serveur || sessionUser || "",
-    note: line.note || order.note || "",
-  }));
-  state.ventes = [...ventes, ...state.ventes];
 
-  order.lignes.forEach((line) => {
-    const stockItem = stockItemForArticle(line.article, siteId);
-    if (stockItem) {
-      const bottles = lineBottleQty(line, stockItem);
-      stockItem.sorties = (Number(stockItem.sorties) || 0) + bottles;
-      stockItem.lastSortieAt = new Date().toISOString();
-      stockItem.lastSortieBy = sessionUser || "Serveur";
-      consumePhysicalStock(stockItem, bottles);
-      drainArticleCasiers(stockItem.article, bottles, { motif: "vente", commentaire: `Facture ${factureNumber}` });
-      const saleDate = String(line.date || order.date || today()).slice(0, 10);
-      const promoForLine = activePromotion(stockItem, saleDate);
-      if (promoForLine && promoForLine.stockPromoRestant != null) {
-        const cs = Math.max(1, caseSize(stockItem));
-        const casiersSold = bottles / cs;
-        const promoIdx = (stockItem.promotions || []).findIndex((p) => Number(p.id) === promoForLine.id);
-        if (promoIdx >= 0) {
-          stockItem.promotions[promoIdx].stockPromoRestant = Math.max(0, (Number(stockItem.promotions[promoIdx].stockPromoRestant) || 0) - casiersSold);
-        }
-      }
-    }
-  });
+  const rollback = {
+    ventes: state.ventes,
+    commandes: state.commandes,
+    stock: JSON.parse(JSON.stringify(state.stock || [])),
+    nextId: { ...(state.nextId || {}) },
+    casiers: state.casiers,
+    casierMouvements: state.casierMouvements,
+  };
 
-  state.commandes = state.commandes.filter((item) => item.id !== order.id);
-  if (activeOrderId === order.id) activeOrderId = null;
-  pendingFinalizeOrderId = null;
-  recordStaffAudit("create", "encaissement", `Facture ${factureNumber} · ${order.client || "Client"}`, `Total ${fmt(orderTotal)} FCFA · ${paymentMethod}${paymentMix.creditName ? ` · debiteur ${paymentMix.creditName}` : ""}`);
+  finalizeOrderInFlight.add(oid);
   const finalizeBtn = document.getElementById("confirm-finalize-btn");
   const prevFinalizeText = finalizeBtn ? finalizeBtn.textContent : "";
   if (finalizeBtn) { finalizeBtn.disabled = true; finalizeBtn.textContent = "Enregistrement…"; }
+
   try {
-    await persistState();
+    const ventes = order.lignes.map((line) => ({
+      id: state.nextId.vente++,
+      siteId: order.siteId || currentSiteId(),
+      sourceOrderId: oid,
+      factureNumber,
+      date: line.date || order.date || today(),
+      soldAt: encaisseAt,
+      client: order.client,
+      table: order.table || order.client,
+      article: line.article,
+      cat: line.cat,
+      prix: line.prix,
+      qty: line.qty,
+      formatQuantite: linePackSize(line, stockItemForArticle(line.article, siteId)),
+      packSize: linePackSize(line, stockItemForArticle(line.article, siteId)),
+      remise: line.remise,
+      paiement: paymentMethod,
+      paiementDetails: splitPaymentDetails(paymentMix.details, calcNet(line), orderTotal),
+      debiteur: paymentMix.creditName,
+      creditIssuedBy: creditIssuedBy || undefined,
+      server: order.server || order.serveur || sessionUser || "",
+      serveur: order.server || order.serveur || sessionUser || "",
+      note: line.note || order.note || "",
+    }));
+    state.ventes = [...ventes, ...state.ventes];
+
+    order.lignes.forEach((line) => {
+      const stockItem = stockItemForArticle(line.article, siteId);
+      if (stockItem) {
+        const bottles = lineBottleQty(line, stockItem);
+        stockItem.sorties = (Number(stockItem.sorties) || 0) + bottles;
+        stockItem.lastSortieAt = new Date().toISOString();
+        stockItem.lastSortieBy = sessionUser || "Serveur";
+        consumePhysicalStock(stockItem, bottles);
+        drainArticleCasiers(stockItem.article, bottles, { motif: "vente", commentaire: `Facture ${factureNumber}` });
+        const saleDate = String(line.date || order.date || today()).slice(0, 10);
+        const promoForLine = activePromotion(stockItem, saleDate);
+        if (promoForLine && promoForLine.stockPromoRestant != null) {
+          const cs = Math.max(1, caseSize(stockItem));
+          const casiersSold = bottles / cs;
+          const promoIdx = (stockItem.promotions || []).findIndex((p) => Number(p.id) === promoForLine.id);
+          if (promoIdx >= 0) {
+            stockItem.promotions[promoIdx].stockPromoRestant = Math.max(0, (Number(stockItem.promotions[promoIdx].stockPromoRestant) || 0) - casiersSold);
+          }
+        }
+      }
+    });
+
+    state.commandes = state.commandes.filter((item) => item.id !== oid);
+    if (activeOrderId === oid) activeOrderId = null;
+    pendingFinalizeOrderId = null;
+    recordStaffAudit("create", "encaissement", `Facture ${factureNumber} · ${order.client || "Client"}`, `Total ${fmt(orderTotal)} FCFA · ${paymentMethod}${paymentMix.creditName ? ` · debiteur ${paymentMix.creditName}` : ""}`);
+
+    await persistStatePatch({
+      ventes: state.ventes,
+      commandes: state.commandes,
+      stock: state.stock,
+      nextId: state.nextId,
+      casiers: state.casiers,
+      casierMouvements: state.casierMouvements,
+    });
+
     closeModal("modal-vente");
+    closeModal("modal-finalize");
     resetOrderForm();
     if (currentPage === "home") renderDashboard();
     if (currentPage === "stock" && stockSubTab === "casiers") renderCasiers();
     renderVentesPage();
     showToast(`Facture ${factureNumber} enregistree pour ${order.client}.`);
     showFinalizeSuccess(factureNumber);
+  } catch (e) {
+    state.ventes = rollback.ventes;
+    state.commandes = rollback.commandes;
+    state.stock = rollback.stock;
+    state.nextId = rollback.nextId;
+    state.casiers = rollback.casiers;
+    state.casierMouvements = rollback.casierMouvements;
+    handleApiError(e);
+    const net =
+      !navigator.onLine
+      || (typeof e?.message === "string" && (e.message.includes("Failed to fetch") || e.message.includes("NetworkError")));
+    showToast(net ? "Problème réseau : rien n'a été encaissé. Réessayez." : "L'encaissement n'a pas été enregistré.");
   } finally {
+    finalizeOrderInFlight.delete(oid);
     if (finalizeBtn) { finalizeBtn.disabled = false; finalizeBtn.textContent = prevFinalizeText; }
   }
 }
@@ -15265,12 +15699,14 @@ async function bootstrapAuthenticatedApp(opts = {}) {
   if (!Array.isArray(state.casiers)) state.casiers = [];
   if (!Array.isArray(state.casierMouvements)) state.casierMouvements = [];
   if (!Array.isArray(state.staffAuditLog)) state.staffAuditLog = [];
+  if (!Array.isArray(state.workShifts)) state.workShifts = [];
   if (!state.nextId) state.nextId = {};
   if (!state.nextId.stockEntree || Number.isNaN(Number(state.nextId.stockEntree))) state.nextId.stockEntree = 100;
   if (!state.nextId.stockLoss || Number.isNaN(Number(state.nextId.stockLoss))) state.nextId.stockLoss = 100;
   if (!state.nextId.creditRecovery) state.nextId.creditRecovery = 100;
   if (!state.nextId.casier || Number.isNaN(Number(state.nextId.casier))) state.nextId.casier = 1;
   if (!state.nextId.casierMouvement || Number.isNaN(Number(state.nextId.casierMouvement))) state.nextId.casierMouvement = 1;
+  if (!state.nextId.workShift || Number.isNaN(Number(state.nextId.workShift))) state.nextId.workShift = 100;
   // Restaurer depuis localStorage si le serveur n'a pas les casiers (éviter après purge / reset : cache local obsolète)
   if (!skipCasierLsRestore && !state.casiers.length) lsRestoreCasiers();
   // Migration : casiers vides existants sans bouteillesVides tracquées → initialiser à capacite
@@ -15433,6 +15869,7 @@ function attachEvents() {
     renderCharges();
     renderCasierPhysique();
     loadParamsForm();
+    if (currentPage === "planning") renderPlanningPage();
     resetOrderForm();
     persistState().catch(handleApiError);
   });
@@ -16086,6 +16523,7 @@ document.getElementById("fab-btn").addEventListener("click", () => {
   if (restoreBtn) restoreBtn.addEventListener("click", () => restoreFromJson());
   document.getElementById("restore-backup-refresh-btn")?.addEventListener("click", () => refreshRestoreBackupUi().catch(handleApiError));
   document.getElementById("restore-site-backup-btn")?.addEventListener("click", () => restoreSelectedSiteFromBackup().catch(handleApiError));
+  bindPlanningEvents();
   document.querySelectorAll(".nav-btn").forEach((button) => button.addEventListener("click", () => handleNavButtonClick(button)));
   bindMobileMoreSheet();
   document.getElementById("page-pdj")?.addEventListener("click", (event) => {

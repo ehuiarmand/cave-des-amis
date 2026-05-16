@@ -73,6 +73,10 @@
           <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5 1a2 2 0 0 0-2 2v11h10a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2H5zm1 3h6v1H6V4zm0 2h6v1H6V6zm0 2h4v1H6V8z"/></svg>
           <span>Guide</span>
         </button>
+        <button class="nav-btn staff-schedule-nav" data-page="planning" type="button">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M3.5 0a.5.5 0 0 1 .5.5V1h8V.5a.5.5 0 0 1 1 0V1h1a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2h1V.5a.5.5 0 0 1 .5-.5zM2 2a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1H2zm0 4h12v1H2V6z"/></svg>
+          <span>Planning</span>
+        </button>
         <button class="nav-btn" data-page="stock" type="button">
           <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8.186 1.113a.5.5 0 0 0-.372 0L1.846 3.5 4.25 4.461 10.404 2l-2.218-.887zm3.564 1.426L5.596 5 8 5.961 14.154 3.5l-2.404-.961zm3.25 1.7-6.5 2.6v7.922l6.5-2.6V4.24zM7.5 14.762V6.838L1 4.239v7.923l6.5 2.6zM7.443.184a1.5 1.5 0 0 1 1.114 0l7.129 2.852A.5.5 0 0 1 16 3.5v8.35a1.5 1.5 0 0 1-.914 1.387l-6.857 2.743a.5.5 0 0 1-.372 0L1.914 13.237A1.5 1.5 0 0 1 1 11.85V3.5a.5.5 0 0 1 .314-.464L7.443.184z"/></svg>
           <span>Stock</span>
@@ -1108,6 +1112,81 @@
         </article>
       </section>
 
+      <section id="page-planning" class="page">
+        <div class="tabs page-subtabs planning-subtabs" role="tablist" aria-label="Planning">
+          <button type="button" class="tab active" data-subtab-planning="mine" role="tab" aria-selected="true">Mes horaires</button>
+          <button type="button" class="tab manager-only" data-subtab-planning="team" role="tab">Équipe</button>
+        </div>
+
+        <div data-planning-panel="mine" class="planning-panel">
+          <article class="card">
+            <div class="section-head">
+              <h3>Mes horaires</h3>
+              <span class="section-meta" id="planning-mine-week-label">Semaine</span>
+            </div>
+            <div class="planning-week-nav">
+              <button type="button" id="planning-mine-prev" class="btn btn-outline mini-btn" aria-label="Semaine précédente">←</button>
+              <button type="button" id="planning-mine-today" class="btn btn-outline mini-btn">Aujourd&apos;hui</button>
+              <button type="button" id="planning-mine-next" class="btn btn-outline mini-btn" aria-label="Semaine suivante">→</button>
+            </div>
+            <div id="planning-mine-summary" class="planning-summary muted"></div>
+            <div id="planning-mine-list" class="stack-list planning-shift-list"></div>
+          </article>
+        </div>
+
+        <div data-planning-panel="team" class="planning-panel hidden manager-only">
+          <article class="card">
+            <div class="section-head">
+              <h3>Programme de travail</h3>
+              <span class="section-meta" id="planning-team-week-label">Semaine</span>
+            </div>
+            <p class="muted" style="font-size:0.86rem;margin:0 0 12px;line-height:1.45">
+              Planifiez les créneaux des serveuses et gérantes du maquis actif. Les personnes concernées voient leurs horaires dans l&apos;onglet <strong>Mes horaires</strong>.
+            </p>
+            <div class="planning-week-nav">
+              <button type="button" id="planning-team-prev" class="btn btn-outline mini-btn" aria-label="Semaine précédente">←</button>
+              <button type="button" id="planning-team-today" class="btn btn-outline mini-btn">Aujourd&apos;hui</button>
+              <button type="button" id="planning-team-next" class="btn btn-outline mini-btn" aria-label="Semaine suivante">→</button>
+            </div>
+            <div id="planning-team-list" class="stack-list planning-shift-list"></div>
+          </article>
+
+          <article class="card manager-only">
+            <div class="section-head">
+              <h3>Ajouter un créneau</h3>
+              <span class="section-meta">Équipe</span>
+            </div>
+            <div class="form-grid two-cols">
+              <div class="form-group">
+                <label for="ws-user">Personne</label>
+                <select id="ws-user" style="width:100%;margin-top:4px;padding:12px;border-radius:12px;border:1px solid var(--line)"></select>
+              </div>
+              <div class="form-group">
+                <label for="ws-date">Date</label>
+                <input id="ws-date" type="date" style="width:100%">
+              </div>
+              <div class="form-group">
+                <label for="ws-start">Début</label>
+                <input id="ws-start" type="time" value="18:00" style="width:100%">
+              </div>
+              <div class="form-group">
+                <label for="ws-end">Fin</label>
+                <input id="ws-end" type="time" value="02:00" style="width:100%">
+              </div>
+              <div class="form-group" style="grid-column:1/-1">
+                <label for="ws-note">Note (optionnel)</label>
+                <input id="ws-note" type="text" maxlength="200" placeholder="ex: terrasse, événement…" style="width:100%">
+              </div>
+            </div>
+            <div class="button-stack">
+              <button type="button" id="ws-save-btn" class="btn btn-primary">Enregistrer le créneau</button>
+              <button type="button" id="ws-cancel-edit-btn" class="btn btn-outline hidden">Annuler la modification</button>
+            </div>
+            <input type="hidden" id="ws-edit-id" value="">
+          </article>
+        </div>
+      </section>
+
       <section id="page-params" class="page">
         <div class="tabs page-subtabs params-subtabs" role="tablist" aria-label="Sous-menus paramètres">
           <button type="button" class="tab active" data-subtab-params="profil" role="tab" aria-selected="true">Profil</button>
@@ -1513,6 +1592,13 @@
             <span class="mobile-more-feature-copy">
               <strong>Guide</strong>
               <span class="mobile-more-feature-desc">Mode d&apos;emploi et bonnes pratiques.</span>
+            </span>
+          </button>
+          <button type="button" class="mobile-more-feature staff-schedule-nav" data-more-nav="planning">
+            <span class="mobile-more-feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M3.5 0a.5.5 0 0 1 .5.5V1h8V.5a.5.5 0 0 1 1 0V1h1a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2h1V.5a.5.5 0 0 1 .5-.5zM2 2a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1H2zm0 4h12v1H2V6z"/></svg></span>
+            <span class="mobile-more-feature-copy">
+              <strong>Planning</strong>
+              <span class="mobile-more-feature-desc">Mes horaires et programme équipe.</span>
             </span>
           </button>
           <button type="button" class="mobile-more-feature manager-more-item" data-more-nav="charges">
@@ -2448,6 +2534,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=257"></script>
+  <script src="./app-orders.js?v=260"></script>
 </body>
 </html>

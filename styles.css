@@ -2939,3 +2939,22 @@ textarea { font: inherit; }
     display: none;
   }
 }
+
+/* Planning / horaires équipe */
+.planning-week-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.planning-summary {
+  font-size: 0.88rem;
+  margin-bottom: 10px;
+}
+.planning-shift-list .planning-shift-item {
+  align-items: flex-start;
+}
+#page-planning .planning-subtabs {
+  margin-bottom: 14px;
+}

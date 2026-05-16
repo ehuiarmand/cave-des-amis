@@ -105,7 +105,7 @@ REQUIRE_2FA_FOR_PRIVILEGED = _env_first(
 STATE_PUT_LIST_KEYS = (
     "ventes", "stock", "commandes", "stockChecks", "stockEntrees", "stockLosses",
     "dayBooks", "purchaseOrders", "supplierPrices", "casiers", "casierMouvements",
-    "creditRecoveries", "consignes", "charges", "staffAuditLog",
+    "creditRecoveries", "consignes", "charges", "staffAuditLog", "workShifts",
 )
 MAX_STATE_LIST_ROWS = 50_000
 
@@ -582,6 +582,7 @@ def build_default_state() -> dict[str, Any]:
             {**item, "siteId": item.get("siteId", "maquis-1")} for item in legacy["charges"]
         ],
         "staffAuditLog": [],
+        "workShifts": [],
         "stockEntrees": [],
         "stockLosses": [],
         "nextId": {
@@ -595,6 +596,7 @@ def build_default_state() -> dict[str, Any]:
             "casier": legacy.get("nextId", {}).get("casier", 1),
             "casierMouvement": legacy.get("nextId", {}).get("casierMouvement", 1),
             "consigne": legacy.get("nextId", {}).get("consigne", 0),
+            "workShift": legacy.get("nextId", {}).get("workShift", 100),
         },
     }
 
@@ -660,6 +662,12 @@ def migrate_state(payload: dict[str, Any]) -> dict[str, Any]:
         ]
         payload["auth"] = {"users": users}
 
+    if not isinstance(payload.get("workShifts"), list):
+        payload["workShifts"] = []
+    nxt = payload.setdefault("nextId", {})
+    if nxt.get("workShift") is None:
+        nxt["workShift"] = 100
+
     return payload
 
 
@@ -682,7 +690,100 @@ _SITE_SCOPED_ROW_KEYS: tuple[str, ...] = (
     "consignes",
     "charges",
     "staffAuditLog",
+    "workShifts",
 )
+
+
+def _valid_work_date(s: str) -> bool:
+    return bool(re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(s or "").strip()))
+
+
+def _valid_work_time(s: str) -> bool:
+    return bool(re.fullmatch(r"\d{2}:\d{2}", str(s or "").strip()))
+
+
+def filter_work_shifts_for_session(
+    rows: list[Any],
+    session: dict[str, Any],
+    site_ids: list[str],
+    allowed: set[str],
+) -> list[Any]:
+    """Serveuse : uniquement ses créneaux. Gérant / admin : équipe des maquis autorisés."""
+    role = str(session.get("role", "")).strip().lower()
+    un_key = str(session.get("username", "")).strip().casefold()
+    out: list[Any] = []
+    for r in rows or []:
+        if not isinstance(r, dict):
+            continue
+        es = row_effective_site_id(r, site_ids, allowed)
+        if es is None or es not in allowed:
+            continue
+        if role == "serveuse":
+            if str(r.get("username", "")).strip().casefold() != un_key:
+                continue
+        out.append(r)
+    return json.loads(json.dumps(out))
+
+
+def session_can_manage_team_schedule(session: dict[str, Any] | None) -> bool:
+    if not session:
+        return False
+    role = str(session.get("role", "")).strip().lower()
+    if role in ("superadmin", "admin", "manager"):
+        return True
+    return str(session.get("username", "")).strip().lower() in ("admin", "tanoh")
+
+
+def validate_work_shift_row(
+    row: dict[str, Any],
+    session: dict[str, Any],
+    auth_users: list[dict[str, Any]],
+    site_ids: list[str],
+    allowed: set[str],
+) -> None:
+    sid = str(row.get("siteId", "")).strip()
+    if sid not in allowed or sid not in site_ids:
+        raise ValueError("Maquis non autorise pour ce creneau.")
+    un = str(row.get("username", "")).strip()
+    if not un:
+        raise ValueError("Utilisateur obligatoire pour le creneau.")
+    user = next(
+        (u for u in auth_users if str(u.get("username", "")).strip().casefold() == un.casefold()),
+        None,
+    )
+    if not user:
+        raise ValueError("Utilisateur inconnu.")
+    u_role = str(user.get("role", "")).strip().lower()
+    if u_role not in ("serveuse", "manager"):
+        raise ValueError("Seules les serveuses et gerantes peuvent etre planifiees.")
+    u_sites = {str(x) for x in (user.get("allowedSiteIds") or []) if str(x) in site_ids}
+    if sid not in u_sites:
+        raise ValueError("Cet utilisateur n'est pas affecte a ce maquis.")
+    sess_role = str(session.get("role", "")).strip().lower()
+    if sess_role == "manager" and u_role not in ("serveuse", "manager"):
+        raise ValueError("Modification non autorisee.")
+    if not _valid_work_date(str(row.get("date", ""))):
+        raise ValueError("Date invalide (AAAA-MM-JJ).")
+    if not _valid_work_time(str(row.get("startTime", ""))) or not _valid_work_time(str(row.get("endTime", ""))):
+        raise ValueError("Heures invalides (HH:MM).")
+
+
+def merge_work_shifts_scoped(
+    current: list[Any],
+    incoming: list[Any],
+    session: dict[str, Any],
+    allowed: set[str],
+    site_ids: list[str],
+    auth_users: list[dict[str, Any]],
+) -> list[Any]:
+    if not session_can_manage_team_schedule(session):
+        raise ValueError("Modification du planning non autorisee.")
+    if not isinstance(incoming, list):
+        raise ValueError("Liste de creneaux invalide.")
+    for row in incoming:
+        if isinstance(row, dict):
+            validate_work_shift_row(row, session, auth_users, site_ids, allowed)
+    return merge_scoped_rows(current, incoming, allowed, site_ids)
 
 
 def _zero_stock_row_quantities(row: dict[str, Any]) -> None:
@@ -1599,6 +1700,7 @@ class DataStore:
                 "charges": json.loads(json.dumps(self._state["charges"])),
                 "nextId": json.loads(json.dumps(self._state["nextId"])),
                 "staffAuditLog": json.loads(json.dumps(self._state.get("staffAuditLog", []))),
+                "workShifts": json.loads(json.dumps(self._state.get("workShifts", []))),
                 "auth": {
                     "users": [
                         {
@@ -1676,6 +1778,12 @@ class DataStore:
                 "charges": filter_site_rows(self._state.get("charges", [])),
                 "nextId": full["nextId"],
                 "staffAuditLog": filter_site_rows(self._state.get("staffAuditLog", [])),
+                "workShifts": filter_work_shifts_for_session(
+                    self._state.get("workShifts", []),
+                    session,
+                    site_ids,
+                    allowed,
+                ),
                 "auth": {"users": users_out},
             }
             bs = resolve_backup_session(session, self)
@@ -2120,7 +2228,7 @@ class DataStore:
                     "ventes", "stock", "commandes", "stockChecks", "dayBooks",
                     "purchaseOrders", "supplierPrices", "casiers", "casierMouvements",
                     "creditRecoveries", "consignes", "charges", "staffAuditLog",
-                    "stockEntrees", "stockLosses",
+                    "stockEntrees", "stockLosses", "workShifts",
                 ]
                 for _key in _GLOBAL_PATCH_KEYS:
                     if _key in payload:
@@ -2203,13 +2311,27 @@ class DataStore:
                 "ventes", "stock", "commandes", "stockChecks", "dayBooks",
                 "purchaseOrders", "supplierPrices", "casiers", "casierMouvements",
                 "creditRecoveries", "consignes", "charges", "staffAuditLog",
-                "stockEntrees", "stockLosses",
+                "stockEntrees", "stockLosses", "workShifts",
             ]
+            if "workShifts" in payload:
+                if str(session.get("role", "")).strip().lower() == "serveuse":
+                    raise ValueError("Modification du planning non autorisee.")
+            auth_users = list(current.get("auth", {}).get("users", []))
             for _key in _SCOPED_KEYS:
                 if _key in payload:
-                    current[_key] = merge_scoped_rows(
-                        current.get(_key, []), payload[_key], allowed, sid_list
-                    )
+                    if _key == "workShifts":
+                        current[_key] = merge_work_shifts_scoped(
+                            current.get(_key, []),
+                            payload[_key],
+                            session,
+                            allowed,
+                            sid_list,
+                            auth_users,
+                        )
+                    else:
+                        current[_key] = merge_scoped_rows(
+                            current.get(_key, []), payload[_key], allowed, sid_list
+                        )
 
             if "pdjWorkDateBySite" in payload:
                 _prev_pdj = dict(current.get("pdjWorkDateBySite") or {})
