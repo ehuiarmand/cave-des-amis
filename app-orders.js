@@ -4148,6 +4148,13 @@ function stockRetailValueFcfa(item, site = currentSite(), asOfDate = today()) {
   return Math.round(Math.max(0, btl) * unit);
 }
 
+/** Valorisation stock au prix d'achat : bouteilles en stock × (prixAchat / unités par casier). */
+function stockPurchaseValueFcfa(item) {
+  const btl = stockActuel(item);
+  const paBtl = prixAchatParBouteille(item);
+  return Math.round(Math.max(0, btl) * paBtl);
+}
+
 function saleFormatLabel(format) {
   const qty = Math.max(1, Number(format?.quantite) || 1);
   return qty === 1 ? "Unite" : `Kit de ${qty}`;
@@ -7866,7 +7873,8 @@ function renderStock() {
   }
   const dualPricing = siteUsesDualZonePricing(site);
   const globalSeuil = Number(site?.seuilStock) || 5;
-  let totalValue = 0;
+  // Valeur totale calculée sur TOUS les articles (pas seulement le filtre) au prix d'achat net remise.
+  const totalValue = allItems.reduce((sum, item) => sum + stockPurchaseValueFcfa(item), 0);
   let nbAlerte = 0;
   let nbOk = 0;
 
@@ -7874,8 +7882,7 @@ function renderStock() {
     const actuel = stockActuel(item);
     const frigo = stockFrigo(item);
     const reserve = stockReserve(item);
-    const valeur = stockRetailValueFcfa(item, site, today());
-    totalValue += valeur;
+    const valeur = stockPurchaseValueFcfa(item);
     const seuilFrigo = Number(item.seuilMin) || globalSeuil;
     const isFrigoLow = isFrigoLowForAlert(frigo, seuilFrigo);
     const seuilArticle = Number(item.seuilMin) || 0;
@@ -12677,7 +12684,7 @@ function printStockReport() {
   let alertCount = 0;
   const rows = items.map((item) => {
     const actuel = stockActuel(item);
-    const valeur = stockRetailValueFcfa(item, site);
+    const valeur = stockPurchaseValueFcfa(item);
     totalValue += valeur;
     const alert = isStockBelowArticleSeuilForAlert(actuel, item.seuilMin);
     if (alert) alertCount += 1;
