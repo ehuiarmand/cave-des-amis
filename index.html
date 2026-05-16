@@ -1712,6 +1712,56 @@
     </div>
   </div>
 
+  <!-- SUPPLEMENT ENCAISSEMENT : différence de prix après remplacement d'article -->
+  <div id="modal-supplement" class="modal-overlay" aria-hidden="true">
+    <div class="modal">
+      <div class="modal-handle"></div>
+      <div class="section-head">
+        <h3>Supplément à encaisser</h3>
+        <button class="icon-btn close-modal" data-close="modal-supplement" type="button">Fermer</button>
+      </div>
+      <div class="inline-card inline-card--tight" style="margin-bottom:12px">
+        <p id="supplement-desc" class="muted" style="margin:0 0 6px"></p>
+        <strong id="supplement-amount" style="font-size:1.2rem">0 FCFA</strong>
+      </div>
+      <div class="form-grid finalize-pay-grid">
+        <div class="form-group form-group--zero">
+          <label for="supp-cash">Espèces</label>
+          <input id="supp-cash" class="supp-pay-input" type="number" min="0" placeholder="0" inputmode="numeric">
+        </div>
+        <div class="form-group form-group--zero">
+          <label for="supp-wave">Wave</label>
+          <input id="supp-wave" class="supp-pay-input" type="number" min="0" placeholder="0" inputmode="numeric">
+        </div>
+        <div class="form-group form-group--zero">
+          <label for="supp-orange">Orange</label>
+          <input id="supp-orange" class="supp-pay-input" type="number" min="0" placeholder="0" inputmode="numeric">
+        </div>
+        <div class="form-group form-group--zero">
+          <label for="supp-mtn">MTN</label>
+          <input id="supp-mtn" class="supp-pay-input" type="number" min="0" placeholder="0" inputmode="numeric">
+        </div>
+        <div class="form-group form-group--zero">
+          <label for="supp-card">Carte</label>
+          <input id="supp-card" class="supp-pay-input" type="number" min="0" placeholder="0" inputmode="numeric">
+        </div>
+        <div class="form-group form-group--zero">
+          <label for="supp-credit">Crédit</label>
+          <input id="supp-credit" class="supp-pay-input" type="number" min="0" placeholder="0" inputmode="numeric">
+        </div>
+      </div>
+      <div class="form-group form-group--zero form-group--credit">
+        <label for="supp-credit-name">Débiteur (si crédit)</label>
+        <input id="supp-credit-name" type="text" placeholder="Obligatoire si crédit" autocomplete="name">
+      </div>
+      <div id="supp-reste" class="finalize-reste" style="margin-bottom:10px">Reste : 0 FCFA</div>
+      <div class="button-stack button-stack--row finalize-flow-actions">
+        <button id="confirm-supplement-btn" class="btn btn-primary" type="button">Encaisser le supplément</button>
+        <button type="button" class="btn btn-outline close-modal" data-close="modal-supplement">Annuler</button>
+      </div>
+    </div>
+  </div>
+
   <!-- SAISIE RAPIDE : menu serveuse multi-articles -->
   <div id="modal-saisie-rapide" class="modal-overlay" aria-hidden="true">
     <div class="modal">
@@ -2338,6 +2388,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=223"></script>
+  <script src="./app-orders.js?v=226"></script>
 </body>
 </html>

@@ -5730,7 +5730,7 @@ function renderSalesHistory() {
           <div class="order-total">${fmt(total)} FCFA</div>
         </div>
         <div class="order-lines">
-          ${invoice.lignes.map((vente) => `<div class="order-line"><div><p class="list-item-title">${escapeHtml(vente.article)}</p><p class="list-item-sub">${escapeHtml(vente.cat)} · ${escapeHtml(lineQtyPriceLabel(vente, stockItemForArticle(vente.article)))}${vente.remise ? ` · -${fmt(vente.remise)}` : ""}</p></div><button class="del-btn" type="button" data-delete-type="vente" data-id="${vente.id}">Suppr.</button></div>`).join("")}
+          ${invoice.lignes.map((vente) => `<div class="order-line"><div><p class="list-item-title">${escapeHtml(vente.article)}</p><p class="list-item-sub">${escapeHtml(vente.cat)} · ${escapeHtml(lineQtyPriceLabel(vente, stockItemForArticle(vente.article)))}${vente.remise ? ` · -${fmt(vente.remise)}` : ""}</p></div><div style="display:flex;gap:6px;align-items:center">${sessionUser ? `<button type="button" class="mini-btn" data-replace-vente="${vente.id}" title="Remplacer cet article et mettre a jour le stock">Remplacer</button>` : ""}<button class="del-btn" type="button" data-delete-type="vente" data-id="${vente.id}">Suppr.</button></div></div>`).join("")}
         </div>
         <div class="order-actions">
           <button type="button" class="mini-btn" data-print-invoice="${escapeHtml(invoice.factureNumber)}">Imprimer facture</button>
@@ -6990,6 +6990,7 @@ async function confirmKit() {
 // ─── REMPLACEMENT D'ARTICLE ───────────────────────────────────────────────────
 
 let replacingLine = null; // { orderId, lineId, article }
+let replacingVenteId = null; // id de la vente encaissee en cours de remplacement
 
 function isOrderPaidForReplace(order) {
   const s = String(orderStatus(order) || "").trim();
@@ -7123,6 +7124,210 @@ async function confirmReplace(newArticleName) {
   replacingLine = null;
   renderVentesPage();
   showToast(`${prevArticle} remplace par ${line.article} (${fmt(calcNet(line))} FCFA).`);
+}
+
+function openReplaceVenteModal(venteId) {
+  const vente = recordsForSite(state.ventes).find((v) => v.id === Number(venteId));
+  if (!vente) return;
+  replacingVenteId = Number(venteId);
+  replacingLine = null;
+  const infoEl = document.getElementById("replace-current-info");
+  if (infoEl) {
+    infoEl.innerHTML = `Article encaisse a remplacer : <strong>${escapeHtml(vente.article)}</strong>`
+      + ` · ${escapeHtml(lineQtyPriceLabel(vente, stockItemForArticle(vente.article)))}`
+      + `${vente.client ? ` · ${escapeHtml(vente.client)}` : ""}`
+      + ` · Facture ${escapeHtml(vente.factureNumber || "")}`
+      + `<br><span class="muted" style="font-size:0.82rem">Le stock de l'ancien article sera restitue, le prix et le stock du nouveau seront appliques.</span>`;
+  }
+  const searchEl = document.getElementById("replace-search");
+  if (searchEl) searchEl.value = "";
+  renderReplaceVentePicker("", vente);
+  openModal("modal-replace-article");
+  window.requestAnimationFrame(() => searchEl?.focus());
+}
+
+function renderReplaceVentePicker(query, vente) {
+  const picker = document.getElementById("replace-picker");
+  if (!picker || !vente) return;
+  const q = (query || "").toLowerCase().trim();
+  const currentKey = String(vente.article || "").toLowerCase();
+  const products = knownProducts(vente.date || today()).filter((p) => {
+    if (p.article.toLowerCase() === currentKey) return false;
+    return !q || p.article.toLowerCase().includes(q) || (p.cat || "").toLowerCase().includes(q);
+  }).slice(0, 24);
+  if (!products.length) {
+    picker.innerHTML = `<p class="muted" style="padding:12px;font-size:0.88rem">Aucun autre produit ne correspond.</p>`;
+    return;
+  }
+  picker.innerHTML = products.map((p) => {
+    const enc = encodeURIComponent(p.article);
+    const stockItem = stockItemForArticle(p.article);
+    const format = saleFormatForLine(vente, p, vente.date);
+    const newPrix = formatPrice(format, vente.location || "Intérieur");
+    const avail = stockItem ? availableStock(stockItem) : null;
+    const avLabel = avail == null ? "—" : `${fmt(avail)} btl`;
+    return `<button type="button" class="vente-picker-row" data-pick-replace="${enc}">
+      <span class="vente-picker-name">${escapeHtml(p.article)}</span>
+      <span class="vente-picker-meta">${escapeHtml(p.cat || "—")} · ${fmt(newPrix)} FCFA · Stock ${avLabel}</span>
+    </button>`;
+  }).join("");
+}
+
+// Donnees en attente d'un supplement d'encaissement (remplacement article prix superieur)
+let _pendingSupplement = null;
+
+async function confirmReplaceVente(newArticleName) {
+  const article = String(newArticleName || "").trim();
+  if (!replacingVenteId || !article) return;
+  const siteId = currentSiteId();
+  const vente = (state.ventes || []).find((v) => v.id === replacingVenteId && (v.siteId || siteId) === siteId);
+  if (!vente) {
+    showToast("Vente introuvable.");
+    closeModal("modal-replace-article");
+    replacingVenteId = null;
+    return;
+  }
+  if (article.toLowerCase() === String(vente.article || "").toLowerCase()) {
+    showToast("Choisissez un produit different.");
+    return;
+  }
+  const newProduct = findKnownProduct(article, vente.date);
+  if (!newProduct) {
+    showToast("Produit introuvable dans le catalogue.");
+    return;
+  }
+  const oldStockItem = stockItemForArticle(vente.article, siteId);
+  const bottles = lineBottleQty(vente, oldStockItem);
+  const newStockItem = stockItemForArticle(newProduct.article, siteId);
+  if (!newStockItem) {
+    showToast(`Article "${newProduct.article}" sans fiche stock.`);
+    return;
+  }
+  if (availableStock(newStockItem) < bottles) {
+    showToast(`Stock insuffisant pour ${newProduct.article}. Disponible : ${fmt(availableStock(newStockItem))} bouteille(s).`);
+    return;
+  }
+  const newFormat = saleFormatForLine(vente, newProduct, vente.date);
+  const newPrix = formatPrice(newFormat, vente.location || "Intérieur");
+  const prevArticle = vente.article;
+  const prevPrix = Number(vente.prix) || 0;
+  const qty = Number(vente.qty) || 1;
+  const diff = Math.round((newPrix - prevPrix) * qty);
+  const prixLine = newPrix !== prevPrix
+    ? `\nPrix : ${fmt(prevPrix)} → ${fmt(newPrix)} FCFA`
+    + (diff > 0 ? ` — supplément ${fmt(diff)} FCFA à encaisser` : ` — différence ${fmt(Math.abs(diff))} FCFA`)
+    : "";
+  if (!window.confirm(
+    `Remplacer "${prevArticle}" par "${newProduct.article}" sur la facture ${vente.factureNumber || "#" + vente.id} ?`
+    + `\n\nStock restitué : ${prevArticle} +${bottles} btl\nStock débité : ${newProduct.article} -${bottles} btl`
+    + prixLine,
+  )) return;
+  // Restituer le stock de l'ancien article
+  if (oldStockItem) {
+    oldStockItem.sorties = Math.max(0, (Number(oldStockItem.sorties) || 0) - bottles);
+    oldStockItem.frigo = (Number(oldStockItem.frigo) || 0) + bottles;
+  }
+  // Consommer le stock du nouvel article
+  newStockItem.sorties = (Number(newStockItem.sorties) || 0) + bottles;
+  newStockItem.lastSortieAt = new Date().toISOString();
+  newStockItem.lastSortieBy = sessionUser || "-";
+  consumePhysicalStock(newStockItem, bottles);
+  // Mettre a jour la vente
+  vente.article = newProduct.article;
+  vente.cat = newProduct.cat || vente.cat;
+  if (newPrix > 0) vente.prix = newPrix;
+  recordStaffAudit(
+    "update", "vente",
+    `Remplacement article · Facture ${vente.factureNumber || "#" + vente.id} · ${vente.client || ""}`,
+    `${prevArticle} → ${vente.article} · ${bottles} btl · Prix ${fmt(prevPrix)} → ${fmt(newPrix)} FCFA`,
+  );
+  closeModal("modal-replace-article");
+  replacingVenteId = null;
+  if (diff > 0) {
+    // Prix superieur : ouvrir l'encaissement du supplement avant de sauvegarder
+    _pendingSupplement = { vente, diff };
+    openSupplementModal(diff, newProduct.article, vente.client, vente.factureNumber);
+  } else {
+    await persistState({ ventes: state.ventes, stock: state.stock, staffAuditLog: state.staffAuditLog });
+    renderSalesHistory();
+    if (currentPage === "stock") renderStock();
+    if (currentPage === "home") renderDashboard();
+    showToast(`"${prevArticle}" → "${vente.article}" · Stock ajuste.`);
+  }
+}
+
+function openSupplementModal(diff, article, client, factureNumber) {
+  document.getElementById("supplement-desc").textContent =
+    `Supplément pour "${article}"${client ? ` · ${client}` : ""}${factureNumber ? ` · ${factureNumber}` : ""}`;
+  document.getElementById("supplement-amount").textContent = `${fmt(diff)} FCFA`;
+  document.querySelectorAll(".supp-pay-input").forEach((i) => { i.value = ""; });
+  document.getElementById("supp-credit-name").value = "";
+  document.getElementById("supp-reste").textContent = `Reste : ${fmt(diff)} FCFA`;
+  document.getElementById("supp-reste").style.color = "#ff8e82";
+  openModal("modal-supplement");
+  document.getElementById("supp-cash")?.focus();
+}
+
+async function confirmSupplement() {
+  if (!_pendingSupplement) return;
+  const { vente, diff } = _pendingSupplement;
+  const inputs = [
+    ["Espèces", "supp-cash"],
+    ["Wave", "supp-wave"],
+    ["Orange Money", "supp-orange"],
+    ["MTN MoMo", "supp-mtn"],
+    ["Carte", "supp-card"],
+    ["Crédit client", "supp-credit"],
+  ].map(([method, id]) => ({ method, amount: Number(document.getElementById(id)?.value) || 0 }))
+    .filter((item) => item.amount > 0);
+  const paid = inputs.reduce((s, i) => s + i.amount, 0);
+  if (!inputs.length) { showToast("Renseignez au moins un montant."); return; }
+  if (Math.round(paid) !== Math.round(diff)) {
+    showToast(`Le total saisi (${fmt(paid)} FCFA) doit etre egal a ${fmt(diff)} FCFA.`);
+    return;
+  }
+  const creditName = document.getElementById("supp-credit-name").value.trim();
+  if (inputs.some((i) => isCreditClientMethod(i.method)) && !creditName) {
+    showToast("Le nom du debiteur est obligatoire pour un credit client.");
+    return;
+  }
+  const paymentMethod = inputs.length > 1 ? "Mixte" : inputs[0].method;
+  // Enregistrer une vente supplementaire pour la difference
+  const suppVente = {
+    id: state.nextId.vente++,
+    siteId: vente.siteId || currentSiteId(),
+    factureNumber: vente.factureNumber,
+    date: vente.date,
+    soldAt: new Date().toISOString(),
+    client: vente.client,
+    table: vente.table,
+    article: vente.article,
+    cat: vente.cat,
+    prix: diff,
+    qty: 1,
+    formatQuantite: 1,
+    packSize: 1,
+    remise: 0,
+    paiement: paymentMethod,
+    paiementDetails: inputs.map((i) => ({ method: i.method, amount: i.amount })),
+    debiteur: creditName || undefined,
+    server: vente.server || sessionUser || "",
+    serveur: vente.serveur || sessionUser || "",
+    note: "Supplément remplacement article",
+  };
+  state.ventes = [suppVente, ...state.ventes];
+  recordStaffAudit(
+    "create", "encaissement",
+    `Supplément · Facture ${vente.factureNumber || ""} · ${vente.client || ""}`,
+    `${fmt(diff)} FCFA · ${paymentMethod}`,
+  );
+  await persistState({ ventes: state.ventes, stock: state.stock, staffAuditLog: state.staffAuditLog, nextId: state.nextId });
+  _pendingSupplement = null;
+  closeModal("modal-supplement");
+  renderSalesHistory();
+  if (currentPage === "stock") renderStock();
+  if (currentPage === "home") renderDashboard();
+  showToast(`Supplément ${fmt(diff)} FCFA encaisse — ${paymentMethod}.`);
 }
 
 function qrLocationLabel(location) {
@@ -12075,6 +12280,8 @@ function closeModal(id) {
   if (id === "modal-finalize") resetFinalizeModalUi();
   if (id === "modal-saisie-rapide") { srCart = []; }
   if (id === "modal-casier-edit") pendingPurchaseCasierResume = false;
+  if (id === "modal-replace-article") { replacingLine = null; replacingVenteId = null; }
+  if (id === "modal-supplement") { _pendingSupplement = null; }
 }
 
 async function removeOrderLine(orderId, lineId) {
@@ -14382,13 +14589,30 @@ function attachEvents() {
     if (e.target.classList.contains("kit-cb")) updateKitCountInfo();
   });
   document.getElementById("confirm-kit-btn")?.addEventListener("click", () => confirmKit().catch(handleApiError));
-  // Remplacement d'article
-  document.getElementById("replace-search")?.addEventListener("input", (e) => renderReplacePicker(e.target.value));
+  // Remplacement d'article (commande en cours OU vente encaissee)
+  document.getElementById("replace-search")?.addEventListener("input", (e) => {
+    if (replacingVenteId != null) {
+      const vente = (state.ventes || []).find((v) => v.id === replacingVenteId);
+      renderReplaceVentePicker(e.target.value, vente);
+    } else {
+      renderReplacePicker(e.target.value);
+    }
+  });
   document.getElementById("replace-picker")?.addEventListener("click", (e) => {
     const item = e.target.closest("[data-pick-replace]");
     if (!item) return;
     const article = decodeURIComponent(item.getAttribute("data-pick-replace") || "");
-    confirmReplace(article).catch(handleApiError);
+    if (replacingVenteId != null) {
+      confirmReplaceVente(article).catch(handleApiError);
+    } else {
+      confirmReplace(article).catch(handleApiError);
+    }
+  });
+  // Bouton Remplacer sur vente encaissee (delegue depuis ventes-list)
+  document.getElementById("ventes-list")?.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-replace-vente]");
+    if (!btn) return;
+    openReplaceVenteModal(Number(btn.dataset.replaceVente));
   });
   document.getElementById("generate-qr-btn").addEventListener("click", renderQrPreview);
   document.getElementById("print-all-qr-btn").addEventListener("click", () => printAllQrTables());
@@ -14433,6 +14657,17 @@ document.getElementById("fab-btn").addEventListener("click", () => {
   document.getElementById("save-vente-btn").addEventListener("click", () => saveOrderLine().catch(handleApiError));
   document.getElementById("finalize-order-btn").addEventListener("click", () => openFinalizeDialog());
   document.getElementById("confirm-finalize-btn").addEventListener("click", () => finalizeOrder(pendingFinalizeOrderId || activeOrderId).catch(handleApiError));
+  // Supplement encaissement (remplacement article prix superieur)
+  document.getElementById("confirm-supplement-btn")?.addEventListener("click", () => confirmSupplement().catch(handleApiError));
+  document.querySelectorAll(".supp-pay-input").forEach((input) => {
+    input.addEventListener("input", () => {
+      const diff = _pendingSupplement?.diff || 0;
+      const paid = [...document.querySelectorAll(".supp-pay-input")].reduce((s, i) => s + (Number(i.value) || 0), 0);
+      const reste = diff - paid;
+      const el = document.getElementById("supp-reste");
+      if (el) { el.textContent = reste === 0 ? "Montant complet" : `Reste : ${fmt(Math.abs(reste))} FCFA${reste < 0 ? " (trop)" : ""}`; el.style.color = reste === 0 ? "#72d7a9" : "#ff8e82"; }
+    });
+  });
   document.getElementById("print-finalize-btn")?.addEventListener("click", () => {
     const n = document.getElementById("print-finalize-btn")?.dataset.facture;
     if (n) printInvoice(n);
