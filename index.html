@@ -378,7 +378,10 @@
               <p class="eyebrow">Suivi operationnel</p>
               <h3>Gestion des commandes</h3>
             </div>
-            <button id="new-order-top-btn" class="btn btn-primary" type="button" style="width:auto">Saisie rapide</button>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <button id="fill-fridge-btn" class="btn btn-outline" type="button" style="width:auto">🧊 Remplir le frigo</button>
+              <button id="new-order-top-btn" class="btn btn-primary" type="button" style="width:auto">Saisie rapide</button>
+            </div>
           </div>
           <div class="pdj-kpis">
             <div class="pdj-kpi">
@@ -604,8 +607,12 @@
           <div class="caisse-shell">
             <div class="caisse-shell-intro">
               <p class="eyebrow">Caisse</p>
-              <h3 class="caisse-shell-title">Recouvrement crédits</h3>
-              <p class="muted caisse-shell-copy">Les ventes encaissées et factures du jour sont visibles dans <strong>Commandes</strong>. Ici : versements et suivi des créances clients.</p>
+              <h3 class="caisse-shell-title">Caisse &amp; Paiement</h3>
+              <p class="muted caisse-shell-copy">Historique des factures encaissées · suivi des crédits et versements clients.</p>
+            </div>
+            <div class="tabs" style="margin-bottom:14px">
+              <button type="button" class="tab" data-caisse-inner="historique" role="tab" aria-selected="false">Historique ventes</button>
+              <button type="button" class="tab active" data-caisse-inner="recouvrement" role="tab" aria-selected="true">Recouvrement crédit</button>
             </div>
 
             <div id="ventes-caisse-panel-historique" class="caisse-inner-panel hidden" role="tabpanel" data-caisse-panel="historique" aria-hidden="true">
@@ -1762,6 +1769,23 @@
     </div>
   </div>
 
+  <!-- REMPLIR LE FRIGO : transfert réserve → frigo, accessible à toutes les serveuses -->
+  <div id="modal-remplir-frigo" class="modal-overlay" aria-hidden="true">
+    <div class="modal">
+      <div class="modal-handle"></div>
+      <div class="section-head">
+        <h3>Remplir le frigo</h3>
+        <button class="icon-btn close-modal" data-close="modal-remplir-frigo" type="button">Fermer</button>
+      </div>
+      <p class="muted" style="margin-bottom:10px;font-size:0.88rem">Transférez des bouteilles depuis la réserve vers le frigo. Seuls les articles ayant du stock en réserve sont listés.</p>
+      <div class="form-group">
+        <label for="frigo-search">Rechercher un article</label>
+        <input id="frigo-search" type="search" placeholder="Nom, catégorie…" autocomplete="off">
+      </div>
+      <div id="frigo-picker" class="vente-article-picker" style="margin-top:6px;max-height:340px;overflow-y:auto"></div>
+    </div>
+  </div>
+
   <!-- SAISIE RAPIDE : menu serveuse multi-articles -->
   <div id="modal-saisie-rapide" class="modal-overlay" aria-hidden="true">
     <div class="modal">
@@ -2388,6 +2412,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=226"></script>
+  <script src="./app-orders.js?v=228"></script>
 </body>
 </html>

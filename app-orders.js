@@ -3121,24 +3121,25 @@ function syncCaisseInnerPanels() {
   const hist = document.getElementById("ventes-caisse-panel-historique");
   const rec = document.getElementById("ventes-caisse-panel-recouvrement");
   if (!rec) return;
-  if (caisseInnerTab === "historique") caisseInnerTab = "recouvrement";
+  const showHistorique = caisseInnerTab === "historique";
   if (hist) {
-    hist.classList.add("hidden");
-    hist.setAttribute("aria-hidden", "true");
+    hist.classList.toggle("hidden", !showHistorique);
+    hist.setAttribute("aria-hidden", showHistorique ? "false" : "true");
   }
-  rec.classList.remove("hidden");
-  rec.setAttribute("aria-hidden", "false");
+  rec.classList.toggle("hidden", showHistorique);
+  rec.setAttribute("aria-hidden", showHistorique ? "true" : "false");
   document.querySelectorAll("[data-caisse-inner]").forEach((btn) => {
     const inner = btn.dataset.caisseInner;
-    const active = inner === "recouvrement";
+    const active = inner === caisseInnerTab;
     btn.classList.toggle("active", active);
     btn.setAttribute("aria-selected", active ? "true" : "false");
   });
+  if (showHistorique) renderSalesHistory();
 }
 
 function setCaisseInnerTab(tab) {
   if (tab !== "historique" && tab !== "recouvrement") return;
-  caisseInnerTab = tab === "historique" ? "recouvrement" : tab;
+  caisseInnerTab = tab;
   syncCaisseInnerPanels();
   syncNavActiveState();
 }
@@ -3667,7 +3668,7 @@ function navigate(page, opts = {}) {
   if (vstab !== undefined && vstab !== null && String(vstab).trim() !== "") ventesSubTab = vstab;
   if (cinner !== undefined && cinner !== null && String(cinner).trim() !== "") {
     const ci = String(cinner).trim();
-    caisseInnerTab = ci === "historique" ? "recouvrement" : ci;
+    caisseInnerTab = ci;
   }
   if (vstab === "caisse" && (cinner === undefined || String(cinner).trim() === "")) caisseInnerTab = "recouvrement";
 
@@ -12396,6 +12397,44 @@ function openReapproModal(itemId, mode = "achat") {
   openModal("modal-reappro");
 }
 
+function openFrigoModal() {
+  const searchEl = document.getElementById("frigo-search");
+  if (searchEl) searchEl.value = "";
+  renderFrigoPicker("");
+  openModal("modal-remplir-frigo");
+  window.requestAnimationFrame(() => searchEl?.focus());
+}
+
+function renderFrigoPicker(query) {
+  const picker = document.getElementById("frigo-picker");
+  if (!picker) return;
+  const q = (query || "").toLowerCase().trim();
+  const items = recordsForSite(state.stock)
+    .filter((item) => {
+      const hasReserve = stockReserve(item) > 0;
+      const matchQ = !q || item.article.toLowerCase().includes(q) || (item.cat || "").toLowerCase().includes(q);
+      return hasReserve && matchQ;
+    })
+    .sort((a, b) => a.article.localeCompare(b.article, "fr"));
+  if (!items.length) {
+    picker.innerHTML = `<p class="muted" style="padding:12px;font-size:0.88rem">${q ? "Aucun article ne correspond." : "Aucun article avec du stock en réserve."}</p>`;
+    return;
+  }
+  picker.innerHTML = items.map((item) => {
+    const frigo = stockFrigo(item);
+    const reserve = stockReserve(item);
+    const frigoLow = isFrigoLowForAlert(frigo, Number(item.seuilMin) || 0);
+    const badge = frigoLow ? `<span class="badge badge-amber" style="font-size:0.7rem;margin-left:4px">Frigo bas</span>` : "";
+    return `<div class="order-line" style="align-items:center;padding:10px 4px;border-bottom:1px solid #f0f0f0">
+      <div style="flex:1">
+        <p class="list-item-title" style="margin:0">${escapeHtml(item.article)}${badge}</p>
+        <p class="list-item-sub" style="margin:2px 0 0">Frigo : <strong>${fmt(frigo)}</strong> btl · Réserve : <strong>${fmt(reserve)}</strong> btl</p>
+      </div>
+      <button type="button" class="btn btn-outline" style="width:auto;padding:6px 14px;font-size:0.85rem" data-fill-frigo-id="${item.id}">Remplir</button>
+    </div>`;
+  }).join("");
+}
+
 async function autoFillFridge(itemId) {
   const item = state.stock.find((i) => i.id === itemId);
   if (!item) return;
@@ -14352,6 +14391,15 @@ function attachEvents() {
     activeOrderId = null;
     resetOrderForm();
     openOrderEditor();
+  });
+  document.getElementById("fill-fridge-btn")?.addEventListener("click", openFrigoModal);
+  document.getElementById("frigo-search")?.addEventListener("input", (e) => renderFrigoPicker(e.target.value));
+  document.getElementById("frigo-picker")?.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-fill-frigo-id]");
+    if (!btn) return;
+    const itemId = Number(btn.dataset.fillFrigoId);
+    closeModal("modal-remplir-frigo");
+    openReapproModal(itemId, "frigo");
   });
   document.getElementById("print-orders-management-btn")?.addEventListener("click", printOrdersManagementList);
   document.getElementById("orders-management-table")?.addEventListener("click", (event) => {
