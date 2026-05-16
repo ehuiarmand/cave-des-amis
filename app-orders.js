@@ -1258,16 +1258,60 @@ function formatCreditPaidAt(p) {
 /** Note affichée / enregistrée pour un versement recouvrement si le champ est vide. */
 const CREDIT_RECOVERY_DEFAULT_NOTE = "Payé";
 
+/** Délai d’affichage de l’historique après solde complet (jours). */
+const CREDIT_HISTORY_SETTLED_RETENTION_DAYS = 3;
+
 function formatCreditRecoveryNote(p) {
   return String(p?.note ?? "").trim() || CREDIT_RECOVERY_DEFAULT_NOTE;
 }
 
-/** Versements visibles dans l’historique recouvrement : débiteur encore dû, ou ayant eu du crédit en vente (historique conservé après solde). */
+function creditRecoveryPaidAtMs(p) {
+  const raw = String(p?.paidAt || p?.createdAt || `${p?.date || ""}T12:00:00`).trim();
+  const t = parseFlexibleDateTime(raw).getTime();
+  return Number.isFinite(t) ? t : 0;
+}
+
+/** Dernier versement enregistré pour un débiteur sur le maquis courant. */
+function debtorLastCreditRecoveryMs(debtorKey, sourceState = state) {
+  const dk = debtorDisplayKey(debtorKey);
+  let max = 0;
+  creditRecoveriesForSite(sourceState).forEach((r) => {
+    if (debtorDisplayKey(r.debiteur) !== dk) return;
+    max = Math.max(max, creditRecoveryPaidAtMs(r));
+  });
+  return max;
+}
+
+function calendarDaysSince(ms) {
+  if (!ms) return 0;
+  const start = new Date(ms);
+  const now = new Date();
+  start.setHours(0, 0, 0, 0);
+  now.setHours(0, 0, 0, 0);
+  return Math.floor((now - start) / 86400000);
+}
+
+/** Débiteur soldé depuis plus de N jours calendaires (dernier versement). */
+function isDebtorSettledBeyondHistoryRetention(debtorKey, sourceState = state, retentionDays = CREDIT_HISTORY_SETTLED_RETENTION_DAYS) {
+  const dk = debtorDisplayKey(debtorKey);
+  if (Math.round(Number(creditOutstandingMap(sourceState)[dk]) || 0) > 0) return false;
+  if (issuedCreditTotalForDebtor(dk, sourceState) <= 0) return false;
+  const lastMs = debtorLastCreditRecoveryMs(dk, sourceState);
+  if (!lastMs) return false;
+  return calendarDaysSince(lastMs) > Math.max(1, retentionDays);
+}
+
+/**
+ * Versements visibles dans l’historique :
+ * - dette encore ouverte → toujours ;
+ * - solde complet → masqué après CREDIT_HISTORY_SETTLED_RETENTION_DAYS depuis le dernier versement.
+ */
 function isCreditRecoveryVisibleInHistoryUi(p, sourceState = state) {
   const dk = debtorDisplayKey(p.debiteur);
   const remaining = Math.round(Number(creditOutstandingMap(sourceState)[dk]) || 0);
   if (remaining > 0) return true;
-  return issuedCreditTotalForDebtor(dk, sourceState) > 0;
+  if (issuedCreditTotalForDebtor(dk, sourceState) <= 0) return false;
+  return !isDebtorSettledBeyondHistoryRetention(dk, sourceState);
 }
 
 function creditRecoveriesForHistoryUi(sourceState = state) {
@@ -1331,7 +1375,7 @@ function buildCreditRecoveryHistoryHtml() {
         <tbody>${rows}</tbody>
       </table>
     </div>
-    <p class="muted" style="font-size:0.78rem;margin-top:8px;line-height:1.4">Liste des versements pour les clients ayant eu du crédit sur les ventes de ce maquis (y compris après solde complet). Les encaissements sans vente « crédit client » correspondante ne s’affichent pas ici.</p>
+    <p class="muted" style="font-size:0.78rem;margin-top:8px;line-height:1.4">Versements liés à des ventes « crédit client » de ce maquis. Après solde complet, l’historique d’un client disparaît ${CREDIT_HISTORY_SETTLED_RETENTION_DAYS} jours après son dernier paiement. Les encaissements sans vente crédit correspondante ne s’affichent pas ici.</p>
   </div>`;
 }
 
@@ -10987,7 +11031,7 @@ function renderCreditRecovery() {
   if (!entries.length) {
     list.innerHTML = `
       <div class="muted" style="margin-bottom:14px;padding:12px;border:1px solid var(--border);border-radius:8px;font-size:0.92rem">
-        <strong>Aucun solde débiteur actif</strong> — soit tous les crédits sont soldés, soit aucune vente n’a été encaissée en « Crédit client » pour ce maquis. Les versements enregistrés restent visibles dans l’historique ci‑dessous pour les clients concernés.
+        <strong>Aucun solde débiteur actif</strong> — soit tous les crédits sont soldés, soit aucune vente n’a été encaissée en « Crédit client » pour ce maquis. L’historique ci‑dessous affiche les versements récents (clients soldés : ${CREDIT_HISTORY_SETTLED_RETENTION_DAYS} jours après le dernier paiement).
       </div>
       ${historyHtml}`;
     return;
