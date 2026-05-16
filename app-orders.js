@@ -452,7 +452,7 @@ function exportHtmlReport() {
     if (qte <= 0) { statut = "RUPTURE"; sc = "#b71c1c"; bg = "#ffebee"; }
     else if (qte <= Number(item.seuilMin || 0)) { statut = "CRITIQUE"; sc = "#b71c1c"; bg = "#ffebee"; }
     else if (qte <= Number(item.seuilMin || 0) * 2) { statut = "FAIBLE"; sc = "#e65100"; bg = "#fff3e0"; }
-    const valeur = stockPurchaseValueFcfa(item, site);
+    const valeur = stockPurchaseValueFcfa(item);
     return `<tr style="background:${bg}">
       <td><strong>${escapeHtml(item.article || "—")}</strong></td>
       <td style="color:#555">${escapeHtml(item.cat || "—")}</td>
@@ -619,7 +619,7 @@ function exportHtmlReport() {
         <thead><tr>
           <th>Article</th><th>Catégorie</th>
           <th style="text-align:center">Qté actuelle</th><th style="text-align:center">Seuil min.</th>
-          <th style="text-align:right">Prix achat</th><th style="text-align:right">Marge pot.</th>
+          <th style="text-align:right">Prix achat</th><th style="text-align:right">Valeur stock</th>
           <th style="text-align:center">Statut</th>
         </tr></thead>
         <tbody>${rowsStock}</tbody>
@@ -4147,12 +4147,10 @@ function stockRetailValueFcfa(item, site = currentSite(), asOfDate = today()) {
   return Math.round(Math.max(0, btl) * unit);
 }
 
-/** Marge potentielle du stock : (prix_vente - prix_achat) par bouteille × stock actuel. */
-function stockPurchaseValueFcfa(item, site = currentSite(), asOfDate = today()) {
+/** Valeur du stock au coût d'achat : bouteilles en stock × (prixAchat casier ÷ unités par casier). */
+function stockPurchaseValueFcfa(item) {
   const btl = Math.max(0, stockActuel(item));
-  const prixVente = stockRetailUnitPricePerBottle(item, site, asOfDate);
-  const prixAchat = prixAchatParBouteille(item);
-  return Math.round(btl * Math.max(0, prixVente - prixAchat));
+  return Math.round(btl * prixAchatParBouteille(item));
 }
 
 function saleFormatLabel(format) {
@@ -7872,9 +7870,8 @@ function renderStock() {
   }
   const dualPricing = siteUsesDualZonePricing(site);
   const globalSeuil = Number(site?.seuilStock) || 5;
-  // Marge potentielle totale sur TOUS les articles (pas seulement le filtre).
-  const priceDay = today();
-  const totalValue = allItems.reduce((sum, item) => sum + stockPurchaseValueFcfa(item, site, priceDay), 0);
+  // Valeur totale au coût d'achat sur TOUS les articles (pas seulement le filtre).
+  const totalValue = allItems.reduce((sum, item) => sum + stockPurchaseValueFcfa(item), 0);
   let nbAlerte = 0;
   let nbOk = 0;
 
@@ -7882,7 +7879,7 @@ function renderStock() {
     const actuel = stockActuel(item);
     const frigo = stockFrigo(item);
     const reserve = stockReserve(item);
-    const valeur = stockPurchaseValueFcfa(item, site, priceDay);
+    const valeur = stockPurchaseValueFcfa(item);
     const seuilFrigo = Number(item.seuilMin) || globalSeuil;
     const isFrigoLow = isFrigoLowForAlert(frigo, seuilFrigo);
     const seuilArticle = Number(item.seuilMin) || 0;
@@ -7986,7 +7983,7 @@ function renderStock() {
             : `<th class="th-orange scd" style="text-align:right">Prix vente</th>
             <th class="th-orange scd" style="text-align:right">Marge / btl.</th>
             <th class="th-orange scd" style="text-align:right">Marge / cas.</th>`}
-            <th class="th-blue scd" style="text-align:right">Marge pot.</th>
+            <th class="th-blue scd" style="text-align:right">Valeur stock</th>
             <th class="th-blue">Statut</th>
             <th class="th-blue">MAJ</th>
             <th></th>
@@ -12710,7 +12707,7 @@ function printStockReport() {
     showToast("Impossible d'ouvrir l'impression.");
     return;
   }
-  ticketWindow.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>Point du stock</title><style>body{font-family:Arial,sans-serif;color:#111;padding:28px}header{display:flex;justify-content:space-between;gap:18px;border-bottom:2px solid #111;padding-bottom:14px;margin-bottom:18px}h1,h2,p{margin:0 0 8px}.meta{color:#555}.summary{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:16px 0}.box{border:1px solid #111;padding:12px}.box strong{display:block;font-size:18px;margin-top:4px}table{width:100%;border-collapse:collapse;margin-top:12px;font-size:12px}th,td{border-bottom:1px solid #ddd;padding:7px 6px;text-align:left}th{background:#f2f2f2}td:nth-child(n+3){text-align:right}td:last-child{text-align:left}@media print{body{padding:0}table{font-size:10px}}</style></head><body><header><div><h1>${escapeHtml(site?.nom || "Maquis")}</h1><p>${escapeHtml(site?.ville || "")} ${escapeHtml(site?.pays || "")}</p></div><div><h2>Point du stock</h2><p class="meta">Imprime le ${escapeHtml(formatDateTimeDdMmYyyy(new Date()))}</p></div></header><div class="summary"><div class="box">Articles<strong>${fmt(items.length)}</strong></div><div class="box">Marge potentielle<strong>${fmt(totalValue)} FCFA</strong></div><div class="box">Articles en alerte<strong>${fmt(alertCount)}</strong></div></div><table><thead><tr><th>Article</th><th>Categorie</th><th>Btl/kit</th><th>Btl/casier</th><th>Frigo</th><th>Reserve</th><th>Initial cas.</th><th>Entrees cas.</th><th>Sorties btl</th><th>Stock btl</th><th>Seuil</th><th>Achat/cas.</th><th>Vente int.</th><th>Vente ext.</th><th>Marge pot.</th><th>Statut</th></tr></thead><tbody>${rows}</tbody></table><script>window.onload=function(){window.print();}</script></body></html>`);
+  ticketWindow.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>Point du stock</title><style>body{font-family:Arial,sans-serif;color:#111;padding:28px}header{display:flex;justify-content:space-between;gap:18px;border-bottom:2px solid #111;padding-bottom:14px;margin-bottom:18px}h1,h2,p{margin:0 0 8px}.meta{color:#555}.summary{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:16px 0}.box{border:1px solid #111;padding:12px}.box strong{display:block;font-size:18px;margin-top:4px}table{width:100%;border-collapse:collapse;margin-top:12px;font-size:12px}th,td{border-bottom:1px solid #ddd;padding:7px 6px;text-align:left}th{background:#f2f2f2}td:nth-child(n+3){text-align:right}td:last-child{text-align:left}@media print{body{padding:0}table{font-size:10px}}</style></head><body><header><div><h1>${escapeHtml(site?.nom || "Maquis")}</h1><p>${escapeHtml(site?.ville || "")} ${escapeHtml(site?.pays || "")}</p></div><div><h2>Point du stock</h2><p class="meta">Imprime le ${escapeHtml(formatDateTimeDdMmYyyy(new Date()))}</p></div></header><div class="summary"><div class="box">Articles<strong>${fmt(items.length)}</strong></div><div class="box">Valeur du stock<strong>${fmt(totalValue)} FCFA</strong></div><div class="box">Articles en alerte<strong>${fmt(alertCount)}</strong></div></div><table><thead><tr><th>Article</th><th>Categorie</th><th>Btl/kit</th><th>Btl/casier</th><th>Frigo</th><th>Reserve</th><th>Initial cas.</th><th>Entrees cas.</th><th>Sorties btl</th><th>Stock btl</th><th>Seuil</th><th>Achat/cas.</th><th>Vente int.</th><th>Vente ext.</th><th>Valeur stock</th><th>Statut</th></tr></thead><tbody>${rows}</tbody></table><script>window.onload=function(){window.print();}</script></body></html>`);
   ticketWindow.document.close();
 }
 
