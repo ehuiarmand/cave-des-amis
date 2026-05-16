@@ -4638,14 +4638,6 @@ function dayBookNeedsCashOpening(book) {
   return true;
 }
 
-function addCalendarDaysIso(isoDateStr, days) {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(isoDateStr || "").slice(0, 10));
-  if (!m) return today();
-  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
-  d.setDate(d.getDate() + days);
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-}
-
 /**
  * Après une clôture : ouvre automatiquement la journée suivante (fonds = caisse à la fermeture)
  * et bascule la date comptable active — sans formulaire « Ouvrir la journée ».
@@ -4710,6 +4702,49 @@ function autoOpenNextAccountingDayAfterClose(siteId, closedDateStr, closingCashF
   pdjBrowseConsultationOnly = false;
 
   return { nextDate, pdjMap };
+}
+
+let _dayBookAutoOpenPersistTimer = null;
+
+function schedulePersistAutoOpenedDayBooks() {
+  clearTimeout(_dayBookAutoOpenPersistTimer);
+  _dayBookAutoOpenPersistTimer = setTimeout(() => {
+    _dayBookAutoOpenPersistTimer = null;
+    persistStatePatch({
+      dayBooks: state.dayBooks,
+      pdjWorkDateBySite: state.pdjWorkDateBySite,
+    }).catch((e) => console.error(e));
+  }, 350);
+}
+
+/** Date de la veille clôturée (stockCheck), ou null. */
+function previousClosedJournalDate(dateStr, siteId = currentSiteId()) {
+  const prev = addCalendarDaysIso(dateStr, -1);
+  return stockCheckForSiteDate(prev, siteId) ? prev : null;
+}
+
+/**
+ * Ouvre `dateStr` si la journée précédente est clôturée (reprise du dénombrement de fermeture).
+ * @returns {boolean} true si la journée est ouverte (déjà ou venant d'être ouverte)
+ */
+function ensureAccountingDayOpenedFromPreviousClose(siteId, dateStr) {
+  if (!PDJ_REQUIRE_CASH_OPENING || !siteId || !dateStr) return false;
+  if (stockCheckForSiteDate(dateStr, siteId)) return false;
+  if (!dayBookNeedsCashOpening(dayBookFor(dateStr, siteId))) return true;
+  const prevClosed = previousClosedJournalDate(dateStr, siteId);
+  if (!prevClosed) return false;
+  const block = blockingJournalBeforeOpeningNewDate(dateStr, siteId);
+  if (block && block !== dateStr) return false;
+  const prevCheck = stockCheckForSiteDate(prevClosed, siteId);
+  const closingCash = Number(prevCheck?.closingCashFcfa);
+  const amount = Number.isFinite(closingCash)
+    ? closingCash
+    : Number(prevCheck?.expectedEspecesCash) || 0;
+  const res = autoOpenNextAccountingDayAfterClose(siteId, prevClosed, amount, {
+    actorLabel: "reprise auto",
+  });
+  if (res) schedulePersistAutoOpenedDayBooks();
+  return Boolean(res);
 }
 
 /** Stock à l'ouverture enregistré lors de l'ouverture caisse (cliché) — base du théorique pour la journée `dayBook.date`. */
@@ -4831,8 +4866,20 @@ function renderCashOpeningPanel() {
   const siteId = currentSiteId();
   const ventesForDate = recordsForSite(state.ventes).filter((v) => v.date.slice(0, 10) === dStr);
   const closed = stockCheckForSiteDate(dStr, siteId);
-  const book = dayBookFor(dStr, siteId);
-  const needs = dayBookNeedsCashOpening(book);
+  let book = dayBookFor(dStr, siteId);
+  let needs = dayBookNeedsCashOpening(book);
+  if (!closed && needs) {
+    const autoOpened = ensureAccountingDayOpenedFromPreviousClose(siteId, dStr);
+    book = dayBookFor(dStr, siteId);
+    needs = dayBookNeedsCashOpening(book);
+    if (autoOpened && !needs) {
+      requestAnimationFrame(() => {
+        renderDailyStockCheck();
+        updateCloseDayButtonLabel();
+        updatePdjSubTabHints();
+      });
+    }
+  }
   if (lockBlock) {
     lockBlock.classList.toggle("pdj-main--locked", needs && canManagePdjAccounting());
   }
@@ -4880,9 +4927,30 @@ function renderCashOpeningPanel() {
         <p class="muted" style="margin-top:8px;font-size:0.88rem;line-height:1.45">
           Les ventes sont autorisées pour cette date jusqu'à la <strong>clôture</strong> (vérification stock et caisse ci‑dessous).
           Enregistré ${escapeHtml(formatDateTimeDdMmYyyy(book.openingRecordedAt || book.openedAt))}
-          ${book.openingRecordedBy ? ` · ${escapeHtml(book.openingRecordedBy)}` : ""}
+          ${book.openingRecordedBy ? ` · ${escapeHtml(book.openingRecordedBy)}` : ""}${book.autoOpenedFromClose ? ` · Ouverture auto après clôture du ${escapeHtml(formatDateDdMmYyyy(book.autoOpenedFromDate || ""))}` : ""}
         </p>
       </div>`;
+    return;
+  }
+  const prevWasClosed = previousClosedJournalDate(dStr, siteId);
+  if (needs && prevWasClosed) {
+    const block = blockingJournalBeforeOpeningNewDate(dStr, siteId);
+    container.removeAttribute("data-pdj-opening-fp");
+    container.innerHTML = block && block !== dStr
+      ? `<div class="pdj-opening-card" style="border-left:3px solid #ff8e82;background:#fff8f7">
+          <p class="eyebrow" style="margin-bottom:4px">Ouverture automatique</p>
+          <strong>Clôturez d'abord le ${escapeHtml(formatDateDdMmYyyy(block))}</strong>
+          <p class="muted" style="margin-top:8px;line-height:1.45">
+            La journée du ${escapeHtml(formatDateDdMmYyyy(dStr))} reprendra le fonds de caisse de la veille dès que les journées précédentes seront clôturées.
+          </p>
+        </div>`
+      : `<div class="pdj-opening-card pdj-opening-card--done" style="border-left:3px solid #1565c0;background:#f4f8ff">
+          <p class="eyebrow" style="margin-bottom:4px">Ouverture automatique</p>
+          <strong>Reprise après clôture du ${escapeHtml(formatDateDdMmYyyy(prevWasClosed))}</strong>
+          <p class="muted" style="margin-top:8px;line-height:1.45">
+            La caisse est reprise du dénombrement de fermeture. Rechargez la page (Ctrl+F5) si le stock de clôture n'apparaît pas encore.
+          </p>
+        </div>`;
     return;
   }
   const draftKey = pdjOpeningCashDraftKey(siteId, dStr);
@@ -5370,7 +5438,11 @@ function renderDailyStockCheck() {
   const items = recordsForSite(state.stock).slice().sort((a, b) => a.article.localeCompare(b.article, "fr"));
   const dStr = pdjCalendarDate();
   const closed = stockCheckForSiteDate(dStr, currentSiteId());
-  const dayBook = dayBookFor(dStr, currentSiteId());
+  let dayBook = dayBookFor(dStr, currentSiteId());
+  if (!closed && dayBookNeedsCashOpening(dayBook)) {
+    ensureAccountingDayOpenedFromPreviousClose(currentSiteId(), dStr);
+    dayBook = dayBookFor(dStr, currentSiteId());
+  }
   const pendingForClose = pendingOrdersForJournalDate(dStr, currentSiteId());
   const closeBlockedByPending = pendingForClose.length > 0;
   const container = document.getElementById("pdj-stock-check");
@@ -11611,12 +11683,19 @@ async function closeAccountingDay() {
   const pendingForClose = pendingOrdersForJournalDate(dStr, currentSiteId());
   // Ne pas comparer dStr à today() : la journée ouverte peut être la veille (nuit / décalage)
   // jusqu'à clôture — seuls les admins peuvent choisir une autre date via le sélecteur PDJ.
-  const dayBook = dayBookFor(dStr, currentSiteId());
+  let dayBook = dayBookFor(dStr, currentSiteId());
   const isPastDateCorrection = dStr !== today() && canAnyAdmin();
   if (!isPastDateCorrection && PDJ_REQUIRE_CASH_OPENING && (!dayBook || dayBookNeedsCashOpening(dayBook))) {
-    showToast(dStr === today()
-      ? "Enregistrez d'abord l'ouverture de caisse pour aujourd'hui."
-      : "Enregistrez d'abord l'ouverture de caisse pour cette journee.");
+    ensureAccountingDayOpenedFromPreviousClose(currentSiteId(), dStr);
+    dayBook = dayBookFor(dStr, currentSiteId());
+  }
+  if (!isPastDateCorrection && PDJ_REQUIRE_CASH_OPENING && (!dayBook || dayBookNeedsCashOpening(dayBook))) {
+    const prevClosed = previousClosedJournalDate(dStr, currentSiteId());
+    showToast(prevClosed
+      ? `La journée du ${formatDateDdMmYyyy(dStr)} doit être ouverte automatiquement après la clôture du ${formatDateDdMmYyyy(prevClosed)}. Rechargez la page (Ctrl+F5).`
+      : dStr === today()
+        ? "Enregistrez d'abord l'ouverture de caisse pour aujourd'hui."
+        : "Enregistrez d'abord l'ouverture de caisse pour cette journee.");
     return;
   }
   if (pendingForClose.length) {
