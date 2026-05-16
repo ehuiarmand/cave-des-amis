@@ -616,6 +616,26 @@
             </div>
 
             <div id="ventes-caisse-panel-historique" class="caisse-inner-panel hidden" role="tabpanel" data-caisse-panel="historique" aria-hidden="true">
+
+              <!-- Remplacement d'article via sélecteur de facture -->
+              <div style="border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:18px">
+                <p class="eyebrow" style="margin-bottom:10px">Remplacer un article encaissé</p>
+                <div class="form-group" style="margin-bottom:0">
+                  <label for="replace-facture-select">Facture concernée</label>
+                  <select id="replace-facture-select">
+                    <option value="">— Sélectionnez une facture —</option>
+                  </select>
+                  <p class="muted" style="margin:6px 0 0;font-size:0.82rem">Factures de la <strong>journée comptable en cours</strong>. Sélectionnez une facture pour voir ses articles et cliquez <strong>Remplacer</strong> sur la ligne souhaitée.</p>
+                </div>
+                <div id="replace-facture-lines-wrap" class="hidden" style="margin-top:12px;border:1px solid var(--border);border-radius:8px;padding:10px;max-height:260px;overflow:auto">
+                  <p class="eyebrow" style="margin:0 0 8px;font-size:0.75rem">Lignes de la facture</p>
+                  <table class="data-table" style="width:100%;font-size:0.88rem">
+                    <thead><tr><th>Article</th><th>Qté</th><th style="text-align:right">Prix unit.</th><th style="text-align:right">Total</th><th></th></tr></thead>
+                    <tbody id="replace-facture-lines"></tbody>
+                  </table>
+                </div>
+              </div>
+
               <div class="section-head">
                 <h3>Historique des ventes finalisees</h3>
                 <span class="section-meta">Factures clôturées</span>
@@ -1708,6 +1728,10 @@
         <button class="icon-btn close-modal" data-close="modal-replace-article" type="button">Fermer</button>
       </div>
       <p id="replace-current-info" class="muted" style="margin-bottom:10px"></p>
+      <div id="replace-qty-wrap" style="display:none;margin-bottom:12px">
+        <label for="replace-qty" style="font-size:0.87rem;font-weight:600;display:block;margin-bottom:4px">Quantité à remplacer</label>
+        <input id="replace-qty" type="number" min="1" value="1" inputmode="numeric" style="width:90px;text-align:center;padding:6px 10px;border:1.5px solid #90caf9;border-radius:8px;font-size:1rem;font-weight:700;color:#1565c0">
+      </div>
       <div class="form-group">
         <label for="replace-search">Nouveau produit — clic pour remplacer</label>
         <input id="replace-search" type="search" placeholder="Nom, categorie..." autocomplete="off">
@@ -2412,6 +2436,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=229"></script>
+  <script src="./app-orders.js?v=233"></script>
 </body>
 </html>

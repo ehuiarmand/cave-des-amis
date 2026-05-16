@@ -4438,12 +4438,19 @@ async function recordCashOpening() {
   } else if (dateStr === today() && (String(currentRole || "").trim() === "manager" || canSiteAdmin())) {
     delete pdjMapOpen[siteId];
   }
-  await persistState({ dayBooks: state.dayBooks, pdjWorkDateBySite: pdjMapOpen });
-  delete pdjOpeningCashDraftBySiteDate[pdjOpeningCashDraftKey(siteId, dateStr)];
-  pdjSubTab = "synthese";
-  renderPointDuJour();
-  setPdjSubTab("synthese");
-  showToast("Ouverture de caisse enregistrée. Consultez la synthèse ou clôturez en fin de journée.");
+  const openCashBtn = document.getElementById("pdj-opening-submit");
+  const prevOpenText = openCashBtn ? openCashBtn.textContent : "";
+  if (openCashBtn) { openCashBtn.disabled = true; openCashBtn.textContent = "Enregistrement…"; }
+  try {
+    await persistState({ dayBooks: state.dayBooks, pdjWorkDateBySite: pdjMapOpen });
+    delete pdjOpeningCashDraftBySiteDate[pdjOpeningCashDraftKey(siteId, dateStr)];
+    pdjSubTab = "synthese";
+    renderPointDuJour();
+    setPdjSubTab("synthese");
+    showToast("Ouverture de caisse enregistrée. Consultez la synthèse ou clôturez en fin de journée.");
+  } finally {
+    if (openCashBtn) { openCashBtn.disabled = false; openCashBtn.textContent = prevOpenText; }
+  }
 }
 
 function renderCashOpeningPanel() {
@@ -5703,6 +5710,7 @@ function salesForHistory() {
 function renderSalesHistory() {
   const histPanel = document.getElementById("ventes-caisse-panel-historique");
   if (!histPanel || histPanel.classList.contains("hidden")) return;
+  populateReplaceFactureSelect();
   renderTabs();
   const ventes = salesForHistory().slice().sort((a, b) => b.date.localeCompare(a.date));
   const invoices = new Map();
@@ -5937,6 +5945,60 @@ function paidOrdersFromSales() {
 function paidOrdersFromSalesForCurrentAccountingDay() {
   const d = pdjCalendarDate();
   return paidOrdersFromSales().filter((o) => String(o.date || "").trim().slice(0, 10) === d);
+}
+
+function populateReplaceFactureSelect() {
+  const sel = document.getElementById("replace-facture-select");
+  if (!sel) return;
+  const prev = sel.value;
+  const orders = paidOrdersFromSalesForCurrentAccountingDay()
+    .slice()
+    .sort((a, b) => String(b.factureNumber || "").localeCompare(String(a.factureNumber || "")));
+  const opts = [`<option value="">— Sélectionnez une facture —</option>`];
+  for (const o of orders) {
+    const key = escapeHtml(String(o.id));
+    const num = escapeHtml(String(o.factureNumber || o.id));
+    const cli = escapeHtml(String(o.client || o.table || "Comptoir").slice(0, 32));
+    const tot = fmt(o.lignes.reduce((s, l) => s + calcNet(l), 0));
+    opts.push(`<option value="${key}">${num} · ${cli} · ${tot} FCFA</option>`);
+  }
+  sel.innerHTML = opts.join("");
+  if (prev && orders.some((o) => String(o.id) === prev)) sel.value = prev;
+  else sel.value = "";
+  renderReplaceFactureLines(sel.value);
+}
+
+function renderReplaceFactureLines(factureKey) {
+  const wrap = document.getElementById("replace-facture-lines-wrap");
+  const tbody = document.getElementById("replace-facture-lines");
+  if (!wrap || !tbody) return;
+  if (!factureKey) {
+    wrap.classList.add("hidden");
+    tbody.innerHTML = "";
+    return;
+  }
+  const order = paidOrdersFromSalesForCurrentAccountingDay().find((o) => String(o.id) === String(factureKey));
+  if (!order?.lignes?.length) {
+    wrap.classList.add("hidden");
+    tbody.innerHTML = "";
+    return;
+  }
+  const wd = workingDate();
+  const dayOpen = wd && !stockCheckForSiteDate(wd, currentSiteId());
+  tbody.innerHTML = order.lignes.map((v) => {
+    const total = calcNet(v);
+    const replaceCell = sessionUser && dayOpen
+      ? `<button type="button" class="mini-btn" data-replace-vente="${v.id}" style="white-space:nowrap">Remplacer</button>`
+      : `<span class="muted" style="font-size:0.8rem">Journée clôturée</span>`;
+    return `<tr>
+      <td><strong>${escapeHtml(v.article)}</strong></td>
+      <td>${escapeHtml(String(v.qty || 1))}</td>
+      <td style="text-align:right">${fmt(v.prix)} FCFA</td>
+      <td style="text-align:right">${fmt(total)} FCFA</td>
+      <td style="text-align:right;padding-left:8px">${replaceCell}</td>
+    </tr>`;
+  }).join("");
+  wrap.classList.remove("hidden");
 }
 
 function managementOrders() {
@@ -6782,8 +6844,15 @@ function renderConsignes() {
 
 async function saveConsigne() {
   const multi = readConsigneFactureReliquatInputs();
+  const consigneBtn = document.getElementById("save-consigne-btn");
+  const prevConsigneText = consigneBtn ? consigneBtn.textContent : "";
   if (multi.length) {
-    await saveConsignesMultiFromFacture(multi);
+    if (consigneBtn) { consigneBtn.disabled = true; consigneBtn.textContent = "Enregistrement…"; }
+    try {
+      await saveConsignesMultiFromFacture(multi);
+    } finally {
+      if (consigneBtn) { consigneBtn.disabled = false; consigneBtn.textContent = prevConsigneText; }
+    }
     return;
   }
 
@@ -6821,17 +6890,22 @@ async function saveConsigne() {
   });
   const localConsignes = [...state.consignes];
   const localNextId = { ...state.nextId };
-  await persistState({ consignes: localConsignes, nextId: localNextId });
-  if (!state.consignes?.length) state.consignes = localConsignes;
-  if (!state.nextId?.consigne) state.nextId = { ...state.nextId, ...localNextId };
-  document.getElementById("consigne-form-wrap")?.classList.add("hidden");
-  resetConsigneForm();
-  renderConsignes();
-  showToast(
-    reliquatProchaineVisite
-      ? "Reliquat enregistré : le client pourra consommer le reste à une prochaine visite."
-      : "Consigne bouteille (dépôt) enregistrée — retour physique à suivre.",
-  );
+  if (consigneBtn) { consigneBtn.disabled = true; consigneBtn.textContent = "Enregistrement…"; }
+  try {
+    await persistState({ consignes: localConsignes, nextId: localNextId });
+    if (!state.consignes?.length) state.consignes = localConsignes;
+    if (!state.nextId?.consigne) state.nextId = { ...state.nextId, ...localNextId };
+    document.getElementById("consigne-form-wrap")?.classList.add("hidden");
+    resetConsigneForm();
+    renderConsignes();
+    showToast(
+      reliquatProchaineVisite
+        ? "Reliquat enregistré : le client pourra consommer le reste à une prochaine visite."
+        : "Consigne bouteille (dépôt) enregistrée — retour physique à suivre.",
+    );
+  } finally {
+    if (consigneBtn) { consigneBtn.disabled = false; consigneBtn.textContent = prevConsigneText; }
+  }
 }
 
 async function returnConsigne(id) {
@@ -7046,6 +7120,8 @@ function openReplaceModal(orderId, lineId) {
       + `${order.client ? ` · ${escapeHtml(order.client)}` : ""}`
       + `<br><span class="muted" style="font-size:0.82rem">Cliquez sur le nouveau produit : la ligne est mise a jour tout de suite (avant encaissement).</span>`;
   }
+  const qtyWrapCmd = document.getElementById("replace-qty-wrap");
+  if (qtyWrapCmd) qtyWrapCmd.style.display = "none";
   const searchEl = document.getElementById("replace-search");
   if (searchEl) searchEl.value = "";
   renderReplacePicker("");
@@ -7148,6 +7224,10 @@ function openReplaceVenteModal(venteId) {
       + ` · Facture ${escapeHtml(vente.factureNumber || "")}`
       + `<br><span class="muted" style="font-size:0.82rem">Le stock de l'ancien article sera restitue, le prix et le stock du nouveau seront appliques.</span>`;
   }
+  const qtyWrap = document.getElementById("replace-qty-wrap");
+  const qtyInput = document.getElementById("replace-qty");
+  if (qtyWrap) qtyWrap.style.display = "";
+  if (qtyInput) qtyInput.value = String(Number(vente.qty) || 1);
   const searchEl = document.getElementById("replace-search");
   if (searchEl) searchEl.value = "";
   renderReplaceVentePicker("", vente);
@@ -7200,60 +7280,71 @@ async function confirmReplaceVente(newArticleName) {
     showToast("Choisissez un produit different.");
     return;
   }
+  // Quantite saisie dans le champ du modal (peut etre differente de l'originale)
+  const qtyInput = document.getElementById("replace-qty");
+  const newQty = Math.max(1, Math.floor(Number(qtyInput?.value) || Number(vente.qty) || 1));
+  const originalQty = Number(vente.qty) || 1;
   const newProduct = findKnownProduct(article, vente.date);
   if (!newProduct) {
     showToast("Produit introuvable dans le catalogue.");
     return;
   }
   const oldStockItem = stockItemForArticle(vente.article, siteId);
-  const bottles = lineBottleQty(vente, oldStockItem);
+  // Bouteilles a restituer (basees sur la quantite originale de la vente)
+  const oldBottles = lineBottleQty(vente, oldStockItem);
   const newStockItem = stockItemForArticle(newProduct.article, siteId);
   if (!newStockItem) {
     showToast(`Article "${newProduct.article}" sans fiche stock.`);
     return;
   }
-  if (availableStock(newStockItem) < bottles) {
-    showToast(`Stock insuffisant pour ${newProduct.article}. Disponible : ${fmt(availableStock(newStockItem))} bouteille(s).`);
+  const newFormat = saleFormatForLine({ ...vente, qty: newQty }, newProduct, vente.date);
+  const newFormatQty = Math.max(1, Number(newFormat?.quantite) || 1);
+  const newBottles = newQty * newFormatQty;
+  if (availableStock(newStockItem) < newBottles) {
+    showToast(`Stock insuffisant pour ${newProduct.article}. Disponible : ${fmt(availableStock(newStockItem))} bouteille(s) (besoin : ${fmt(newBottles)}).`);
     return;
   }
-  const newFormat = saleFormatForLine(vente, newProduct, vente.date);
   const newPrix = formatPrice(newFormat, vente.location || "Intérieur");
   const prevArticle = vente.article;
   const prevPrix = Number(vente.prix) || 0;
-  const qty = Number(vente.qty) || 1;
-  const diff = Math.round((newPrix - prevPrix) * qty);
-  const prixLine = newPrix !== prevPrix
-    ? `\nPrix : ${fmt(prevPrix)} → ${fmt(newPrix)} FCFA`
-    + (diff > 0 ? ` — supplément ${fmt(diff)} FCFA à encaisser` : ` — différence ${fmt(Math.abs(diff))} FCFA`)
+  const oldTotal = prevPrix * originalQty;
+  const newTotal = newPrix * newQty;
+  const diff = Math.round(newTotal - oldTotal);
+  const qtyLine = newQty !== originalQty ? `\nQuantité : ${originalQty} → ${newQty}` : "";
+  const prixLine = (newPrix !== prevPrix || newQty !== originalQty)
+    ? `\nMontant : ${fmt(prevPrix)} × ${originalQty} = ${fmt(oldTotal)} FCFA → ${fmt(newPrix)} × ${newQty} = ${fmt(newTotal)} FCFA`
+    + (diff > 0 ? ` — supplément ${fmt(diff)} FCFA à encaisser` : diff < 0 ? ` — différence ${fmt(Math.abs(diff))} FCFA` : "")
     : "";
   if (!window.confirm(
     `Remplacer "${prevArticle}" par "${newProduct.article}" sur la facture ${vente.factureNumber || "#" + vente.id} ?`
-    + `\n\nStock restitué : ${prevArticle} +${bottles} btl\nStock débité : ${newProduct.article} -${bottles} btl`
+    + `${qtyLine}\nStock restitué : ${prevArticle} +${oldBottles} btl\nStock débité : ${newProduct.article} -${newBottles} btl`
     + prixLine,
   )) return;
-  // Restituer le stock de l'ancien article
+  // Restituer le stock de l'ancien article (quantite originale)
   if (oldStockItem) {
-    oldStockItem.sorties = Math.max(0, (Number(oldStockItem.sorties) || 0) - bottles);
-    oldStockItem.frigo = (Number(oldStockItem.frigo) || 0) + bottles;
+    oldStockItem.sorties = Math.max(0, (Number(oldStockItem.sorties) || 0) - oldBottles);
+    oldStockItem.frigo = (Number(oldStockItem.frigo) || 0) + oldBottles;
   }
-  // Consommer le stock du nouvel article
-  newStockItem.sorties = (Number(newStockItem.sorties) || 0) + bottles;
+  // Consommer le stock du nouvel article (nouvelle quantite)
+  newStockItem.sorties = (Number(newStockItem.sorties) || 0) + newBottles;
   newStockItem.lastSortieAt = new Date().toISOString();
   newStockItem.lastSortieBy = sessionUser || "-";
-  consumePhysicalStock(newStockItem, bottles);
+  consumePhysicalStock(newStockItem, newBottles);
   // Mettre a jour la vente
   vente.article = newProduct.article;
   vente.cat = newProduct.cat || vente.cat;
+  vente.qty = newQty;
+  vente.formatQuantite = newFormatQty;
   if (newPrix > 0) vente.prix = newPrix;
   recordStaffAudit(
     "update", "vente",
     `Remplacement article · Facture ${vente.factureNumber || "#" + vente.id} · ${vente.client || ""}`,
-    `${prevArticle} → ${vente.article} · ${bottles} btl · Prix ${fmt(prevPrix)} → ${fmt(newPrix)} FCFA`,
+    `${prevArticle} ×${originalQty} → ${vente.article} ×${newQty} · ${oldBottles} btl → ${newBottles} btl · ${fmt(oldTotal)} → ${fmt(newTotal)} FCFA`,
   );
   closeModal("modal-replace-article");
   replacingVenteId = null;
   if (diff > 0) {
-    // Prix superieur : ouvrir l'encaissement du supplement avant de sauvegarder
+    // Montant superieur : ouvrir l'encaissement du supplement avant de sauvegarder
     _pendingSupplement = { vente, diff };
     openSupplementModal(diff, newProduct.article, vente.client, vente.factureNumber);
   } else {
@@ -7261,7 +7352,7 @@ async function confirmReplaceVente(newArticleName) {
     renderSalesHistory();
     if (currentPage === "stock") renderStock();
     if (currentPage === "home") renderDashboard();
-    showToast(`"${prevArticle}" → "${vente.article}" · Stock ajuste.`);
+    showToast(`"${prevArticle}" ×${originalQty} → "${vente.article}" ×${newQty} · Stock ajuste.`);
   }
 }
 
@@ -7330,13 +7421,20 @@ async function confirmSupplement() {
     `Supplément · Facture ${vente.factureNumber || ""} · ${vente.client || ""}`,
     `${fmt(diff)} FCFA · ${paymentMethod}`,
   );
-  await persistState({ ventes: state.ventes, stock: state.stock, staffAuditLog: state.staffAuditLog, nextId: state.nextId });
-  _pendingSupplement = null;
-  closeModal("modal-supplement");
-  renderSalesHistory();
-  if (currentPage === "stock") renderStock();
-  if (currentPage === "home") renderDashboard();
-  showToast(`Supplément ${fmt(diff)} FCFA encaisse — ${paymentMethod}.`);
+  const suppBtn = document.getElementById("confirm-supplement-btn");
+  const prevSuppText = suppBtn ? suppBtn.textContent : "";
+  if (suppBtn) { suppBtn.disabled = true; suppBtn.textContent = "Enregistrement…"; }
+  try {
+    await persistState({ ventes: state.ventes, stock: state.stock, staffAuditLog: state.staffAuditLog, nextId: state.nextId });
+    _pendingSupplement = null;
+    closeModal("modal-supplement");
+    renderSalesHistory();
+    if (currentPage === "stock") renderStock();
+    if (currentPage === "home") renderDashboard();
+    showToast(`Supplément ${fmt(diff)} FCFA encaisse — ${paymentMethod}.`);
+  } finally {
+    if (suppBtn) { suppBtn.disabled = false; suppBtn.textContent = prevSuppText; }
+  }
 }
 
 function qrLocationLabel(location) {
@@ -9236,14 +9334,15 @@ async function saveCreditRecovery() {
   }
 
   const saveBtn = document.getElementById("credit-save-btn");
+  const prevCreditText = saveBtn ? saveBtn.textContent : "";
   _creditRecoverySaveInFlight = true;
-  if (saveBtn) saveBtn.disabled = true;
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = "Enregistrement…"; }
 
   try {
     if (creditRecoveryIsDuplicateInSite(nameNorm, applied, method, paidAtIso)) {
       showToast("Ce versement est déjà enregistré (doublon évité).");
       _creditRecoverySaveInFlight = false;
-      if (saveBtn) saveBtn.disabled = false;
+      if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = prevCreditText; }
       return;
     }
     const fp = `${nameNorm}|${applied}|${method}|${paidAtIso}`;
@@ -9251,7 +9350,7 @@ async function saveCreditRecovery() {
     if (fp === _lastCreditRecoverySaveFingerprint && now - _lastCreditRecoverySaveFingerprintAt < CREDIT_RECOVERY_SAVE_DEDUPE_MS) {
       showToast("Versement déjà pris en compte.");
       _creditRecoverySaveInFlight = false;
-      if (saveBtn) saveBtn.disabled = false;
+      if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = prevCreditText; }
       return;
     }
 
@@ -9290,11 +9389,11 @@ async function saveCreditRecovery() {
     renderPointDuJour();
   } catch (err) {
     _creditRecoverySaveInFlight = false;
-    if (saveBtn) saveBtn.disabled = false;
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = prevCreditText; }
     throw err;
   }
   _creditRecoverySaveInFlight = false;
-  if (saveBtn) saveBtn.disabled = false;
+  if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = prevCreditText; }
 }
 
 function purchaseOrdersForSite() {
@@ -10224,11 +10323,18 @@ async function saveOrderLine() {
   };
   order.lignes.push(line);
   recordStaffAudit("create", "commande_ligne", `Ligne ajoutee · commande #${order.id} · ${order.client || ""}`, `${line.article} · ${fmt(calcNet(line))} FCFA`);
-  await persistState();
-  closeModal("modal-vente");
-  resetOrderForm();
-  renderVentesPage();
-  showToast("Ligne ajoutee a la commande.");
+  const saveLineBtn = document.getElementById("save-vente-btn");
+  const prevSaveLineText = saveLineBtn ? saveLineBtn.textContent : "";
+  if (saveLineBtn) { saveLineBtn.disabled = true; saveLineBtn.textContent = "Enregistrement…"; }
+  try {
+    await persistState();
+    closeModal("modal-vente");
+    resetOrderForm();
+    renderVentesPage();
+    showToast("Ligne ajoutee a la commande.");
+  } finally {
+    if (saveLineBtn) { saveLineBtn.disabled = false; saveLineBtn.textContent = prevSaveLineText; }
+  }
 }
 
 function readPaymentMix(total) {
@@ -10352,14 +10458,21 @@ async function finalizeOrder(orderId = activeOrderId) {
   if (activeOrderId === order.id) activeOrderId = null;
   pendingFinalizeOrderId = null;
   recordStaffAudit("create", "encaissement", `Facture ${factureNumber} · ${order.client || "Client"}`, `Total ${fmt(orderTotal)} FCFA · ${paymentMethod}${paymentMix.creditName ? ` · debiteur ${paymentMix.creditName}` : ""}`);
-  await persistState();
-  closeModal("modal-vente");
-  resetOrderForm();
-  if (currentPage === "home") renderDashboard();
-  if (currentPage === "stock" && stockSubTab === "casiers") renderCasiers();
-  renderVentesPage();
-  showToast(`Facture ${factureNumber} enregistree pour ${order.client}.`);
-  showFinalizeSuccess(factureNumber);
+  const finalizeBtn = document.getElementById("confirm-finalize-btn");
+  const prevFinalizeText = finalizeBtn ? finalizeBtn.textContent : "";
+  if (finalizeBtn) { finalizeBtn.disabled = true; finalizeBtn.textContent = "Enregistrement…"; }
+  try {
+    await persistState();
+    closeModal("modal-vente");
+    resetOrderForm();
+    if (currentPage === "home") renderDashboard();
+    if (currentPage === "stock" && stockSubTab === "casiers") renderCasiers();
+    renderVentesPage();
+    showToast(`Facture ${factureNumber} enregistree pour ${order.client}.`);
+    showFinalizeSuccess(factureNumber);
+  } finally {
+    if (finalizeBtn) { finalizeBtn.disabled = false; finalizeBtn.textContent = prevFinalizeText; }
+  }
 }
 
 function resetFinalizeModalUi() {
@@ -11257,19 +11370,26 @@ async function closeAccountingDay() {
   const pdjMapClose = { ...(state.pdjWorkDateBySite || {}) };
   if (pdjMapClose[sidClose] === dStr) delete pdjMapClose[sidClose];
   const savedStockChecks = state.stockChecks;
-  await persistState({ stock: state.stock, stockChecks: state.stockChecks, pdjWorkDateBySite: pdjMapClose });
-  if (!stockCheckForSiteDate(dStr, sidClose) && savedStockChecks?.length) {
-    state.stockChecks = savedStockChecks;
+  const closeBtn = document.getElementById("close-day-btn");
+  const prevCloseText = closeBtn ? closeBtn.textContent : "";
+  if (closeBtn) { closeBtn.disabled = true; closeBtn.textContent = "Clôture en cours…"; }
+  try {
+    await persistState({ stock: state.stock, stockChecks: state.stockChecks, pdjWorkDateBySite: pdjMapClose });
+    if (!stockCheckForSiteDate(dStr, sidClose) && savedStockChecks?.length) {
+      state.stockChecks = savedStockChecks;
+    }
+    delete pdjClosingCashDraftBySiteDate[pdjOpeningCashDraftKey(sidClose, dStr)];
+    setPdjBrowseDate(dStr);
+    pdjSubTab = "cloture";
+    renderStock();
+    renderDashboard();
+    renderPointDuJour();
+    setPdjSubTab("cloture", { scrollTop: true });
+    const cashHint = cashEcartEspeces === 0 ? "" : ` Écart espèces : ${cashEcartEspeces > 0 ? "+" : ""}${fmt(cashEcartEspeces)} FCFA.`;
+    showToast(`Journée du ${formatDateDdMmYyyy(dStr)} clôturée.${cashHint} Onglet Clôture : imprimez le rapport si besoin.`);
+  } finally {
+    if (closeBtn) { closeBtn.disabled = false; closeBtn.textContent = prevCloseText; }
   }
-  delete pdjClosingCashDraftBySiteDate[pdjOpeningCashDraftKey(sidClose, dStr)];
-  setPdjBrowseDate(dStr);
-  pdjSubTab = "cloture";
-  renderStock();
-  renderDashboard();
-  renderPointDuJour();
-  setPdjSubTab("cloture", { scrollTop: true });
-  const cashHint = cashEcartEspeces === 0 ? "" : ` Écart espèces : ${cashEcartEspeces > 0 ? "+" : ""}${fmt(cashEcartEspeces)} FCFA.`;
-  showToast(`Journée du ${formatDateDdMmYyyy(dStr)} clôturée.${cashHint} Onglet Clôture : imprimez le rapport si besoin.`);
 }
 
 async function saveCharge() {
@@ -11288,14 +11408,21 @@ async function saveCharge() {
   }
   state.charges.unshift(charge);
   recordStaffAudit("create", "charge", `Depense : ${charge.lib}`, `${fmt(charge.montant)} FCFA · ${charge.cat} · ${charge.paiement}`);
-  await persistState();
-  closeModal("modal-charge");
-  document.getElementById("c-date").value = today();
-  document.getElementById("c-lib").value = "";
-  document.getElementById("c-montant").value = "";
-  renderDashboard();
-  renderCharges();
-  showToast("Depense enregistree.");
+  const chargeBtn = document.getElementById("save-charge-btn");
+  const prevChargeText = chargeBtn ? chargeBtn.textContent : "";
+  if (chargeBtn) { chargeBtn.disabled = true; chargeBtn.textContent = "Enregistrement…"; }
+  try {
+    await persistState();
+    closeModal("modal-charge");
+    document.getElementById("c-date").value = today();
+    document.getElementById("c-lib").value = "";
+    document.getElementById("c-montant").value = "";
+    renderDashboard();
+    renderCharges();
+    showToast("Depense enregistree.");
+  } finally {
+    if (chargeBtn) { chargeBtn.disabled = false; chargeBtn.textContent = prevChargeText; }
+  }
 }
 
 async function saveParams() {
@@ -11328,13 +11455,20 @@ async function saveParams() {
     autoClotureEnabled: Boolean(document.getElementById("p-auto-cloture-enabled")?.checked),
     autoClotureTime: String(document.getElementById("p-auto-cloture-time")?.value || "23:00").slice(0, 5),
   } : item);
-  await persistState({ sites: updatedSites, categories: cleanCategories });
-  try { populateCategorySelects(); } catch (e) { console.error(e); }
-  try { loadParamsForm(); } catch (e) { console.error(e); }
-  try { renderTopbar(); renderSiteSwitcher(); renderHero(); } catch (e) { console.error(e); }
-  // Recalcule le timer si l'heure de cloture automatique a change
-  try { startAutoClotureSchedule(); } catch (e) { console.error(e); }
-  showToast("Parametres sauvegardes.");
+  const paramsBtn = document.getElementById("save-params-btn");
+  const prevParamsText = paramsBtn ? paramsBtn.textContent : "";
+  if (paramsBtn) { paramsBtn.disabled = true; paramsBtn.textContent = "Enregistrement…"; }
+  try {
+    await persistState({ sites: updatedSites, categories: cleanCategories });
+    try { populateCategorySelects(); } catch (e) { console.error(e); }
+    try { loadParamsForm(); } catch (e) { console.error(e); }
+    try { renderTopbar(); renderSiteSwitcher(); renderHero(); } catch (e) { console.error(e); }
+    // Recalcule le timer si l'heure de cloture automatique a change
+    try { startAutoClotureSchedule(); } catch (e) { console.error(e); }
+    showToast("Parametres sauvegardes.");
+  } finally {
+    if (paramsBtn) { paramsBtn.disabled = false; paramsBtn.textContent = prevParamsText; }
+  }
 }
 
 async function restoreFromJson() {
@@ -12289,7 +12423,11 @@ function closeModal(id) {
   if (id === "modal-finalize") resetFinalizeModalUi();
   if (id === "modal-saisie-rapide") { srCart = []; }
   if (id === "modal-casier-edit") pendingPurchaseCasierResume = false;
-  if (id === "modal-replace-article") { replacingLine = null; replacingVenteId = null; }
+  if (id === "modal-replace-article") {
+    replacingLine = null; replacingVenteId = null;
+    const qw = document.getElementById("replace-qty-wrap");
+    if (qw) qw.style.display = "none";
+  }
   if (id === "modal-supplement") { _pendingSupplement = null; }
 }
 
@@ -12476,6 +12614,8 @@ async function saveReappro() {
   }
   const item = state.stock.find((i) => i.id === itemId);
   if (!item) return;
+  const reapproBtn = document.getElementById("save-reappro-btn");
+  const prevReapproText = reapproBtn ? reapproBtn.textContent : "";
   if (mode === "frigo") {
     const bottles = Math.min(Math.round(qty), stockReserve(item));
     if (bottles <= 0) {
@@ -12487,11 +12627,16 @@ async function saveReappro() {
     item.lastReapproAt = new Date().toISOString();
     item.lastReapproBy = sessionUser || "-";
     recordStaffAudit("update", "reappro", `Reserve vers frigo · ${item.article}`, `${fmt(bottles)} btl`);
-    await persistState();
-    closeModal("modal-reappro");
-    renderVentesPage();
-    renderStock();
-    showToast(`${fmt(bottles)} bouteille(s) mises au frigo.`);
+    if (reapproBtn) { reapproBtn.disabled = true; reapproBtn.textContent = "Enregistrement…"; }
+    try {
+      await persistState();
+      closeModal("modal-reappro");
+      renderVentesPage();
+      renderStock();
+      showToast(`${fmt(bottles)} bouteille(s) mises au frigo.`);
+    } finally {
+      if (reapproBtn) { reapproBtn.disabled = false; reapproBtn.textContent = prevReapproText; }
+    }
     return;
   }
   const cases = qty;
@@ -12532,13 +12677,18 @@ async function saveReappro() {
     });
   }
   recordStaffAudit("update", "reappro", `Achat rapide · ${item.article}`, `${fmt(cases)} cas. x ${fmt(selectedCaseSize)} btl · ${fmt(bottles)} btl${prixCasier > 0 ? ` · ${fmt(cases * prixCasier)} FCFA` : ""}`);
-  await persistState({ stock: state.stock, charges: state.charges, nextId: state.nextId, stockEntrees: state.stockEntrees });
-  closeModal("modal-reappro");
-  renderStock();
-  renderDashboard();
-  renderCharges();
-  const chargeMsg = prixCasier > 0 ? ` · Depense de ${fmt(cases * prixCasier)} FCFA enregistree.` : "";
-  showToast(`+${fmt(cases)} casier(s) (${fmt(bottles)} btl) pour "${item.article}".${chargeMsg}`);
+  if (reapproBtn) { reapproBtn.disabled = true; reapproBtn.textContent = "Enregistrement…"; }
+  try {
+    await persistState({ stock: state.stock, charges: state.charges, nextId: state.nextId, stockEntrees: state.stockEntrees });
+    closeModal("modal-reappro");
+    renderStock();
+    renderDashboard();
+    renderCharges();
+    const chargeMsg = prixCasier > 0 ? ` · Depense de ${fmt(cases * prixCasier)} FCFA enregistree.` : "";
+    showToast(`+${fmt(cases)} casier(s) (${fmt(bottles)} btl) pour "${item.article}".${chargeMsg}`);
+  } finally {
+    if (reapproBtn) { reapproBtn.disabled = false; reapproBtn.textContent = prevReapproText; }
+  }
 }
 
 function openPerteModal(itemId = null) {
@@ -12594,11 +12744,18 @@ async function savePerte() {
     createdBy: sessionUser || "-",
   });
   recordStaffAudit("create", "perte", `Perte · ${item.article}`, `${fmt(qty)} btl · ${motif}${notes ? ` · ${notes}` : ""}`);
-  await persistState({ stock: state.stock, stockLosses: state.stockLosses });
-  closeModal("modal-perte");
-  renderStock();
-  renderDashboard();
-  showToast(`Perte de ${fmt(qty)} btl "${item.article}" enregistree (${motif}).`);
+  const perteBtn = document.getElementById("save-perte-btn");
+  const prevPerteText = perteBtn ? perteBtn.textContent : "";
+  if (perteBtn) { perteBtn.disabled = true; perteBtn.textContent = "Enregistrement…"; }
+  try {
+    await persistState({ stock: state.stock, stockLosses: state.stockLosses });
+    closeModal("modal-perte");
+    renderStock();
+    renderDashboard();
+    showToast(`Perte de ${fmt(qty)} btl "${item.article}" enregistree (${motif}).`);
+  } finally {
+    if (perteBtn) { perteBtn.disabled = false; perteBtn.textContent = prevPerteText; }
+  }
 }
 
 function updateCasierMoveInfos() {
@@ -14490,6 +14647,15 @@ function attachEvents() {
     if (pick?.dataset?.pickVenteLine) applyVenteLineToConsigneForm(pick.dataset.pickVenteLine);
   });
   document.getElementById("save-consigne-btn")?.addEventListener("click", () => saveConsigne().catch(handleApiError));
+  // Sélecteur de facture pour remplacement d'article
+  document.getElementById("replace-facture-select")?.addEventListener("change", (e) => {
+    renderReplaceFactureLines(e.target.value);
+  });
+  document.getElementById("replace-facture-lines-wrap")?.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-replace-vente]");
+    if (!btn) return;
+    openReplaceVenteModal(Number(btn.dataset.replaceVente));
+  });
   document.getElementById("cancel-consigne-btn")?.addEventListener("click", () => {
     document.getElementById("consigne-form-wrap")?.classList.add("hidden");
   });
@@ -14654,14 +14820,23 @@ function attachEvents() {
       renderReplacePicker(e.target.value);
     }
   });
-  document.getElementById("replace-picker")?.addEventListener("click", (e) => {
+  document.getElementById("replace-picker")?.addEventListener("click", async (e) => {
     const item = e.target.closest("[data-pick-replace]");
     if (!item) return;
     const article = decodeURIComponent(item.getAttribute("data-pick-replace") || "");
-    if (replacingVenteId != null) {
-      confirmReplaceVente(article).catch(handleApiError);
-    } else {
-      confirmReplace(article).catch(handleApiError);
+    const prevHtml = item.innerHTML;
+    item.disabled = true;
+    item.textContent = "Enregistrement…";
+    try {
+      if (replacingVenteId != null) {
+        await confirmReplaceVente(article);
+      } else {
+        await confirmReplace(article);
+      }
+    } catch (err) {
+      handleApiError(err);
+    } finally {
+      if (item.isConnected) { item.disabled = false; item.innerHTML = prevHtml; }
     }
   });
   // Bouton Remplacer sur vente encaissee (delegue depuis ventes-list)
