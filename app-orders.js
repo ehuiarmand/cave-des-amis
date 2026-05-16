@@ -442,6 +442,7 @@ let liveSyncTimer = null;
 let appLiveClockTimer = null;
 let autoClotureTimer = null;
 let _autoClotureInProgress = false;
+let _lastUserInteractionAt = 0;
 /** Jours réouverts manuellement : la clôture auto ne les referme pas. Clé : "siteId|date" */
 const _autoClotureManualReopened = new Set();
 let qrAlertCount = 0;
@@ -8369,27 +8370,28 @@ function getMainShellScrollEl() {
   return document.querySelector(".main-shell");
 }
 
-/** Évite que la synchro live remonte la page en haut après un re-rendu (desktop + mobile). */
+/** Évite que la synchro live remonte la page en haut après un re-rendu. */
 function withPreservedMainShellScroll(fn) {
   const shell = getMainShellScrollEl();
   const shellY = shell ? shell.scrollTop : 0;
   const winY = window.scrollY || window.pageYOffset || 0;
   fn();
-  const restore = () => {
-    if (shell && shell.scrollTop !== shellY) shell.scrollTop = shellY;
-    const curWinY = window.scrollY || window.pageYOffset || 0;
-    if (Math.abs(curWinY - winY) > 1) window.scrollTo(0, winY);
-  };
   requestAnimationFrame(() => {
-    requestAnimationFrame(restore);
+    requestAnimationFrame(() => {
+      if (shell && shell.scrollTop !== shellY) shell.scrollTop = shellY;
+      if (Math.abs((window.scrollY || window.pageYOffset || 0) - winY) > 1) {
+        window.scrollTo(0, winY);
+      }
+    });
   });
-  // Filet de sécurité mobile : les navigateurs mobiles peuvent décaler le scroll après le paint
-  setTimeout(restore, 80);
 }
 
-/** Saisie en cours sur PDJ, stock ou ventes : ne pas rafraîchir toute la page (sync toutes les 4 s). */
+/** Interaction récente (scroll, touch, saisie) : ne pas re-rendre pendant 5 s après. */
+const LIVE_SYNC_DEFER_MS = 5000;
+
 function shouldDeferLiveSyncRender() {
   if (modalIsOpen()) return true;
+  if (Date.now() - _lastUserInteractionAt < LIVE_SYNC_DEFER_MS) return true;
   const ae = document.activeElement;
   if (!(ae instanceof HTMLElement)) return false;
   if (ae.matches("input, textarea, select")) {
@@ -14544,8 +14546,17 @@ function syncVenteFormFromActiveOrder() {
   syncFinalizeButtonJournalState();
 }
 
+function _markUserInteraction() {
+  _lastUserInteractionAt = Date.now();
+}
+
 function attachEvents() {
   installFcfaThousandsDelegation();
+  // Toute interaction utilisateur suspend le re-rendu live (scroll, toucher, clavier)
+  document.addEventListener("scroll", _markUserInteraction, { passive: true, capture: true });
+  document.addEventListener("touchstart", _markUserInteraction, { passive: true });
+  document.addEventListener("touchmove", _markUserInteraction, { passive: true });
+  document.addEventListener("keydown", _markUserInteraction, { passive: true });
   document.getElementById("login-form").addEventListener("submit", handleLoginSubmit);
   document.getElementById("logout-btn").addEventListener("click", () => logout());
   document.getElementById("site-switcher").addEventListener("change", () => {
