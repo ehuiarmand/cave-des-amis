@@ -2674,6 +2674,7 @@ function renderPlanningTeam() {
   const labelEl = document.getElementById("planning-team-week-label");
   const listEl = document.getElementById("planning-team-list");
   if (labelEl) labelEl.textContent = planningWeekLabel(bounds);
+  populateWorkShiftUserSelect();
   const rows = teamWorkShiftsInWeek(bounds);
   if (!listEl) return;
   if (!rows.length) {
@@ -2687,7 +2688,6 @@ function renderPlanningTeam() {
   listEl.querySelectorAll("[data-ws-del]").forEach((btn) => {
     btn.addEventListener("click", () => deleteWorkShift(btn.dataset.wsDel));
   });
-  populateWorkShiftUserSelect();
 }
 
 function populateWorkShiftUserSelect() {
@@ -2700,9 +2700,23 @@ function populateWorkShiftUserSelect() {
       const label = staffDisplayName(u.username);
       return `<option value="${escapeHtml(u.username)}">${escapeHtml(label)} (${escapeHtml(u.username)})</option>`;
     }).join("")
-    : `<option value="">— Aucune personne —</option>`;
+    : `<option value="">— Aucune personne sur ce maquis —</option>`;
   if (staff.some((u) => u.username === prev)) sel.value = prev;
   else if (staff.length) sel.value = staff[0].username;
+
+  const hint = document.getElementById("ws-staff-hint");
+  const saveBtn = document.getElementById("ws-save-btn");
+  const siteName = currentSite()?.nom || currentSiteId() || "ce maquis";
+  if (hint) {
+    if (!staff.length) {
+      hint.innerHTML = `Aucune <strong>serveuse</strong> ni <strong>gérante</strong> n'est affectée à « ${escapeHtml(siteName)} ». `
+        + `Ouvrez <strong>Paramètres → Accès</strong>, créez ou modifiez un compte (rôle Serveuse ou Gérant) et cochez ce maquis dans la liste des établissements.`;
+      hint.classList.remove("hidden");
+    } else {
+      hint.classList.add("hidden");
+    }
+  }
+  if (saveBtn) saveBtn.disabled = !staff.length;
 }
 
 function resetWorkShiftForm() {
@@ -2742,7 +2756,12 @@ async function saveWorkShiftFromForm() {
   const note = String(document.getElementById("ws-note")?.value || "").trim().slice(0, 200);
   const editRaw = document.getElementById("ws-edit-id")?.value?.trim();
   const siteId = String(currentSiteId() || "");
-  if (!username) { showToast("Choisissez une personne."); return; }
+  if (!username) {
+    showToast(schedulableStaffForCurrentSite().length
+      ? "Choisissez une personne."
+      : "Aucune serveuse/gérante sur ce maquis : Paramètres → Accès.");
+    return;
+  }
   if (!date || !startTime || !endTime) { showToast("Date et heures obligatoires."); return; }
   if (!siteId) { showToast("Choisissez un maquis."); return; }
   const now = new Date().toISOString();
