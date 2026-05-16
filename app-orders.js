@@ -9528,6 +9528,109 @@ const PURGE_MAQUIS_ROW_KEYS = [
   "creditRecoveries", "charges", "staffAuditLog",
 ];
 
+/** Clés acceptées par PUT /api/state (aligné server.py). */
+const STATE_PUT_ROW_KEYS = [
+  "ventes", "stock", "commandes", "stockChecks", "stockEntrees", "stockLosses",
+  "dayBooks", "purchaseOrders", "supplierPrices", "casiers", "casierMouvements",
+  "creditRecoveries", "consignes", "charges", "staffAuditLog",
+];
+
+/**
+ * Corps PUT : uniquement les clés présentes dans `overrides` (+ activeSiteId).
+ * Si `overrides` est vide → sauvegarde complète (comportement historique de persistState()).
+ */
+function buildStatePutBody(overrides = {}) {
+  const o = overrides && typeof overrides === "object" ? overrides : {};
+  const explicit = Object.keys(o);
+  const body = { activeSiteId: o.activeSiteId ?? state.activeSiteId };
+
+  if (!explicit.length) {
+    body.sites = state.sites;
+    body.ventes = state.ventes;
+    body.stock = state.stock;
+    body.commandes = state.commandes;
+    body.stockChecks = state.stockChecks ?? [];
+    body.stockLosses = state.stockLosses ?? [];
+    body.stockEntrees = state.stockEntrees ?? [];
+    body.dayBooks = state.dayBooks ?? [];
+    body.pdjWorkDateBySite = state.pdjWorkDateBySite ?? {};
+    body.purchaseOrders = state.purchaseOrders ?? [];
+    body.supplierPrices = state.supplierPrices ?? [];
+    body.creditRecoveries = state.creditRecoveries ?? [];
+    body.consignes = state.consignes ?? [];
+    body.categories = state.categories ?? CATEGORIES;
+    body.charges = state.charges;
+    body.nextId = state.nextId;
+    body.staffAuditLog = state.staffAuditLog ?? [];
+    body.auth = { users: state.auth?.users || [] };
+    body.casiers = state.casiers ?? [];
+    body.casierMouvements = state.casierMouvements ?? [];
+    return body;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(o, "sites")) body.sites = o.sites;
+  STATE_PUT_ROW_KEYS.forEach((key) => {
+    if (Object.prototype.hasOwnProperty.call(o, key)) body[key] = o[key];
+  });
+  if (Object.prototype.hasOwnProperty.call(o, "pdjWorkDateBySite")) body.pdjWorkDateBySite = o.pdjWorkDateBySite;
+  if (Object.prototype.hasOwnProperty.call(o, "categories")) body.categories = o.categories;
+  if (Object.prototype.hasOwnProperty.call(o, "nextId")) body.nextId = o.nextId;
+  if (Object.prototype.hasOwnProperty.call(o, "auth")) body.auth = o.auth;
+  if (Object.prototype.hasOwnProperty.call(o, "params")) body.params = o.params;
+  return body;
+}
+
+/** Fusionne la réponse serveur sans écraser par des tableaux vides accidentels. */
+function mergeStateFromServerResponse(incoming, previous) {
+  if (!incoming || typeof incoming !== "object") return previous;
+  const prev = previous && typeof previous === "object" ? previous : {};
+  const out = { ...prev, ...incoming };
+  const listKeys = [...STATE_PUT_ROW_KEYS, "sites"];
+  listKeys.forEach((key) => {
+    const inc = incoming[key];
+    const old = prev[key];
+    if (Array.isArray(inc)) {
+      if (inc.length > 0 || !Array.isArray(old) || old.length === 0) out[key] = inc;
+      else out[key] = old;
+    }
+  });
+  if (incoming.auth && typeof incoming.auth === "object") out.auth = incoming.auth;
+  if (incoming.meta) out.meta = incoming.meta;
+  if (incoming.pdjWorkDateBySite && typeof incoming.pdjWorkDateBySite === "object") {
+    out.pdjWorkDateBySite = incoming.pdjWorkDateBySite;
+  }
+  if (incoming.nextId && typeof incoming.nextId === "object") out.nextId = incoming.nextId;
+  if (incoming.activeSiteId != null) out.activeSiteId = incoming.activeSiteId;
+  return out;
+}
+
+function applyPersistStateResponseExtras(overrides, _stockChecks) {
+  if (!state.casiers?.length && (overrides.casiers ?? state.casiers ?? []).length) {
+    state.casiers = overrides.casiers ?? state.casiers;
+  }
+  if (!state.casierMouvements?.length && (overrides.casierMouvements ?? state.casierMouvements ?? []).length) {
+    state.casierMouvements = overrides.casierMouvements ?? state.casierMouvements;
+  }
+  if (!state.consignes?.length && (overrides.consignes ?? state.consignes ?? []).length) {
+    state.consignes = overrides.consignes ?? state.consignes;
+  }
+  if (!state.supplierPrices?.length && (overrides.supplierPrices ?? state.supplierPrices ?? []).length) {
+    state.supplierPrices = overrides.supplierPrices ?? state.supplierPrices;
+  }
+  if (overrides.stockChecks !== undefined && _stockChecks.length) {
+    const merged = [...(state.stockChecks || [])];
+    _stockChecks.forEach((sc) => {
+      if (!sc?.siteId || !sc?.date) return;
+      const idx = merged.findIndex((x) => x.siteId === sc.siteId && x.date === sc.date);
+      if (idx >= 0) merged[idx] = sc;
+      else merged.push(sc);
+    });
+    state.stockChecks = merged;
+  }
+  lsSaveCasiers();
+  renderTopbar();
+}
+
 async function purgeMaquisDataViaStatePut(siteId, keepStockCatalog) {
   if (!canGlobalSuperAdmin()) throw new Error("Reserve au super administrateur.");
   const sid = String(siteId || "").trim();
@@ -9563,55 +9666,15 @@ async function purgeMaquisDataViaStatePut(siteId, keepStockCatalog) {
 }
 
 async function persistState(overrides = {}) {
-  const _casiers = overrides.casiers ?? state.casiers ?? [];
-  const _casierMouvements = overrides.casierMouvements ?? state.casierMouvements ?? [];
-  const _consignes = overrides.consignes ?? state.consignes ?? [];
-  const _supplierPrices = overrides.supplierPrices ?? state.supplierPrices ?? [];
   const _stockChecks = overrides.stockChecks ?? state.stockChecks ?? [];
-  state = await apiRequest(API.state, {
+  const prev = state;
+  const body = buildStatePutBody(overrides);
+  const incoming = await apiRequest(API.state, {
     method: "PUT",
-    body: JSON.stringify({
-      sites: overrides.sites || state.sites,
-      activeSiteId: overrides.activeSiteId || state.activeSiteId,
-      params: overrides.params || {},
-      ventes: overrides.ventes || state.ventes,
-      stock: overrides.stock || state.stock,
-      commandes: overrides.commandes || state.commandes,
-      stockChecks: overrides.stockChecks || state.stockChecks || [],
-      stockLosses: overrides.stockLosses ?? state.stockLosses ?? [],
-      stockEntrees: overrides.stockEntrees ?? state.stockEntrees ?? [],
-      dayBooks: overrides.dayBooks !== undefined ? overrides.dayBooks : (state.dayBooks || []),
-      pdjWorkDateBySite: overrides.pdjWorkDateBySite !== undefined ? overrides.pdjWorkDateBySite : (state.pdjWorkDateBySite || {}),
-      purchaseOrders: overrides.purchaseOrders ?? state.purchaseOrders ?? [],
-      supplierPrices: overrides.supplierPrices ?? state.supplierPrices ?? [],
-      creditRecoveries: overrides.creditRecoveries || state.creditRecoveries || [],
-      consignes: _consignes,
-      categories: overrides.categories || state.categories || CATEGORIES,
-      charges: overrides.charges || state.charges,
-      nextId: overrides.nextId || state.nextId,
-      staffAuditLog: overrides.staffAuditLog !== undefined ? overrides.staffAuditLog : (state.staffAuditLog || []),
-      auth: overrides.auth || { users: state.auth.users || [] },
-      casiers: _casiers,
-      casierMouvements: _casierMouvements,
-    }),
+    body: JSON.stringify(body),
   });
-  // Le serveur peut ne pas renvoyer les nouveaux champs — on les préserve localement
-  if (!state.casiers?.length && _casiers.length) state.casiers = _casiers;
-  if (!state.casierMouvements?.length && _casierMouvements.length) state.casierMouvements = _casierMouvements;
-  if (!state.consignes?.length && _consignes.length) state.consignes = _consignes;
-  if (!state.supplierPrices?.length && _supplierPrices.length) state.supplierPrices = _supplierPrices;
-  if (overrides.stockChecks !== undefined && _stockChecks.length) {
-    const merged = [...(state.stockChecks || [])];
-    _stockChecks.forEach((sc) => {
-      if (!sc?.siteId || !sc?.date) return;
-      const idx = merged.findIndex((x) => x.siteId === sc.siteId && x.date === sc.date);
-      if (idx >= 0) merged[idx] = sc;
-      else merged.push(sc);
-    });
-    state.stockChecks = merged;
-  }
-  lsSaveCasiers();
-  renderTopbar();
+  state = mergeStateFromServerResponse(incoming, prev);
+  applyPersistStateResponseExtras(overrides, _stockChecks);
 }
 
 /**
@@ -9623,34 +9686,17 @@ async function persistStatePatch(patch) {
   if (!patch || typeof patch !== "object") throw new Error("persistStatePatch: patch invalide.");
   const keys = Object.keys(patch);
   if (!keys.length) throw new Error("persistStatePatch: patch vide.");
-  const _activeSiteId = state.activeSiteId;
-  const _casiers = state.casiers ?? [];
-  const _casierMouvements = state.casierMouvements ?? [];
-  const _consignes = state.consignes ?? [];
-  const _supplierPrices = state.supplierPrices ?? [];
   const _stockChecks = patch.stockChecks ?? [];
-  // Toujours inclure activeSiteId pour eviter que le serveur renvoie son ancienne valeur stockee
-  const fullPatch = patch.activeSiteId !== undefined ? patch : { activeSiteId: _activeSiteId, ...patch };
-  state = await apiRequest(API.state, {
+  const prev = state;
+  const body = buildStatePutBody(
+    patch.activeSiteId !== undefined ? patch : { activeSiteId: state.activeSiteId, ...patch },
+  );
+  const incoming = await apiRequest(API.state, {
     method: "PUT",
-    body: JSON.stringify(fullPatch),
+    body: JSON.stringify(body),
   });
-  if (!state.casiers?.length && _casiers.length) state.casiers = _casiers;
-  if (!state.casierMouvements?.length && _casierMouvements.length) state.casierMouvements = _casierMouvements;
-  if (!state.consignes?.length && _consignes.length) state.consignes = _consignes;
-  if (!state.supplierPrices?.length && _supplierPrices.length) state.supplierPrices = _supplierPrices;
-  if (patch.stockChecks !== undefined && _stockChecks.length) {
-    const merged = [...(state.stockChecks || [])];
-    _stockChecks.forEach((sc) => {
-      if (!sc?.siteId || !sc?.date) return;
-      const idx = merged.findIndex((x) => x.siteId === sc.siteId && x.date === sc.date);
-      if (idx >= 0) merged[idx] = sc;
-      else merged.push(sc);
-    });
-    state.stockChecks = merged;
-  }
-  lsSaveCasiers();
-  renderTopbar();
+  state = mergeStateFromServerResponse(incoming, prev);
+  applyPersistStateResponseExtras(patch, _stockChecks);
 }
 
 function renderCreditRecovery() {

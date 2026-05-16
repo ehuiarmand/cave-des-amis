@@ -1980,7 +1980,8 @@ class DataStore:
             is_super = session_is_superadmin(session, all_site_ids=sid_list)
 
             if is_super:
-                current["sites"] = payload.get("sites", current["sites"])
+                if "sites" in payload:
+                    current["sites"] = payload["sites"]
                 site_ids = [site.get("id") for site in current["sites"] if site.get("id")]
                 req_aid = payload.get("activeSiteId", current.get("activeSiteId"))
                 if req_aid in site_ids:
@@ -1994,27 +1995,26 @@ class DataStore:
                         "active_site_rejected",
                         {"requested": str(req_aid), "username": str(session.get("username", ""))},
                     )
-                current["ventes"] = payload.get("ventes", current["ventes"])
-                current["stock"] = payload.get("stock", current["stock"])
-                current["commandes"] = payload.get("commandes", current.get("commandes", []))
-                current["stockChecks"] = payload.get("stockChecks", current.get("stockChecks", []))
-                current["dayBooks"] = payload.get("dayBooks", current.get("dayBooks", []))
-                current["pdjWorkDateBySite"] = _sanitize_pdj_work_date_map(
-                    payload.get("pdjWorkDateBySite", current.get("pdjWorkDateBySite", {})),
-                    site_ids,
-                )
-                current["purchaseOrders"] = payload.get("purchaseOrders", current.get("purchaseOrders", []))
-                current["supplierPrices"] = payload.get("supplierPrices", current.get("supplierPrices", []))
-                current["casiers"] = payload.get("casiers", current.get("casiers", []))
-                current["casierMouvements"] = payload.get("casierMouvements", current.get("casierMouvements", []))
-                current["creditRecoveries"] = payload.get("creditRecoveries", current.get("creditRecoveries", []))
-                current["consignes"] = payload.get("consignes", current.get("consignes", []))
-                current["categories"] = payload.get("categories", current.get("categories", DEFAULT_STATE["categories"]))
-                current["charges"] = payload.get("charges", current["charges"])
-                current["nextId"] = payload.get("nextId", current["nextId"])
-                current["staffAuditLog"] = payload.get("staffAuditLog", current.get("staffAuditLog", []))
-                current["stockEntrees"] = payload.get("stockEntrees", current.get("stockEntrees", []))
-                current["stockLosses"] = payload.get("stockLosses", current.get("stockLosses", []))
+                # Patch partiel : ne remplacer une collection que si elle est dans le payload
+                # (évite d'écraser ventes/charges/etc. avec [] quand le client n'envoie que le stock).
+                _GLOBAL_PATCH_KEYS = [
+                    "ventes", "stock", "commandes", "stockChecks", "dayBooks",
+                    "purchaseOrders", "supplierPrices", "casiers", "casierMouvements",
+                    "creditRecoveries", "consignes", "charges", "staffAuditLog",
+                    "stockEntrees", "stockLosses",
+                ]
+                for _key in _GLOBAL_PATCH_KEYS:
+                    if _key in payload:
+                        current[_key] = payload[_key]
+                if "pdjWorkDateBySite" in payload:
+                    current["pdjWorkDateBySite"] = _sanitize_pdj_work_date_map(
+                        payload.get("pdjWorkDateBySite") or {},
+                        site_ids,
+                    )
+                if "categories" in payload:
+                    current["categories"] = payload.get("categories", DEFAULT_STATE["categories"])
+                if "nextId" in payload:
+                    current["nextId"] = merge_next_id_dict(current.get("nextId", {}), payload.get("nextId"))
 
                 auth_payload = payload.get("auth", {})
                 users_payload = auth_payload.get("users")
