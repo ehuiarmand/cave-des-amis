@@ -1113,6 +1113,7 @@
           <button type="button" class="tab active" data-subtab-params="profil" role="tab" aria-selected="true">Profil</button>
           <button type="button" class="tab any-admin" data-subtab-params="catalogue" role="tab">Catégories</button>
           <button type="button" class="tab any-admin" data-subtab-params="acces" role="tab">Accès</button>
+          <button type="button" class="tab maquis-backup-admin" data-subtab-params="sauvegarde" role="tab">Sauvegarde</button>
           <button type="button" class="tab any-admin" data-subtab-params="admin" role="tab">Administration</button>
         </div>
 
@@ -1342,16 +1343,7 @@
           </article>
         </div>
 
-        <div data-params-panel="admin" class="params-panel hidden">
-          <article class="card any-admin">
-            <div class="section-head">
-              <h3>Historique gérant &amp; serveuses</h3>
-              <span class="section-meta">Audit</span>
-            </div>
-            <p class="muted" style="margin-bottom:12px">Journal des actions (créations, modifications, suppressions) faites par les comptes <strong>gérant</strong> et <strong>serveuse</strong>.</p>
-            <div id="staff-audit-list"></div>
-          </article>
-
+        <div data-params-panel="sauvegarde" class="params-panel hidden">
           <article class="card maquis-backup-admin">
             <div class="section-head">
               <h3>Sauvegarde &amp; restauration</h3>
@@ -1380,6 +1372,18 @@
               <span class="section-meta">Cliquez pour créer un snapshot isolé</span>
             </div>
             <div id="sites-list" class="stack-list"></div>
+          </article>
+
+        </div>
+
+        <div data-params-panel="admin" class="params-panel hidden">
+          <article class="card any-admin">
+            <div class="section-head">
+              <h3>Historique gérant &amp; serveuses</h3>
+              <span class="section-meta">Audit</span>
+            </div>
+            <p class="muted" style="margin-bottom:12px">Journal des actions (créations, modifications, suppressions) faites par les comptes <strong>gérant</strong> et <strong>serveuse</strong>.</p>
+            <div id="staff-audit-list"></div>
           </article>
 
           <article class="card global-superadmin-only">
@@ -2444,6 +2448,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=256"></script>
+  <script src="./app-orders.js?v=257"></script>
 </body>
 </html>

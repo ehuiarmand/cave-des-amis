@@ -3914,7 +3914,7 @@ function setParamsSubTab(tab) {
   root.querySelectorAll("[data-params-panel]").forEach((panel) => {
     panel.classList.toggle("hidden", panel.dataset.paramsPanel !== tab);
   });
-  if (tab === "admin") {
+  if (tab === "sauvegarde") {
     apiRequest(API.session)
       .then((s) => {
         applySessionFieldsFromApi(s);
@@ -3923,6 +3923,10 @@ function setParamsSubTab(tab) {
         if (canManageMaquisBackups()) refreshRestoreBackupUi().catch(() => {});
       })
       .catch(() => {});
+  }
+  if (tab === "admin") {
+    populatePurgeMaquisSelect();
+    renderStaffAuditLog();
   }
 }
 
