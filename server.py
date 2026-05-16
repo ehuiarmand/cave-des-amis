@@ -743,7 +743,7 @@ def validate_work_shift_row(
 ) -> None:
     sid = str(row.get("siteId", "")).strip()
     if sid not in allowed or sid not in site_ids:
-        raise ValueError("Maquis non autorise pour ce creneau.")
+        raise ValueError(f"Maquis non autorise pour ce creneau (siteId={sid or '?'}).")
     un = str(row.get("username", "")).strip()
     if not un:
         raise ValueError("Utilisateur obligatoire pour le creneau.")
@@ -752,13 +752,13 @@ def validate_work_shift_row(
         None,
     )
     if not user:
-        raise ValueError("Utilisateur inconnu.")
+        raise ValueError(f"Utilisateur inconnu pour le planning : « {un} ».")
     u_role = str(user.get("role", "")).strip().lower()
     if u_role not in ("serveuse", "manager"):
-        raise ValueError("Seules les serveuses et gerantes peuvent etre planifiees.")
+        raise ValueError(f"Seules les serveuses et gerantes peuvent etre planifiees (compte « {un} » : {u_role}).")
     u_sites = {str(x) for x in (user.get("allowedSiteIds") or []) if str(x) in site_ids}
     if sid not in u_sites:
-        raise ValueError("Cet utilisateur n'est pas affecte a ce maquis.")
+        raise ValueError(f"« {un} » n'est pas affecte au maquis {sid}. Cochez ce maquis dans Parametres → Acces.")
     sess_role = str(session.get("role", "")).strip().lower()
     if sess_role == "manager" and u_role not in ("serveuse", "manager"):
         raise ValueError("Modification non autorisee.")
@@ -1595,8 +1595,10 @@ class DataStore:
             merged["creditRecoveries"] = payload.get("creditRecoveries", merged.get("creditRecoveries", []))
             merged["consignes"] = payload.get("consignes", merged.get("consignes", []))
             merged["staffAuditLog"] = payload.get("staffAuditLog", merged.get("staffAuditLog", []))
+            merged["workShifts"] = payload.get("workShifts", merged.get("workShifts", []))
             merged["stockEntrees"] = payload.get("stockEntrees", merged.get("stockEntrees", []))
             merged["stockLosses"] = payload.get("stockLosses", merged.get("stockLosses", []))
+            merged["pdjWorkDateBySite"] = payload.get("pdjWorkDateBySite", merged.get("pdjWorkDateBySite", {}))
             for index, site in enumerate(merged["sites"], start=1):
                 site.setdefault("prefixeFacture", f"SITE{index}")
                 site.setdefault("dualZonePricing", True)
@@ -1638,8 +1640,10 @@ class DataStore:
         merged["creditRecoveries"] = payload.get("creditRecoveries", merged.get("creditRecoveries", []))
         merged["consignes"] = payload.get("consignes", merged.get("consignes", []))
         merged["staffAuditLog"] = payload.get("staffAuditLog", merged.get("staffAuditLog", []))
+        merged["workShifts"] = payload.get("workShifts", merged.get("workShifts", []))
         merged["stockEntrees"] = payload.get("stockEntrees", merged.get("stockEntrees", []))
         merged["stockLosses"] = payload.get("stockLosses", merged.get("stockLosses", []))
+        merged["pdjWorkDateBySite"] = payload.get("pdjWorkDateBySite", merged.get("pdjWorkDateBySite", {}))
         for index, site in enumerate(merged["sites"], start=1):
             site.setdefault("prefixeFacture", f"SITE{index}")
             site.setdefault("dualZonePricing", True)
@@ -2277,6 +2281,15 @@ class DataStore:
                         auth_users_sa,
                         snapshot=ws_snapshot,
                     )
+                    audit_log(
+                        "work_shifts_put",
+                        {
+                            "username": str(session.get("username", "")),
+                            "incoming": len(payload.get("workShifts") or []),
+                            "stored": len(current.get("workShifts") or []),
+                            "snapshot": ws_snapshot,
+                        },
+                    )
                 _GLOBAL_PATCH_KEYS = [
                     "ventes", "stock", "commandes", "stockChecks", "dayBooks",
                     "purchaseOrders", "supplierPrices", "casiers", "casierMouvements",
@@ -2382,6 +2395,16 @@ class DataStore:
                             sid_list,
                             auth_users,
                             snapshot=ws_snapshot,
+                        )
+                        audit_log(
+                            "work_shifts_put",
+                            {
+                                "username": str(session.get("username", "")),
+                                "incoming": len(payload.get("workShifts") or []),
+                                "stored": len(current.get("workShifts") or []),
+                                "snapshot": ws_snapshot,
+                                "siteId": str(payload.get("activeSiteId") or ""),
+                            },
                         )
                     else:
                         current[_key] = merge_scoped_rows(

@@ -3233,22 +3233,79 @@ function applyWorkShiftsAfterSave(sentRows) {
   lsSaveWorkShifts();
 }
 
+/** Vérifie que chaque créneau peut être envoyé au serveur (évite PUT rejeté silencieusement côté UI). */
+function validateWorkShiftsBeforeSend(rows, siteId) {
+  const sid = String(siteId || currentSiteId() || "").trim();
+  if (!sid) throw new Error("Aucun maquis sélectionné.");
+  const staff = schedulableStaffForCurrentSite();
+  const staffSet = new Set(staff.map((u) => String(u.username || "").trim().toLowerCase()));
+  const problems = [];
+  (rows || []).forEach((r, i) => {
+    const un = String(r?.username || "").trim();
+    const d = String(r?.date || "").slice(0, 10);
+    const rsid = String(r?.siteId || "").trim();
+    if (!un) problems.push(`ligne ${i + 1} : personne manquante`);
+    else if (!staffSet.has(un.toLowerCase())) {
+      problems.push(`« ${un} » n'est pas serveuse/gérante sur ce maquis (Paramètres → Accès).`);
+    }
+    if (rsid && rsid !== sid) problems.push(`ligne ${i + 1} : mauvais maquis (${rsid})`);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) problems.push(`ligne ${i + 1} : date invalide`);
+  });
+  if (problems.length) {
+    throw new Error(problems[0]);
+  }
+}
+
+/** Relit le serveur (sans fusion locale) et vérifie que les créneaux envoyés y sont stockés. */
+async function verifyWorkShiftsPersistedOnServer(sentRows) {
+  const sent = Array.isArray(sentRows) ? sentRows : [];
+  if (!sent.length) return;
+  const sentIds = new Set(sent.map((s) => Number(s.id)).filter((id) => !Number.isNaN(id)));
+  let serverRows = [];
+  try {
+    const fresh = await apiRequest(API.state, { cache: "no-store" });
+    serverRows = Array.isArray(fresh?.workShifts) ? fresh.workShifts : [];
+  } catch (e) {
+    throw new Error("Impossible de relire le planning sur le serveur. Vérifiez la connexion.");
+  }
+  const found = serverRows.filter((s) => sentIds.has(Number(s.id))).length;
+  if (found >= sentIds.size) {
+    state.workShifts = mergeWorkShiftsFromServer(serverRows, workShiftsAll());
+    return;
+  }
+  console.warn("[planning] verify failed", {
+    sent: sentIds.size,
+    found,
+    serverCount: serverRows.length,
+    siteId: currentSiteId(),
+  });
+  throw new Error(
+    `Le serveur n'a enregistré que ${found}/${sentIds.size} créneau(x). `
+    + "Redémarrez « python server.py » (version à jour), faites Ctrl+F5, puis réessayez. "
+    + "Vérifiez aussi Paramètres → Accès (personne + maquis cochés).",
+  );
+}
+
 /**
  * Sauvegarde planning : sync serveur d'abord, PUT, puis force l'état local + cache navigateur.
  * @param {boolean} snapshot — true = le serveur peut retirer les créneaux absents du payload (liste complète).
  */
 async function persistWorkShiftsPatch(rows, { snapshot = true, skipRefresh = false, ...patchExtra } = {}) {
   if (!skipRefresh) await refreshWorkShiftsFromServer();
-  const sent = [...rows];
+  const siteId = String(patchExtra.activeSiteId ?? state.activeSiteId ?? currentSiteId() ?? "");
+  const sent = rows.map((r) => ({ ...r, siteId: String(r.siteId || siteId) }));
+  validateWorkShiftsBeforeSend(sent, siteId);
   const prev = workShiftsAll();
   state.workShifts = sent;
   try {
     await persistStatePatch({
       ...patchExtra,
+      activeSiteId: siteId || state.activeSiteId,
       workShifts: sent,
       workShiftsScopedSnapshot: snapshot,
     });
     applyWorkShiftsAfterSave(sent);
+    await verifyWorkShiftsPersistedOnServer(sent);
   } catch (e) {
     state.workShifts = prev;
     throw e;
