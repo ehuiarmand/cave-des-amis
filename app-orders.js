@@ -3618,9 +3618,12 @@ function renderCasiers() {
     byBrasserie[key][groupKey].push(item);
   });
   let totalLotsTous = 0, totalLotsConsignes = 0, nbAlerte = 0, nbEpuise = 0;
-  let html = `<div style="display:flex;justify-content:flex-end;margin-bottom:14px">
+  let html = `<div style="display:flex;gap:8px;justify-content:flex-end;margin-bottom:14px;flex-wrap:wrap">
+    <button type="button" class="purge-casiers-btn" style="background:#e53935;color:#fff;border:none;padding:7px 16px;border-radius:8px;font-size:0.82rem;cursor:pointer;font-weight:600;letter-spacing:0.01em">
+      🗑 Purger casiers vides retournés
+    </button>
     <button type="button" class="sync-casiers-btn" style="background:#1565c0;color:#fff;border:none;padding:7px 16px;border-radius:8px;font-size:0.82rem;cursor:pointer;font-weight:600;letter-spacing:0.01em">
-      ⟳ Créer casiers depuis stock &amp; ventes
+      ⟳ Recréer casiers depuis stock actuel
     </button>
   </div>`;
   Object.entries(byBrasserie).sort(([a], [b]) => a.localeCompare(b, "fr")).forEach(([brasserie, byCaseSize]) => {
@@ -9286,7 +9289,7 @@ async function syncStateSilently() {
         const _casierMouvements = state.casierMouvements ?? [];
         const _nextCasier = state.nextId?.casier;
         const _nextCasierMvt = state.nextId?.casierMouvement;
-        state = fresh;
+        state = mergeStateFromServerResponse(fresh, state, null);
         if (!state.pdjWorkDateBySite || typeof state.pdjWorkDateBySite !== "object") state.pdjWorkDateBySite = {};
         if (!state.nextId) state.nextId = {};
         if (!state.casiers?.length && _casiers.length) state.casiers = _casiers;
@@ -9336,7 +9339,8 @@ async function syncStateSilently() {
     }
   } catch (error) {
     // Fallback: if delta endpoint fails, reload full state.
-    state = await apiRequest(API.state, { cache: "no-store" });
+    const fresh = await apiRequest(API.state, { cache: "no-store" });
+    if (fresh) state = mergeStateFromServerResponse(fresh, state, null);
     if (!state.pdjWorkDateBySite || typeof state.pdjWorkDateBySite !== "object") state.pdjWorkDateBySite = {};
     delta = null;
   }
@@ -9580,27 +9584,52 @@ function buildStatePutBody(overrides = {}) {
   return body;
 }
 
-/** Fusionne la réponse serveur sans écraser par des tableaux vides accidentels. */
-function mergeStateFromServerResponse(incoming, previous) {
+/** Clés réellement envoyées dans le corps PUT (hors activeSiteId). */
+function patchedKeysFromPutBody(body) {
+  return new Set(
+    Object.keys(body || {}).filter((k) => k !== "activeSiteId" && k !== "params"),
+  );
+}
+
+/**
+ * Fusionne la réponse PUT /api/state.
+ * @param {Set<string>|null} patchedKeys — clés modifiées par ce PUT ; les autres collections restent inchangées côté client.
+ *   `null` = sauvegarde complète (toutes les clés du corps sont appliquées, avec garde-fou anti-tableau vide).
+ */
+function mergeStateFromServerResponse(incoming, previous, patchedKeys = null) {
   if (!incoming || typeof incoming !== "object") return previous;
   const prev = previous && typeof previous === "object" ? previous : {};
-  const out = { ...prev, ...incoming };
-  const listKeys = [...STATE_PUT_ROW_KEYS, "sites"];
-  listKeys.forEach((key) => {
-    const inc = incoming[key];
-    const old = prev[key];
-    if (Array.isArray(inc)) {
-      if (inc.length > 0 || !Array.isArray(old) || old.length === 0) out[key] = inc;
-      else out[key] = old;
-    }
-  });
-  if (incoming.auth && typeof incoming.auth === "object") out.auth = incoming.auth;
+  const out = { ...prev };
+
   if (incoming.meta) out.meta = incoming.meta;
-  if (incoming.pdjWorkDateBySite && typeof incoming.pdjWorkDateBySite === "object") {
-    out.pdjWorkDateBySite = incoming.pdjWorkDateBySite;
-  }
-  if (incoming.nextId && typeof incoming.nextId === "object") out.nextId = incoming.nextId;
   if (incoming.activeSiteId != null) out.activeSiteId = incoming.activeSiteId;
+  if (incoming.auth && typeof incoming.auth === "object") out.auth = incoming.auth;
+  if (incoming.sites && (!patchedKeys || patchedKeys.has("sites"))) out.sites = incoming.sites;
+  if (incoming.categories && (!patchedKeys || patchedKeys.has("categories"))) {
+    out.categories = incoming.categories;
+  }
+
+  const applyListKey = (key) => {
+    if (patchedKeys && !patchedKeys.has(key)) return;
+    const inc = incoming[key];
+    if (!Array.isArray(inc)) return;
+    const old = prev[key];
+    if (inc.length > 0 || !Array.isArray(old) || old.length === 0) out[key] = inc;
+    else out[key] = old;
+  };
+
+  STATE_PUT_ROW_KEYS.forEach(applyListKey);
+
+  if (!patchedKeys || patchedKeys.has("pdjWorkDateBySite")) {
+    if (incoming.pdjWorkDateBySite && typeof incoming.pdjWorkDateBySite === "object") {
+      out.pdjWorkDateBySite = incoming.pdjWorkDateBySite;
+    }
+  }
+  if (!patchedKeys || patchedKeys.has("nextId")) {
+    if (incoming.nextId && typeof incoming.nextId === "object") {
+      out.nextId = { ...(prev.nextId || {}), ...incoming.nextId };
+    }
+  }
   return out;
 }
 
@@ -9669,11 +9698,13 @@ async function persistState(overrides = {}) {
   const _stockChecks = overrides.stockChecks ?? state.stockChecks ?? [];
   const prev = state;
   const body = buildStatePutBody(overrides);
+  const isFullSave = !Object.keys(overrides || {}).length;
+  const patchedKeys = isFullSave ? null : patchedKeysFromPutBody(body);
   const incoming = await apiRequest(API.state, {
     method: "PUT",
     body: JSON.stringify(body),
   });
-  state = mergeStateFromServerResponse(incoming, prev);
+  state = mergeStateFromServerResponse(incoming, prev, patchedKeys);
   applyPersistStateResponseExtras(overrides, _stockChecks);
 }
 
@@ -9691,11 +9722,12 @@ async function persistStatePatch(patch) {
   const body = buildStatePutBody(
     patch.activeSiteId !== undefined ? patch : { activeSiteId: state.activeSiteId, ...patch },
   );
+  const patchedKeys = patchedKeysFromPutBody(body);
   const incoming = await apiRequest(API.state, {
     method: "PUT",
     body: JSON.stringify(body),
   });
-  state = mergeStateFromServerResponse(incoming, prev);
+  state = mergeStateFromServerResponse(incoming, prev, patchedKeys);
   applyPersistStateResponseExtras(patch, _stockChecks);
 }
 
@@ -10474,7 +10506,7 @@ async function applyPurchaseReceipt(po, linesReceived, opts = {}) {
       let remaining = bottles;
       const partials = (state.casiers || [])
         .filter((c) => c.siteId === siteId && String(c.article || "").toLowerCase() === String(item.article || "").toLowerCase())
-        .filter((c) => (Number(c.quantiteActuelle) || 0) < (Number(c.capacite) || 0))
+        .filter((c) => (Number(c.bouteillesVides) || 0) === 0 && (Number(c.quantiteActuelle) || 0) < (Number(c.capacite) || 0))
         .sort((a, b) => (Number(b.quantiteActuelle) || 0) - (Number(a.quantiteActuelle) || 0));
       partials.forEach((c) => {
         if (remaining <= 0) return;
@@ -11481,10 +11513,12 @@ async function saveStock() {
     fields.prixVenteExt = fields.prixVenteInt;
   }
   fields.promotions = readStockPromotions();
+  let _rollbackSnapshot = null;
   if (editId) {
     const item = state.stock.find((i) => i.id === Number(editId));
     if (item) {
       const before = JSON.parse(JSON.stringify(item));
+      _rollbackSnapshot = before;
       Object.assign(item, fields);
       touchStockItemUpdated(item);
       const changes = [];
@@ -11527,18 +11561,31 @@ async function saveStock() {
     saveBtn.disabled = true;
     saveBtn.textContent = "Enregistrement…";
   }
+  let saveOk = false;
   try {
     await persistStatePatch({
       stock: state.stock,
       nextId: state.nextId,
       staffAuditLog: state.staffAuditLog,
     });
+    saveOk = true;
+  } catch (err) {
+    // Rollback : restaurer l'état local pour que la sync ne perde pas les données
+    if (editId && _rollbackSnapshot) {
+      const rollbackItem = state.stock.find((i) => i.id === Number(editId));
+      if (rollbackItem) Object.assign(rollbackItem, _rollbackSnapshot);
+    } else if (!editId) {
+      state.stock = state.stock.filter((i) => i.id !== state.nextId.stock - 1);
+    }
+    state.staffAuditLog = (state.staffAuditLog || []).slice(0, -1);
+    throw err;
   } finally {
     if (saveBtn) {
       saveBtn.disabled = false;
       saveBtn.innerHTML = prevBtnHtml;
     }
   }
+  if (!saveOk) return;
   closeModal("modal-stock");
   resetStockForm();
   populateCategorySelects();
@@ -13843,23 +13890,41 @@ function logCasierAudit(verb, casier, before, item, beforeStock, qty, opts = {})
   recordStaffAudit(verb, opts.entity || "casier", `${codeLabel} · ${article} · ${opts.label || verb}`, lines.join("\n"));
 }
 
+async function purgerCasiersVides() {
+  if (!canAnyAdmin()) { showToast("Réservé aux administrateurs."); return; }
+  const siteId = currentSiteId();
+  const phantoms = (state.casiers || []).filter((c) =>
+    c.siteId === siteId &&
+    (Number(c.quantiteActuelle) || 0) === 0 &&
+    (Number(c.bouteillesVides) || 0) === 0
+  );
+  if (!phantoms.length) { showToast("Aucun casier vide à purger."); return; }
+  if (!confirm(`Supprimer ${phantoms.length} casier(s) entièrement vides (sans bouteilles pleines ni vides) ?`)) return;
+  const ids = new Set(phantoms.map((c) => c.id));
+  state.casiers = state.casiers.filter((c) => !ids.has(c.id));
+  recordStaffAudit("delete", "casier_purge", `Purge ${phantoms.length} casier(s) vides`, `Casiers sans bouteilles pleines ni vides supprimés.`);
+  try {
+    await persistState({ casiers: state.casiers, nextId: state.nextId });
+  } catch (e) { showToast("Erreur lors de la sauvegarde."); return; }
+  renderCasiers();
+  showToast(`${phantoms.length} casier(s) vide(s) supprimé(s).`);
+}
+
 async function syncCasiersFromStockEtVentes() {
   if (!canAnyAdmin()) { showToast("Réservé aux administrateurs."); return; }
   const siteId = currentSiteId();
   const eligible = recordsForSite(state.stock).filter((item) => lotType(item) === "casier");
   if (!eligible.length) { showToast("Aucun article en stock pour initialiser les casiers."); return; }
 
-  let previewPleins = 0, previewVides = 0;
+  let previewPleins = 0;
   eligible.forEach((item) => {
     const cap = Math.max(1, caseSize(item));
     previewPleins += Math.ceil(Math.max(0, stockActuel(item)) / cap);
-    previewVides  += Math.ceil(Math.max(0, Number(item.sorties) || 0) / cap);
   });
 
   if (!confirm(
-    `Créer les casiers depuis le stock et les ventes ?\n\n` +
-    `  • ${previewPleins} casier(s) PLEINS  (stock actuel)\n` +
-    `  • ${previewVides} casier(s) VIDES   (bouteilles vendues)\n\n` +
+    `Recréer les casiers depuis le stock actuel ?\n\n` +
+    `  • ${previewPleins} casier(s) PLEINS/PARTIELS (stock actuel)\n\n` +
     `Les casiers existants de ce site seront remplacés.`
   )) return;
 
@@ -13872,68 +13937,42 @@ async function syncCasiersFromStockEtVentes() {
   state.casiers = state.casiers.filter((c) => !rowMatchesSite(c, siteId, multiSiteActive()));
 
   const now = new Date().toISOString();
-  let createdPleins = 0, createdVides = 0;
+  let createdPleins = 0;
 
   eligible.forEach((item) => {
     const cap = Math.max(1, caseSize(item));
-
-    // --- Casiers PLEINS (stock actuel) ---
     const stockBtl = Math.max(0, stockActuel(item));
-    if (stockBtl > 0) {
-      const fullCount = Math.floor(stockBtl / cap);
-      const remainder = stockBtl % cap;
-      for (let i = 0; i < fullCount; i++) {
-        const c = { id: state.nextId.casier++, siteId, code: nextCasierCode(), article: item.article,
-          capacite: cap, quantiteActuelle: cap, bouteillesVides: 0,
-          emplacement: "Réserve", statut: "plein", createdAt: now, createdBy: sessionUser || "-", autoInitialized: true };
-        recomputeCasierStatus(c);
-        state.casiers.push(c);
-        createdPleins++;
-      }
-      if (remainder > 0) {
-        const c = { id: state.nextId.casier++, siteId, code: nextCasierCode(), article: item.article,
-          capacite: cap, quantiteActuelle: remainder, bouteillesVides: 0,
-          emplacement: "Réserve", statut: "partiel", createdAt: now, createdBy: sessionUser || "-", autoInitialized: true };
-        recomputeCasierStatus(c);
-        state.casiers.push(c);
-        createdPleins++;
-      }
+    if (stockBtl <= 0) return;
+    const fullCount = Math.floor(stockBtl / cap);
+    const remainder = stockBtl % cap;
+    for (let i = 0; i < fullCount; i++) {
+      const c = { id: state.nextId.casier++, siteId, code: nextCasierCode(), article: item.article,
+        capacite: cap, quantiteActuelle: cap, bouteillesVides: 0,
+        emplacement: "Réserve", statut: "plein", createdAt: now, createdBy: sessionUser || "-", autoInitialized: true };
+      recomputeCasierStatus(c);
+      state.casiers.push(c);
+      createdPleins++;
     }
-
-    // --- Casiers VIDES (bouteilles vendues, à retourner fournisseur) ---
-    const sorties = Math.max(0, Number(item.sorties) || 0);
-    if (sorties > 0) {
-      const fullVides = Math.floor(sorties / cap);
-      const remainderVides = sorties % cap;
-      for (let i = 0; i < fullVides; i++) {
-        const c = { id: state.nextId.casier++, siteId, code: nextCasierCode(), article: item.article,
-          capacite: cap, quantiteActuelle: 0, bouteillesVides: cap,
-          emplacement: "À retourner", statut: "vide", createdAt: now, createdBy: sessionUser || "-", autoInitialized: true };
-        recomputeCasierStatus(c);
-        state.casiers.push(c);
-        createdVides++;
-      }
-      if (remainderVides > 0) {
-        const c = { id: state.nextId.casier++, siteId, code: nextCasierCode(), article: item.article,
-          capacite: cap, quantiteActuelle: 0, bouteillesVides: remainderVides,
-          emplacement: "À retourner", statut: "vide", createdAt: now, createdBy: sessionUser || "-", autoInitialized: true };
-        recomputeCasierStatus(c);
-        state.casiers.push(c);
-        createdVides++;
-      }
+    if (remainder > 0) {
+      const c = { id: state.nextId.casier++, siteId, code: nextCasierCode(), article: item.article,
+        capacite: cap, quantiteActuelle: remainder, bouteillesVides: 0,
+        emplacement: "Réserve", statut: "partiel", createdAt: now, createdBy: sessionUser || "-", autoInitialized: true };
+      recomputeCasierStatus(c);
+      state.casiers.push(c);
+      createdPleins++;
     }
   });
 
   lsSaveCasiers();
   recordStaffAudit("create", "casier_sync",
-    `Sync casiers: ${createdPleins} pleins · ${createdVides} vides`,
-    `Initialisation depuis stock actuel et ventes totales du site.`
+    `Sync casiers: ${createdPleins} casier(s)`,
+    `Initialisation depuis stock actuel du site (casiers vides exclus).`
   );
   try {
     await persistState({ casiers: state.casiers, casierMouvements: state.casierMouvements, nextId: state.nextId });
   } catch (e) { lsSaveCasiers(); }
   renderCasiers();
-  showToast(`${fmt(createdPleins + createdVides)} casier(s) créé(s) : ${fmt(createdPleins)} plein(s) · ${fmt(createdVides)} vide(s)`);
+  showToast(`${fmt(createdPleins)} casier(s) créé(s) depuis le stock actuel.`);
 }
 
 async function ensurePhysicalCasiersFromReserve() {
@@ -14296,12 +14335,13 @@ async function _retourVidesLot(matchingVides, cap, label) {
   if (!state.nextId.casierMouvement) state.nextId.casierMouvement = 1;
   const now = new Date().toISOString();
   let processed = 0;
+  const idsToDelete = [];
   for (const casier of matchingVides) {
     const vides = Math.max(0, Number(casier.bouteillesVides) || 0);
     if (vides < cap) continue; // pas assez de bouteilles vides pour un casier
     casier.bouteillesVides = Math.max(0, vides - cap);
-    casier.statut = "retourne"; // rendu au fournisseur : plus retournable jusqu'à nouveau remplissage
-    recomputeCasierStatus(casier); // recalcule selon qty mais préserve "retourne"
+    casier.statut = "retourne"; // rendu au fournisseur
+    recomputeCasierStatus(casier);
     casier.lastMoveAt = now;
     casier.lastMoveBy = sessionUser || "system";
     state.casierMouvements.unshift({
@@ -14313,9 +14353,16 @@ async function _retourVidesLot(matchingVides, cap, label) {
       user: sessionUser || "system", role: currentRole || "-",
       date: today(), createdAt: now,
     });
+    // Casier complètement vide après retour : supprimer (il repart chez le fournisseur)
+    if ((Number(casier.bouteillesVides) || 0) === 0 && (Number(casier.quantiteActuelle) || 0) === 0) {
+      idsToDelete.push(casier.id);
+    }
     processed++;
   }
   if (!processed) { showToast("Aucun casier traité."); return 0; }
+  if (idsToDelete.length > 0) {
+    state.casiers = state.casiers.filter((c) => !idsToDelete.includes(c.id));
+  }
   lsSaveCasiers();
   recordStaffAudit("create", "casier_retour_vide",
     `Retour ${label} : ${processed} casier(s)`,
@@ -15225,6 +15272,10 @@ function attachEvents() {
   document.getElementById("co-vides")?.addEventListener("input", renderCasierOrderPreview);
   document.getElementById("co-submit-btn")?.addEventListener("click", submitCasierOrder);
   document.getElementById("stock-card-casiers")?.addEventListener("click", (e) => {
+    if (e.target.closest(".purge-casiers-btn")) {
+      purgerCasiersVides().catch(handleApiError);
+      return;
+    }
     if (e.target.closest(".sync-casiers-btn")) {
       syncCasiersFromStockEtVentes().catch(handleApiError);
       return;
