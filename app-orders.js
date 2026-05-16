@@ -5731,7 +5731,15 @@ function renderSalesHistory() {
           <div class="order-total">${fmt(total)} FCFA</div>
         </div>
         <div class="order-lines">
-          ${invoice.lignes.map((vente) => `<div class="order-line"><div><p class="list-item-title">${escapeHtml(vente.article)}</p><p class="list-item-sub">${escapeHtml(vente.cat)} · ${escapeHtml(lineQtyPriceLabel(vente, stockItemForArticle(vente.article)))}${vente.remise ? ` · -${fmt(vente.remise)}` : ""}</p></div><div style="display:flex;gap:6px;align-items:center">${sessionUser ? `<button type="button" class="mini-btn" data-replace-vente="${vente.id}" title="Remplacer cet article et mettre a jour le stock">Remplacer</button>` : ""}<button class="del-btn" type="button" data-delete-type="vente" data-id="${vente.id}">Suppr.</button></div></div>`).join("")}
+          ${invoice.lignes.map((vente) => {
+            const wd = workingDate();
+            const venteDate = String(vente.date || "").slice(0, 10);
+            const dayOpen = wd && venteDate === wd && !stockCheckForSiteDate(wd, vente.siteId || currentSiteId());
+            const replaceBtn = sessionUser && dayOpen
+              ? `<button type="button" class="mini-btn" data-replace-vente="${vente.id}" title="Remplacer cet article (journee ouverte uniquement)">Remplacer</button>`
+              : "";
+            return `<div class="order-line"><div><p class="list-item-title">${escapeHtml(vente.article)}</p><p class="list-item-sub">${escapeHtml(vente.cat)} · ${escapeHtml(lineQtyPriceLabel(vente, stockItemForArticle(vente.article)))}${vente.remise ? ` · -${fmt(vente.remise)}` : ""}</p></div><div style="display:flex;gap:6px;align-items:center">${replaceBtn}<button class="del-btn" type="button" data-delete-type="vente" data-id="${vente.id}">Suppr.</button></div></div>`;
+          }).join("")}
         </div>
         <div class="order-actions">
           <button type="button" class="mini-btn" data-print-invoice="${escapeHtml(invoice.factureNumber)}">Imprimer facture</button>
