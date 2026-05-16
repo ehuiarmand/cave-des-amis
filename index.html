@@ -1248,12 +1248,13 @@
               <p id="export-period-label" class="muted" style="margin:0;font-size:0.82rem;flex:1;min-width:140px;padding-bottom:6px"></p>
             </div>
             <div class="button-stack">
+              <button id="export-html-report-btn" class="btn btn-primary" type="button">📄 Rapport complet (HTML)</button>
               <button id="export-ventes-excel-btn" class="btn btn-outline" type="button">Exporter les ventes (Excel)</button>
               <button id="export-charges-excel-btn" class="btn btn-outline" type="button">Exporter les charges (Excel)</button>
-              <button id="export-compta-excel-btn" class="btn btn-primary" type="button">Exporter ventes + charges (Excel)</button>
+              <button id="export-compta-excel-btn" class="btn btn-outline" type="button">Exporter ventes + charges (Excel)</button>
               <button id="export-btn" class="btn btn-outline" type="button">Sauvegarde technique (JSON)</button>
             </div>
-            <p class="muted" style="font-size:0.82rem;margin-top:10px">Les exports Excel respectent la période choisie ci-dessus (comme sur le tableau de bord). La sauvegarde JSON exporte tout le maquis (restauration technique).</p>
+            <p class="muted" style="font-size:0.82rem;margin-top:10px">Le rapport HTML s'ouvre dans n'importe quel navigateur et s'imprime en PDF. Les exports Excel respectent la période choisie. La sauvegarde JSON est pour la restauration technique.</p>
           </article>
         </div>
 
@@ -2436,6 +2437,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=238"></script>
+  <script src="./app-orders.js?v=239"></script>
 </body>
 </html>

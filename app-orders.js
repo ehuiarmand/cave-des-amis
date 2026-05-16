@@ -388,6 +388,285 @@ function exportExcelComptaMonth() {
 function exportCsvVentesMonth() { exportExcelVentesMonth(); }
 function exportCsvChargesMonth() { exportExcelChargesMonth(); }
 
+function exportHtmlReport() {
+  const period = exportPeriod();
+  const site = currentSite();
+  const nomMaquis = escapeHtml(site?.nom || state?.params?.nom || "Mon Maquis");
+  const ville = escapeHtml(site?.ville || state?.params?.ville || "");
+  const gerant = escapeHtml(site?.gerant || state?.params?.gerant || "");
+  const generatedAt = new Date().toLocaleString("fr-FR");
+  const periodLabel = escapeHtml(period.label || "Toute la période");
+
+  const allVentes = recordsForSite(state.ventes);
+  const ventes = recordsInPeriod(allVentes, (v) => saleDateValue(v), period)
+    .slice().sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  const allCharges = recordsForSite(state.charges);
+  const charges = recordsInPeriod(allCharges, (c) => c.date, period)
+    .slice().sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  const stockItems = recordsForSite(state.stock).slice().sort((a, b) =>
+    String(a.article).localeCompare(String(b.article), "fr"));
+
+  const caTotal = ventes.reduce((s, v) => s + calcNet(v), 0);
+  const chargesTotal = charges.reduce((s, c) => s + (Number(c.montant) || 0), 0);
+  const benefice = caTotal - chargesTotal;
+  const nbVentes = ventes.length;
+
+  const payTotals = ventes.reduce((acc, v) => {
+    const k = v.paiement || "Autre";
+    acc[k] = (acc[k] || 0) + calcNet(v);
+    return acc;
+  }, {});
+
+  const PAY_COLORS = {
+    "Espèces": "#1b5e20", "Orange Money": "#e65100", "MTN MoMo": "#f57f17",
+    "Wave": "#0277bd", "Carte": "#4527a0", "Crédit client": "#b71c1c",
+  };
+
+  const rowsVentes = ventes.map((v) => {
+    const color = PAY_COLORS[v.paiement] || "#37474f";
+    return `<tr>
+      <td>${escapeHtml(formatDateDdMmYyyy(v.date))}</td>
+      <td><strong>${escapeHtml(v.article || "—")}</strong></td>
+      <td style="color:#555">${escapeHtml(v.cat || "—")}</td>
+      <td style="text-align:center">${escapeHtml(String(v.qty || 1))}</td>
+      <td style="text-align:right">${fmt(v.prix)} FCFA</td>
+      <td style="text-align:right;color:#c62828">${v.remise ? `-${fmt(v.remise)}` : "—"}</td>
+      <td style="text-align:right;font-weight:600">${fmt(calcNet(v))} FCFA</td>
+      <td><span class="badge-pay" style="background:${color}">${escapeHtml(v.paiement || "—")}</span></td>
+      <td style="color:#555">${escapeHtml(v.server || v.serveur || "—")}</td>
+    </tr>`;
+  }).join("");
+
+  const rowsCharges = charges.map((c) => {
+    return `<tr>
+      <td>${escapeHtml(formatDateDdMmYyyy(c.date))}</td>
+      <td><strong>${escapeHtml(c.lib || "—")}</strong></td>
+      <td style="color:#555">${escapeHtml(c.cat || "Autres")}</td>
+      <td style="text-align:right;font-weight:600;color:#c62828">${fmt(c.montant)} FCFA</td>
+      <td>${escapeHtml(c.paiement || "—")}</td>
+    </tr>`;
+  }).join("");
+
+  const rowsStock = stockItems.map((item) => {
+    const qte = stockActuel(item);
+    let statut = "OK"; let sc = "#1b5e20"; let bg = "#e8f5e9";
+    if (qte <= 0) { statut = "RUPTURE"; sc = "#b71c1c"; bg = "#ffebee"; }
+    else if (qte <= Number(item.seuilMin || 0)) { statut = "CRITIQUE"; sc = "#b71c1c"; bg = "#ffebee"; }
+    else if (qte <= Number(item.seuilMin || 0) * 2) { statut = "FAIBLE"; sc = "#e65100"; bg = "#fff3e0"; }
+    const valeur = qte * (Number(item.prixAchat) || 0);
+    return `<tr style="background:${bg}">
+      <td><strong>${escapeHtml(item.article || "—")}</strong></td>
+      <td style="color:#555">${escapeHtml(item.cat || "—")}</td>
+      <td style="text-align:center;font-weight:700;color:${sc}">${fmt(qte)}</td>
+      <td style="text-align:center;color:#555">${fmt(item.seuilMin || 0)}</td>
+      <td style="text-align:right">${fmt(item.prixAchat || 0)} FCFA</td>
+      <td style="text-align:right">${fmt(valeur)} FCFA</td>
+      <td style="text-align:center"><span class="badge-stock" style="background:${sc}">${statut}</span></td>
+    </tr>`;
+  }).join("");
+
+  const payRows = Object.entries(payTotals).sort((a, b) => b[1] - a[1]).map(([k, v]) => {
+    const c = PAY_COLORS[k] || "#37474f";
+    return `<tr><td><span class="badge-pay" style="background:${c}">${escapeHtml(k)}</span></td>
+      <td style="text-align:right;font-weight:600">${fmt(v)} FCFA</td>
+      <td style="text-align:right;color:#555">${caTotal > 0 ? Math.round(v / caTotal * 100) : 0} %</td></tr>`;
+  }).join("");
+
+  const html = `<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Rapport — ${nomMaquis}</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Segoe UI',Arial,sans-serif;background:#f5f5f5;color:#212121;font-size:14px}
+  .page{max-width:960px;margin:0 auto;padding:24px 16px 60px}
+  /* ── En-tête ── */
+  .header{background:linear-gradient(135deg,#c54f41,#7b241c);color:#fff;border-radius:12px;padding:28px 32px;margin-bottom:24px;display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:12px}
+  .header h1{font-size:2rem;font-weight:800;letter-spacing:-0.5px}
+  .header-sub{font-size:0.92rem;opacity:.85;margin-top:4px}
+  .header-meta{text-align:right;font-size:0.82rem;opacity:.8;line-height:1.6}
+  /* ── KPI cards ── */
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;margin-bottom:24px}
+  .kpi{border-radius:10px;padding:18px 20px;color:#fff;position:relative;overflow:hidden}
+  .kpi::after{content:'';position:absolute;right:-20px;top:-20px;width:80px;height:80px;border-radius:50%;background:rgba(255,255,255,.12)}
+  .kpi-label{font-size:0.78rem;font-weight:600;text-transform:uppercase;letter-spacing:.8px;opacity:.88}
+  .kpi-value{font-size:1.7rem;font-weight:800;margin-top:4px;line-height:1}
+  .kpi-sub{font-size:0.78rem;opacity:.8;margin-top:3px}
+  .kpi-ca{background:linear-gradient(135deg,#1565c0,#0d47a1)}
+  .kpi-charges{background:linear-gradient(135deg,#c62828,#b71c1c)}
+  .kpi-ben{background:linear-gradient(135deg,#2e7d32,#1b5e20)}
+  .kpi-ben.neg{background:linear-gradient(135deg,#bf360c,#b71c1c)}
+  .kpi-ventes{background:linear-gradient(135deg,#6a1b9a,#4a148c)}
+  /* ── Sections ── */
+  section{background:#fff;border-radius:10px;border:1px solid #e0e0e0;margin-bottom:20px;overflow:hidden}
+  .section-head{padding:14px 20px;display:flex;align-items:center;gap:10px;border-bottom:1px solid #e0e0e0}
+  .section-head h2{font-size:1rem;font-weight:700;flex:1}
+  .section-badge{font-size:0.78rem;background:#f5f5f5;border:1px solid #ddd;border-radius:20px;padding:2px 10px;color:#555;font-weight:600}
+  .section-body{overflow-x:auto}
+  /* ── Tableaux ── */
+  table{width:100%;border-collapse:collapse;font-size:0.85rem}
+  thead tr{background:#fafafa}
+  th{padding:10px 12px;text-align:left;font-size:0.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#757575;border-bottom:2px solid #e0e0e0}
+  td{padding:9px 12px;border-bottom:1px solid #f0f0f0;vertical-align:middle}
+  tbody tr:last-child td{border-bottom:none}
+  tbody tr:hover{background:#fafafa}
+  /* ── Badges ── */
+  .badge-pay,.badge-stock{display:inline-block;padding:2px 9px;border-radius:20px;font-size:0.72rem;font-weight:700;color:#fff;letter-spacing:.4px}
+  /* ── Répartition paiements ── */
+  .pay-grid{display:grid;grid-template-columns:1fr 1fr;gap:0}
+  .pay-grid table{border:none}
+  /* ── Pied ── */
+  .footer{text-align:center;color:#9e9e9e;font-size:0.78rem;margin-top:32px;padding-top:16px;border-top:1px solid #e0e0e0}
+  .total-row{background:#f5f5f5!important;font-weight:700}
+  .total-row td{border-top:2px solid #e0e0e0!important;border-bottom:none!important}
+  .stripe tbody tr:nth-child(even){background:#fafafa}
+  @media print{
+    body{background:#fff}
+    .page{padding:0}
+    section{break-inside:avoid;border:1px solid #ccc}
+    .kpi{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    .header{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- En-tête -->
+  <div class="header">
+    <div>
+      <h1>${nomMaquis}</h1>
+      <div class="header-sub">${ville ? ville + " · " : ""}${gerant ? "Gérant : " + gerant : ""}</div>
+    </div>
+    <div class="header-meta">
+      Rapport <strong>${periodLabel}</strong><br>
+      Généré le ${escapeHtml(generatedAt)}
+    </div>
+  </div>
+
+  <!-- KPI -->
+  <div class="kpis">
+    <div class="kpi kpi-ca">
+      <div class="kpi-label">CA encaissé</div>
+      <div class="kpi-value">${fmt(caTotal)}</div>
+      <div class="kpi-sub">FCFA — ${periodLabel}</div>
+    </div>
+    <div class="kpi kpi-charges">
+      <div class="kpi-label">Charges</div>
+      <div class="kpi-value">${fmt(chargesTotal)}</div>
+      <div class="kpi-sub">FCFA — ${periodLabel}</div>
+    </div>
+    <div class="kpi kpi-ben${benefice < 0 ? " neg" : ""}">
+      <div class="kpi-label">Bénéfice net</div>
+      <div class="kpi-value">${benefice >= 0 ? "" : "-"}${fmt(Math.abs(benefice))}</div>
+      <div class="kpi-sub">FCFA — CA − Charges</div>
+    </div>
+    <div class="kpi kpi-ventes">
+      <div class="kpi-label">Transactions</div>
+      <div class="kpi-value">${nbVentes}</div>
+      <div class="kpi-sub">vente${nbVentes > 1 ? "s" : ""} — ${periodLabel}</div>
+    </div>
+  </div>
+
+  <!-- Répartition paiements -->
+  ${Object.keys(payTotals).length ? `
+  <section>
+    <div class="section-head">
+      <h2>Répartition des encaissements</h2>
+      <span class="section-badge">${Object.keys(payTotals).length} mode(s)</span>
+    </div>
+    <div class="section-body">
+      <table>
+        <thead><tr><th>Mode de paiement</th><th style="text-align:right">Montant</th><th style="text-align:right">Part</th></tr></thead>
+        <tbody>${payRows}
+          <tr class="total-row"><td><strong>Total</strong></td><td style="text-align:right">${fmt(caTotal)} FCFA</td><td style="text-align:right">100 %</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>` : ""}
+
+  <!-- Ventes -->
+  <section>
+    <div class="section-head">
+      <h2>Détail des ventes</h2>
+      <span class="section-badge">${nbVentes} vente${nbVentes > 1 ? "s" : ""} · ${fmt(caTotal)} FCFA</span>
+    </div>
+    <div class="section-body">
+      ${ventes.length ? `<table class="stripe">
+        <thead><tr>
+          <th>Date</th><th>Article</th><th>Catégorie</th>
+          <th style="text-align:center">Qté</th><th style="text-align:right">Prix unit.</th>
+          <th style="text-align:right">Remise</th><th style="text-align:right">Net</th>
+          <th>Paiement</th><th>Serveur</th>
+        </tr></thead>
+        <tbody>${rowsVentes}
+          <tr class="total-row"><td colspan="6"><strong>Total</strong></td>
+            <td style="text-align:right">${fmt(caTotal)} FCFA</td><td colspan="2"></td></tr>
+        </tbody>
+      </table>` : '<p style="padding:20px;color:#9e9e9e;text-align:center">Aucune vente sur cette période.</p>'}
+    </div>
+  </section>
+
+  <!-- Stock -->
+  <section>
+    <div class="section-head">
+      <h2>État du stock</h2>
+      <span class="section-badge">${stockItems.length} article${stockItems.length > 1 ? "s" : ""}</span>
+    </div>
+    <div class="section-body">
+      ${stockItems.length ? `<table>
+        <thead><tr>
+          <th>Article</th><th>Catégorie</th>
+          <th style="text-align:center">Qté actuelle</th><th style="text-align:center">Seuil min.</th>
+          <th style="text-align:right">Prix achat</th><th style="text-align:right">Valeur stock</th>
+          <th style="text-align:center">Statut</th>
+        </tr></thead>
+        <tbody>${rowsStock}</tbody>
+      </table>` : '<p style="padding:20px;color:#9e9e9e;text-align:center">Stock vide.</p>'}
+    </div>
+  </section>
+
+  <!-- Charges -->
+  <section>
+    <div class="section-head">
+      <h2>Détail des charges</h2>
+      <span class="section-badge">${charges.length} charge${charges.length > 1 ? "s" : ""} · ${fmt(chargesTotal)} FCFA</span>
+    </div>
+    <div class="section-body">
+      ${charges.length ? `<table class="stripe">
+        <thead><tr>
+          <th>Date</th><th>Libellé</th><th>Catégorie</th>
+          <th style="text-align:right">Montant</th><th>Paiement</th>
+        </tr></thead>
+        <tbody>${rowsCharges}
+          <tr class="total-row"><td colspan="3"><strong>Total</strong></td>
+            <td style="text-align:right;color:#c62828">${fmt(chargesTotal)} FCFA</td><td></td></tr>
+        </tbody>
+      </table>` : '<p style="padding:20px;color:#9e9e9e;text-align:center">Aucune charge sur cette période.</p>'}
+    </div>
+  </section>
+
+  <div class="footer">
+    Rapport généré automatiquement par <strong>Maquis Manager</strong> · ${nomMaquis} · ${escapeHtml(generatedAt)}
+  </div>
+</div>
+</body>
+</html>`;
+
+  const slug = exportFileSlug();
+  const fname = `rapport_${exportPeriodFileBase(period, "rapport")}_${slug}.html`
+    .replace(/rapport_rapport_/, "rapport_");
+  const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = fname;
+  link.click();
+  URL.revokeObjectURL(link.href);
+  showToast(`Rapport HTML exporté — ${period.label}.`);
+}
+
 function touchStockItemUpdated(item) {
   if (!item) return;
   item.updatedAt = new Date().toISOString();
@@ -15071,6 +15350,7 @@ document.getElementById("fab-btn").addEventListener("click", () => {
   });
   document.getElementById("reappro-case-size-select").addEventListener("change", updateReapproPrixInfo);
   document.getElementById("enable-2fa-btn").addEventListener("click", () => enable2FA().catch(handleApiError));
+  document.getElementById("export-html-report-btn")?.addEventListener("click", exportHtmlReport);
   document.getElementById("export-btn")?.addEventListener("click", exportData);
   document.getElementById("export-ventes-excel-btn")?.addEventListener("click", exportExcelVentesMonth);
   document.getElementById("export-charges-excel-btn")?.addEventListener("click", exportExcelChargesMonth);
