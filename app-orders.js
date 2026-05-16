@@ -8125,6 +8125,86 @@ function stopLiveSync() {
   liveSyncTimer = null;
 }
 
+/** Prochaine occurrence locale de l'heure de clôture auto (aujourd'hui ou demain si déjà passée). */
+function nextAutoClotureLocalTargetDate(now, hh, mm) {
+  const t = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hh, mm, 0, 0);
+  if (t.getTime() <= now.getTime()) t.setDate(t.getDate() + 1);
+  return t;
+}
+
+function formatAutoClotureRemaining(ms) {
+  const sec = Math.max(0, Math.floor(ms / 1000));
+  if (sec < 60) return `${sec} s`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min} min`;
+  const h = Math.floor(min / 60);
+  const r = min % 60;
+  return r ? `${h} h ${r} min` : `${h} h`;
+}
+
+/** Dès quelle heure locale afficher le compte à rebours le soir (en plus de la fenêtre nuit &lt; 8 h). */
+const AUTO_CLOTURE_COUNTDOWN_EVENING_FROM_HOUR = 22;
+/** Afficher aussi le compte à rebours s'il reste au plus ce délai avant l'heure programmée (toute heure de la journée). */
+const AUTO_CLOTURE_COUNTDOWN_LAST_MS = 60 * 60 * 1000;
+
+/** Compte à rebours clôture auto : à partir de 22 h ou toute la nuit jusqu'à 8 h, ou dès qu'il reste ≤ 1 h avant l'heure programmée. */
+function updateAutoClotureCountdown() {
+  const el = document.getElementById("topbar-auto-cloture-countdown");
+  if (!el) return;
+  if (!state || !sessionUser) {
+    el.classList.add("hidden");
+    el.textContent = "";
+    el.removeAttribute("title");
+    return;
+  }
+  const site = currentSite();
+  if (!site?.autoClotureEnabled || !site?.autoClotureTime) {
+    el.classList.add("hidden");
+    el.textContent = "";
+    el.removeAttribute("title");
+    return;
+  }
+  const parts = String(site.autoClotureTime).trim().split(":");
+  const hh = Number(parts[0]);
+  const mm = Number(parts[1]);
+  if (Number.isNaN(hh) || Number.isNaN(mm)) {
+    el.classList.add("hidden");
+    el.textContent = "";
+    el.removeAttribute("title");
+    return;
+  }
+  const siteId = currentSiteId();
+  const dStr = workingDate();
+  if (!dStr || stockCheckForSiteDate(dStr, siteId)) {
+    el.classList.add("hidden");
+    el.textContent = "";
+    el.removeAttribute("title");
+    return;
+  }
+  const now = new Date();
+  const hour = now.getHours();
+  const target = nextAutoClotureLocalTargetDate(now, hh, mm);
+  const remaining = target.getTime() - now.getTime();
+  const timeLabel = String(site.autoClotureTime).trim().slice(0, 5);
+  if (remaining <= 0) {
+    el.classList.remove("hidden");
+    el.textContent = "Clôture automatique…";
+    el.title = `Journée ${dStr} · heure programmée ${timeLabel} — traitement en cours ou consultez le point du jour.`;
+    return;
+  }
+  const inEveningOrNight = hour >= AUTO_CLOTURE_COUNTDOWN_EVENING_FROM_HOUR || hour < NIGHT_SHIFT_CUTOFF_HOUR;
+  const inLastHourBeforeClose = remaining <= AUTO_CLOTURE_COUNTDOWN_LAST_MS;
+  if (!inEveningOrNight && !inLastHourBeforeClose) {
+    el.classList.add("hidden");
+    el.textContent = "";
+    el.removeAttribute("title");
+    return;
+  }
+  el.classList.remove("hidden");
+  el.textContent = `Clôture auto dans ${formatAutoClotureRemaining(remaining)}`;
+  el.title = `Journée comptable ${dStr} · clôture automatique à ${timeLabel} (heure locale). Visible à partir de ${AUTO_CLOTURE_COUNTDOWN_EVENING_FROM_HOUR} h ou la nuit (avant ${NIGHT_SHIFT_CUTOFF_HOUR} h), ou dès qu'il reste au plus 1 h ; sinon masqué entre ${NIGHT_SHIFT_CUTOFF_HOUR} h et ${AUTO_CLOTURE_COUNTDOWN_EVENING_FROM_HOUR} h.`;
+}
+
 function updateAppLiveClock() {
   const timeEl = document.getElementById("topbar-live-clock-time");
   const zoneEl = document.getElementById("topbar-live-clock-zone");
@@ -8150,6 +8230,7 @@ function updateAppLiveClock() {
       zoneEl.textContent = "";
     }
   }
+  updateAutoClotureCountdown();
 }
 
 function startAppLiveClock() {
@@ -8200,7 +8281,6 @@ function _scheduleNextAutoClotureTimeout() {
   if (target <= now) target.setDate(target.getDate() + 1);
 
   const msUntil = target.getTime() - now.getTime();
-  console.info(`[auto-cloture] Prochain déclenchement dans ${Math.round(msUntil / 60000)} min (${target.toLocaleTimeString()})`);
   autoClotureTimer = window.setTimeout(() => {
     _triggerAutoClotureNow();
     // Reprogrammer pour le lendemain
