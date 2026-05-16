@@ -2937,6 +2937,7 @@ async function generatePlanningRotationFromForm() {
     + (replace ? "\n\nLes créneaux existants sur cette période pour ce maquis seront supprimés." : "");
   if (!window.confirm(msg)) return;
 
+  await refreshWorkShiftsFromServer();
   let rows = [...workShiftsAll()];
   if (replace) {
     rows = rows.filter((s) => {
@@ -2947,10 +2948,8 @@ async function generatePlanningRotationFromForm() {
   }
   rows = [...rows, ...generated];
   const prevWorkShifts = workShiftsAll();
-  state.workShifts = rows;
   try {
-    await persistStatePatch({ workShifts: rows, nextId: state.nextId });
-    reconcileWorkShiftsAfterPatch(rows);
+    await persistWorkShiftsPatch(rows, { snapshot: true, skipRefresh: true, nextId: state.nextId });
     recordStaffAudit("create", "planning", `Rotation ${bounds.start} → ${bounds.end}`, `${staffOrder.join(", ")} · ${workDays}j/${teamSize} srv`);
     renderPlanningTeam();
     renderPlanningMine();
@@ -3134,6 +3133,81 @@ function reconcileWorkShiftsAfterPatch(sentRows) {
   state.workShifts = Array.from(byId.values());
 }
 
+const LS_WORK_SHIFTS_KEY = "cda_workShifts_v1";
+
+function lsSaveWorkShifts() {
+  try {
+    const rows = workShiftsAll();
+    if (!rows.length) return;
+    localStorage.setItem(LS_WORK_SHIFTS_KEY, JSON.stringify(rows));
+    if (state?.nextId?.workShift != null) {
+      localStorage.setItem(`${LS_WORK_SHIFTS_KEY}_nextId`, String(state.nextId.workShift));
+    }
+  } catch {
+    /* quota / mode privé */
+  }
+}
+
+function lsRestoreWorkShifts() {
+  try {
+    const raw = localStorage.getItem(LS_WORK_SHIFTS_KEY);
+    if (!raw) return;
+    const list = JSON.parse(raw);
+    if (!Array.isArray(list) || !list.length) return;
+    state.workShifts = mergeWorkShiftsFromServer(state.workShifts || [], list);
+    if (!state.nextId) state.nextId = {};
+    const nextRaw = localStorage.getItem(`${LS_WORK_SHIFTS_KEY}_nextId`);
+    if (nextRaw) {
+      state.nextId.workShift = Math.max(Number(state.nextId.workShift) || 100, Number(nextRaw) || 0);
+    }
+  } catch {
+    /* localStorage corrompu */
+  }
+}
+
+/** Après PUT planning : l'état local garde toujours les créneaux envoyés. */
+function applyWorkShiftsAfterSave(sentRows) {
+  const sent = Array.isArray(sentRows) ? sentRows : [];
+  if (!sent.length) {
+    lsSaveWorkShifts();
+    return;
+  }
+  state.workShifts = mergeWorkShiftsFromServer(workShiftsAll(), sent);
+  reconcileWorkShiftsAfterPatch(sent);
+  const sentIds = new Set(sent.map((s) => Number(s.id)));
+  if (sent.some((s) => !workShiftsAll().some((g) => Number(g.id) === Number(s.id)))) {
+    const byId = new Map(workShiftsAll().map((s) => [Number(s.id), s]));
+    sent.forEach((s) => byId.set(Number(s.id), s));
+    state.workShifts = Array.from(byId.values());
+  }
+  if (sentIds.size > workShiftsAll().filter((s) => sentIds.has(Number(s.id))).length) {
+    state.workShifts = sent.slice();
+  }
+  lsSaveWorkShifts();
+}
+
+/**
+ * Sauvegarde planning : sync serveur d'abord, PUT, puis force l'état local + cache navigateur.
+ * @param {boolean} snapshot — true = le serveur peut retirer les créneaux absents du payload (liste complète).
+ */
+async function persistWorkShiftsPatch(rows, { snapshot = true, skipRefresh = false, ...patchExtra } = {}) {
+  if (!skipRefresh) await refreshWorkShiftsFromServer();
+  const sent = [...rows];
+  const prev = workShiftsAll();
+  state.workShifts = sent;
+  try {
+    await persistStatePatch({
+      ...patchExtra,
+      workShifts: sent,
+      workShiftsScopedSnapshot: snapshot,
+    });
+    applyWorkShiftsAfterSave(sent);
+  } catch (e) {
+    state.workShifts = prev;
+    throw e;
+  }
+}
+
 async function saveWorkShiftFromForm() {
   if (!canManageTeamSchedule()) {
     showToast("Réservé au gérant ou à un administrateur.");
@@ -3167,6 +3241,7 @@ async function saveWorkShiftFromForm() {
     showToast("Plage limitée à 31 jours. Réduisez la période Du / Au.");
     return;
   }
+  await refreshWorkShiftsFromServer();
   const now = new Date().toISOString();
   let rows = [...workShiftsAll()];
   if (editRaw) {
@@ -3204,10 +3279,8 @@ async function saveWorkShiftFromForm() {
     }
   }
   const prevWorkShifts = workShiftsAll();
-  state.workShifts = rows;
   try {
-    await persistStatePatch({ workShifts: rows, nextId: state.nextId });
-    reconcileWorkShiftsAfterPatch(rows);
+    await persistWorkShiftsPatch(rows, { snapshot: true, skipRefresh: true, nextId: state.nextId });
     const auditDay = editRaw ? dateStart : `${dateStart}${dayList.length > 1 ? ` → ${dateEnd}` : ""}`;
     recordStaffAudit(editRaw ? "update" : "create", "planning", editRaw ? `Créneau #${editRaw}` : `Créneau ${auditDay}`, `${username} ${startTime}-${endTime}${dayList.length > 1 ? ` · ${dayList.length} jours` : ""}`);
     resetWorkShiftForm();
@@ -3226,12 +3299,11 @@ async function deleteWorkShift(idRaw) {
   const shift = workShiftsAll().find((s) => Number(s.id) === id);
   if (!shift) return;
   if (!window.confirm(`Supprimer le créneau du ${formatDateDdMmYyyy(shift.date)} (${shift.startTime} – ${shift.endTime}) pour ${staffDisplayName(shift.username)} ?`)) return;
+  await refreshWorkShiftsFromServer();
   const rows = workShiftsAll().filter((s) => Number(s.id) !== id);
   const prevWorkShifts = workShiftsAll();
-  state.workShifts = rows;
   try {
-    await persistStatePatch({ workShifts: rows });
-    reconcileWorkShiftsAfterPatch(rows);
+    await persistWorkShiftsPatch(rows, { snapshot: true, skipRefresh: true });
     recordStaffAudit("delete", "planning", `Créneau #${id}`, `${shift.username} ${shift.date}`);
     if (String(document.getElementById("ws-edit-id")?.value) === String(id)) resetWorkShiftForm();
     renderPlanningTeam();
@@ -3267,7 +3339,9 @@ function applyPlanningRangeAndRender() {
 async function renderPlanningPage() {
   if (!state) return;
   if (!Array.isArray(state.workShifts)) state.workShifts = [];
-  await refreshWorkShiftsFromServer({ onlyIfLocalEmpty: true });
+  lsRestoreWorkShifts();
+  await refreshWorkShiftsFromServer();
+  lsSaveWorkShifts();
   if (!document.getElementById("planning-range-start")?.value) setPlanningRangeCurrentWeek();
   resetWorkShiftForm();
   setPlanningSubTab(planningSubTab);
@@ -10250,9 +10324,13 @@ async function syncStateSilently() {
       if (fresh) {
         const _casiers = state.casiers ?? [];
         const _casierMouvements = state.casierMouvements ?? [];
+        const _workShifts = workShiftsAll();
         const _nextCasier = state.nextId?.casier;
         const _nextCasierMvt = state.nextId?.casierMouvement;
         state = mergeStateFromServerResponse(fresh, state, null);
+        if (_workShifts.length) {
+          state.workShifts = mergeWorkShiftsFromServer(state.workShifts || [], _workShifts);
+        }
         if (!state.pdjWorkDateBySite || typeof state.pdjWorkDateBySite !== "object") state.pdjWorkDateBySite = {};
         if (!state.nextId) state.nextId = {};
         if (!state.casiers?.length && _casiers.length) state.casiers = _casiers;
@@ -10303,7 +10381,13 @@ async function syncStateSilently() {
   } catch (error) {
     // Fallback: if delta endpoint fails, reload full state.
     const fresh = await apiRequest(API.state, { cache: "no-store" });
-    if (fresh) state = mergeStateFromServerResponse(fresh, state, null);
+    if (fresh) {
+      const _workShifts = workShiftsAll();
+      state = mergeStateFromServerResponse(fresh, state, null);
+      if (_workShifts.length) {
+        state.workShifts = mergeWorkShiftsFromServer(state.workShifts || [], _workShifts);
+      }
+    }
     if (!state.pdjWorkDateBySite || typeof state.pdjWorkDateBySite !== "object") state.pdjWorkDateBySite = {};
     delta = null;
   }
@@ -10545,6 +10629,9 @@ function buildStatePutBody(overrides = {}) {
   if (Object.prototype.hasOwnProperty.call(o, "nextId")) body.nextId = o.nextId;
   if (Object.prototype.hasOwnProperty.call(o, "auth")) body.auth = o.auth;
   if (Object.prototype.hasOwnProperty.call(o, "params")) body.params = o.params;
+  if (Object.prototype.hasOwnProperty.call(o, "workShiftsScopedSnapshot")) {
+    body.workShiftsScopedSnapshot = Boolean(o.workShiftsScopedSnapshot);
+  }
   return body;
 }
 
@@ -10701,7 +10788,7 @@ async function persistStatePatch(patch) {
   });
   state = mergeStateFromServerResponse(incoming, prev, patchedKeys);
   if (Array.isArray(patch.workShifts) && patchedKeys.has("workShifts")) {
-    reconcileWorkShiftsAfterPatch(patch.workShifts);
+    applyWorkShiftsAfterSave(patch.workShifts);
   }
   applyPersistStateResponseExtras(patch, _stockChecks);
 }
@@ -16214,6 +16301,8 @@ async function bootstrapAuthenticatedApp(opts = {}) {
   if (!Array.isArray(state.casierMouvements)) state.casierMouvements = [];
   if (!Array.isArray(state.staffAuditLog)) state.staffAuditLog = [];
   if (!Array.isArray(state.workShifts)) state.workShifts = [];
+  lsRestoreWorkShifts();
+  if (workShiftsAll().length) lsSaveWorkShifts();
   if (!state.nextId) state.nextId = {};
   if (!state.nextId.stockEntree || Number.isNaN(Number(state.nextId.stockEntree))) state.nextId.stockEntree = 100;
   if (!state.nextId.stockLoss || Number.isNaN(Number(state.nextId.stockLoss))) state.nextId.stockLoss = 100;

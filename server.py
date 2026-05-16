@@ -775,6 +775,8 @@ def merge_work_shifts_scoped(
     allowed: set[str],
     site_ids: list[str],
     auth_users: list[dict[str, Any]],
+    *,
+    snapshot: bool = False,
 ) -> list[Any]:
     if not session_can_manage_team_schedule(session):
         raise ValueError("Modification du planning non autorisee.")
@@ -791,16 +793,35 @@ def merge_work_shifts_scoped(
         if isinstance(row, dict):
             row_id = str(row.get("id", ""))
             if row_id not in existing_ids:
-                # Nouveau creneau : validation complete
                 validate_work_shift_row(row, session, auth_users, site_ids, allowed)
             else:
-                # Creneau existant re-envoye : validation allegee (siteId + username minimum)
                 sid = str(row.get("siteId", "")).strip()
                 if sid not in allowed or sid not in {str(x) for x in site_ids}:
                     raise ValueError("Maquis non autorise pour ce creneau.")
                 if not str(row.get("username", "")).strip():
                     raise ValueError("Utilisateur obligatoire pour le creneau.")
-    return merge_scoped_rows(current, incoming, allowed, site_ids)
+    return merge_work_shifts_rows(current, incoming, allowed, site_ids, snapshot=snapshot)
+
+
+def merge_work_shifts_rows(
+    current: list[Any],
+    incoming: list[Any],
+    allowed: set[str],
+    site_ids: list[str],
+    *,
+    snapshot: bool = False,
+) -> list[dict[str, Any]]:
+    """Fusion planning : upsert par defaut ; suppression hors snapshot uniquement si snapshot=True."""
+    if snapshot:
+        return merge_scoped_rows(current, incoming, allowed, site_ids)
+    by_id: dict[str, dict[str, Any]] = {}
+    for r in current or []:
+        if isinstance(r, dict) and r.get("id") is not None:
+            by_id[str(r["id"])] = r
+    for row in incoming or []:
+        if isinstance(row, dict) and row.get("id") is not None:
+            by_id[str(row["id"])] = row
+    return list(by_id.values())
 
 
 def _zero_stock_row_quantities(row: dict[str, Any]) -> None:
@@ -2246,6 +2267,7 @@ class DataStore:
                         raise ValueError("Modification du planning non autorisee.")
                     auth_users_sa = list(current.get("auth", {}).get("users", []))
                     allowed_sa = set(sid_list)
+                    ws_snapshot = bool(payload.get("workShiftsScopedSnapshot"))
                     current["workShifts"] = merge_work_shifts_scoped(
                         current.get("workShifts", []),
                         payload["workShifts"],
@@ -2253,6 +2275,7 @@ class DataStore:
                         allowed_sa,
                         sid_list,
                         auth_users_sa,
+                        snapshot=ws_snapshot,
                     )
                 _GLOBAL_PATCH_KEYS = [
                     "ventes", "stock", "commandes", "stockChecks", "dayBooks",
@@ -2347,6 +2370,7 @@ class DataStore:
                 if str(session.get("role", "")).strip().lower() == "serveuse":
                     raise ValueError("Modification du planning non autorisee.")
             auth_users = list(current.get("auth", {}).get("users", []))
+            ws_snapshot = bool(payload.get("workShiftsScopedSnapshot"))
             for _key in _SCOPED_KEYS:
                 if _key in payload:
                     if _key == "workShifts":
@@ -2357,6 +2381,7 @@ class DataStore:
                             allowed,
                             sid_list,
                             auth_users,
+                            snapshot=ws_snapshot,
                         )
                     else:
                         current[_key] = merge_scoped_rows(
