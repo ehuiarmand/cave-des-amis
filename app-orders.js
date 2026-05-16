@@ -3011,7 +3011,10 @@ function renderPlanningMine() {
   const restToday = serveusePlanningBlocksSale(today(), currentSiteId());
   if (sumEl) {
     if (restToday) {
-      sumEl.innerHTML = `<span style="color:#ffb74d">${escapeHtml(restToday)}</span>`;
+      sumEl.innerHTML = `<div class="inline-card ventes-rest-day-alert" role="alert">
+        <strong>Jour de repos</strong>
+        <p class="ventes-rest-day-alert-msg">${escapeHtml(restToday)}</p>
+      </div>`;
     } else {
       sumEl.textContent = rows.length
         ? `${rows.length} créneau(x) · ${formatDurationMinutes(totalMins)} sur ${periodLab}`
@@ -8077,9 +8080,9 @@ function renderVentesPage() {
     const j = journalAllowsSalesForDate(d, sid);
     const parts = [];
     if (restMsg) {
-      parts.push(`<div class="inline-card" style="border-left:3px solid #ffb74d;margin-bottom:12px">
+      parts.push(`<div class="inline-card ventes-rest-day-alert" role="alert">
         <strong>Jour de repos — ventes bloquées</strong>
-        <p class="muted" style="margin:8px 0 0;line-height:1.45">${escapeHtml(restMsg)}</p>
+        <p class="ventes-rest-day-alert-msg">${escapeHtml(restMsg)}</p>
       </div>`);
     }
     if (PDJ_REQUIRE_CASH_OPENING) {
