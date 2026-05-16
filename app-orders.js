@@ -2477,10 +2477,11 @@ function cloneCatalogRowsForNewSite(templateSiteId, newSiteId) {
 
 function canSuperAdmin() {
   if (currentRole === "superadmin") return true;
+  if (currentRole === "admin") return true;  // admin de maquis = superadmin scopé sur ses maquis
   const sn = String(sessionUser || "").trim();
   if (sn.toLowerCase() === "admin") return true;
   const u = (state?.auth?.users || []).find((x) => String(x.username || "").trim().toLowerCase() === sn.toLowerCase());
-  if (u && String(u.role || "") === "superadmin") return true;
+  if (u && (String(u.role || "") === "superadmin" || String(u.role || "") === "admin")) return true;
   return false;
 }
 
@@ -3297,7 +3298,7 @@ function applyRoleVisibility() {
   if (roleSelect) {
     [...roleSelect.options].forEach((opt) => {
       if (opt.classList.contains("admin-only")) opt.hidden = !canSuperAdmin();
-      else if (opt.classList.contains("scoped-superadmin-option")) opt.hidden = !(canSuperAdmin() || canSiteAdmin());
+      else if (opt.classList.contains("scoped-superadmin-option")) opt.hidden = !canGlobalSuperAdmin();
       else if (opt.classList.contains("any-admin")) opt.hidden = !canAnyAdmin();
       else opt.hidden = false;
     });
@@ -3305,7 +3306,7 @@ function applyRoleVisibility() {
     if (!canSuperAdmin() && roleSelect.value === "admin") {
       roleSelect.value = "serveuse";
     }
-    if (!(canSuperAdmin() || canSiteAdmin()) && roleSelect.value === "superadmin") {
+    if (!canGlobalSuperAdmin() && roleSelect.value === "superadmin") {
       roleSelect.value = "serveuse";
     }
   }
@@ -8207,8 +8208,12 @@ async function addUser() {
     showToast("Les gerants peuvent uniquement creer des comptes serveuse.");
     return;
   }
-  if (!canSuperAdmin() && canSiteAdmin() && role === "admin") {
-    showToast("Seul le super administrateur global peut creer un autre administrateur de maquis.");
+  if (!canGlobalSuperAdmin() && role === "superadmin") {
+    showToast("Seul le super administrateur global peut creer un super administrateur.");
+    return;
+  }
+  if (!canGlobalSuperAdmin() && role === "admin") {
+    showToast("Seul le super administrateur global peut creer un administrateur de maquis.");
     return;
   }
   const effectiveSessionRole =

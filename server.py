@@ -876,12 +876,9 @@ def merge_auth_users_scoped(
         t_role = str(exist.get("role", ""))
         t_sites = {str(x) for x in (exist.get("allowedSiteIds") or []) if str(x) in site_set}
         if s_role == "admin":
-            if t_role == "admin":
+            # L'admin de maquis ne peut gérer que les gérants et serveuses de ses maquis
+            if t_role in ("admin", "superadmin"):
                 return False
-            if t_role == "superadmin":
-                if str(exist.get("username", "")).strip().lower() in ("admin", "tanoh"):
-                    return False
-                return bool(t_sites) and t_sites <= allowed
             return bool(t_sites) and t_sites <= allowed
         if s_role == "manager":
             return t_role == "serveuse" and bool(t_sites & allowed)
@@ -902,7 +899,8 @@ def merge_auth_users_scoped(
 
         if exist is None:
             if s_role == "admin":
-                if new_role not in ("manager", "serveuse", "superadmin"):
+                # Un administrateur de maquis ne peut créer que des gérants et serveuses
+                if new_role not in ("manager", "serveuse"):
                     continue
             elif s_role == "manager":
                 if new_role != "serveuse":
@@ -942,9 +940,8 @@ def merge_auth_users_scoped(
                 new_role = str(exist.get("role", ""))
 
         if s_role == "admin" and str(exist.get("username", "")) != s_user:
-            if new_role == "admin":
-                new_role = str(exist.get("role", ""))
-            if new_role not in ("manager", "serveuse", "superadmin"):
+            # Un admin de maquis ne peut gérer que des gérants et serveuses (pas créer/promouvoir superadmin)
+            if new_role not in ("manager", "serveuse"):
                 new_role = str(exist.get("role", ""))
 
         scoped_super = s_role == "superadmin" and not session_is_superadmin(session, all_site_ids=site_ids)
