@@ -2688,6 +2688,25 @@ function workShiftsAll() {
   return Array.isArray(state?.workShifts) ? state.workShifts : [];
 }
 
+function workShiftBelongsToSite(shift, siteId) {
+  const sid = String(siteId ?? currentSiteId() ?? "").trim();
+  if (!sid) return false;
+  return rowMatchesSite(shift, sid, multiSiteActive());
+}
+
+/** Créneaux d'un seul maquis (évite de valider / écraser les autres sites). */
+function workShiftsForSite(siteId = currentSiteId()) {
+  return workShiftsAll().filter((s) => workShiftBelongsToSite(s, siteId));
+}
+
+/** Payload PUT : autres maquis inchangés + liste complète du maquis ciblé. */
+function buildWorkShiftsPutPayload(siteScopedRows, siteId) {
+  const sid = String(siteId || currentSiteId() || "").trim();
+  const scoped = (siteScopedRows || []).map((r) => ({ ...r, siteId: String(r.siteId || sid) }));
+  const other = workShiftsAll().filter((s) => !workShiftBelongsToSite(s, sid));
+  return [...other, ...scoped];
+}
+
 function myWorkShiftsInWeek(bounds) {
   const sn = String(sessionUser || "").trim().toLowerCase();
   return workShiftsForSessionUser()
@@ -2958,12 +2977,11 @@ async function generatePlanningRotationFromForm() {
   if (!window.confirm(msg)) return;
 
   await refreshWorkShiftsFromServer();
-  let rows = [...workShiftsAll()];
+  let rows = [...workShiftsForSite(siteId)];
   if (replace) {
     rows = rows.filter((s) => {
       const d = String(s.date || "").slice(0, 10);
-      const sid = String(s.siteId || currentSiteId() || "");
-      return !(d >= bounds.start && d <= bounds.end && sid === siteId);
+      return !(d >= bounds.start && d <= bounds.end);
     });
   }
   rows = [...rows, ...generated];
@@ -3236,22 +3254,25 @@ function applyWorkShiftsAfterSave(sentRows) {
   lsSaveWorkShifts();
 }
 
-/** Vérifie que chaque créneau peut être envoyé au serveur (évite PUT rejeté silencieusement côté UI). */
+/** Vérifie les créneaux du maquis ciblé uniquement (pas les autres sites fusionnés en mémoire). */
 function validateWorkShiftsBeforeSend(rows, siteId) {
   const sid = String(siteId || currentSiteId() || "").trim();
   if (!sid) throw new Error("Aucun maquis sélectionné.");
-  const staff = schedulableStaffForCurrentSite();
+  const staff = (state?.auth?.users || []).filter((u) => {
+    const r = String(u.role || "").trim().toLowerCase();
+    if (r !== "serveuse" && r !== "manager") return false;
+    return (u.allowedSiteIds || []).some((x) => String(x) === sid);
+  });
   const staffSet = new Set(staff.map((u) => String(u.username || "").trim().toLowerCase()));
   const problems = [];
   (rows || []).forEach((r, i) => {
+    if (!workShiftBelongsToSite({ ...r, siteId: r?.siteId || sid }, sid)) return;
     const un = String(r?.username || "").trim();
     const d = String(r?.date || "").slice(0, 10);
-    const rsid = String(r?.siteId || "").trim();
     if (!un) problems.push(`ligne ${i + 1} : personne manquante`);
     else if (!staffSet.has(un.toLowerCase())) {
       problems.push(`« ${un} » n'est pas serveuse/gérante sur ce maquis (Paramètres → Accès).`);
     }
-    if (rsid && rsid !== sid) problems.push(`ligne ${i + 1} : mauvais maquis (${rsid})`);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) problems.push(`ligne ${i + 1} : date invalide`);
   });
   if (problems.length) {
@@ -3293,11 +3314,12 @@ async function verifyWorkShiftsPersistedOnServer(sentRows) {
  * Sauvegarde planning : sync serveur d'abord, PUT, puis force l'état local + cache navigateur.
  * @param {boolean} snapshot — true = le serveur peut retirer les créneaux absents du payload (liste complète).
  */
-async function persistWorkShiftsPatch(rows, { snapshot = true, skipRefresh = false, ...patchExtra } = {}) {
+async function persistWorkShiftsPatch(siteScopedRows, { snapshot = true, skipRefresh = false, ...patchExtra } = {}) {
   if (!skipRefresh) await refreshWorkShiftsFromServer();
   const siteId = String(patchExtra.activeSiteId ?? state.activeSiteId ?? currentSiteId() ?? "");
-  const sent = rows.map((r) => ({ ...r, siteId: String(r.siteId || siteId) }));
-  validateWorkShiftsBeforeSend(sent, siteId);
+  const scoped = (siteScopedRows || []).map((r) => ({ ...r, siteId: String(r.siteId || siteId) }));
+  validateWorkShiftsBeforeSend(scoped, siteId);
+  const sent = buildWorkShiftsPutPayload(scoped, siteId);
   const prev = workShiftsAll();
   state.workShifts = sent;
   try {
@@ -3308,7 +3330,7 @@ async function persistWorkShiftsPatch(rows, { snapshot = true, skipRefresh = fal
       workShiftsScopedSnapshot: snapshot,
     });
     applyWorkShiftsAfterSave(sent);
-    await verifyWorkShiftsPersistedOnServer(sent);
+    await verifyWorkShiftsPersistedOnServer(scoped);
   } catch (e) {
     state.workShifts = prev;
     throw e;
@@ -3350,7 +3372,7 @@ async function saveWorkShiftFromForm() {
   }
   await refreshWorkShiftsFromServer();
   const now = new Date().toISOString();
-  let rows = [...workShiftsAll()];
+  let rows = [...workShiftsForSite(siteId)];
   if (editRaw) {
     const id = Number(editRaw);
     const idx = rows.findIndex((s) => Number(s.id) === id);
@@ -3406,11 +3428,12 @@ async function deleteWorkShift(idRaw) {
   const shift = workShiftsAll().find((s) => Number(s.id) === id);
   if (!shift) return;
   if (!window.confirm(`Supprimer le créneau du ${formatDateDdMmYyyy(shift.date)} (${shift.startTime} – ${shift.endTime}) pour ${staffDisplayName(shift.username)} ?`)) return;
+  const siteId = String(shift.siteId || currentSiteId() || "");
   await refreshWorkShiftsFromServer();
-  const rows = workShiftsAll().filter((s) => Number(s.id) !== id);
+  const rows = workShiftsForSite(siteId).filter((s) => Number(s.id) !== id);
   const prevWorkShifts = workShiftsAll();
   try {
-    await persistWorkShiftsPatch(rows, { snapshot: true, skipRefresh: true });
+    await persistWorkShiftsPatch(rows, { snapshot: true, skipRefresh: true, activeSiteId: siteId });
     recordStaffAudit("delete", "planning", `Créneau #${id}`, `${shift.username} ${shift.date}`);
     if (String(document.getElementById("ws-edit-id")?.value) === String(id)) resetWorkShiftForm();
     renderPlanningTeam();
