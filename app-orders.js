@@ -430,7 +430,6 @@ function exportHtmlReport() {
       <td style="color:#555">${escapeHtml(v.cat || "—")}</td>
       <td style="text-align:center">${escapeHtml(String(v.qty || 1))}</td>
       <td style="text-align:right">${fmt(v.prix)} FCFA</td>
-      <td style="text-align:right;color:#c62828">${v.remise ? `-${fmt(v.remise)}` : "—"}</td>
       <td style="text-align:right;font-weight:600">${fmt(calcNet(v))} FCFA</td>
       <td><span class="badge-pay" style="background:${color}">${escapeHtml(v.paiement || "—")}</span></td>
       <td style="color:#555">${escapeHtml(v.server || v.serveur || "—")}</td>
@@ -453,7 +452,7 @@ function exportHtmlReport() {
     if (qte <= 0) { statut = "RUPTURE"; sc = "#b71c1c"; bg = "#ffebee"; }
     else if (qte <= Number(item.seuilMin || 0)) { statut = "CRITIQUE"; sc = "#b71c1c"; bg = "#ffebee"; }
     else if (qte <= Number(item.seuilMin || 0) * 2) { statut = "FAIBLE"; sc = "#e65100"; bg = "#fff3e0"; }
-    const valeur = qte * (Number(item.prixAchat) || 0);
+    const valeur = stockPurchaseValueFcfa(item, site);
     return `<tr style="background:${bg}">
       <td><strong>${escapeHtml(item.article || "—")}</strong></td>
       <td style="color:#555">${escapeHtml(item.cat || "—")}</td>
@@ -598,11 +597,11 @@ function exportHtmlReport() {
         <thead><tr>
           <th>Date</th><th>Article</th><th>Catégorie</th>
           <th style="text-align:center">Qté</th><th style="text-align:right">Prix unit.</th>
-          <th style="text-align:right">Remise</th><th style="text-align:right">Net</th>
+          <th style="text-align:right">Net</th>
           <th>Paiement</th><th>Serveur</th>
         </tr></thead>
         <tbody>${rowsVentes}
-          <tr class="total-row"><td colspan="6"><strong>Total</strong></td>
+          <tr class="total-row"><td colspan="5"><strong>Total</strong></td>
             <td style="text-align:right">${fmt(caTotal)} FCFA</td><td colspan="2"></td></tr>
         </tbody>
       </table>` : '<p style="padding:20px;color:#9e9e9e;text-align:center">Aucune vente sur cette période.</p>'}
@@ -6329,7 +6328,6 @@ function openOrderDetailModal(orderKey) {
       <td>${escapeHtml(line.cat || "-")}</td>
       <td>${escapeHtml(lineQtyLabel(line, stockItemForArticle(line.article)))}</td>
       <td style="text-align:right">${fmt(line.prix || 0)} FCFA</td>
-      <td style="text-align:right">${fmt(line.remise || 0)} FCFA</td>
       <td style="text-align:right">${fmt(calcNet(line))} FCFA</td>
     </tr>
   `).join("");
@@ -6347,8 +6345,8 @@ function openOrderDetailModal(orderKey) {
     </dl>
     <div class="stock-table-wrap" style="margin-top:14px">
       <table class="stock-table">
-        <thead><tr><th>Article</th><th>Categorie</th><th>Quantite</th><th style="text-align:right">Prix</th><th style="text-align:right">Remise</th><th style="text-align:right">Total</th></tr></thead>
-        <tbody>${lineRows || `<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:24px">Aucun article</td></tr>`}</tbody>
+        <thead><tr><th>Article</th><th>Categorie</th><th>Quantite</th><th style="text-align:right">Prix</th><th style="text-align:right">Total</th></tr></thead>
+        <tbody>${lineRows || `<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:24px">Aucun article</td></tr>`}</tbody>
       </table>
     </div>
     <div class="order-actions" style="margin-top:14px">
@@ -12194,7 +12192,7 @@ function printInvoice(factureNumber) {
   const creditSection = debiteur
     ? `<p style="color:#c54f41"><span>Débiteur</span><span>${escapeHtml(debiteur)}</span></p>${creditIssuerPrint ? `<p class="meta"><span>Crédit accordé par</span><span>${escapeHtml(creditIssuerPrint)}</span></p>` : ""}`
     : "";
-  ticketWindow.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>Facture ${escapeHtml(factureNumber)}</title><style>body{font-family:Arial,sans-serif;padding:32px;color:#111;background:#fff}header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #222;padding-bottom:16px;margin-bottom:18px}h1,h2,p{margin:0 0 8px}table{width:100%;border-collapse:collapse;margin-top:14px}th,td{padding:10px 8px;border-bottom:1px solid #ddd;text-align:left}th:last-child,td:last-child{text-align:right}.meta{color:#555}.totals{margin-top:18px;display:flex;justify-content:flex-end}.totals-box{min-width:300px;border:1px solid #111;padding:16px}.totals-box p{display:flex;justify-content:space-between;margin-bottom:6px}.grand{font-size:20px;font-weight:700;border-top:1px solid #111;padding-top:8px;margin-top:8px}.footer{margin-top:26px;color:#666;font-size:12px}.pay-label{font-size:12px;color:#555;font-weight:700;text-transform:uppercase;margin-bottom:4px}</style></head><body><header><div><h1>${escapeHtml(site?.nom || "Maquis")}</h1><p>${escapeHtml(site?.ville || "")} - ${escapeHtml(site?.pays || "")}</p><p>Gerant: ${escapeHtml(site?.gerant || "-")}</p></div><div><h2>Facture</h2><p class="meta">Numero: ${escapeHtml(factureNumber)}</p><p class="meta">Date: ${escapeHtml(formatDateDdMmYyyy(lignes[0].date))}</p><p class="meta">Client: ${escapeHtml(client)}</p></div></header><table><thead><tr><th>Article</th><th>Qte</th><th>Prix unit.</th><th>Remise</th><th>Total</th></tr></thead><tbody>${lignes.map((line) => `<tr><td>${escapeHtml(line.article)}</td><td>${escapeHtml(lineQtyLabel(line, stockItemForArticle(line.article)))}</td><td>${fmt(line.prix)} FCFA</td><td>${fmt(line.remise || 0)} FCFA</td><td>${fmt(calcNet(line))} FCFA</td></tr>`).join("")}</tbody></table><div class="totals"><div class="totals-box">${isMixed ? `<p class="pay-label" style="display:block">Paiement mixte</p>` : ""}${paymentSection}${creditSection}<p class="grand"><span>Total facture</span><span>${fmt(total)} FCFA</span></p></div></div><p class="footer">Merci pour votre visite.</p><script>window.onload=function(){window.print();}</script></body></html>`);
+  ticketWindow.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>Facture ${escapeHtml(factureNumber)}</title><style>body{font-family:Arial,sans-serif;padding:32px;color:#111;background:#fff}header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #222;padding-bottom:16px;margin-bottom:18px}h1,h2,p{margin:0 0 8px}table{width:100%;border-collapse:collapse;margin-top:14px}th,td{padding:10px 8px;border-bottom:1px solid #ddd;text-align:left}th:last-child,td:last-child{text-align:right}.meta{color:#555}.totals{margin-top:18px;display:flex;justify-content:flex-end}.totals-box{min-width:300px;border:1px solid #111;padding:16px}.totals-box p{display:flex;justify-content:space-between;margin-bottom:6px}.grand{font-size:20px;font-weight:700;border-top:1px solid #111;padding-top:8px;margin-top:8px}.footer{margin-top:26px;color:#666;font-size:12px}.pay-label{font-size:12px;color:#555;font-weight:700;text-transform:uppercase;margin-bottom:4px}</style></head><body><header><div><h1>${escapeHtml(site?.nom || "Maquis")}</h1><p>${escapeHtml(site?.ville || "")} - ${escapeHtml(site?.pays || "")}</p><p>Gerant: ${escapeHtml(site?.gerant || "-")}</p></div><div><h2>Facture</h2><p class="meta">Numero: ${escapeHtml(factureNumber)}</p><p class="meta">Date: ${escapeHtml(formatDateDdMmYyyy(lignes[0].date))}</p><p class="meta">Client: ${escapeHtml(client)}</p></div></header><table><thead><tr><th>Article</th><th>Qte</th><th>Prix unit.</th><th>Total</th></tr></thead><tbody>${lignes.map((line) => `<tr><td>${escapeHtml(line.article)}</td><td>${escapeHtml(lineQtyLabel(line, stockItemForArticle(line.article)))}</td><td>${fmt(line.prix)} FCFA</td><td>${fmt(calcNet(line))} FCFA</td></tr>`).join("")}</tbody></table><div class="totals"><div class="totals-box">${isMixed ? `<p class="pay-label" style="display:block">Paiement mixte</p>` : ""}${paymentSection}${creditSection}<p class="grand"><span>Total facture</span><span>${fmt(total)} FCFA</span></p></div></div><p class="footer">Merci pour votre visite.</p><script>window.onload=function(){window.print();}</script></body></html>`);
   ticketWindow.document.close();
 }
 
@@ -12647,7 +12645,6 @@ function printSalesHistory() {
     ? `Periode : ${start ? formatDateDdMmYyyy(start) : "..."} au ${end ? formatDateDdMmYyyy(end) : "..."}`
     : "Periode : toutes les dates";
   const total = ventes.reduce((sum, vente) => sum + calcNet(vente), 0);
-  const remises = ventes.reduce((sum, vente) => sum + (Number(vente.remise) || 0), 0);
   const payRows = Object.entries(paymentTotals(ventes))
     .map(([method, amount]) => `<tr><td>${escapeHtml(method)}</td><td>${fmt(amount)} FCFA</td></tr>`)
     .join("");
@@ -12660,7 +12657,6 @@ function printSalesHistory() {
       <td>${escapeHtml(vente.cat)}</td>
       <td>${escapeHtml(lineQtyLabel(vente, stockItemForArticle(vente.article)))}</td>
       <td>${fmt(vente.prix)} FCFA</td>
-      <td>${fmt(vente.remise || 0)} FCFA</td>
       <td>${escapeHtml(paymentLabel(vente))}</td>
       <td>${fmt(calcNet(vente))} FCFA</td>
     </tr>
@@ -12670,7 +12666,7 @@ function printSalesHistory() {
     showToast("Impossible d'ouvrir l'impression.");
     return;
   }
-  ticketWindow.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>Historique des ventes</title><style>body{font-family:Arial,sans-serif;color:#111;padding:28px}header{display:flex;justify-content:space-between;gap:18px;border-bottom:2px solid #111;padding-bottom:14px;margin-bottom:18px}h1,h2,p{margin:0 0 8px}.meta{color:#555}.summary{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:16px 0}.box{border:1px solid #111;padding:12px}.box strong{display:block;font-size:18px;margin-top:4px}table{width:100%;border-collapse:collapse;margin-top:12px;font-size:12px}th,td{border-bottom:1px solid #ddd;padding:7px 6px;text-align:left}th{background:#f2f2f2}td:nth-child(6),td:nth-child(7),td:nth-child(8),td:nth-child(10),.pay td:last-child{text-align:right}.pay{max-width:420px;margin-top:10px}@media print{body{padding:0}table{font-size:11px}}</style></head><body><header><div><h1>${escapeHtml(site?.nom || "Maquis")}</h1><p>${escapeHtml(site?.ville || "")} ${escapeHtml(site?.pays || "")}</p><p class="meta">${escapeHtml(periodLabel)}${currentFilter !== "all" ? ` - Categorie : ${escapeHtml(currentFilter)}` : ""}</p></div><div><h2>Historique des ventes</h2><p class="meta">Imprime le ${escapeHtml(formatDateTimeDdMmYyyy(new Date()))}</p></div></header><div class="summary"><div class="box">Total ventes<strong>${fmt(total)} FCFA</strong></div><div class="box">Transactions<strong>${fmt(ventes.length)}</strong></div><div class="box">Remises<strong>${fmt(remises)} FCFA</strong></div></div><h2>Encaissements</h2><table class="pay"><tbody>${payRows}</tbody></table><h2>Detail</h2><table><thead><tr><th>Date</th><th>Facture</th><th>Client</th><th>Article</th><th>Categorie</th><th>Qte</th><th>Prix</th><th>Remise</th><th>Paiement</th><th>Total</th></tr></thead><tbody>${rows}</tbody></table><script>window.onload=function(){window.print();}</script></body></html>`);
+  ticketWindow.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>Historique des ventes</title><style>body{font-family:Arial,sans-serif;color:#111;padding:28px}header{display:flex;justify-content:space-between;gap:18px;border-bottom:2px solid #111;padding-bottom:14px;margin-bottom:18px}h1,h2,p{margin:0 0 8px}.meta{color:#555}.summary{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:16px 0}.box{border:1px solid #111;padding:12px}.box strong{display:block;font-size:18px;margin-top:4px}table{width:100%;border-collapse:collapse;margin-top:12px;font-size:12px}th,td{border-bottom:1px solid #ddd;padding:7px 6px;text-align:left}th{background:#f2f2f2}td:nth-child(6),td:nth-child(7),td:nth-child(9),.pay td:last-child{text-align:right}.pay{max-width:420px;margin-top:10px}@media print{body{padding:0}table{font-size:11px}}</style></head><body><header><div><h1>${escapeHtml(site?.nom || "Maquis")}</h1><p>${escapeHtml(site?.ville || "")} ${escapeHtml(site?.pays || "")}</p><p class="meta">${escapeHtml(periodLabel)}${currentFilter !== "all" ? ` - Categorie : ${escapeHtml(currentFilter)}` : ""}</p></div><div><h2>Historique des ventes</h2><p class="meta">Imprime le ${escapeHtml(formatDateTimeDdMmYyyy(new Date()))}</p></div></header><div class="summary"><div class="box">Total ventes<strong>${fmt(total)} FCFA</strong></div><div class="box">Transactions<strong>${fmt(ventes.length)}</strong></div></div><h2>Encaissements</h2><table class="pay"><tbody>${payRows}</tbody></table><h2>Detail</h2><table><thead><tr><th>Date</th><th>Facture</th><th>Client</th><th>Article</th><th>Categorie</th><th>Qte</th><th>Prix</th><th>Paiement</th><th>Total</th></tr></thead><tbody>${rows}</tbody></table><script>window.onload=function(){window.print();}</script></body></html>`);
   ticketWindow.document.close();
 }
 
