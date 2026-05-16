@@ -2690,7 +2690,7 @@ function workShiftsAll() {
 
 function myWorkShiftsInWeek(bounds) {
   const sn = String(sessionUser || "").trim().toLowerCase();
-  return workShiftsAll()
+  return workShiftsForSessionUser()
     .filter((s) => {
       const d = String(s.date || "").slice(0, 10);
       return d >= bounds.start && d <= bounds.end
@@ -2700,7 +2700,7 @@ function myWorkShiftsInWeek(bounds) {
 }
 
 function teamWorkShiftsInWeek(bounds) {
-  return recordsForSite(workShiftsAll())
+  return workShiftsForSessionUser()
     .filter((s) => {
       const d = String(s.date || "").slice(0, 10);
       return d >= bounds.start && d <= bounds.end;
@@ -2708,11 +2708,17 @@ function teamWorkShiftsInWeek(bounds) {
     .sort((a, b) => `${a.date}${a.startTime}`.localeCompare(`${b.date}${b.startTime}`));
 }
 
-/** Au moins un créneau d'équipe est planifié ce jour-là sur le maquis (rotation active). */
+/** Planning actif ce jour (gérant : équipe ; serveuse : au moins un créneau sur le mois). */
 function teamHasPlanningOnDate(siteId, dateIso) {
   const d = String(dateIso || "").slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return false;
   const multi = multiSiteActive();
+  if (String(currentRole || "").trim() === "serveuse") {
+    const month = d.slice(0, 7);
+    return workShiftsForSessionUser(siteId).some(
+      (s) => rowMatchesSite(s, siteId, multi) && String(s.date || "").slice(0, 7) === month,
+    );
+  }
   return workShiftsAll().some(
     (s) => rowMatchesSite(s, siteId, multi) && String(s.date || "").slice(0, 10) === d,
   );
@@ -2836,6 +2842,12 @@ function renderRotationPreview() {
   const teamSize = Math.max(1, Math.min(5, Number(document.getElementById("ws-rotation-team-size")?.value) || 1));
   const bounds = planningDisplayBounds();
   const days = planningDatesBetween(bounds.start, bounds.end);
+  const periodHint = document.getElementById("ws-rotation-period-hint");
+  if (periodHint) {
+    periodHint.textContent = days.length
+      ? `Période Du/Au active : ${formatDateDdMmYyyy(bounds.start)} — ${formatDateDdMmYyyy(bounds.end)} (${days.length} jour(s))`
+      : "Renseignez Du / Au en haut (bouton « Ce mois » pour tout le mois).";
+  }
   if (!staff.length) {
     el.textContent = "Cochez au moins une personne dans la rotation.";
     return;
@@ -2919,6 +2931,13 @@ async function generatePlanningRotationFromForm() {
   if (!days.length) { showToast("Période Du / Au invalide."); return; }
   if (days.length > 62) { showToast("Maximum 62 jours par génération."); return; }
   if (teamSize > staffOrder.length) { showToast("Trop de personnes en service par jour."); return; }
+  if (days.length <= 7) {
+    const goShort = window.confirm(
+      `La période Du/Au ne couvre que ${days.length} jour(s) (${formatDateDdMmYyyy(bounds.start)} — ${formatDateDdMmYyyy(bounds.end)}).\n\n`
+      + "Pour tout le mois : cliquez « Ce mois » en haut, puis relancez.\n\nContinuer pour cette courte période ?",
+    );
+    if (!goShort) return;
+  }
 
   const generated = buildRotationShiftsForPeriod({
     startIso: bounds.start,
@@ -2932,7 +2951,8 @@ async function generatePlanningRotationFromForm() {
     note: "Rotation auto",
   });
   const names = staffOrder.map(staffDisplayName).join(", ");
-  const msg = `Générer ${generated.length} créneau(x) du ${formatDateDdMmYyyy(bounds.start)} au ${formatDateDdMmYyyy(bounds.end)} ?\n\n`
+  const msg = `Générer ${generated.length} créneau(x) sur ${days.length} jour(s) ?\n\n`
+    + `Période Du/Au : ${formatDateDdMmYyyy(bounds.start)} — ${formatDateDdMmYyyy(bounds.end)}\n`
     + `Rotation : ${names}\n${workDays} jour(s) d'affilée · ${teamSize} en service / jour · ${startTime}–${endTime}`
     + (replace ? "\n\nLes créneaux existants sur cette période pour ce maquis seront supprimés." : "");
   if (!window.confirm(msg)) return;
@@ -3000,7 +3020,13 @@ function renderPlanningMine() {
   }
   if (!listEl) return;
   if (!rows.length) {
-    listEl.innerHTML = emptyState("Aucun horaire", "Votre gérant n'a pas encore publié de créneaux pour cette période. Changez les dates Du / Au en haut.");
+    const isSrv = String(currentRole || "").trim() === "serveuse";
+    listEl.innerHTML = emptyState(
+      "Aucun horaire",
+      isSrv
+        ? "Votre gérante n'a pas encore publié vos créneaux pour cette période. Essayez « Ce mois » en haut ou demandez-lui de régénérer le planning (onglet Équipe)."
+        : "Aucun créneau pour vous sur cette période. L'onglet Équipe affiche tout le personnel.",
+    );
     return;
   }
   listEl.innerHTML = rows.map((s) => renderPlanningShiftRow(s)).join("");
@@ -3133,15 +3159,23 @@ function reconcileWorkShiftsAfterPatch(sentRows) {
   state.workShifts = Array.from(byId.values());
 }
 
-const LS_WORK_SHIFTS_KEY = "cda_workShifts_v1";
+const LS_WORK_SHIFTS_KEY_PREFIX = "cda_workShifts_v2";
+
+/** Cache navigateur par compte + maquis (évite de mélanger gérante / serveuses). */
+function lsWorkShiftsStorageKey() {
+  const u = String(sessionUser || "").trim().toLowerCase() || "anon";
+  const s = String(currentSiteId() || "").trim() || "site";
+  return `${LS_WORK_SHIFTS_KEY_PREFIX}_${u}_${s}`;
+}
 
 function lsSaveWorkShifts() {
   try {
     const rows = workShiftsAll();
     if (!rows.length) return;
-    localStorage.setItem(LS_WORK_SHIFTS_KEY, JSON.stringify(rows));
+    const key = lsWorkShiftsStorageKey();
+    localStorage.setItem(key, JSON.stringify(rows));
     if (state?.nextId?.workShift != null) {
-      localStorage.setItem(`${LS_WORK_SHIFTS_KEY}_nextId`, String(state.nextId.workShift));
+      localStorage.setItem(`${key}_nextId`, String(state.nextId.workShift));
     }
   } catch {
     /* quota / mode privé */
@@ -3150,19 +3184,32 @@ function lsSaveWorkShifts() {
 
 function lsRestoreWorkShifts() {
   try {
-    const raw = localStorage.getItem(LS_WORK_SHIFTS_KEY);
+    const key = lsWorkShiftsStorageKey();
+    const raw = localStorage.getItem(key);
     if (!raw) return;
     const list = JSON.parse(raw);
     if (!Array.isArray(list) || !list.length) return;
     state.workShifts = mergeWorkShiftsFromServer(state.workShifts || [], list);
     if (!state.nextId) state.nextId = {};
-    const nextRaw = localStorage.getItem(`${LS_WORK_SHIFTS_KEY}_nextId`);
+    const nextRaw = localStorage.getItem(`${key}_nextId`);
     if (nextRaw) {
       state.nextId.workShift = Math.max(Number(state.nextId.workShift) || 100, Number(nextRaw) || 0);
     }
   } catch {
     /* localStorage corrompu */
   }
+}
+
+/** Créneaux visibles pour l'utilisateur connecté (serveuse = les siens ; gérant = tout le maquis sur Équipe). */
+function workShiftsForSessionUser(siteId = currentSiteId()) {
+  const multi = multiSiteActive();
+  const sid = siteId || currentSiteId();
+  const rows = workShiftsAll().filter((s) => rowMatchesSite(s, sid, multi));
+  if (String(currentRole || "").trim() === "serveuse") {
+    const un = String(sessionUser || "").trim().toLowerCase();
+    return rows.filter((s) => String(s.username || "").trim().toLowerCase() === un);
+  }
+  return rows;
 }
 
 /** Après PUT planning : l'état local garde toujours les créneaux envoyés. */
@@ -3366,6 +3413,7 @@ function bindPlanningEvents() {
   document.getElementById("planning-range-month")?.addEventListener("click", () => {
     setPlanningRangeCurrentMonth();
     onRangeChange();
+    renderRotationPreview();
   });
   document.getElementById("planning-range-prev")?.addEventListener("click", () => {
     shiftPlanningRangeByPeriod(-1);
@@ -10308,7 +10356,12 @@ async function performAutoClotureBackground(dStr) {
 async function syncStateSilently() {
   if (!state || modalIsOpen()) return;
   if (currentPage === "planning") {
-    /* Ne pas fusionner tout l'état : un GET partiel vide effaçait le planning après enregistrement. */
+    try {
+      await refreshWorkShiftsFromServer();
+      lsSaveWorkShifts();
+    } catch {
+      /* garder l'état local */
+    }
     renderPlanningMine();
     if (canManageTeamSchedule()) renderPlanningTeam();
     return;
@@ -16301,7 +16354,11 @@ async function bootstrapAuthenticatedApp(opts = {}) {
   if (!Array.isArray(state.casierMouvements)) state.casierMouvements = [];
   if (!Array.isArray(state.staffAuditLog)) state.staffAuditLog = [];
   if (!Array.isArray(state.workShifts)) state.workShifts = [];
+  const serverWs = workShiftsAll().slice();
   lsRestoreWorkShifts();
+  if (serverWs.length) {
+    state.workShifts = mergeWorkShiftsFromServer(serverWs, workShiftsAll());
+  }
   if (workShiftsAll().length) lsSaveWorkShifts();
   if (!state.nextId) state.nextId = {};
   if (!state.nextId.stockEntree || Number.isNaN(Number(state.nextId.stockEntree))) state.nextId.stockEntree = 100;
