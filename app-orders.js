@@ -2708,6 +2708,40 @@ function teamWorkShiftsInWeek(bounds) {
     .sort((a, b) => `${a.date}${a.startTime}`.localeCompare(`${b.date}${b.startTime}`));
 }
 
+/** Au moins un créneau d'équipe est planifié ce jour-là sur le maquis (rotation active). */
+function teamHasPlanningOnDate(siteId, dateIso) {
+  const d = String(dateIso || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return false;
+  const multi = multiSiteActive();
+  return workShiftsAll().some(
+    (s) => rowMatchesSite(s, siteId, multi) && String(s.date || "").slice(0, 10) === d,
+  );
+}
+
+function serveuseHasShiftOnDate(username, siteId, dateIso) {
+  const d = String(dateIso || "").slice(0, 10);
+  const un = String(username || "").trim().toLowerCase();
+  if (!un || !/^\d{4}-\d{2}-\d{2}$/.test(d)) return false;
+  const multi = multiSiteActive();
+  return workShiftsAll().some(
+    (s) => rowMatchesSite(s, siteId, multi)
+      && String(s.username || "").trim().toLowerCase() === un
+      && String(s.date || "").slice(0, 10) === d,
+  );
+}
+
+/** Message si la serveuse ne peut pas vendre (jour de repos planifié). */
+function serveusePlanningBlocksSale(saleDateStr, siteId = currentSiteId()) {
+  if (String(currentRole || "").trim() !== "serveuse") return null;
+  const d = String(saleDateStr || "").slice(0, 10);
+  const sid = siteId || currentSiteId();
+  if (!sid || !/^\d{4}-\d{2}-\d{2}$/.test(d)) return null;
+  if (!teamHasPlanningOnDate(sid, d)) return null;
+  if (serveuseHasShiftOnDate(sessionUser, sid, d)) return null;
+  const label = formatDateDdMmYyyy(d);
+  return `Jour de repos (${label}) : vous ne pouvez pas vendre. Voyez votre gérante pour vous autoriser — elle pourra ajouter un créneau dans Planning → Équipe.`;
+}
+
 function schedulableStaffForCurrentSite() {
   const sid = String(currentSiteId() || "");
   return (state?.auth?.users || []).filter((u) => {
@@ -2955,10 +2989,15 @@ function renderPlanningMine() {
   const rows = myWorkShiftsInWeek(bounds);
   const totalMins = rows.reduce((acc, s) => acc + workShiftDurationMinutes(s), 0);
   const periodLab = bounds.start === bounds.end ? "ce jour" : "cette période";
+  const restToday = serveusePlanningBlocksSale(today(), currentSiteId());
   if (sumEl) {
-    sumEl.textContent = rows.length
-      ? `${rows.length} créneau(x) · ${formatDurationMinutes(totalMins)} sur ${periodLab}`
-      : `Aucun créneau planifié pour ${periodLab}.`;
+    if (restToday) {
+      sumEl.innerHTML = `<span style="color:#ffb74d">${escapeHtml(restToday)}</span>`;
+    } else {
+      sumEl.textContent = rows.length
+        ? `${rows.length} créneau(x) · ${formatDurationMinutes(totalMins)} sur ${periodLab}`
+        : `Aucun créneau planifié pour ${periodLab}.`;
+    }
   }
   if (!listEl) return;
   if (!rows.length) {
@@ -6209,17 +6248,34 @@ function assertJournalAllowsSalesOrToast(saleDateStr, siteId = currentSiteId()) 
   return j.ok;
 }
 
+/** Journée ouverte + pas de jour de repos planifié (serveuse). */
+function assertCanSellOrToast(saleDateStr, siteId = currentSiteId()) {
+  if (!assertJournalAllowsSalesOrToast(saleDateStr, siteId)) return false;
+  const rest = serveusePlanningBlocksSale(saleDateStr, siteId);
+  if (rest) {
+    showToast(rest);
+    return false;
+  }
+  return true;
+}
+
 function journalEncaisseDisabledForOrder(order) {
-  if (!PDJ_REQUIRE_CASH_OPENING || !order) return false;
+  if (!order) return false;
   const d = String(order.date || "").slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return true;
-  return !journalAllowsSalesForDate(d, order.siteId || currentSiteId()).ok;
+  const sid = order.siteId || currentSiteId();
+  if (serveusePlanningBlocksSale(d, sid)) return true;
+  if (!PDJ_REQUIRE_CASH_OPENING) return false;
+  return !journalAllowsSalesForDate(d, sid).ok;
 }
 
 function journalEncaisseBlockTitle(order) {
   if (!order) return "";
   const d = String(order.date || "").slice(0, 10);
-  const j = journalAllowsSalesForDate(d, order.siteId || currentSiteId());
+  const sid = order.siteId || currentSiteId();
+  const rest = serveusePlanningBlocksSale(d, sid);
+  if (rest) return rest;
+  const j = journalAllowsSalesForDate(d, sid);
   return j.ok ? "" : j.message;
 }
 
@@ -7696,7 +7752,7 @@ async function submitSaisieRapide() {
   try {
     if (orderFormMode) {
       const date = document.getElementById("sr-date")?.value?.trim() || today();
-      if (!assertJournalAllowsSalesOrToast(date, currentSiteId())) return;
+      if (!assertCanSellOrToast(date, currentSiteId())) return;
       state.nextId = state.nextId || {};
       state.nextId.ligneCommande = Number(state.nextId.ligneCommande) || 0;
       const selectedOrderId = Number(document.getElementById("sr-order-select")?.value) || 0;
@@ -7771,7 +7827,7 @@ async function submitSaisieRapide() {
     }
 
     const date = pdjCalendarDate();
-    if (!assertJournalAllowsSalesOrToast(date, currentSiteId())) return;
+    if (!assertCanSellOrToast(date, currentSiteId())) return;
     const tableLabel = document.getElementById("sr-client")?.value?.trim() || "Comptoir";
     state.nextId = state.nextId || {};
     state.nextId.commande = (Number(state.nextId.commande) || 0) + 1;
@@ -7836,25 +7892,32 @@ function renderVentesPage() {
   syncDualZonePricingUi();
   const gate = document.getElementById("ventes-journal-gate");
   if (gate) {
-    if (!PDJ_REQUIRE_CASH_OPENING) {
-      gate.classList.add("hidden");
-      gate.innerHTML = "";
-    } else {
-      const d = journalSaleDateFromDom();
-      const j = journalAllowsSalesForDate(d, currentSiteId());
-      gate.classList.remove("hidden");
-      if (j.ok) {
-        gate.innerHTML = `<div class="inline-card" style="border-left:3px solid #72d7a9;margin-bottom:12px">
+    const d = journalSaleDateFromDom();
+    const sid = currentSiteId();
+    const restMsg = serveusePlanningBlocksSale(d, sid);
+    const j = journalAllowsSalesForDate(d, sid);
+    const parts = [];
+    if (restMsg) {
+      parts.push(`<div class="inline-card" style="border-left:3px solid #ffb74d;margin-bottom:12px">
+        <strong>Jour de repos — ventes bloquées</strong>
+        <p class="muted" style="margin:8px 0 0;line-height:1.45">${escapeHtml(restMsg)}</p>
+      </div>`);
+    }
+    if (PDJ_REQUIRE_CASH_OPENING) {
+      if (j.ok && !restMsg) {
+        parts.push(`<div class="inline-card" style="border-left:3px solid #72d7a9;margin-bottom:12px">
           <strong>Journée ouverte</strong> (${escapeHtml(isoDateToDdMmYyyy(d))}) — vous pouvez enregistrer des lignes de commande et encaisser. Clôturez la journée sur le <strong>Point du jour</strong> en fin de service.
-        </div>`;
-      } else {
-        gate.innerHTML = `<div class="inline-card" style="border-left:3px solid #ff8e82;margin-bottom:12px">
+        </div>`);
+      } else if (!j.ok) {
+        parts.push(`<div class="inline-card" style="border-left:3px solid #ff8e82;margin-bottom:12px">
           <strong>Ventes indisponibles pour cette date</strong>
           <p class="muted" style="margin:8px 0 0;line-height:1.45">${escapeHtml(j.message)}</p>
           <p class="muted" style="margin:6px 0 0;font-size:0.86rem;line-height:1.45">Ouvrez la journée (ou la suivante si celle-ci est déjà clôturée) depuis la page <strong>Point du jour</strong> — rôle gérant ou administrateur.</p>
-        </div>`;
+        </div>`);
       }
     }
+    gate.classList.toggle("hidden", !parts.length);
+    gate.innerHTML = parts.join("");
   }
   document.getElementById("articles-list").innerHTML = recordsForSite(state.stock).map((item) => `<option value="${escapeHtml(item.article)}">`).join("");
   if (document.getElementById("modal-vente")?.classList.contains("open")) renderVenteArticlePicker();
@@ -9617,8 +9680,10 @@ function syncFinalizeButtonJournalState() {
   if (!btn) return;
   const id = Number(document.getElementById("v-order-select")?.value) || activeOrderId || null;
   const saleD = document.getElementById("v-date")?.value?.trim() || pdjCalendarDate();
-  const allow = journalAllowsSalesForDate(saleD, currentSiteId()).ok;
-  btn.disabled = !id || !allow;
+  const sid = currentSiteId();
+  const allowJournal = journalAllowsSalesForDate(saleD, sid).ok;
+  const allowPlanning = !serveusePlanningBlocksSale(saleD, sid);
+  btn.disabled = !id || !allowJournal || !allowPlanning;
 }
 
 function openOrderEditor(orderId = null) {
@@ -11761,7 +11826,7 @@ async function saveOrderLine() {
   }
   const selectedOrderId = Number(document.getElementById("v-order-select").value) || activeOrderId;
   const creatingNewOrder = !selectedOrderId;
-  if (!assertJournalAllowsSalesOrToast(date, currentSiteId())) return;
+  if (!assertCanSellOrToast(date, currentSiteId())) return;
   const existingOrder = selectedOrderId
     ? recordsForSite(state.commandes).find((item) => item.id === selectedOrderId)
     : null;
@@ -11872,7 +11937,7 @@ async function finalizeOrder(orderId = activeOrderId) {
     return;
   }
   const saleDateGuard = String(order.date || today()).slice(0, 10);
-  if (!assertJournalAllowsSalesOrToast(saleDateGuard, order.siteId || currentSiteId())) return;
+  if (!assertCanSellOrToast(saleDateGuard, order.siteId || currentSiteId())) return;
   const orderTotal = order.lignes.reduce((sum, line) => sum + calcNet(line), 0);
   const paymentMix = readPaymentMix(orderTotal);
   if (paymentMix.error) {
@@ -12049,7 +12114,7 @@ function openFinalizeDialog(orderId = activeOrderId) {
     return;
   }
   const saleD = String(order.date || today()).slice(0, 10);
-  if (!assertJournalAllowsSalesOrToast(saleD, order.siteId || currentSiteId())) return;
+  if (!assertCanSellOrToast(saleD, order.siteId || currentSiteId())) return;
   pendingFinalizeOrderId = orderId;
   resetFinalizeModalUi();
   document.querySelectorAll(".finalize-pay-input").forEach((input) => { input.value = ""; });
