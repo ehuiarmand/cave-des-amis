@@ -441,6 +441,7 @@ let pendingFinalizeOrderId = null;
 let liveSyncTimer = null;
 let appLiveClockTimer = null;
 let autoClotureTimer = null;
+let _autoClotureInProgress = false;
 /** Jours réouverts manuellement : la clôture auto ne les referme pas. Clé : "siteId|date" */
 const _autoClotureManualReopened = new Set();
 let qrAlertCount = 0;
@@ -5803,8 +5804,9 @@ function orderManagementArticlesCell(order, maxLines = 25) {
   const slice = lines.slice(0, maxLines);
   const rows = slice.map((l) => {
     const art = String(l.article || l.libelle || "").trim() || "—";
-    const q = Math.max(1, Math.round(Number(l.qty) || 1));
-    return `${escapeHtml(art)} ×${fmt(q)} <span style="color:#555">(${fmt(calcNet(l))} FCFA)</span>`;
+    const si = stockItemForArticle(l.article);
+    const qLabel = lineQtyLabel(l, si);
+    return `${escapeHtml(art)} ×${qLabel} <span style="color:#555">(${fmt(calcNet(l))} FCFA)</span>`;
   });
   const more = lines.length > maxLines
     ? `<br><span style="color:#888;font-size:0.92em">… +${lines.length - maxLines} ligne(s)</span>`
@@ -8380,19 +8382,14 @@ function withPreservedMainShellScroll(fn) {
   });
 }
 
-/** Saisie en cours sur PDJ ou stock : ne pas rafraîchir toute la page (sync toutes les 4 s). */
+/** Saisie en cours sur PDJ, stock ou ventes : ne pas rafraîchir toute la page (sync toutes les 4 s). */
 function shouldDeferLiveSyncRender() {
   if (modalIsOpen()) return true;
   const ae = document.activeElement;
   if (!(ae instanceof HTMLElement)) return false;
-  if (currentPage === "pdj") {
-    if (ae.id === "pdj-opening-cash" || ae.id === "pdj-closing-cash") return true;
-    if (ae.classList.contains("stock-check-input")) return true;
-    if (ae.closest("#pdj-stock-check") || ae.closest("#pdj-opening-wrap")) return true;
-  }
-  if (currentPage === "stock") {
-    if (ae.closest("#modal-stock")) return true;
-    if (ae.matches("input, textarea, select") && ae.closest("#page-stock")) return true;
+  if (ae.matches("input, textarea, select")) {
+    const pageEl = document.getElementById(`page-${currentPage}`);
+    if (pageEl && pageEl.contains(ae)) return true;
   }
   return false;
 }
@@ -8672,6 +8669,7 @@ function _scheduleNextAutoClotureTimeout() {
 }
 
 function _triggerAutoClotureNow() {
+  if (_autoClotureInProgress) return;
   if (!state || !sessionUser) return;
   if (!canManagePdjAccounting()) return;
   const site = currentSite();
@@ -8682,7 +8680,10 @@ function _triggerAutoClotureNow() {
   if (_autoClotureManualReopened.has(`${currentSiteId()}|${dStr}`)) return;
   const dayBookCurrent = dayBookFor(dStr);
   if (dayBookCurrent?.manualReopenedAt) return;
-  performAutoClotureBackground(dStr).catch(console.error);
+  _autoClotureInProgress = true;
+  performAutoClotureBackground(dStr)
+    .catch(console.error)
+    .finally(() => { _autoClotureInProgress = false; });
 }
 
 async function performAutoClotureBackground(dStr) {
@@ -8809,6 +8810,7 @@ async function performAutoClotureBackground(dStr) {
 async function syncStateSilently() {
   if (!state || modalIsOpen()) return;
   if (!["ventes", "home", "stock", "pdj", "commandes"].includes(currentPage)) return;
+  _tryAutoClotureIfDueNow();
   const deferRender = shouldDeferLiveSyncRender();
 
   if (currentPage === "stock") {
@@ -8897,10 +8899,10 @@ async function syncStateSilently() {
   renderTopbar();
   renderSiteSwitcher();
   if (currentPage === "home") {
-    renderDashboard();
+    withPreservedMainShellScroll(() => renderDashboard());
   }
-  if (currentPage === "ventes") {
-    renderVentesPage();
+  if (currentPage === "ventes" && !deferRender) {
+    withPreservedMainShellScroll(() => renderVentesPage());
   }
   if (currentPage === "pdj" && !deferRender && !skipPdjFullRender) {
     withPreservedMainShellScroll(() => {
