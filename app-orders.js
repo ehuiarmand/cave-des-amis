@@ -9366,7 +9366,7 @@ async function syncStateSilently() {
   }
   renderTopbar();
   renderSiteSwitcher();
-  if (currentPage === "home") {
+  if (currentPage === "home" && !deferRender) {
     withPreservedMainShellScroll(() => renderDashboard());
   }
   if (currentPage === "ventes" && !deferRender) {
