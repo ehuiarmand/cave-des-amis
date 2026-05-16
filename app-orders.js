@@ -70,6 +70,8 @@ let currentRole = null;
 let allowedSiteIds = [];
 /** True si le compte couvre tous les maquis (sauvegardes, multi-sites, purge globale). Voir reponse API `globalSuperadmin`. */
 let globalSuperadmin = null;
+/** Droit sauvegarde maquis cote serveur (reponse login / session). null = serveur ancien. */
+let maquisBackupAllowed = null;
 let currentPage = "home";
 let currentFilter = "all";
 let ventesSubTab = "commandes";
@@ -778,11 +780,21 @@ function ventesEncaisseesForMonth(ventes, refDate = new Date()) {
   });
 }
 
+function applySessionFieldsFromApi(payload) {
+  if (!payload) return;
+  if (payload.username) sessionUser = payload.username;
+  if (payload.role) currentRole = normalizeRoleForUsername(payload.username || sessionUser, payload.role);
+  if (Array.isArray(payload.allowedSiteIds)) allowedSiteIds = payload.allowedSiteIds;
+  if ("globalSuperadmin" in payload) globalSuperadmin = payload.globalSuperadmin;
+  if ("maquisBackupAllowed" in payload) maquisBackupAllowed = Boolean(payload.maquisBackupAllowed);
+  applySessionTimingFromApi(payload);
+}
+
 function applySessionTimingFromApi(payload) {
   if (!payload) {
     return;
   }
-  if ("globalSuperadmin" in payload) {
+  if ("globalSuperadmin" in payload && !("username" in payload)) {
     globalSuperadmin = payload.globalSuperadmin;
   }
   if (typeof payload.csrfToken === "string" && payload.csrfToken.trim()) {
@@ -2495,6 +2507,7 @@ function canGlobalSuperAdmin() {
 
 /** Sauvegarde / restauration par maquis (admins scopés ou superadmin global). */
 function canManageMaquisBackups() {
+  if (maquisBackupAllowed === false) return false;
   if (canGlobalSuperAdmin()) return true;
   if (!canAnyAdmin()) return false;
   return (allowedSiteIds || []).length > 0;
@@ -3901,9 +3914,15 @@ function setParamsSubTab(tab) {
   root.querySelectorAll("[data-params-panel]").forEach((panel) => {
     panel.classList.toggle("hidden", panel.dataset.paramsPanel !== tab);
   });
-  if (tab === "admin" && canManageMaquisBackups()) {
-    renderSitesList();
-    refreshRestoreBackupUi().catch(() => {});
+  if (tab === "admin") {
+    apiRequest(API.session)
+      .then((s) => {
+        applySessionFieldsFromApi(s);
+        applyRoleVisibility();
+        renderSitesList();
+        if (canManageMaquisBackups()) refreshRestoreBackupUi().catch(() => {});
+      })
+      .catch(() => {});
   }
 }
 
@@ -12216,7 +12235,7 @@ async function refreshRestoreBackupUi() {
         ? `<span class="muted">Un <strong>404</strong> signifie en général que le <strong>serveur Python</strong> ne connaît pas encore la route <code>GET /api/admin/backups</code> (version ancienne de <code>server.py</code>, ou page ouverte sans passer par ce serveur). <strong>Déployez la dernière version</strong> du dépôt et <strong>redémarrez</strong> le processus serveur.</span><br><br>`
         : "";
       const hint403 = Number(fetchErr?.status) === 403
-        ? `<span class="muted">Si vous venez d&apos;obtenir les droits administrateur, <strong>déconnectez-vous puis reconnectez-vous</strong>. Sinon redémarrez le serveur Python (<code>server.py</code>) pour appliquer la dernière version.</span><br><br>`
+        ? `<span class="muted">Si vous venez d&apos;obtenir les droits administrateur, <strong>déconnectez-vous puis reconnectez-vous</strong>. Sinon redémarrez le serveur Python (<code>server.py</code>) pour appliquer la dernière version.${maquisBackupAllowed === false ? " Le serveur refuse explicitement la sauvegarde pour ce compte (vérifiez le rôle et les maquis autorisés dans Paramètres → Utilisateurs)." : ""}</span><br><br>`
         : "";
       infoEl.innerHTML =
         `${hint403}${hint404}<span style="color:#c62828"><strong>Liste des sauvegardes inaccessible${st}</strong><br>${msg}</span><br>`
@@ -15133,10 +15152,7 @@ async function handleLoginSubmit(event) {
       totpSection.classList.add("hidden");
       document.getElementById("login-totp").value = "";
       document.querySelector("#login-form button[type=submit]").textContent = "Ouvrir le tableau de bord";
-      sessionUser = session.username;
-      currentRole = normalizeRoleForUsername(session.username, session.role);
-      allowedSiteIds = session.allowedSiteIds || [];
-      applySessionTimingFromApi(session);
+      applySessionFieldsFromApi(session);
       errorEl.textContent = "";
       setAuthVisible(true);
       await bootstrapAuthenticatedApp();
@@ -15152,10 +15168,7 @@ async function handleLoginSubmit(event) {
         document.querySelector("#login-form button[type=submit]").textContent = "Verifier le code";
         errorEl.textContent = "";
       } else {
-        sessionUser = result.username;
-        currentRole = normalizeRoleForUsername(result.username, result.role);
-        allowedSiteIds = result.allowedSiteIds || [];
-        applySessionTimingFromApi(result);
+        applySessionFieldsFromApi(result);
         errorEl.textContent = "";
         setAuthVisible(true);
         await bootstrapAuthenticatedApp();
@@ -15185,6 +15198,7 @@ async function logout() {
   currentRole = null;
   allowedSiteIds = [];
   globalSuperadmin = null;
+  maquisBackupAllowed = null;
   sessionDeadlineUnix = null;
   csrfToken = null;
   activeOrderId = null;
@@ -16610,10 +16624,7 @@ async function init() {
   setAuthVisible(false);
   try {
     const session = await apiRequest(API.session);
-    sessionUser = session.username;
-    currentRole = normalizeRoleForUsername(session.username, session.role);
-    allowedSiteIds = session.allowedSiteIds || [];
-    applySessionTimingFromApi(session);
+    applySessionFieldsFromApi(session);
     setAuthVisible(true);
     await bootstrapAuthenticatedApp();
   } catch (error) {

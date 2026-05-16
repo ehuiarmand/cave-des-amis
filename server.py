@@ -787,8 +787,8 @@ def session_can_manage_maquis_backups(
         return True
     if session_is_superadmin(session, all_site_ids=all_site_ids):
         return True
-    role = str(session.get("role", ""))
-    if role not in ("superadmin", "admin"):
+    role = str(session.get("role", "")).strip().lower()
+    if role not in ("superadmin", "admin", "manager"):
         return False
     if all_site_ids is not None:
         return bool(session_allowed_sites(session, all_site_ids))
@@ -803,11 +803,12 @@ def resolve_backup_session(session: dict[str, Any], store: "StateStore") -> dict
         return out
     with store._lock:
         all_ids = [str(s["id"]) for s in store._state.get("sites", []) if s.get("id")]
+        un_key = un.casefold()
         user = next(
             (
                 u
                 for u in store._state.get("auth", {}).get("users", [])
-                if str(u.get("username", "")).strip() == un
+                if str(u.get("username", "")).strip().casefold() == un_key
             ),
             None,
         )
@@ -1305,6 +1306,23 @@ class SessionManager:
             "sessionIdleSeconds": self.idle_seconds,
         }
 
+    def sync_from_auth_user(self, token: str | None, store: "DataStore") -> None:
+        """Réaligne le cookie de session sur auth.users (rôle / maquis autorisés)."""
+        if not token:
+            return
+        with self._lock:
+            raw = self._sessions.get(token)
+        if not raw:
+            return
+        bs = resolve_backup_session(raw, store)
+        with self._lock:
+            raw = self._sessions.get(token)
+            if not raw:
+                return
+            raw["role"] = bs.get("role", raw.get("role"))
+            raw["allowedSiteIds"] = list(bs.get("allowedSiteIds") or [])
+            raw["globalSuperadmin"] = bool(bs.get("globalSuperadmin"))
+
     def get(self, token: str | None) -> dict[str, Any] | None:
         if not token:
             return None
@@ -1660,8 +1678,12 @@ class DataStore:
                 "staffAuditLog": filter_site_rows(self._state.get("staffAuditLog", [])),
                 "auth": {"users": users_out},
             }
-            if session_can_manage_maquis_backups(session, all_site_ids=site_ids):
-                payload["adminBackups"] = json.loads(json.dumps(self.list_backups_for_session(session)))
+            bs = resolve_backup_session(session, self)
+            if session_can_manage_maquis_backups(bs, all_site_ids=site_ids):
+                if session_is_superadmin(bs, all_site_ids=site_ids):
+                    payload["adminBackups"] = json.loads(json.dumps(self.list_backups()))
+                else:
+                    payload["adminBackups"] = json.loads(json.dumps(self.list_backups_for_session(bs)))
             return payload
 
     def changes(self, *, since: str, site_id: str | None = None, session: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -2054,6 +2076,12 @@ class DataStore:
                         self._write(self._state)
                 elif role == "superadmin":
                     allowed = [sid for sid in user.get("allowedSiteIds", all_site_ids) if sid in all_site_ids] or all_site_ids[:1]
+                elif role == "admin":
+                    allowed = [
+                        str(sid)
+                        for sid in user.get("allowedSiteIds", all_site_ids)
+                        if str(sid) in all_site_ids
+                    ] or (all_site_ids[:1] if all_site_ids else [])
                 gs = compute_global_superadmin(str(user.get("username", "")), role, allowed, all_site_ids)
                 return {
                     "username": user["username"],
@@ -2559,18 +2587,11 @@ class AppHandler(BaseHTTPRequestHandler):
             session = self.require_session()
             if session is None:
                 return
-            role = session["role"]
-            allowed = list(session.get("allowedSiteIds") or [])
-            if str(session.get("username", "")).strip().lower() == "admin":
-                role = "superadmin"
-                with store._lock:
-                    allowed = [s["id"] for s in store._state["sites"]]
             aids = store.all_site_ids()
-            gs_raw = session.get("globalSuperadmin")
-            if gs_raw is None:
-                global_sa = session_is_superadmin(session, all_site_ids=aids)
-            else:
-                global_sa = bool(gs_raw)
+            bs = resolve_backup_session(session, store)
+            role = str(bs.get("role", session.get("role", "")))
+            allowed = list(bs.get("allowedSiteIds") or session.get("allowedSiteIds") or [])
+            global_sa = bool(bs.get("globalSuperadmin"))
             self.send_json(
                 HTTPStatus.OK,
                 {
@@ -2579,6 +2600,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     "role": role,
                     "allowedSiteIds": allowed,
                     "globalSuperadmin": global_sa,
+                    "maquisBackupAllowed": session_can_manage_maquis_backups(bs, all_site_ids=aids),
                     **session_timing_fields(session),
                 },
             )
@@ -2787,22 +2809,25 @@ class AppHandler(BaseHTTPRequestHandler):
                 pre_auth = create_pre_auth_token(canon)
                 self.send_json(HTTPStatus.OK, {"needsTwoFactor": True, "preAuthToken": pre_auth})
                 return
+            aids_login = store.all_site_ids()
             token = sessions.create(
                 user["username"],
                 user["role"],
                 user["allowedSiteIds"],
                 global_superadmin=bool(user.get("globalSuperadmin")),
-                all_site_ids=store.all_site_ids(),
+                all_site_ids=aids_login,
             )
             sess_view = sessions.get(token) or {}
+            bs_login = resolve_backup_session(sess_view, store)
             self.send_json(
                 HTTPStatus.OK,
                 {
                     "authenticated": True,
                     "username": user["username"],
-                    "role": user["role"],
-                    "allowedSiteIds": user["allowedSiteIds"],
-                    "globalSuperadmin": bool(user.get("globalSuperadmin")),
+                    "role": bs_login.get("role", user["role"]),
+                    "allowedSiteIds": list(bs_login.get("allowedSiteIds") or user["allowedSiteIds"]),
+                    "globalSuperadmin": bool(bs_login.get("globalSuperadmin")),
+                    "maquisBackupAllowed": session_can_manage_maquis_backups(bs_login, all_site_ids=aids_login),
                     **session_timing_fields(sess_view),
                 },
                 cookie=token,
@@ -2839,16 +2864,19 @@ class AppHandler(BaseHTTPRequestHandler):
                 elif role == "superadmin":
                     allowed = [sid for sid in user_data.get("allowedSiteIds", all_site_ids) if sid in all_site_ids] or all_site_ids[:1]
                 gs = compute_global_superadmin(str(username), role, allowed, all_site_ids)
-            token = sessions.create(username, role, allowed, global_superadmin=gs, all_site_ids=all_site_ids)
+            aids_2fa = store.all_site_ids()
+            token = sessions.create(username, role, allowed, global_superadmin=gs, all_site_ids=aids_2fa)
             sess_view = sessions.get(token) or {}
+            bs_2fa = resolve_backup_session(sess_view, store)
             self.send_json(
                 HTTPStatus.OK,
                 {
                     "authenticated": True,
                     "username": username,
-                    "role": role,
-                    "allowedSiteIds": allowed,
-                    "globalSuperadmin": gs,
+                    "role": bs_2fa.get("role", role),
+                    "allowedSiteIds": list(bs_2fa.get("allowedSiteIds") or allowed),
+                    "globalSuperadmin": bool(bs_2fa.get("globalSuperadmin")),
+                    "maquisBackupAllowed": session_can_manage_maquis_backups(bs_2fa, all_site_ids=aids_2fa),
                     **session_timing_fields(sess_view),
                 },
                 cookie=token,
@@ -3137,7 +3165,8 @@ class AppHandler(BaseHTTPRequestHandler):
                 clear_cookie=True,
             )
             return None
-        return session
+        sessions.sync_from_auth_user(token, store)
+        return sessions.get(token)
 
     def require_csrf(self, session: dict[str, Any]) -> bool:
         expected = str(session.get("csrfToken") or "").strip()
