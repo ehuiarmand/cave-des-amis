@@ -3035,6 +3035,76 @@ def _stock_reserve_py(item: dict[str, Any]) -> float:
     return max(0.0, total - _stock_frigo_py(item))
 
 
+def _stock_actuel_py(item: dict[str, Any]) -> float:
+    if item.get("frigo") is not None or item.get("reserve") is not None:
+        return max(0.0, _stock_frigo_py(item) + _stock_reserve_py(item))
+    return max(0.0, float(item.get("init", 0) or 0) + float(item.get("entrees", 0) or 0) - float(item.get("sorties", 0) or 0))
+
+
+def _add_calendar_days_iso(iso_date: str, days: int) -> str:
+    from datetime import date, timedelta
+    y, m, d = iso_date[:10].split("-")
+    return (date(int(y), int(m), int(d)) + timedelta(days=days)).isoformat()
+
+
+def _auto_open_next_day_after_close(state: dict[str, Any], site_id: str, closed_date: str, closing_cash: float) -> str | None:
+    """Ouvre la journée comptable suivante (fonds = caisse à la fermeture) et positionne pdjWorkDateBySite."""
+    today_str = _today_iso_local()
+    next_date = _add_calendar_days_iso(closed_date, 1)
+    if next_date > today_str:
+        return None
+    opening = max(0, int(round(float(closing_cash or 0))))
+    books = list(state.get("dayBooks", []))
+    book = next(
+        (b for b in books if str(b.get("siteId", "")) == site_id and str(b.get("date", ""))[:10] == next_date),
+        None,
+    )
+    if book and book.get("openingCashRecorded"):
+        pass
+    else:
+        ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        snapshot: dict[str, str] = {}
+        for item in state.get("stock", []):
+            if str(item.get("siteId", "")) != site_id:
+                continue
+            snapshot[str(item.get("id"))] = _stock_actuel_py(item)
+        if not book:
+            book = {
+                "id": int(time.time() * 1000) + 1,
+                "siteId": site_id,
+                "date": next_date,
+                "openedAt": ts,
+                "openingStockById": snapshot,
+                "openingCashFcfa": opening,
+                "openingCashRecorded": True,
+                "openingRecordedAt": ts,
+                "openingRecordedBy": "clôture auto",
+                "autoOpenedFromClose": True,
+                "autoOpenedFromDate": closed_date[:10],
+            }
+        else:
+            book["openingCashFcfa"] = opening
+            book["openingCashRecorded"] = True
+            book["openingRecordedAt"] = ts
+            book["openingRecordedBy"] = "clôture auto"
+            if not book.get("openingStockById"):
+                book["openingStockById"] = snapshot
+            book["autoOpenedFromClose"] = True
+            book["autoOpenedFromDate"] = closed_date[:10]
+            if not book.get("openedAt"):
+                book["openedAt"] = ts
+        books = [book] + [b for b in books if not (str(b.get("siteId", "")) == site_id and str(b.get("date", ""))[:10] == next_date)]
+        state["dayBooks"] = books
+
+    pdj_map = dict(state.get("pdjWorkDateBySite") or {})
+    if next_date == today_str:
+        pdj_map.pop(site_id, None)
+    else:
+        pdj_map[site_id] = next_date
+    state["pdjWorkDateBySite"] = pdj_map
+    return next_date
+
+
 def _server_auto_close_site(site_id: str, d_str: str) -> None:
     """Clôture automatique d'un maquis pour une date donnée. Thread-safe via store._lock (RLock)."""
     with store._lock:
@@ -3199,6 +3269,7 @@ def _server_auto_close_site(site_id: str, d_str: str) -> None:
             pdj_map.pop(site_id, None)
             state["pdjWorkDateBySite"] = pdj_map
 
+        next_opened = _auto_open_next_day_after_close(state, site_id, d_str, closing_cash)
         store._write(state)
 
     audit_log("auto_cloture_jour", {
@@ -3208,7 +3279,8 @@ def _server_auto_close_site(site_id: str, d_str: str) -> None:
         "nbVentes": len(ventes_jour),
         "method": "server_background",
     })
-    print(f"[auto-cloture] Site {site_id} clôturée pour le {d_str} (CA {ca_encaisse:.0f} FCFA, {len(ventes_jour)} ventes)", flush=True)
+    extra = f" → journée suivante {next_opened} ouverte auto" if next_opened else ""
+    print(f"[auto-cloture] Site {site_id} clôturée pour le {d_str} (CA {ca_encaisse:.0f} FCFA, {len(ventes_jour)} ventes){extra}", flush=True)
 
 
 def _auto_cloture_check() -> None:

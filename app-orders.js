@@ -4147,7 +4147,7 @@ function stockRetailValueFcfa(item, site = currentSite(), asOfDate = today()) {
   return Math.round(Math.max(0, btl) * unit);
 }
 
-/** Valeur du stock : quantité en stock × prix d'achat unitaire (tel que saisi). */
+/** Valeur du stock : quantité (casiers) × prix d'achat du casier. */
 function stockPurchaseValueFcfa(item) {
   return Math.round(Math.max(0, stockActuel(item)) * (Number(item?.prixAchat) || 0));
 }
@@ -4638,6 +4638,80 @@ function dayBookNeedsCashOpening(book) {
   return true;
 }
 
+function addCalendarDaysIso(isoDateStr, days) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(isoDateStr || "").slice(0, 10));
+  if (!m) return today();
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  d.setDate(d.getDate() + days);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+/**
+ * Après une clôture : ouvre automatiquement la journée suivante (fonds = caisse à la fermeture)
+ * et bascule la date comptable active — sans formulaire « Ouvrir la journée ».
+ * @returns {{ nextDate: string, pdjMap: object } | null}
+ */
+function autoOpenNextAccountingDayAfterClose(siteId, closedDateStr, closingCashFcfa, { actorLabel = "" } = {}) {
+  const sid = String(siteId || "").trim();
+  const closed = String(closedDateStr || "").slice(0, 10);
+  if (!sid || !/^\d{4}-\d{2}-\d{2}$/.test(closed)) return null;
+  const nextDate = addCalendarDaysIso(closed, 1);
+  const t = today();
+  if (nextDate > t) return null;
+
+  const openingAmount = Math.max(0, Math.round(Number(closingCashFcfa) || 0));
+  const ts = new Date().toISOString();
+  const snapshot = captureOpeningStockSnapshot();
+  const recordedBy = actorLabel || sessionUser || "clôture auto";
+
+  let book = dayBookFor(nextDate, sid);
+  if (!book || dayBookNeedsCashOpening(book)) {
+    if (!book) {
+      book = {
+        id: Date.now() + 1,
+        siteId: sid,
+        date: nextDate,
+        openedAt: ts,
+        openingStockById: snapshot,
+        openingCashFcfa: openingAmount,
+        openingCashRecorded: true,
+        openingRecordedAt: ts,
+        openingRecordedBy: recordedBy,
+        autoOpenedFromClose: true,
+        autoOpenedFromDate: closed,
+      };
+    } else {
+      book.openingCashFcfa = openingAmount;
+      book.openingCashRecorded = true;
+      book.openingRecordedAt = ts;
+      book.openingRecordedBy = recordedBy;
+      if (!book.openingStockById || !Object.keys(book.openingStockById).length) {
+        book.openingStockById = snapshot;
+      }
+      book.autoOpenedFromClose = true;
+      book.autoOpenedFromDate = closed;
+      if (!book.openedAt) book.openedAt = ts;
+    }
+    state.dayBooks = [book, ...(state.dayBooks || []).filter((b) => !(b.siteId === sid && b.date === nextDate))];
+    recordStaffAudit(
+      "update",
+      "caisse_ouverture",
+      `Ouverture auto après clôture ${formatDateDdMmYyyy(closed)}`,
+      `Journée ${formatDateDdMmYyyy(nextDate)} · ${fmt(openingAmount)} FCFA (reprise caisse fermeture)`,
+    );
+  }
+
+  const pdjMap = { ...(state.pdjWorkDateBySite || {}) };
+  if (nextDate === t) delete pdjMap[sid];
+  else pdjMap[sid] = nextDate;
+  state.pdjWorkDateBySite = pdjMap;
+
+  delete pdjViewDateBySite[sid];
+  pdjBrowseConsultationOnly = false;
+
+  return { nextDate, pdjMap };
+}
+
 /** Stock à l'ouverture enregistré lors de l'ouverture caisse (cliché) — base du théorique pour la journée `dayBook.date`. */
 function stockOpeningFromDayBook(item, book) {
   if (!item || !book?.openingStockById) return null;
@@ -4763,14 +4837,22 @@ function renderCashOpeningPanel() {
     lockBlock.classList.toggle("pdj-main--locked", needs && canManagePdjAccounting());
   }
   if (closed) {
+    const nextD = addCalendarDaysIso(dStr, 1);
+    const nextBook = dayBookFor(nextD, siteId);
+    const nextReady = nextBook && !dayBookNeedsCashOpening(nextBook) && !stockCheckForSiteDate(nextD, siteId);
     container.removeAttribute("data-pdj-opening-fp");
     container.innerHTML = `
       <div class="pdj-opening-card pdj-opening-card--done" style="border-left:3px solid #1565c0;background:#f4f8ff">
         <p class="eyebrow" style="margin-bottom:4px">Journée clôturée</p>
         <strong>${escapeHtml(formatDateDdMmYyyy(dStr))}</strong>
-        <p class="muted" style="margin-top:8px;line-height:1.45">
-          Les ventes pour cette date sont bloquées. Pour encaisser à nouveau, ouvrez la journée suivante depuis cette page (date adéquate, puis ouverture de caisse).
-        </p>
+        ${nextReady
+    ? `<p class="muted" style="margin-top:8px;line-height:1.45">
+          La journée suivante (<strong>${escapeHtml(formatDateDdMmYyyy(nextD))}</strong>) est ouverte automatiquement
+          avec <strong>${fmt(nextBook.openingCashFcfa)} FCFA</strong> en caisse (reprise du dénombrement de fermeture).
+        </p>`
+    : `<p class="muted" style="margin-top:8px;line-height:1.45">
+          Les ventes pour cette date sont bloquées. La journée suivante s’ouvre automatiquement à la clôture lorsque possible.
+        </p>`}
         <p class="muted" style="margin-top:8px;font-size:0.82rem;line-height:1.45">
           Une réouverture de journée nécessite un profil gérant ou administrateur et sera journalisée.
         </p>
@@ -9091,13 +9173,30 @@ async function performAutoClotureBackground(dStr) {
     `Clôture automatique ${formatDateDdMmYyyy(dStr)}`,
     `Programmée · ${new Date().toLocaleTimeString("fr-FR")} · CA ${fmt(caEncaisse)} FCFA · ${ventesJour.length} vente(s) · stock théorique`,
   );
-  const pdjMapClose = { ...(state.pdjWorkDateBySite || {}) };
-  if (pdjMapClose[siteId] === dStr) delete pdjMapClose[siteId];
-  await persistState({ stock: state.stock, stockChecks: state.stockChecks, pdjWorkDateBySite: pdjMapClose });
+  const autoOpen = autoOpenNextAccountingDayAfterClose(siteId, dStr, closingCashFcfa, { actorLabel: "auto-cloture" });
+  if (!autoOpen) {
+    const pdjMapClose = { ...(state.pdjWorkDateBySite || {}) };
+    if (pdjMapClose[siteId] === dStr) delete pdjMapClose[siteId];
+    state.pdjWorkDateBySite = pdjMapClose;
+  }
+  await persistState({
+    stock: state.stock,
+    stockChecks: state.stockChecks,
+    dayBooks: state.dayBooks,
+    pdjWorkDateBySite: state.pdjWorkDateBySite,
+  });
+  if (autoOpen?.nextDate) {
+    setPdjBrowseDate(null);
+    syncPdjWorkDateInput();
+    pdjSubTab = "synthese";
+  }
   renderDashboard();
   renderPointDuJour();
   renderStock();
-  showToast(`Clôture auto : journée du ${formatDateDdMmYyyy(dStr)} clôturée (stock théorique, caisse théorique).`);
+  const nextMsg = autoOpen?.nextDate
+    ? ` Journée suivante (${formatDateDdMmYyyy(autoOpen.nextDate)}) ouverte automatiquement.`
+    : "";
+  showToast(`Clôture auto : journée du ${formatDateDdMmYyyy(dStr)} clôturée (stock théorique, caisse théorique).${nextMsg}`);
 }
 
 async function syncStateSilently() {
@@ -11678,26 +11777,44 @@ async function closeAccountingDay() {
     `${cashBlock}${stockBlock}`,
   );
   const sidClose = currentSiteId();
-  const pdjMapClose = { ...(state.pdjWorkDateBySite || {}) };
-  if (pdjMapClose[sidClose] === dStr) delete pdjMapClose[sidClose];
+  const autoOpen = autoOpenNextAccountingDayAfterClose(sidClose, dStr, closingCashFcfa, { actorLabel: sessionUser });
+  if (!autoOpen) {
+    const pdjMapClose = { ...(state.pdjWorkDateBySite || {}) };
+    if (pdjMapClose[sidClose] === dStr) delete pdjMapClose[sidClose];
+    state.pdjWorkDateBySite = pdjMapClose;
+  }
   const savedStockChecks = state.stockChecks;
   const closeBtn = document.getElementById("close-day-btn");
   const prevCloseText = closeBtn ? closeBtn.textContent : "";
   if (closeBtn) { closeBtn.disabled = true; closeBtn.textContent = "Clôture en cours…"; }
   try {
-    await persistState({ stock: state.stock, stockChecks: state.stockChecks, pdjWorkDateBySite: pdjMapClose });
+    await persistState({
+      stock: state.stock,
+      stockChecks: state.stockChecks,
+      dayBooks: state.dayBooks,
+      pdjWorkDateBySite: state.pdjWorkDateBySite,
+    });
     if (!stockCheckForSiteDate(dStr, sidClose) && savedStockChecks?.length) {
       state.stockChecks = savedStockChecks;
     }
     delete pdjClosingCashDraftBySiteDate[pdjOpeningCashDraftKey(sidClose, dStr)];
-    setPdjBrowseDate(dStr);
-    pdjSubTab = "cloture";
+    if (autoOpen?.nextDate) {
+      setPdjBrowseDate(null);
+      syncPdjWorkDateInput();
+      pdjSubTab = "synthese";
+    } else {
+      setPdjBrowseDate(dStr);
+      pdjSubTab = "cloture";
+    }
     renderStock();
     renderDashboard();
     renderPointDuJour();
-    setPdjSubTab("cloture", { scrollTop: true });
+    setPdjSubTab(pdjSubTab, { scrollTop: true });
     const cashHint = cashEcartEspeces === 0 ? "" : ` Écart espèces : ${cashEcartEspeces > 0 ? "+" : ""}${fmt(cashEcartEspeces)} FCFA.`;
-    showToast(`Journée du ${formatDateDdMmYyyy(dStr)} clôturée.${cashHint} Onglet Clôture : imprimez le rapport si besoin.`);
+    const nextMsg = autoOpen?.nextDate
+      ? ` Journée suivante (${formatDateDdMmYyyy(autoOpen.nextDate)}) ouverte automatiquement avec ${fmt(closingCashFcfa)} FCFA en caisse.`
+      : " Onglet Clôture : imprimez le rapport si besoin.";
+    showToast(`Journée du ${formatDateDdMmYyyy(dStr)} clôturée.${cashHint}${nextMsg}`);
   } finally {
     if (closeBtn) { closeBtn.disabled = false; closeBtn.textContent = prevCloseText; }
   }
