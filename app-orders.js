@@ -4147,10 +4147,9 @@ function stockRetailValueFcfa(item, site = currentSite(), asOfDate = today()) {
   return Math.round(Math.max(0, btl) * unit);
 }
 
-/** Valeur du stock au coût d'achat : bouteilles en stock × (prixAchat casier ÷ unités par casier). */
+/** Valeur du stock : quantité en stock × prix d'achat unitaire (tel que saisi). */
 function stockPurchaseValueFcfa(item) {
-  const btl = Math.max(0, stockActuel(item));
-  return Math.round(btl * prixAchatParBouteille(item));
+  return Math.round(Math.max(0, stockActuel(item)) * (Number(item?.prixAchat) || 0));
 }
 
 function saleFormatLabel(format) {
@@ -7871,6 +7870,7 @@ function renderStock() {
   const dualPricing = siteUsesDualZonePricing(site);
   const globalSeuil = Number(site?.seuilStock) || 5;
   // Valeur totale au coût d'achat sur TOUS les articles (pas seulement le filtre).
+  const priceDay = today();
   const totalValue = allItems.reduce((sum, item) => sum + stockPurchaseValueFcfa(item), 0);
   let nbAlerte = 0;
   let nbOk = 0;
