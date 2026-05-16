@@ -2931,3 +2931,11 @@ textarea { font: inherit; }
   color: #c54f41;
   font-weight: 700;
 }
+
+/* Casiers physiques : journal mouvements (responsive) */
+@media (max-width: 720px) {
+  .casier-mvt-table .casier-mvt-col-note,
+  .casier-mvt-table th.casier-mvt-col-note {
+    display: none;
+  }
+}

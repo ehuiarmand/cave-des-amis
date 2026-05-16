@@ -2706,7 +2706,7 @@ async function persistPdjWorkDateFromSuperPicker() {
     showToast("Date invalide.");
     return;
   }
-  await persistState({ pdjWorkDateBySite: map });
+  await persistStatePatch({ pdjWorkDateBySite: map });
   pdjBrowseConsultationOnly = false;
   delete pdjViewDateBySite[siteId];
   if (el) el.value = map[siteId] || workingDate();
@@ -4615,7 +4615,7 @@ async function reopenAccountingDay(siteId, dateStr) {
   }
   const pdjMapReopen = { ...(state.pdjWorkDateBySite || {}) };
   if (canAnyAdmin()) pdjMapReopen[String(siteId)] = dateStr;
-  await persistState({ stock: state.stock, stockChecks: state.stockChecks, dayBooks: state.dayBooks, pdjWorkDateBySite: pdjMapReopen });
+  await persistStatePatch({ stock: state.stock, stockChecks: state.stockChecks, dayBooks: state.dayBooks, pdjWorkDateBySite: pdjMapReopen });
   // Auto-positionner la date de travail sur la date recouverte
   const workDateEl = document.getElementById("pdj-work-date");
   if (workDateEl && canAnyAdmin()) {
@@ -4840,7 +4840,7 @@ async function recordCashOpening() {
   const prevOpenText = openCashBtn ? openCashBtn.textContent : "";
   if (openCashBtn) { openCashBtn.disabled = true; openCashBtn.textContent = "Enregistrement…"; }
   try {
-    await persistState({ dayBooks: state.dayBooks, pdjWorkDateBySite: pdjMapOpen });
+    await persistStatePatch({ dayBooks: state.dayBooks, pdjWorkDateBySite: pdjMapOpen });
     delete pdjOpeningCashDraftBySiteDate[pdjOpeningCashDraftKey(siteId, dateStr)];
     pdjSubTab = "synthese";
     renderPointDuJour();
@@ -13521,7 +13521,91 @@ function lsRestoreCasiers() {
 }
 
 let casierPhysFilters = { article: "", emplacement: "", statut: "all" };
+let casierPhysMvtUi = { dateFrom: "", dateTo: "", user: "", page: 1, pageSize: 50 };
 let casierViewMode = "lots"; // "lots" | "physique"
+
+function casierPhysMvtDateKey(m) {
+  const d = String(m?.date || (m?.createdAt || "").slice(0, 10));
+  return /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : "";
+}
+
+function filteredCasierPhysMouvements() {
+  const from = String(casierPhysMvtUi.dateFrom || "").trim();
+  const to = String(casierPhysMvtUi.dateTo || "").trim();
+  const u = String(casierPhysMvtUi.user || "").trim().toLowerCase();
+  return casierMouvementsForSite()
+    .filter((m) => {
+      const dk = casierPhysMvtDateKey(m);
+      if (from && dk && dk < from) return false;
+      if (to && dk && dk > to) return false;
+      if (u && !String(m.user || "").toLowerCase().includes(u)) return false;
+      return true;
+    })
+    .sort((a, b) => String(b.createdAt || b.date || "").localeCompare(String(a.createdAt || a.date || "")));
+}
+
+function syncCasierPhysFilterDatalists() {
+  const all = casiersConsignesForSite();
+  const brasseries = new Set();
+  const emplacements = new Set();
+  const users = new Set();
+  all.forEach((c) => {
+    const stockIt = stockItemForArticle(c.article);
+    const br = normalizeBrasserieName(stockIt?.brasserie || c.article || "");
+    if (br) brasseries.add(br);
+    const emp = String(c.emplacement || "").trim();
+    if (emp) emplacements.add(emp);
+  });
+  casierMouvementsForSite().forEach((m) => {
+    const u = String(m.user || "").trim();
+    if (u) users.add(u);
+  });
+  const fillDl = (id, values) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.innerHTML = [...values].sort((a, b) => a.localeCompare(b, "fr")).map((v) => `<option value="${escapeHtml(v)}"></option>`).join("");
+  };
+  fillDl("casier-phys-dl-brasserie", brasseries);
+  fillDl("casier-phys-dl-emplacement", emplacements);
+  fillDl("casier-phys-dl-users", users);
+}
+
+function exportCasierPhysMouvementsCsv() {
+  const rows = filteredCasierPhysMouvements();
+  const header = ["Date", "Casier", "Article", "Type", "Quantite", "Source_motif", "Commentaire", "Utilisateur", "Facture"];
+  const data = rows.map((m) => [
+    formatDateDdMmYyyy(m.date || (m.createdAt || "").slice(0, 10)),
+    m.casierCode || "",
+    m.article || "",
+    m.type === "retour_vide" ? "Retour vides" : m.type === "sortie" ? "Sortie" : "Entree",
+    m.type === "retour_vide" && m.nbCasiers ? `${m.nbCasiers} cas. (${m.quantite} btl)` : String(m.quantite ?? ""),
+    m.type === "retour_vide" ? (m.commentaire || "retour fournisseur") : m.type === "sortie" ? (m.motif || "") : (m.source || ""),
+    m.commentaire || "",
+    m.user || "",
+    m.factureNumber || m.facture || "",
+  ]);
+  const slug = exportFileSlug();
+  downloadCsvFile(`mouvements_casiers_${slug}.csv`, header, data);
+  showToast(`${fmt(rows.length)} mouvement(s) exporte(s).`);
+}
+
+function renderCasierPhysMvtPagination(total, page, pageSize) {
+  const host = document.getElementById("casier-phys-mvt-pagination");
+  if (!host) return;
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  const p = Math.min(Math.max(1, page), pages);
+  casierPhysMvtUi.page = p;
+  if (total <= pageSize) {
+    host.classList.add("hidden");
+    host.innerHTML = "";
+    return;
+  }
+  host.classList.remove("hidden");
+  host.innerHTML = `
+    <button type="button" class="btn btn-outline" data-casier-mvt-page="${p - 1}" ${p <= 1 ? "disabled" : ""} style="width:auto;min-height:40px">Precedent</button>
+    <span class="muted" style="font-size:0.88rem">Page ${p} / ${pages} · ${fmt(total)} mouvement(s)</span>
+    <button type="button" class="btn btn-outline" data-casier-mvt-page="${p + 1}" ${p >= pages ? "disabled" : ""} style="width:auto;min-height:40px">Suivant</button>`;
+}
 
 function casiersForSite(sourceState = state) {
   const list = Array.isArray(sourceState?.casiers) ? sourceState.casiers : [];
@@ -13585,7 +13669,7 @@ async function cleanupCartonCasiers({ confirmFirst = true } = {}) {
   const removeIds = new Set(toRemove.map((c) => String(c.id)));
   state.casiers = before.filter((c) => !isForSite(c) || !removeIds.has(String(c.id)));
   lsSaveCasiers();
-  try { await persistState({ casiers: state.casiers }); } catch {}
+  try { await persistStatePatch({ casiers: state.casiers }); } catch {}
   renderCasierPhysique();
   renderDashboard();
   showToast(`${toRemove.length} casier(s) 'carton' supprime(s).`);
@@ -13904,7 +13988,7 @@ async function purgerCasiersVides() {
   state.casiers = state.casiers.filter((c) => !ids.has(c.id));
   recordStaffAudit("delete", "casier_purge", `Purge ${phantoms.length} casier(s) vides`, `Casiers sans bouteilles pleines ni vides supprimés.`);
   try {
-    await persistState({ casiers: state.casiers, nextId: state.nextId });
+    await persistStatePatch({ casiers: state.casiers, nextId: state.nextId });
   } catch (e) { showToast("Erreur lors de la sauvegarde."); return; }
   renderCasiers();
   showToast(`${phantoms.length} casier(s) vide(s) supprimé(s).`);
@@ -13969,7 +14053,7 @@ async function syncCasiersFromStockEtVentes() {
     `Initialisation depuis stock actuel du site (casiers vides exclus).`
   );
   try {
-    await persistState({ casiers: state.casiers, casierMouvements: state.casierMouvements, nextId: state.nextId });
+    await persistStatePatch({ casiers: state.casiers, casierMouvements: state.casierMouvements, nextId: state.nextId });
   } catch (e) { lsSaveCasiers(); }
   renderCasiers();
   showToast(`${fmt(createdPleins)} casier(s) créé(s) depuis le stock actuel.`);
@@ -14030,7 +14114,7 @@ async function ensurePhysicalCasiersFromReserve() {
   if (created > 0) {
     recordStaffAudit("create", "casier_init", `Initialisation casiers physiques (${created})`, `Création automatique de ${created} casier(s) à partir de la réserve actuelle.`);
     try {
-      await persistState({ casiers: state.casiers, nextId: state.nextId });
+      await persistStatePatch({ casiers: state.casiers, nextId: state.nextId });
     } catch (e) {
       console.warn("ensurePhysicalCasiersFromReserve: persist failed", e);
     }
@@ -14106,7 +14190,7 @@ async function createCasier({ article, capacite, emplacement, quantiteActuelle =
     commentaire: [emplacement ? `emplacement: ${emplacement}` : "", vides0 > 0 ? `${vides0} btl vides` : ""].filter(Boolean).join(" · "),
     entity: "casier",
   });
-  await persistState({ casiers: state.casiers, casierMouvements: state.casierMouvements, nextId: state.nextId });
+  await persistStatePatch({ casiers: state.casiers, casierMouvements: state.casierMouvements, nextId: state.nextId });
   return casier;
 }
 
@@ -14153,7 +14237,7 @@ async function casierEntree(casierId, qty, { source = "fournisseur", commentaire
     commentaire,
     entity: "casier_entree",
   });
-  await persistState({ casiers: state.casiers, casierMouvements: state.casierMouvements, nextId: state.nextId });
+  await persistStatePatch({ casiers: state.casiers, casierMouvements: state.casierMouvements, nextId: state.nextId });
   return true;
 }
 
@@ -14286,7 +14370,7 @@ async function casierSortie(casierId, qty, { motif = "autre", commentaire = "" }
       `${a.article}: ${fmt(a.take)} btl rés. → frigo`).join("\n");
     recordStaffAudit("update", "frigo", `Casier vers frigo · ${stamp}`, detail || stamp);
   }
-  await persistState({
+  await persistStatePatch({
     casiers: state.casiers,
     casierMouvements: state.casierMouvements,
     nextId: state.nextId,
@@ -14310,7 +14394,7 @@ async function deleteCasier(casierId) {
   if (!window.confirm(`Supprimer le casier ${casier.code} (${casier.article}) ?`)) return false;
   state.casiers = (state.casiers || []).filter((c) => Number(c.id) !== Number(casierId));
   recordStaffAudit("delete", "casier", `Suppression casier ${casier.code}`, `${casier.code} · ${casier.article} · emplacement ${casier.emplacement || "-"}`);
-  await persistState({ casiers: state.casiers });
+  await persistStatePatch({ casiers: state.casiers });
   return true;
 }
 
@@ -14368,7 +14452,7 @@ async function _retourVidesLot(matchingVides, cap, label) {
     `Retour ${label} : ${processed} casier(s)`,
     `${processed} casier(s) × ${cap} btl = ${processed * cap} btl vides retournées fournisseur`
   );
-  await persistState({ casiers: state.casiers, casierMouvements: state.casierMouvements, nextId: state.nextId });
+  await persistStatePatch({ casiers: state.casiers, casierMouvements: state.casierMouvements, nextId: state.nextId });
   return processed;
 }
 
@@ -14424,7 +14508,7 @@ async function retourVidesCasier(casierId, qty) {
     createdAt: new Date().toISOString(),
   });
   recordStaffAudit("create", "casier_retour_vide", `Retour ${casier.code} : ${fmt(nbCasiers)} casier(s) vide(s)`, `${fmt(nbCasiers)} casier(s) × ${fmt(cap)} btl = ${fmt(q)} btl vide(s) retournée(s) fournisseur`);
-  await persistState({ casiers: state.casiers, casierMouvements: state.casierMouvements, nextId: state.nextId });
+  await persistStatePatch({ casiers: state.casiers, casierMouvements: state.casierMouvements, nextId: state.nextId });
   return true;
 }
 
@@ -14452,6 +14536,7 @@ function setCasierViewMode(mode) {
 function renderCasierPhysique() {
   const list = document.getElementById("casier-phys-list");
   if (!list) return;
+  syncCasierPhysFilterDatalists();
   const all = casiersConsignesForSite();
   const fArticle = String(casierPhysFilters.article || "").trim().toLowerCase();
   const fEmplacement = String(casierPhysFilters.emplacement || "").trim().toLowerCase();
@@ -14585,19 +14670,27 @@ function renderCasierPhysique() {
     list.innerHTML = html;
   }
 
-  // Mouvements (50 derniers)
   const mvtList = document.getElementById("casier-phys-mvt-list");
   const mvtCount = document.getElementById("casier-phys-mvt-count");
   if (mvtList) {
-    const mvts = casierMouvementsForSite()
-      .slice()
-      .sort((a, b) => String(b.createdAt || b.date || "").localeCompare(String(a.createdAt || a.date || "")));
-    if (mvtCount) mvtCount.textContent = `${fmt(mvts.length)} mouvement(s)`;
-    const head = mvts.slice(0, 50);
+    const mvts = filteredCasierPhysMouvements();
+    const pageSize = Math.max(10, Math.min(500, Number(casierPhysMvtUi.pageSize) || 50));
+    const pages = Math.max(1, Math.ceil(mvts.length / pageSize));
+    if (casierPhysMvtUi.page > pages) casierPhysMvtUi.page = pages;
+    if (casierPhysMvtUi.page < 1) casierPhysMvtUi.page = 1;
+    const start = (casierPhysMvtUi.page - 1) * pageSize;
+    const pageRows = mvts.slice(start, start + pageSize);
+    if (mvtCount) {
+      mvtCount.textContent = mvts.length
+        ? `${fmt(mvts.length)} mouvement(s)${mvts.length > pageSize ? ` · page ${casierPhysMvtUi.page}/${pages}` : ""}`
+        : "0 mouvement";
+    }
+    renderCasierPhysMvtPagination(mvts.length, casierPhysMvtUi.page, pageSize);
+    const head = pageRows;
     if (!head.length) {
-      mvtList.innerHTML = emptyState("Aucun mouvement", "Les entrées et sorties de casiers apparaîtront ici.");
+      mvtList.innerHTML = emptyState("Aucun mouvement", "Ajustez les filtres ou enregistrez une entrée / sortie de casier.");
     } else {
-      mvtList.innerHTML = `<div class="stock-table-wrap"><table class="stock-table">
+      mvtList.innerHTML = `<div class="stock-table-wrap"><table class="stock-table casier-mvt-table">
         <thead><tr>
           <th>Date</th>
           <th>Casier</th>
@@ -14605,24 +14698,67 @@ function renderCasierPhysique() {
           <th>Type</th>
           <th style="text-align:right">Qté</th>
           <th>Source / motif</th>
-          <th>Note</th>
+          <th class="casier-mvt-col-note">Note</th>
           <th>Utilisateur</th>
+          <th>Facture</th>
         </tr></thead>
         <tbody>
           ${head.map((m) => `<tr>
-            <td>${escapeHtml(formatDateDdMmYyyy(m.date || (m.createdAt || "").slice(0,10)))}</td>
-            <td><strong>${escapeHtml(m.casierCode || "-")}</strong></td>
+            <td>${escapeHtml(formatDateDdMmYyyy(m.date || (m.createdAt || "").slice(0, 10)))}</td>
+            <td><button type="button" class="link-btn" data-casier-mvt-detail="${Number(m.casierId) || ""}" style="font-weight:700;padding:0;border:none;background:none;color:var(--mm-primary);cursor:pointer;text-decoration:underline">${escapeHtml(m.casierCode || "-")}</button></td>
             <td>${escapeHtml(m.article || "-")}</td>
             <td>${m.type === "retour_vide" ? "<span class='badge badge-amber'>Retour vides</span>" : m.type === "sortie" ? "<span class='badge badge-red'>Sortie</span>" : "<span class='badge badge-green'>Entrée</span>"}</td>
             <td style="text-align:right">${m.type === "retour_vide" && m.nbCasiers ? `<strong>${fmt(m.nbCasiers)} casier(s)</strong> <span class="muted">(${fmt(m.quantite)} btl)</span>` : fmt(m.quantite)}</td>
             <td>${escapeHtml(m.type === "retour_vide" ? (m.commentaire || "retour fournisseur") : m.type === "sortie" ? (m.motif || "") : (m.source || ""))}</td>
-            <td>${escapeHtml(m.commentaire || "")}</td>
+            <td class="casier-mvt-col-note">${escapeHtml(m.commentaire || "")}</td>
             <td>${escapeHtml(m.user || "-")}</td>
+            <td>${escapeHtml(m.factureNumber || m.facture || "-")}</td>
           </tr>`).join("")}
         </tbody>
       </table></div>`;
     }
   }
+}
+
+function openCasierPhysDetailModal(casierId) {
+  const c = findCasierById(Number(casierId));
+  if (!c) { showToast("Casier introuvable."); return; }
+  const cap = Math.max(1, Number(c.capacite) || 1);
+  const cur = Math.max(0, Number(c.quantiteActuelle) || 0);
+  const vides = Math.max(0, Number(c.bouteillesVides) || 0);
+  const mvts = casierMouvementsForSite()
+    .filter((m) => Number(m.casierId) === Number(c.id))
+    .sort((a, b) => String(b.createdAt || b.date || "").localeCompare(String(a.createdAt || a.date || "")));
+  const titleEl = document.getElementById("casier-detail-title");
+  const summaryEl = document.getElementById("casier-detail-summary");
+  const listEl = document.getElementById("casier-detail-mvt-list");
+  if (titleEl) titleEl.textContent = `${c.code} · ${c.article || "—"}`;
+  if (summaryEl) {
+    summaryEl.innerHTML = `
+      <p><strong>Emplacement :</strong> ${escapeHtml(c.emplacement || "—")}</p>
+      <p><strong>Stock :</strong> ${fmt(cur)}/${fmt(cap)} btl · <strong>Vides :</strong> ${fmt(vides)} btl</p>
+      <p><strong>Statut :</strong> ${escapeHtml(c.statut || "—")} · <strong>Dernier mouvement :</strong> ${escapeHtml(formatDateDdMmYyyy((c.lastMoveAt || "").slice(0, 10)))} ${escapeHtml(c.lastMoveBy || "")}</p>`;
+  }
+  if (listEl) {
+    if (!mvts.length) {
+      listEl.innerHTML = emptyState("Aucun mouvement", "Les entrées et sorties de ce casier apparaîtront ici.");
+    } else {
+      listEl.innerHTML = `<table class="stock-table casier-mvt-table">
+        <thead><tr>
+          <th>Date</th><th>Type</th><th style="text-align:right">Qté</th><th>Source / motif</th><th class="casier-mvt-col-note">Note</th><th>Utilisateur</th>
+        </tr></thead>
+        <tbody>${mvts.map((m) => `<tr>
+          <td>${escapeHtml(formatDateDdMmYyyy(m.date || (m.createdAt || "").slice(0, 10)))}</td>
+          <td>${m.type === "retour_vide" ? "<span class='badge badge-amber'>Retour vides</span>" : m.type === "sortie" ? "<span class='badge badge-red'>Sortie</span>" : "<span class='badge badge-green'>Entrée</span>"}</td>
+          <td style="text-align:right">${fmt(m.quantite)}</td>
+          <td>${escapeHtml(m.type === "sortie" ? (m.motif || "") : (m.source || m.commentaire || ""))}</td>
+          <td class="casier-mvt-col-note">${escapeHtml(m.commentaire || "")}</td>
+          <td>${escapeHtml(m.user || "-")}</td>
+        </tr>`).join("")}</tbody>
+      </table>`;
+    }
+  }
+  openModal("modal-casier-detail");
 }
 
 /* -----------------------------------------------------------
@@ -14658,7 +14794,7 @@ function openCasierEditModal(opts = {}) {
   }
 
   const empEl = document.getElementById("casier-edit-emplacement");
-  if (empEl) empEl.value = "À retourner";
+  if (empEl) empEl.value = "Réserve";
   const qtyEl = document.getElementById("casier-edit-qty");
   if (qtyEl) {
     const def = Math.max(1, Math.floor(Number(o.qtySuggest) || 0));
@@ -14700,7 +14836,7 @@ function syncCasierEditFromArticle() {
 async function submitCasierEdit() {
   const article = document.getElementById("casier-edit-article")?.value || "";
   const capacite = Math.max(1, Math.floor(Number(document.getElementById("casier-edit-capacite")?.value) || 0));
-  const emplacement = String(document.getElementById("casier-edit-emplacement")?.value || "À retourner").trim();
+  const emplacement = String(document.getElementById("casier-edit-emplacement")?.value || "Réserve").trim();
   const qty = Math.max(1, Math.floor(Number(document.getElementById("casier-edit-qty")?.value) || 1));
   if (!normalizeBrasserieName(article)) { showToast("Saisissez la brasserie."); return; }
   if (capacite <= 0) { showToast("Capacite invalide."); return; }
@@ -14749,7 +14885,12 @@ function openCasierPhysMoveModal(type, prefilledCasierId = null) {
     if (prefilledCasierId) sel.value = String(prefilledCasierId);
   }
   const qtyEl = document.getElementById("casier-phys-move-qty");
-  if (qtyEl) qtyEl.value = "";
+  if (qtyEl) {
+    qtyEl.value = "";
+    qtyEl.removeAttribute("max");
+  }
+  const motifEl = document.getElementById("casier-phys-move-motif");
+  if (motifEl && t === "sortie") motifEl.value = "vente";
   const cmtEl = document.getElementById("casier-phys-move-comment");
   if (cmtEl) cmtEl.value = "";
   updateCasierPhysMovePreview();
@@ -14770,9 +14911,19 @@ function updateCasierPhysMovePreview() {
   }
   const cap = Math.max(1, Number(c.capacite) || 1);
   const cur = Math.max(0, Number(c.quantiteActuelle) || 0);
+  const qtyEl = document.getElementById("casier-phys-move-qty");
+  const maxQty = t === "entree" ? Math.max(0, cap - cur) : cur;
+  if (qtyEl) {
+    if (maxQty > 0) {
+      qtyEl.max = String(maxQty);
+      qtyEl.min = "1";
+    } else {
+      qtyEl.removeAttribute("max");
+    }
+  }
   if (info) info.textContent = `${c.code} · ${c.article} · ${fmt(cur)}/${fmt(cap)} btl · ${c.statut || "-"} · empl: ${c.emplacement || "-"}`;
   if (preview) {
-    if (qty <= 0) { preview.textContent = ""; return; }
+    if (qty <= 0) { preview.textContent = maxQty > 0 ? `Quantité max : ${fmt(maxQty)} btl.` : (t === "entree" ? "Casier plein." : "Casier vide."); return; }
     if (t === "entree") {
       const after = cur + qty;
       if (after > cap) preview.textContent = `Refusé : capacité dépassée (max ${fmt(cap - cur)}).`;
@@ -14791,6 +14942,18 @@ async function submitCasierPhysMove() {
   const commentaire = String(document.getElementById("casier-phys-move-comment")?.value || "").trim();
   if (!id) { showToast("Choisissez un casier."); return; }
   if (qty <= 0) { showToast("Quantité invalide."); return; }
+  const casier = findCasierById(id);
+  if (!casier) { showToast("Casier introuvable."); return; }
+  const cap = Math.max(1, Number(casier.capacite) || 1);
+  const cur = Math.max(0, Number(casier.quantiteActuelle) || 0);
+  if (t === "entree" && cur + qty > cap) {
+    showToast(`Capacité dépassée (max ${fmt(cap - cur)} btl).`);
+    return;
+  }
+  if (t === "sortie" && qty > cur) {
+    showToast(`Stock insuffisant (max ${fmt(cur)} btl).`);
+    return;
+  }
   let ok = false;
   if (t === "entree") {
     const source = document.getElementById("casier-phys-move-source")?.value || "autre";
@@ -15316,6 +15479,40 @@ function attachEvents() {
   document.getElementById("casier-phys-filter-statut")?.addEventListener("change", (e) => {
     casierPhysFilters.statut = e.target.value;
     renderCasierPhysique();
+  });
+  const bindCasierMvtFilter = (id, key) => {
+    document.getElementById(id)?.addEventListener("change", (e) => {
+      casierPhysMvtUi[key] = e.target.value;
+      casierPhysMvtUi.page = 1;
+      renderCasierPhysique();
+    });
+    document.getElementById(id)?.addEventListener("input", (e) => {
+      casierPhysMvtUi[key] = e.target.value;
+      casierPhysMvtUi.page = 1;
+      renderCasierPhysique();
+    });
+  };
+  bindCasierMvtFilter("casier-phys-mvt-from", "dateFrom");
+  bindCasierMvtFilter("casier-phys-mvt-to", "dateTo");
+  bindCasierMvtFilter("casier-phys-mvt-user", "user");
+  document.getElementById("casier-phys-mvt-page-size")?.addEventListener("change", (e) => {
+    casierPhysMvtUi.pageSize = Math.max(10, Math.min(500, Number(e.target.value) || 50));
+    casierPhysMvtUi.page = 1;
+    renderCasierPhysique();
+  });
+  document.getElementById("casier-phys-mvt-export")?.addEventListener("click", exportCasierPhysMouvementsCsv);
+  document.getElementById("casier-phys-mvt-pagination")?.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-casier-mvt-page]");
+    if (!btn || btn.disabled) return;
+    casierPhysMvtUi.page = Math.max(1, Number(btn.dataset.casierMvtPage) || 1);
+    renderCasierPhysique();
+  });
+  document.getElementById("casier-phys-mvt-list")?.addEventListener("click", (e) => {
+    const detailBtn = e.target.closest("[data-casier-mvt-detail]");
+    if (detailBtn) {
+      const id = Number(detailBtn.dataset.casierMvtDetail);
+      if (id) openCasierPhysDetailModal(id);
+    }
   });
   // Actions par ligne (table casiers physiques)
   document.getElementById("casier-phys-list")?.addEventListener("click", (e) => {

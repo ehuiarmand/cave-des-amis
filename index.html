@@ -976,11 +976,13 @@
             <div class="form-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:12px">
               <div class="form-group">
                 <label for="casier-phys-filter-article">Brasserie</label>
-                <input id="casier-phys-filter-article" type="text" placeholder="Filtrer par brasserie">
+                <input id="casier-phys-filter-article" type="text" list="casier-phys-dl-brasserie" placeholder="Filtrer par brasserie">
+                <datalist id="casier-phys-dl-brasserie"></datalist>
               </div>
               <div class="form-group">
                 <label for="casier-phys-filter-emplacement">Emplacement</label>
-                <input id="casier-phys-filter-emplacement" type="text" placeholder="Filtrer par emplacement">
+                <input id="casier-phys-filter-emplacement" type="text" list="casier-phys-dl-emplacement" placeholder="Filtrer par emplacement">
+                <datalist id="casier-phys-dl-emplacement"></datalist>
               </div>
               <div class="form-group">
                 <label for="casier-phys-filter-statut">Statut</label>
@@ -993,10 +995,38 @@
               </div>
             </div>
             <div id="casier-phys-list"></div>
-            <div class="section-head" style="margin-top:18px">
-              <h4 style="margin:0;font-size:1rem">Mouvements de casiers (50 derniers)</h4>
-              <span id="casier-phys-mvt-count" class="section-meta">0</span>
+            <div class="section-head" style="margin-top:18px;flex-wrap:wrap;gap:8px;align-items:flex-end">
+              <div>
+                <h4 style="margin:0;font-size:1rem">Journal des mouvements</h4>
+                <span id="casier-phys-mvt-count" class="section-meta">0 mouvement</span>
+              </div>
+              <button type="button" id="casier-phys-mvt-export" class="btn btn-outline" style="width:auto;min-height:40px">Exporter CSV</button>
             </div>
+            <div class="form-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:12px">
+              <div class="form-group">
+                <label for="casier-phys-mvt-from">Du</label>
+                <input id="casier-phys-mvt-from" type="date">
+              </div>
+              <div class="form-group">
+                <label for="casier-phys-mvt-to">Au</label>
+                <input id="casier-phys-mvt-to" type="date">
+              </div>
+              <div class="form-group">
+                <label for="casier-phys-mvt-user">Utilisateur</label>
+                <input id="casier-phys-mvt-user" type="text" list="casier-phys-dl-users" placeholder="Tous">
+                <datalist id="casier-phys-dl-users"></datalist>
+              </div>
+              <div class="form-group">
+                <label for="casier-phys-mvt-page-size">Par page</label>
+                <select id="casier-phys-mvt-page-size">
+                  <option value="25">25</option>
+                  <option value="50" selected>50</option>
+                  <option value="100">100</option>
+                  <option value="200">200</option>
+                </select>
+              </div>
+            </div>
+            <div id="casier-phys-mvt-pagination" class="pager-bar hidden" style="margin-bottom:10px"></div>
             <div id="casier-phys-mvt-list"></div>
           </div>
           <div id="casier-view-lots-extra">
@@ -2218,7 +2248,7 @@
         </div>
         <div class="form-group">
           <label for="casier-edit-emplacement">Emplacement</label>
-          <input id="casier-edit-emplacement" type="text" placeholder="ex: À retourner">
+          <input id="casier-edit-emplacement" type="text" placeholder="ex: Réserve">
         </div>
       </div>
       <div class="form-group">
@@ -2277,8 +2307,8 @@
         <div class="form-group hidden" id="casier-phys-move-motif-wrap">
           <label for="casier-phys-move-motif">Motif</label>
           <select id="casier-phys-move-motif">
+            <option value="vente" selected>Vente</option>
             <option value="frigo">Vers frigo</option>
-            <option value="vente">Vente</option>
             <option value="casse">Casse / perte</option>
             <option value="transfert">Transfert sortant</option>
             <option value="autre">Autre</option>
@@ -2293,6 +2323,22 @@
       <div class="button-stack">
         <button id="casier-phys-move-submit" class="btn btn-primary" type="button">Valider</button>
         <button class="btn btn-outline close-modal" data-close="modal-casier-phys-move" type="button">Annuler</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-casier-detail" class="modal-overlay" aria-hidden="true">
+    <div class="modal">
+      <div class="modal-handle"></div>
+      <div class="section-head">
+        <h3 id="casier-detail-title">Fiche casier</h3>
+        <button class="icon-btn close-modal" data-close="modal-casier-detail" type="button">Fermer</button>
+      </div>
+      <div id="casier-detail-summary" class="form-hint" style="margin-bottom:12px"></div>
+      <p class="section-meta" style="margin:0 0 8px">Historique des mouvements</p>
+      <div id="casier-detail-mvt-list" class="stock-table-wrap"></div>
+      <div class="button-stack" style="margin-top:14px">
+        <button class="btn btn-outline close-modal" data-close="modal-casier-detail" type="button">Fermer</button>
       </div>
     </div>
   </div>
@@ -2388,6 +2434,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=249"></script>
+  <script src="./app-orders.js?v=251"></script>
 </body>
 </html>
