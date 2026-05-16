@@ -3314,7 +3314,8 @@ async function verifyWorkShiftsPersistedOnServer(sentRows, { siteId, removedIds 
   if (stillThere.length) {
     throw new Error(
       "La suppression n'a pas été enregistrée sur le serveur. "
-      + "Redémarrez « python server.py », faites Ctrl+F5, puis réessayez.",
+      + "Déployez la dernière version de server.py sur le VPS (scripts/deploy.ps1 ou GitHub Actions), "
+      + "redémarrez le service, puis Ctrl+F5.",
     );
   }
   if (sentIds.size) {

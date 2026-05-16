@@ -811,9 +811,19 @@ def merge_work_shifts_rows(
     *,
     snapshot: bool = False,
 ) -> list[dict[str, Any]]:
-    """Fusion planning : upsert par defaut ; suppression hors snapshot uniquement si snapshot=True."""
+    """Fusion planning : upsert par defaut ; snapshot = remplacement dans le perimetre autorise."""
     if snapshot:
-        return merge_scoped_rows(current, incoming, allowed, site_ids)
+        current_list = [r for r in (current or []) if isinstance(r, dict) and r.get("id") is not None]
+        incoming_list = [r for r in (incoming or []) if isinstance(r, dict) and r.get("id") is not None]
+
+        def in_allowed_scope(row: dict[str, Any]) -> bool:
+            es = row_effective_site_id(row, site_ids, allowed)
+            return es is not None and es in allowed
+
+        incoming_for_scope = [r for r in incoming_list if in_allowed_scope(r)]
+        kept = [r for r in current_list if not in_allowed_scope(r)]
+        kept.extend(incoming_for_scope)
+        return kept
     by_id: dict[str, dict[str, Any]] = {}
     for r in current or []:
         if isinstance(r, dict) and r.get("id") is not None:
