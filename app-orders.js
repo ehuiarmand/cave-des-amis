@@ -4147,9 +4147,9 @@ function stockRetailValueFcfa(item, site = currentSite(), asOfDate = today()) {
   return Math.round(Math.max(0, btl) * unit);
 }
 
-/** Valeur du stock : quantité (casiers) × prix d'achat du casier. */
+/** Valeur du stock : bouteilles × (prixAchat ÷ caseSize) = coût réel par bouteille. */
 function stockPurchaseValueFcfa(item) {
-  return Math.round(Math.max(0, stockActuel(item)) * (Number(item?.prixAchat) || 0));
+  return Math.round(Math.max(0, stockActuel(item)) * prixAchatParBouteille(item));
 }
 
 function saleFormatLabel(format) {
