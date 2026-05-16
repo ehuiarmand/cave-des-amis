@@ -4523,49 +4523,9 @@ function renderCashOpeningPanel() {
   const hadOpeningFocus = document.activeElement?.id === "pdj-opening-cash";
   if (prevOpening) pdjOpeningCashDraftBySiteDate[draftKey] = prevOpening.value;
   if (prevOpening && container.getAttribute("data-pdj-opening-fp") === formFp) {
-    // #region agent log
-    const _sk = Date.now();
-    globalThis.__pdjOpeningSkipLogLast = globalThis.__pdjOpeningSkipLogLast || 0;
-    if (_sk - globalThis.__pdjOpeningSkipLogLast > 8000) {
-      globalThis.__pdjOpeningSkipLogLast = _sk;
-      fetch("http://127.0.0.1:7725/ingest/d031651a-daea-460d-8400-58dc731a515d", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "dee456" },
-        body: JSON.stringify({
-          sessionId: "dee456",
-          hypothesisId: "H",
-          location: "app-orders.js:renderCashOpeningPanel",
-          message: "opening_panel_skip_dom_replace",
-          data: { formFp, draftLen: (prevOpening.value || "").length },
-          timestamp: _sk,
-        }),
-      }).catch(() => {});
-    }
-    // #endregion
     return;
   }
   const openingDraft = pdjOpeningCashDraftBySiteDate[draftKey] ?? "";
-  // #region agent log
-  if (openingDraft.length > 0) {
-    const _n = Date.now();
-    globalThis.__pdjOpeningDraftLogLast = globalThis.__pdjOpeningDraftLogLast || 0;
-    if (_n - globalThis.__pdjOpeningDraftLogLast > 8000) {
-      globalThis.__pdjOpeningDraftLogLast = _n;
-      fetch("http://127.0.0.1:7725/ingest/d031651a-daea-460d-8400-58dc731a515d", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "dee456" },
-        body: JSON.stringify({
-          sessionId: "dee456",
-          hypothesisId: "G",
-          location: "app-orders.js:renderCashOpeningPanel",
-          message: "opening_draft_preserved_across_render",
-          data: { draftKey, draftLen: openingDraft.length, hadPrev: Boolean(prevOpening), hadFocus: hadOpeningFocus },
-          timestamp: _n,
-        }),
-      }).catch(() => {});
-    }
-  }
-  // #endregion
   container.innerHTML = `
     <div class="pdj-opening-card">
       <p class="eyebrow" style="margin-bottom:4px">Ouvrir la journée</p>
@@ -5250,6 +5210,21 @@ function renderDailyStockCheck() {
     : "";
   const openedLabel = dayBook?.openedAt ? formatDateTimeDdMmYyyy(dayBook.openedAt) : "—";
   const hadClosingFocus = document.activeElement?.id === "pdj-closing-cash";
+  const stockFp = `check|${currentSiteId()}|${dStr}|n${items.length}|${closed ? "c" : "o"}|${superadminCorrection ? "adm" : "std"}`;
+  const aeStock = document.activeElement;
+  const focusInPdjCheck = aeStock instanceof HTMLElement && container.contains(aeStock) && (
+    aeStock.id === "pdj-closing-cash" || aeStock.classList.contains("stock-check-input")
+  );
+  if (focusInPdjCheck && container.getAttribute("data-pdj-stock-fp") === stockFp) {
+    button.disabled = closeBlockedByPending;
+    if (closeBlockedByPending) {
+      button.title = `${pendingForClose.length} commande(s) en attente — traitez-les depuis Ventes avant clôture.`;
+    } else {
+      button.removeAttribute("title");
+    }
+    return;
+  }
+  container.setAttribute("data-pdj-stock-fp", stockFp);
   container.innerHTML = `
       ${pendingBanner}${correctionBanner}
       <div class="inline-card" style="margin-bottom:12px">
@@ -8388,6 +8363,61 @@ function modalIsOpen() {
   return Boolean(document.querySelector(".modal-overlay.open"));
 }
 
+function getMainShellScrollEl() {
+  return document.querySelector(".main-shell");
+}
+
+/** Évite que la synchro live remonte la page en haut après un re-rendu. */
+function withPreservedMainShellScroll(fn) {
+  const shell = getMainShellScrollEl();
+  const y = shell ? shell.scrollTop : (window.scrollY || 0);
+  fn();
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      if (shell) shell.scrollTop = y;
+      else window.scrollTo(0, y);
+    });
+  });
+}
+
+/** Saisie en cours sur PDJ ou stock : ne pas rafraîchir toute la page (sync toutes les 4 s). */
+function shouldDeferLiveSyncRender() {
+  if (modalIsOpen()) return true;
+  const ae = document.activeElement;
+  if (!(ae instanceof HTMLElement)) return false;
+  if (currentPage === "pdj") {
+    if (ae.id === "pdj-opening-cash" || ae.id === "pdj-closing-cash") return true;
+    if (ae.classList.contains("stock-check-input")) return true;
+    if (ae.closest("#pdj-stock-check") || ae.closest("#pdj-opening-wrap")) return true;
+  }
+  if (currentPage === "stock") {
+    if (ae.closest("#modal-stock")) return true;
+    if (ae.matches("input, textarea, select") && ae.closest("#page-stock")) return true;
+  }
+  return false;
+}
+
+function hhmmToMinutes(hhmm) {
+  const parts = String(hhmm || "").trim().split(":");
+  const hh = Number(parts[0]);
+  const mm = Number(parts[1]);
+  if (Number.isNaN(hh) || Number.isNaN(mm)) return -1;
+  return hh * 60 + mm;
+}
+
+/** Journée comptable éligible à la clôture auto (heure locale de l'appareil). */
+function autoClotureIsDueForJournal(site, dStr, now = new Date()) {
+  if (!site?.autoClotureEnabled || !site?.autoClotureTime || !dStr) return false;
+  if (stockCheckForSiteDate(dStr, currentSiteId())) return false;
+  const clotureMins = hhmmToMinutes(site.autoClotureTime);
+  if (clotureMins < 0) return false;
+  const todayIso = today();
+  const nowMins = now.getHours() * 60 + now.getMinutes();
+  if (dStr < todayIso) return true;
+  if (dStr === todayIso && nowMins >= clotureMins) return true;
+  return false;
+}
+
 function qrOrdersForCurrentSite(sourceState = state) {
   const siteId = sourceState?.activeSiteId || currentSiteId();
   return (sourceState?.commandes || []).filter((item) => item.siteId === siteId && item.source === "qr");
@@ -8595,26 +8625,48 @@ function stopAutoClotureSchedule() {
   }
 }
 
-// Calcule les ms jusqu'à l'heure configurée (aujourd'hui ou demain si déjà passée)
-// et programme un setTimeout unique — jamais de polling toutes les minutes.
+/** Tente une clôture immédiate si l'heure est dépassée (y compris après minuit pour la veille). */
+function _tryAutoClotureIfDueNow() {
+  if (!state || !sessionUser || !canManagePdjAccounting()) return;
+  const site = currentSite();
+  if (!site?.autoClotureEnabled) return;
+  const dStr = workingDate();
+  if (!dStr || !autoClotureIsDueForJournal(site, dStr)) return;
+  if (_autoClotureManualReopened.has(`${currentSiteId()}|${dStr}`)) return;
+  const dayBookCurrent = dayBookFor(dStr);
+  if (dayBookCurrent?.manualReopenedAt) return;
+  _triggerAutoClotureNow();
+}
+
 function _scheduleNextAutoClotureTimeout() {
   if (!state || !sessionUser) return;
   const site = currentSite();
   if (!site?.autoClotureEnabled || !site?.autoClotureTime) return;
+
+  _tryAutoClotureIfDueNow();
+
+  const now = new Date();
+  const dStr = workingDate();
+  const siteId = currentSiteId();
+  if (dStr && !stockCheckForSiteDate(dStr, siteId) && autoClotureIsDueForJournal(site, dStr, now)) {
+    autoClotureTimer = window.setTimeout(() => {
+      _tryAutoClotureIfDueNow();
+      _scheduleNextAutoClotureTimeout();
+    }, 60_000);
+    return;
+  }
+
   const parts = String(site.autoClotureTime).split(":");
   const hh = Number(parts[0]);
   const mm = Number(parts[1]);
   if (Number.isNaN(hh) || Number.isNaN(mm)) return;
 
-  const now = new Date();
   const target = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hh, mm, 0, 0);
-  // Si l'heure est déjà passée aujourd'hui, viser demain
   if (target <= now) target.setDate(target.getDate() + 1);
 
-  const msUntil = target.getTime() - now.getTime();
+  const msUntil = Math.max(1000, target.getTime() - now.getTime());
   autoClotureTimer = window.setTimeout(() => {
     _triggerAutoClotureNow();
-    // Reprogrammer pour le lendemain
     _scheduleNextAutoClotureTimeout();
   }, msUntil);
 }
@@ -8757,27 +8809,7 @@ async function performAutoClotureBackground(dStr) {
 async function syncStateSilently() {
   if (!state || modalIsOpen()) return;
   if (!["ventes", "home", "stock", "pdj", "commandes"].includes(currentPage)) return;
-  // #region agent log
-  {
-    const _n = Date.now();
-    globalThis.__syncDbgLast = globalThis.__syncDbgLast || 0;
-    if (_n - globalThis.__syncDbgLast > 10000) {
-      globalThis.__syncDbgLast = _n;
-      fetch("http://127.0.0.1:7725/ingest/d031651a-daea-460d-8400-58dc731a515d", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "dee456" },
-        body: JSON.stringify({
-          sessionId: "dee456",
-          hypothesisId: "D",
-          location: "app-orders.js:syncStateSilently",
-          message: "sync_enter",
-          data: { currentPage, role: String(currentRole || ""), siteId: currentSiteId() },
-          timestamp: _n,
-        }),
-      }).catch(() => {});
-    }
-  }
-  // #endregion
+  const deferRender = shouldDeferLiveSyncRender();
 
   if (currentPage === "stock") {
     // Full reload for stock page — delta only returns commandes, not stock/purchases
@@ -8802,11 +8834,15 @@ async function syncStateSilently() {
     syncPdjWorkDateInput();
     renderTopbar();
     renderSiteSwitcher();
-    renderStock();
-    if (stockSubTab === "mouvements") renderStockMovements();
-    else if (stockSubTab === "achats") renderPurchaseOrders();
-    else if (stockSubTab === "creanciers") renderCreanciers();
-    else if (stockSubTab === "casiers") renderCasiers();
+    if (!deferRender) {
+      withPreservedMainShellScroll(() => {
+        renderStock();
+        if (stockSubTab === "mouvements") renderStockMovements();
+        else if (stockSubTab === "achats") renderPurchaseOrders();
+        else if (stockSubTab === "creanciers") renderCreanciers();
+        else if (stockSubTab === "casiers") renderCasiers();
+      });
+    }
     return;
   }
 
@@ -8846,25 +8882,6 @@ async function syncStateSilently() {
     state.pdjWorkDateBySite = { ...prevPdj, ...incPdj };
     applyPdjWorkDateToVentesAndOrderDom();
     syncPdjWorkDateInput();
-    // #region agent log
-    fetch("http://127.0.0.1:7725/ingest/d031651a-daea-460d-8400-58dc731a515d", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "dee456" },
-      body: JSON.stringify({
-        sessionId: "dee456",
-        hypothesisId: "B",
-        location: "app-orders.js:syncStateSilently",
-        message: "pdj_merged_from_delta",
-        data: {
-          currentPage,
-          role: String(currentRole || ""),
-          siteId: currentSiteId(),
-          deltaPdj: delta.pdjWorkDateBySite,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
   }
 
   const latestQrOrders = qrOrdersForCurrentSite(state);
@@ -8885,31 +8902,11 @@ async function syncStateSilently() {
   if (currentPage === "ventes") {
     renderVentesPage();
   }
-  if (currentPage === "pdj") {
-    if (!skipPdjFullRender) {
+  if (currentPage === "pdj" && !deferRender && !skipPdjFullRender) {
+    withPreservedMainShellScroll(() => {
       renderPointDuJour();
       setPdjSubTab(pdjSubTab);
-    } else {
-      // #region agent log
-      const _si = Date.now();
-      globalThis.__pdjSyncSkipRenderLogLast = globalThis.__pdjSyncSkipRenderLogLast || 0;
-      if (_si - globalThis.__pdjSyncSkipRenderLogLast > 12000) {
-        globalThis.__pdjSyncSkipRenderLogLast = _si;
-        fetch("http://127.0.0.1:7725/ingest/d031651a-daea-460d-8400-58dc731a515d", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "dee456" },
-          body: JSON.stringify({
-            sessionId: "dee456",
-            hypothesisId: "I",
-            location: "app-orders.js:syncStateSilently",
-            message: "pdj_full_render_skipped_unchanged_delta",
-            data: { siteId: currentSiteId(), hadCmdDelta, cmdPollDupStaleMeta },
-            timestamp: _si,
-          }),
-        }).catch(() => {});
-      }
-      // #endregion
-    }
+    });
   }
 }
 

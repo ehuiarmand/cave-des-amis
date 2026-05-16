@@ -3045,11 +3045,13 @@ def _server_auto_close_site(site_id: str, d_str: str) -> None:
         # Vérification idempotente : déjà clôturé ?
         if any(sc.get("siteId") == site_id and sc.get("date") == d_str for sc in state.get("stockChecks", [])):
             return
-        # Commandes en attente ?
-        pending = [c for c in state.get("commandes", [])
-                   if str(c.get("siteId", "")) == site_id
-                   and str(c.get("date", "")).startswith(d_str)
-                   and c.get("lignes")]
+        # Commandes encore au statut « En attente » (aligné client pendingOrdersForJournalDate)
+        pending = [
+            c for c in state.get("commandes", [])
+            if str(c.get("siteId", "")) == site_id
+            and str(c.get("date", "")).startswith(d_str)
+            and str(c.get("status") or "").strip() == "En attente"
+        ]
         if pending:
             print(f"[auto-cloture] Site {site_id} {d_str}: {len(pending)} commande(s) en attente — clôture reportée.", flush=True)
             return
@@ -3224,8 +3226,7 @@ def _auto_cloture_check() -> None:
     try:
         now = time.localtime()
         today_str = time.strftime("%Y-%m-%d", now)
-        current_hhmm = time.strftime("%H:%M", now)
-        current_mins = _to_mins(current_hhmm)
+        current_mins = _to_mins(time.strftime("%H:%M", now))
 
         to_close: list[tuple[str, str]] = []
         with store._lock:
@@ -3233,8 +3234,9 @@ def _auto_cloture_check() -> None:
             closed_by_site: dict[str, set[str]] = {}
             for sc in state.get("stockChecks", []):
                 sid = str(sc.get("siteId") or "")
-                if sid:
-                    closed_by_site.setdefault(sid, set()).add(str(sc.get("date") or ""))
+                d = str(sc.get("date") or "")[:10]
+                if sid and len(d) >= 10:
+                    closed_by_site.setdefault(sid, set()).add(d)
 
             for site in state.get("sites", []):
                 site_id = str(site.get("id") or "")
@@ -3244,21 +3246,31 @@ def _auto_cloture_check() -> None:
                 if len(cloture_time) < 5:
                     continue
                 cloture_mins = _to_mins(cloture_time)
-                # Ne déclenche que dans la fenêtre [heure_config, heure_config + 60 min[
-                # Evite une clôture intempestive si le serveur redémarre des heures après
-                if current_mins < cloture_mins or current_mins >= cloture_mins + 60:
+                if cloture_mins < 0:
                     continue
                 closed_dates = closed_by_site.get(site_id, set())
-                unclosed = sorted(
-                    b["date"][:10]
-                    for b in state.get("dayBooks", [])
-                    if str(b.get("siteId", "")) == site_id
-                    and str(b.get("date") or "")[:10] <= today_str
-                    and len(str(b.get("date") or "")) >= 10
-                    and str(b.get("date") or "")[:10] not in closed_dates
-                )
-                if unclosed:
-                    to_close.append((site_id, unclosed[0]))
+
+                unclosed_dates: set[str] = set()
+                for b in state.get("dayBooks", []):
+                    if str(b.get("siteId", "")) != site_id:
+                        continue
+                    d = str(b.get("date") or "")[:10]
+                    if len(d) >= 10 and d <= today_str and d not in closed_dates:
+                        unclosed_dates.add(d)
+                for v in state.get("ventes", []):
+                    if str(v.get("siteId", "")) != site_id:
+                        continue
+                    d = str(v.get("date", ""))[:10]
+                    if len(d) >= 10 and d <= today_str and d not in closed_dates:
+                        unclosed_dates.add(d)
+
+                for d_str in sorted(unclosed_dates):
+                    if d_str < today_str:
+                        to_close.append((site_id, d_str))
+                        break
+                    if d_str == today_str and current_mins >= cloture_mins:
+                        to_close.append((site_id, d_str))
+                        break
 
         for site_id, d_str in to_close:
             _server_auto_close_site(site_id, d_str)
