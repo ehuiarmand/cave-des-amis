@@ -3380,9 +3380,9 @@ function renderTopbar() {
   }
   document.getElementById("session-user").textContent = sessionUserDisplayLabel() || "utilisateur";
   const eff = String(sessionUser || "").trim().toLowerCase() === "admin" ? "superadmin" : currentRole;
-  const roleLabel = eff === "superadmin"
+  const roleLabel = eff === "superadmin" && canGlobalSuperAdmin()
     ? "super administrateur"
-    : eff === "admin"
+    : eff === "superadmin" || eff === "admin"
       ? "admin. maquis"
       : eff === "manager"
         ? "gérant"
@@ -4748,6 +4748,35 @@ function previousClosedJournalDate(dateStr, siteId = currentSiteId()) {
   return stockCheckForSiteDate(prev, siteId) ? prev : null;
 }
 
+function closingCashFromStockCheck(check) {
+  if (!check) return 0;
+  const closingCash = Number(check.closingCashFcfa);
+  if (Number.isFinite(closingCash)) return Math.max(0, Math.round(closingCash));
+  return Math.max(0, Math.round(Number(check.expectedEspecesCash) || 0));
+}
+
+/**
+ * Ouvre `dateStr` à partir de la clôture de `closedDateStr` (doit être la veille calendaire).
+ * @returns {boolean}
+ */
+function openAccountingDayFromPriorClose(siteId, dateStr, closedDateStr) {
+  const sid = String(siteId || "").trim();
+  const target = String(dateStr || "").slice(0, 10);
+  const closed = String(closedDateStr || "").slice(0, 10);
+  if (!sid || !target || !closed) return false;
+  if (addCalendarDaysIso(closed, 1) !== target) return false;
+  if (stockCheckForSiteDate(target, sid)) return false;
+  if (!dayBookNeedsCashOpening(dayBookFor(target, sid))) return true;
+  const block = blockingJournalBeforeOpeningNewDate(target, sid);
+  if (block && block !== target) return false;
+  const prevCheck = stockCheckForSiteDate(closed, sid);
+  if (!prevCheck) return false;
+  const amount = closingCashFromStockCheck(prevCheck);
+  const res = autoOpenNextAccountingDayAfterClose(sid, closed, amount, { actorLabel: "reprise auto" });
+  if (res) schedulePersistAutoOpenedDayBooks();
+  return Boolean(res);
+}
+
 /**
  * Ouvre `dateStr` si la journée précédente est clôturée (reprise du dénombrement de fermeture).
  * @returns {boolean} true si la journée est ouverte (déjà ou venant d'être ouverte)
@@ -4758,18 +4787,7 @@ function ensureAccountingDayOpenedFromPreviousClose(siteId, dateStr) {
   if (!dayBookNeedsCashOpening(dayBookFor(dateStr, siteId))) return true;
   const prevClosed = previousClosedJournalDate(dateStr, siteId);
   if (!prevClosed) return false;
-  const block = blockingJournalBeforeOpeningNewDate(dateStr, siteId);
-  if (block && block !== dateStr) return false;
-  const prevCheck = stockCheckForSiteDate(prevClosed, siteId);
-  const closingCash = Number(prevCheck?.closingCashFcfa);
-  const amount = Number.isFinite(closingCash)
-    ? closingCash
-    : Number(prevCheck?.expectedEspecesCash) || 0;
-  const res = autoOpenNextAccountingDayAfterClose(siteId, prevClosed, amount, {
-    actorLabel: "reprise auto",
-  });
-  if (res) schedulePersistAutoOpenedDayBooks();
-  return Boolean(res);
+  return openAccountingDayFromPriorClose(siteId, dateStr, prevClosed);
 }
 
 /** Stock à l'ouverture enregistré lors de l'ouverture caisse (cliché) — base du théorique pour la journée `dayBook.date`. */
@@ -4960,22 +4978,58 @@ function renderCashOpeningPanel() {
   const prevWasClosed = previousClosedJournalDate(dStr, siteId);
   if (needs && prevWasClosed) {
     const block = blockingJournalBeforeOpeningNewDate(dStr, siteId);
-    container.removeAttribute("data-pdj-opening-fp");
-    container.innerHTML = block && block !== dStr
-      ? `<div class="pdj-opening-card" style="border-left:3px solid #ff8e82;background:#fff8f7">
+    if (block && block !== dStr) {
+      container.removeAttribute("data-pdj-opening-fp");
+      container.innerHTML = `<div class="pdj-opening-card" style="border-left:3px solid #ff8e82;background:#fff8f7">
           <p class="eyebrow" style="margin-bottom:4px">Ouverture automatique</p>
           <strong>Clôturez d'abord le ${escapeHtml(formatDateDdMmYyyy(block))}</strong>
           <p class="muted" style="margin-top:8px;line-height:1.45">
             La journée du ${escapeHtml(formatDateDdMmYyyy(dStr))} reprendra le fonds de caisse de la veille dès que les journées précédentes seront clôturées.
           </p>
-        </div>`
-      : `<div class="pdj-opening-card pdj-opening-card--done" style="border-left:3px solid #1565c0;background:#f4f8ff">
-          <p class="eyebrow" style="margin-bottom:4px">Ouverture automatique</p>
-          <strong>Reprise après clôture du ${escapeHtml(formatDateDdMmYyyy(prevWasClosed))}</strong>
-          <p class="muted" style="margin-top:8px;line-height:1.45">
-            La caisse est reprise du dénombrement de fermeture. Rechargez la page (Ctrl+F5) si le stock de clôture n'apparaît pas encore.
-          </p>
         </div>`;
+      return;
+    }
+    if (openAccountingDayFromPriorClose(siteId, dStr, prevWasClosed)) {
+      renderCashOpeningPanel();
+      return;
+    }
+    const prevCheck = stockCheckForSiteDate(prevWasClosed, siteId);
+    const reopenAmount = closingCashFromStockCheck(prevCheck);
+    container.removeAttribute("data-pdj-opening-fp");
+    container.innerHTML = `<div class="pdj-opening-card pdj-opening-card--done" style="border-left:3px solid #1565c0;background:#f4f8ff">
+        <p class="eyebrow" style="margin-bottom:4px">Ouverture automatique</p>
+        <strong>Journée du ${escapeHtml(formatDateDdMmYyyy(dStr))}</strong>
+        <p class="muted" style="margin-top:8px;line-height:1.45">
+          Reprise du dénombrement de fermeture du <strong>${escapeHtml(formatDateDdMmYyyy(prevWasClosed))}</strong>
+          (<strong>${fmt(reopenAmount)} FCFA</strong> en caisse). Aucune saisie manuelle.
+        </p>
+        <button type="button" class="btn btn-primary" id="pdj-opening-auto-retry" style="width:auto;min-height:44px;margin-top:10px">
+          Ouvrir automatiquement
+        </button>
+      </div>`;
+    document.getElementById("pdj-opening-auto-retry")?.addEventListener("click", () => {
+      if (openAccountingDayFromPriorClose(siteId, dStr, prevWasClosed)) {
+        renderCashOpeningPanel();
+        renderDailyStockCheck();
+        updateCloseDayButtonLabel();
+        updatePdjSubTabHints();
+        showToast(`Journée du ${formatDateDdMmYyyy(dStr)} ouverte (${fmt(reopenAmount)} FCFA en caisse).`);
+      } else {
+        showToast("Ouverture automatique impossible. Vérifiez que la veille est bien clôturée.");
+      }
+    }, { once: true });
+    return;
+  }
+  const blockBeforeManual = blockingJournalBeforeOpeningNewDate(dStr, siteId);
+  if (needs && blockBeforeManual && blockBeforeManual !== dStr) {
+    container.removeAttribute("data-pdj-opening-fp");
+    container.innerHTML = `<div class="pdj-opening-card" style="border-left:3px solid #ff8e82;background:#fff8f7">
+        <p class="eyebrow" style="margin-bottom:4px">Journées en attente</p>
+        <strong>Clôturez d'abord le ${escapeHtml(formatDateDdMmYyyy(blockBeforeManual))}</strong>
+        <p class="muted" style="margin-top:8px;line-height:1.45">
+          Une journée plus ancienne n'est pas encore clôturée. Terminez-la avant d'ouvrir le ${escapeHtml(formatDateDdMmYyyy(dStr))}.
+        </p>
+      </div>`;
     return;
   }
   const draftKey = pdjOpeningCashDraftKey(siteId, dStr);
@@ -12161,8 +12215,11 @@ async function refreshRestoreBackupUi() {
       const hint404 = is404
         ? `<span class="muted">Un <strong>404</strong> signifie en général que le <strong>serveur Python</strong> ne connaît pas encore la route <code>GET /api/admin/backups</code> (version ancienne de <code>server.py</code>, ou page ouverte sans passer par ce serveur). <strong>Déployez la dernière version</strong> du dépôt et <strong>redémarrez</strong> le processus serveur.</span><br><br>`
         : "";
+      const hint403 = Number(fetchErr?.status) === 403
+        ? `<span class="muted">Si vous venez d&apos;obtenir les droits administrateur, <strong>déconnectez-vous puis reconnectez-vous</strong>. Sinon redémarrez le serveur Python (<code>server.py</code>) pour appliquer la dernière version.</span><br><br>`
+        : "";
       infoEl.innerHTML =
-        `${hint404}<span style="color:#c62828"><strong>Liste des sauvegardes inaccessible${st}</strong><br>${msg}</span><br>`
+        `${hint403}${hint404}<span style="color:#c62828"><strong>Liste des sauvegardes inaccessible${st}</strong><br>${msg}</span><br>`
         + `<span class="muted">Les copies dans <code>backups/</code> sont créées <strong>à chaque enregistrement</strong> par le serveur (fichiers <code>data-*.json</code> ou <code>app-*.sqlite3</code>). Si la liste reste vide après mise à jour du serveur, vérifiez que le dossier <code>backups</code> existe à côté de <code>server.py</code> et les droits disque.</span>`;
     }
     console.error(fetchErr);
