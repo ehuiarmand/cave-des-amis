@@ -780,9 +780,26 @@ def merge_work_shifts_scoped(
         raise ValueError("Modification du planning non autorisee.")
     if not isinstance(incoming, list):
         raise ValueError("Liste de creneaux invalide.")
+    # Identifie les IDs deja presents dans le perimetre courant (re-envoi sans modification).
+    def _in_scope(r: Any) -> bool:
+        if not isinstance(r, dict):
+            return False
+        es = row_effective_site_id(r, site_ids, allowed)
+        return es is not None and es in allowed
+    existing_ids = {str(r.get("id")) for r in (current or []) if isinstance(r, dict) and r.get("id") is not None and _in_scope(r)}
     for row in incoming:
         if isinstance(row, dict):
-            validate_work_shift_row(row, session, auth_users, site_ids, allowed)
+            row_id = str(row.get("id", ""))
+            if row_id not in existing_ids:
+                # Nouveau creneau : validation complete
+                validate_work_shift_row(row, session, auth_users, site_ids, allowed)
+            else:
+                # Creneau existant re-envoye : validation allegee (siteId + username minimum)
+                sid = str(row.get("siteId", "")).strip()
+                if sid not in allowed or sid not in {str(x) for x in site_ids}:
+                    raise ValueError("Maquis non autorise pour ce creneau.")
+                if not str(row.get("username", "")).strip():
+                    raise ValueError("Utilisateur obligatoire pour le creneau.")
     return merge_scoped_rows(current, incoming, allowed, site_ids)
 
 
