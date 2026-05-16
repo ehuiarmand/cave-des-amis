@@ -8369,17 +8369,22 @@ function getMainShellScrollEl() {
   return document.querySelector(".main-shell");
 }
 
-/** Évite que la synchro live remonte la page en haut après un re-rendu. */
+/** Évite que la synchro live remonte la page en haut après un re-rendu (desktop + mobile). */
 function withPreservedMainShellScroll(fn) {
   const shell = getMainShellScrollEl();
-  const y = shell ? shell.scrollTop : (window.scrollY || 0);
+  const shellY = shell ? shell.scrollTop : 0;
+  const winY = window.scrollY || window.pageYOffset || 0;
   fn();
+  const restore = () => {
+    if (shell && shell.scrollTop !== shellY) shell.scrollTop = shellY;
+    const curWinY = window.scrollY || window.pageYOffset || 0;
+    if (Math.abs(curWinY - winY) > 1) window.scrollTo(0, winY);
+  };
   requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      if (shell) shell.scrollTop = y;
-      else window.scrollTo(0, y);
-    });
+    requestAnimationFrame(restore);
   });
+  // Filet de sécurité mobile : les navigateurs mobiles peuvent décaler le scroll après le paint
+  setTimeout(restore, 80);
 }
 
 /** Saisie en cours sur PDJ, stock ou ventes : ne pas rafraîchir toute la page (sync toutes les 4 s). */
