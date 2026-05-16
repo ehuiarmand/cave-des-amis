@@ -8329,7 +8329,6 @@ function renderSitesList() {
         <p class="list-item-title">${escapeHtml(site.nom)}</p>
         <p class="list-item-sub">${escapeHtml(site.id)}${site.ville ? " · " + escapeHtml(site.ville) : ""}${site.pays ? ", " + escapeHtml(site.pays) : ""}</p>
       </div>
-      <button type="button" class="btn btn-danger btn-sm" data-delete-site="${escapeHtml(site.id)}">Supprimer</button>
     </article>`).join("");
   populatePurgeMaquisSelect();
 }
@@ -15446,12 +15445,9 @@ document.getElementById("fab-btn").addEventListener("click", () => {
       return;
     }
     const deltaEl = document.getElementById("shift-journal-delta");
-    const siteEl = document.getElementById("shift-journal-site-select");
     const d = Number(deltaEl?.value);
-    const siteIdFilter = String(siteEl?.value || "").trim();
-    const siteLabel = siteIdFilter
-      ? ((state?.sites || []).find((s) => String(s.id) === siteIdFilter)?.nom || siteIdFilter)
-      : "tous les maquis";
+    const siteId = currentSiteId();
+    const siteLabel = (state?.sites || []).find((s) => String(s.id) === String(siteId))?.nom || siteId;
     const dir = d > 0 ? "AVANCER (+1 jour)" : "RECULER (-1 jour)";
     const msg1 =
       `${dir} — toutes les dates de journée (ventes, PDJ, clôtures stock, commandes, charges, consignes, crédits, achats, casiers…) pour : ${siteLabel}.\n\n`
@@ -15459,7 +15455,7 @@ document.getElementById("fab-btn").addEventListener("click", () => {
     if (!window.confirm(msg1)) return;
     if (!window.confirm("Confirmation finale : appliquer le decalage d'un jour sur le serveur ?")) return;
     try {
-      await applySuperadminAccountingJournalDayShift(d, siteIdFilter);
+      await applySuperadminAccountingJournalDayShift(d, siteId);
     } catch (error) {
       handleApiError(error);
     }
