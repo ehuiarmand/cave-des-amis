@@ -10585,7 +10585,7 @@ function renderStock() {
   if (toggleBtn) toggleBtn.textContent = stockTableCompact ? "Vue complete" : "Vue simple";
 
   document.getElementById("stock-list").innerHTML = items.length
-    ? `<div class="stock-table-wrap"><table class="stock-table${stockTableCompact ? " stock-compact" : ""}">
+    ? `<div class="stock-table-wrap" id="main-stock-table-wrap"><table class="stock-table${stockTableCompact ? " stock-compact" : ""}">
         <thead>
           <tr>
             <th class="th-orange">Article</th>
@@ -10622,7 +10622,32 @@ function renderStock() {
     : term
       ? emptyState("Aucun resultat", `Aucun article ne correspond a "${stockSearchTerm}".`)
       : emptyState("Stock vide", "Ajoutez un article pour construire le catalogue.");
+  initStockScrollMirror();
   renderStockMovements();
+}
+
+function initStockScrollMirror() {
+  const wrap = document.getElementById("main-stock-table-wrap");
+  if (!wrap) return;
+  const table = wrap.querySelector("table");
+  if (!table) return;
+  const mirror = document.createElement("div");
+  mirror.className = "stock-scroll-mirror";
+  mirror.innerHTML = `<div style="height:1px;width:${table.scrollWidth}px"></div>`;
+  wrap.parentNode.insertBefore(mirror, wrap);
+  let syncing = false;
+  mirror.addEventListener("scroll", () => {
+    if (syncing) return;
+    syncing = true;
+    wrap.scrollLeft = mirror.scrollLeft;
+    syncing = false;
+  }, { passive: true });
+  wrap.addEventListener("scroll", () => {
+    if (syncing) return;
+    syncing = true;
+    mirror.scrollLeft = wrap.scrollLeft;
+    syncing = false;
+  }, { passive: true });
 }
 
 function renderCharges() {
@@ -11298,12 +11323,24 @@ function withPreservedMainShellScroll(fn) {
   const shell = getMainShellScrollEl();
   const shellY = shell ? shell.scrollTop : 0;
   const winY = window.scrollY || window.pageYOffset || 0;
+  const stockWrap = document.getElementById("main-stock-table-wrap");
+  const stockScrollX = stockWrap ? stockWrap.scrollLeft : 0;
   fn();
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
       if (shell && shell.scrollTop !== shellY) shell.scrollTop = shellY;
       if (Math.abs((window.scrollY || window.pageYOffset || 0) - winY) > 1) {
         window.scrollTo(0, winY);
+      }
+      if (stockScrollX > 0) {
+        const newWrap = document.getElementById("main-stock-table-wrap");
+        if (newWrap) {
+          newWrap.scrollLeft = stockScrollX;
+          const mirror = newWrap.previousElementSibling;
+          if (mirror && mirror.classList.contains("stock-scroll-mirror")) {
+            mirror.scrollLeft = stockScrollX;
+          }
+        }
       }
     });
   });

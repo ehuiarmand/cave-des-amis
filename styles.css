@@ -2237,6 +2237,13 @@ textarea { font: inherit; }
 
 .stock-table-wrap { overflow-x: auto; margin-top: 4px; }
 
+.stock-scroll-mirror {
+  overflow-x: auto;
+  overflow-y: hidden;
+  height: 14px;
+  margin-bottom: 3px;
+}
+
 .stock-table {
   width: 100%;
   border-collapse: collapse;
