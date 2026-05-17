@@ -7042,6 +7042,18 @@ function stockCheckForSiteDate(dateStr, siteId = currentSiteId()) {
   return (state.stockChecks || []).find((item) => item.siteId === siteId && item.date === dateStr) || null;
 }
 
+function deduplicateStockChecks(arr) {
+  if (!Array.isArray(arr) || arr.length <= 1) return arr;
+  const seen = new Map();
+  for (const sc of arr) {
+    if (!sc?.siteId || !sc?.date) continue;
+    const k = `${sc.siteId}|${sc.date}`;
+    const existing = seen.get(k);
+    if (!existing || (sc.createdAt || "") >= (existing.createdAt || "")) seen.set(k, sc);
+  }
+  return [...seen.values()];
+}
+
 /** Plus petite date ISO encore « ouverte » (ouverture caisse validée, pas de clôture stock). */
 function firstUnclosedJournalDate(siteId = currentSiteId()) {
   let best = null;
@@ -12116,8 +12128,19 @@ function mergeStateFromServerResponse(incoming, previous, patchedKeys = null) {
       out[key] = inc;
       return;
     }
-    if (inc.length > 0 || !Array.isArray(old) || old.length === 0) out[key] = inc;
-    else out[key] = old;
+    let arr = (inc.length > 0 || !Array.isArray(old) || old.length === 0) ? inc : old;
+    // Dédupliquer les stockChecks par (siteId, date) : garder le plus récent
+    if (key === "stockChecks" && arr.length > 1) {
+      const seen = new Map();
+      for (const sc of arr) {
+        if (!sc?.siteId || !sc?.date) continue;
+        const k = `${sc.siteId}|${sc.date}`;
+        const existing = seen.get(k);
+        if (!existing || (sc.createdAt || "") >= (existing.createdAt || "")) seen.set(k, sc);
+      }
+      arr = [...seen.values()];
+    }
+    out[key] = arr;
   };
 
   STATE_PUT_ROW_KEYS.forEach(applyListKey);
@@ -17796,6 +17819,8 @@ async function bootstrapAuthenticatedApp(opts = {}) {
   if (!Array.isArray(state.casierMouvements)) state.casierMouvements = [];
   if (!Array.isArray(state.staffAuditLog)) state.staffAuditLog = [];
   if (!Array.isArray(state.workShifts)) state.workShifts = [];
+  // Nettoyer les doublons de stockChecks (même siteId + date) accumulés par sessions concurrentes
+  state.stockChecks = deduplicateStockChecks(state.stockChecks || []);
   pruneFinalizedCommandesFromState();
   const siteId = String(currentSiteId() || "").trim();
   if (siteId && workShiftsForSite(siteId).length) {
