@@ -9338,6 +9338,18 @@ function kitMixTotalSelected() {
   return Object.values(kitMixCounts).reduce((s, n) => s + (Number(n) || 0), 0);
 }
 
+/** Ex. « 2 kits = 6 bouteilles = 5 000 FCFA » */
+function kitMixOrderSummary(nbKits, bottlesPerKit, pricePerKit) {
+  const n = Math.max(1, Math.min(99, Math.floor(Number(nbKits) || 1)));
+  const sz = Math.max(1, Math.floor(Number(bottlesPerKit) || 3));
+  const p = Math.max(0, Number(pricePerKit) || 0);
+  const totalBtl = n * sz;
+  const totalFcfa = n * p;
+  const kitWord = n > 1 ? "kits" : "kit";
+  const btlWord = totalBtl > 1 ? "bouteilles" : "bouteille";
+  return `${fmt(n)} ${kitWord} = ${fmt(totalBtl)} ${btlWord} = ${fmt(totalFcfa)} FCFA`;
+}
+
 function readKitMixCountsFromDom() {
   const next = {};
   document.querySelectorAll("#kit-products-list .kit-mix-qty").forEach((input) => {
@@ -9415,16 +9427,44 @@ function updateKitCountInfo() {
   const size = Number(document.getElementById("kit-size")?.value) || 3;
   const total = kitMixTotalSelected();
   const info = document.getElementById("kit-count-info");
+  const banner = document.getElementById("kit-mix-summary-banner");
+  const confirmBtn = document.getElementById("confirm-kit-btn");
   const price = Number(document.getElementById("kit-price")?.value) || 0;
   const nbKits = Math.max(1, Math.min(99, Math.floor(Number(document.getElementById("kit-mix-count")?.value) || 1)));
+  const kitOk = total === size;
+  const summary = price > 0 ? kitMixOrderSummary(nbKits, size, price) : "";
+  const parts = Object.entries(kitMixCounts)
+    .map(([article, qty]) => ({ article, qty: Math.max(0, Math.floor(Number(qty) || 0)) }))
+    .filter((p) => p.qty > 0);
+  const mixPerKit = kitOk && parts.length ? kitMixCompositionSummary(parts) : "";
+  if (banner) {
+    if (summary) {
+      banner.textContent = summary;
+      banner.classList.remove("hidden");
+      banner.removeAttribute("hidden");
+    } else {
+      banner.textContent = "";
+      banner.classList.add("hidden");
+      banner.setAttribute("hidden", "");
+    }
+  }
   if (info) {
     const rest = size - total;
-    const kitOk = total === size;
-    const totalFcfa = price > 0 ? nbKits * price : 0;
-    info.textContent = !kitOk
-      ? `${fmt(total)} / ${fmt(size)} btl par kit · reste ${fmt(rest)} a repartir`
-      : `${fmt(nbKits)} kit(s) × ${fmt(size)} btl = ${fmt(nbKits * size)} btl · ${fmt(totalFcfa)} FCFA`;
+    if (!kitOk) {
+      info.textContent = summary
+        ? `Repartition par kit : ${fmt(total)} / ${fmt(size)} btl · reste ${fmt(Math.max(0, rest))} a repartir`
+        : `${fmt(total)} / ${fmt(size)} btl par kit · reste ${fmt(Math.max(0, rest))} a repartir`;
+    } else {
+      info.textContent = mixPerKit ? `${mixPerKit} (par kit)` : "Composition valide — pret a ajouter.";
+    }
     info.style.color = kitOk ? "var(--ok, #72d7a9)" : total > size ? "#ff8e82" : "";
+  }
+  if (confirmBtn) {
+    const canAdd = kitOk && price > 0 && parts.length > 0;
+    confirmBtn.disabled = !canAdd;
+    confirmBtn.textContent = canAdd
+      ? `Ajouter a la commande · ${summary}`
+      : "Ajouter a la commande";
   }
   const atMax = total >= size;
   document.querySelectorAll("#kit-products-list .kit-mix-inc").forEach((btn) => {
@@ -9449,15 +9489,13 @@ function orderLineHtmlForBoard(order, line) {
     const nbKits = Number(line.kitUnitCount) || 1;
     const oneKitLines = batchLines.filter((l) => Number(l.kitUnitIndex) === 1);
     const mix = kitMixCompositionSummary(oneKitLines.map((l) => ({ article: l.article, qty: Number(l.qty) || 0 })));
-    const total = batchLines.reduce((s, l) => s + calcNet(l), 0);
     const priceKit = Number(line.kitPrice) || 0;
-    const title = nbKits > 1
-      ? `${fmt(nbKits)}× Kit mixte ${fmt(priceKit)} FCFA`
-      : `Kit mixte ${fmt(priceKit)} FCFA`;
+    const size = Number(line.kitSize) || oneKitLines.reduce((s, l) => s + (Number(l.qty) || 0), 0) || 3;
+    const title = kitMixOrderSummary(nbKits, size, priceKit);
     return `<div class="order-line order-line-kit-mix">
       <div>
         <p class="list-item-title">${escapeHtml(title)}</p>
-        <p class="list-item-sub">${escapeHtml(mix)} · ${fmt(total)} FCFA · ${escapeHtml(line.paiement || "A regler")}</p>
+        <p class="list-item-sub">${escapeHtml(mix)} · ${escapeHtml(line.paiement || "A regler")}</p>
       </div>
       <div class="line-actions">
         <button type="button" class="mini-btn" data-remove-kit-batch="${escapeHtml(batch)}" data-order-id="${order.id}">Retirer</button>
@@ -9602,8 +9640,7 @@ async function confirmKit() {
   document.getElementById("kit-mix-count").value = "1";
   toggleKitMixBoard(false);
   renderVentesPage();
-  const totalFcfa = nbKits * price;
-  showToast(`${fmt(nbKits)} kit(s) ajoute(s) : ${mixBase} · ${fmt(totalFcfa)} FCFA.`);
+  showToast(`${kitMixOrderSummary(nbKits, size, price)} · ${mixBase}`);
 }
 
 // ─── REMPLACEMENT D'ARTICLE ───────────────────────────────────────────────────
@@ -17627,11 +17664,6 @@ function attachEvents() {
     resetOrderForm();
     openOrderEditor();
   });
-  document.getElementById("new-order-top-btn").addEventListener("click", () => {
-    activeOrderId = null;
-    resetOrderForm();
-    openOrderEditor();
-  });
   document.getElementById("fill-fridge-btn")?.addEventListener("click", openFrigoModal);
   document.getElementById("frigo-search")?.addEventListener("input", (e) => renderFrigoPicker(e.target.value));
   document.getElementById("frigo-picker")?.addEventListener("click", (e) => {
@@ -17669,12 +17701,6 @@ function attachEvents() {
   // Saisie rapide
   document.getElementById("saisie-rapide-btn")?.addEventListener("click", openSaisieRapide);
   document.getElementById("kit-mixte-btn")?.addEventListener("click", () => toggleKitMixBoard());
-  document.querySelectorAll(".js-kit-mixte-open").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      document.getElementById("ventes-card-board")?.scrollIntoView({ behavior: "smooth", block: "start" });
-      toggleKitMixBoard(true);
-    });
-  });
   document.getElementById("sr-submit-btn")?.addEventListener("click", () => submitSaisieRapide().catch(handleApiError));
   document.getElementById("sr-search")?.addEventListener("input", (e) => renderSrMenu(e.target.value));
   document.getElementById("sr-order-select")?.addEventListener("change", () => {
@@ -17924,7 +17950,7 @@ function attachEvents() {
     });
   });
   // Kit
-  document.getElementById("kit-price")?.addEventListener("input", renderKitProducts);
+  document.getElementById("kit-price")?.addEventListener("input", () => { renderKitProducts(); updateKitCountInfo(); });
   document.getElementById("kit-size")?.addEventListener("change", () => { kitMixCounts = {}; renderKitProducts(); });
   document.getElementById("kit-location")?.addEventListener("change", renderKitProducts);
   document.getElementById("kit-mix-count")?.addEventListener("input", updateKitCountInfo);

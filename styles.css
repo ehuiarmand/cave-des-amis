@@ -3191,3 +3191,20 @@ textarea { font: inherit; }
   color: #fff;
   border-color: var(--mm-primary);
 }
+
+.kit-mix-summary-banner {
+  margin: 10px 0 4px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(114, 215, 169, 0.15);
+  border: 1px solid var(--ok, #72d7a9);
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--mm-text, #1a1a1a);
+  line-height: 1.4;
+}
+
+#confirm-kit-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}

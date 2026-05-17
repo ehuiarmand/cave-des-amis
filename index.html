@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Flex:wght@500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./styles.css?v=44">
+  <link rel="stylesheet" href="./styles.css?v=45">
 </head>
 <body>
   <div class="app-bg"></div>
@@ -433,9 +433,10 @@
                 </select>
               </div>
             </div>
+            <p id="kit-mix-summary-banner" class="kit-mix-summary-banner hidden" hidden aria-live="polite"></p>
             <p id="kit-count-info" class="form-hint"></p>
             <div id="kit-products-list" class="kit-mix-list"></div>
-            <button id="confirm-kit-btn" class="btn btn-primary" type="button" style="margin-top:8px;width:100%;max-width:320px">Ajouter a la commande</button>
+            <button id="confirm-kit-btn" class="btn btn-primary" type="button" style="margin-top:8px;width:100%;max-width:480px">Ajouter a la commande</button>
           </div>
 
           <div id="order-board"></div>
@@ -448,8 +449,6 @@
             </div>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
               <button id="fill-fridge-btn" class="btn btn-outline" type="button" style="width:auto">🧊 Remplir le frigo</button>
-              <button id="new-order-top-btn" class="btn btn-primary" type="button" style="width:auto">Saisie rapide</button>
-              <button type="button" class="btn btn-outline js-kit-mixte-open" style="width:auto">Kit mixte</button>
             </div>
           </div>
           <div class="pdj-kpis">
@@ -2662,6 +2661,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=289"></script>
+  <script src="./app-orders.js?v=291"></script>
 </body>
 </html>
