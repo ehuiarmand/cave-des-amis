@@ -8238,9 +8238,8 @@ function renderSalesHistory() {
         </div>
         <div class="order-lines">
           ${invoice.lignes.map((vente) => {
-            const wd = workingDate();
             const venteDate = String(vente.date || "").slice(0, 10);
-            const dayOpen = wd && venteDate === wd && !stockCheckForSiteDate(wd, vente.siteId || currentSiteId());
+            const dayOpen = venteDate && !stockCheckForSiteDate(venteDate, vente.siteId || currentSiteId());
             const replaceBtn = sessionUser && dayOpen
               ? `<button type="button" class="mini-btn" data-replace-vente="${vente.id}" title="Remplacer cet article (journee ouverte uniquement)">Remplacer</button>`
               : "";
@@ -8606,13 +8605,13 @@ function renderReplaceFactureLines(factureKey) {
     tbody.innerHTML = "";
     return;
   }
-  const wd = workingDate();
-  const dayOpen = wd && !stockCheckForSiteDate(wd, currentSiteId());
   tbody.innerHTML = order.lignes.map((v) => {
     const si = stockItemForArticle(v.article);
     ensureVentePackMetadata(v);
     const pack = linePackSize(v, si);
     const total = calcNet(v);
+    const vDate = String(v.date || "").slice(0, 10);
+    const dayOpen = vDate && !stockCheckForSiteDate(vDate, currentSiteId());
     const replaceCell = sessionUser && dayOpen
       ? `<button type="button" class="mini-btn" data-replace-vente="${v.id}" style="white-space:nowrap">Remplacer</button>`
       : `<span class="muted" style="font-size:0.8rem">Journée clôturée</span>`;
