@@ -1023,6 +1023,26 @@ def row_effective_site_id(row: dict[str, Any], site_ids: list[str], allowed: set
     return None
 
 
+def merge_commandes_scoped(
+    current: list[Any],
+    incoming: list[Any],
+    allowed: set[str],
+    site_ids: list[str],
+) -> list[dict[str, Any]]:
+    """Remplace les commandes du perimetre autorise : absentes du payload = retirees (encaissement)."""
+    current_list = [r for r in (current or []) if isinstance(r, dict) and r.get("id") is not None]
+    incoming_list = [r for r in (incoming or []) if isinstance(r, dict) and r.get("id") is not None]
+
+    def in_allowed_scope(row: dict[str, Any]) -> bool:
+        es = row_effective_site_id(row, site_ids, allowed)
+        return es is not None and es in allowed
+
+    incoming_for_scope = [r for r in incoming_list if in_allowed_scope(r)]
+    kept = [r for r in current_list if not in_allowed_scope(r)]
+    kept.extend(incoming_for_scope)
+    return kept
+
+
 def merge_scoped_rows(
     current: list[dict[str, Any]],
     incoming: list[Any],
@@ -2415,6 +2435,10 @@ class DataStore:
                                 "snapshot": ws_snapshot,
                                 "siteId": str(payload.get("activeSiteId") or ""),
                             },
+                        )
+                    elif _key == "commandes":
+                        current[_key] = merge_commandes_scoped(
+                            current.get(_key, []), payload[_key], allowed, sid_list
                         )
                     else:
                         current[_key] = merge_scoped_rows(

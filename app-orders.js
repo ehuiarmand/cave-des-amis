@@ -721,6 +721,8 @@ let currentQrLinkExt = "";
 let pendingFinalizeOrderId = null;
 /** Évite double encaissement (clic répété ou réseau lent). */
 const finalizeOrderInFlight = new Set();
+/** Évite double création commande (réseau lent / double clic). */
+const saisieRapideSubmitInFlight = new Set();
 let liveSyncTimer = null;
 let appLiveClockTimer = null;
 let autoClotureTimer = null;
@@ -7535,10 +7537,10 @@ function orderPaymentFingerprint(order) {
 }
 
 /** Masque les commandes déjà encaissées (ventes liées) pour éviter doublon Servi + Payé. */
-function activeCommandesExcludingFinalized(commandes) {
+function activeCommandesExcludingFinalized(commandes, sourceState = state) {
   const finalizedIds = new Set();
   const paidFingerprints = new Set();
-  recordsForSite(state.ventes).forEach((v) => {
+  recordsForSite(sourceState?.ventes || []).forEach((v) => {
     const sid = v.sourceOrderId;
     if (sid != null && sid !== "") finalizedIds.add(Number(sid));
   });
@@ -7547,9 +7549,40 @@ function activeCommandesExcludingFinalized(commandes) {
   });
   return (commandes || []).filter((o) => {
     if (finalizedIds.has(Number(o.id))) return false;
+    const st = String(orderStatus(o) || "").trim();
+    if (st === "Paye" || st === "Payé" || st === "Annule" || st === "Annulé") return false;
     if (!o.lignes?.length) return true;
     return !paidFingerprints.has(orderPaymentFingerprint(o));
   });
+}
+
+/** Retire du state les commandes déjà facturées (réseau / ancien merge serveur). */
+function pruneFinalizedCommandesFromState(sourceState = state) {
+  const all = Array.isArray(sourceState?.commandes) ? sourceState.commandes : [];
+  const pruned = activeCommandesExcludingFinalized(all, sourceState);
+  if (pruned.length === all.length) return false;
+  sourceState.commandes = pruned;
+  return true;
+}
+
+/** Fusionne le delta commandes sans réinjecter les encaissements. */
+function mergeCommandesFromPoll(incoming, { skipStaleDup = false } = {}) {
+  if (skipStaleDup || !Array.isArray(incoming) || !incoming.length) return;
+  const finalizedIds = new Set();
+  recordsForSite(state.ventes).forEach((v) => {
+    if (v.sourceOrderId != null && v.sourceOrderId !== "") finalizedIds.add(Number(v.sourceOrderId));
+  });
+  const paidFp = new Set(
+    paidOrdersFromSales().filter((p) => p.lignes?.length).map((p) => orderPaymentFingerprint(p)),
+  );
+  const byId = new Map((state.commandes || []).map((order) => [order.id, order]));
+  incoming.forEach((order) => {
+    const oid = Number(order?.id);
+    if (finalizedIds.has(oid)) return;
+    if (order?.lignes?.length && paidFp.has(orderPaymentFingerprint(order))) return;
+    byId.set(order.id, order);
+  });
+  state.commandes = activeCommandesExcludingFinalized(Array.from(byId.values()));
 }
 
 function paidOrdersFromSales() {
@@ -7827,7 +7860,8 @@ function renderOrdersManagement() {
 }
 
 function renderOrders() {
-  const orders = recordsForSite(state.commandes).slice().sort((a, b) => {
+  pruneFinalizedCommandesFromState();
+  const orders = activeCommandesExcludingFinalized(recordsForSite(state.commandes)).slice().sort((a, b) => {
     if (activeOrderId) {
       if (a.id === activeOrderId) return -1;
       if (b.id === activeOrderId) return 1;
@@ -8026,9 +8060,14 @@ function openSaisieRapide() {
 
 async function submitSaisieRapide() {
   if (!srCart.length) { showToast("Ajoutez au moins un article."); return; }
+  if (saisieRapideSubmitInFlight.has("submit")) {
+    showToast("Envoi en cours, patientez…");
+    return;
+  }
   const orderCtxWrap = document.getElementById("sr-order-context-wrap");
   const orderFormMode = Boolean(orderCtxWrap && !orderCtxWrap.classList.contains("hidden"));
   const btn = document.getElementById("sr-submit-btn");
+  saisieRapideSubmitInFlight.add("submit");
   if (btn) { btn.disabled = true; btn.textContent = "Validation..."; }
   try {
     if (orderFormMode) {
@@ -8163,8 +8202,9 @@ async function submitSaisieRapide() {
     srCart = [];
     renderVentesPage();
     const warn = errors.length ? ` (${errors.length} article(s) ignores : stock insuffisant)` : "";
-    showToast(`Commande creee : ${order.lignes.length} article(s) pour ${clientName}.${warn}`);
+    showToast(`Commande creee : ${order.lignes.length} article(s) pour ${tableLabel}.${warn}`);
   } finally {
+    saisieRapideSubmitInFlight.delete("submit");
     if (btn) { btn.disabled = false; btn.textContent = "Valider la commande"; }
   }
 }
@@ -9936,7 +9976,8 @@ async function saveMyUserProfile() {
 }
 
 function populateOrderSelect() {
-  const orders = recordsForSite(state.commandes).map((order) => ({ value: String(order.id), label: order.client || `Commande ${order.id}` }));
+  const orders = activeCommandesExcludingFinalized(recordsForSite(state.commandes))
+    .map((order) => ({ value: String(order.id), label: order.client || `Commande ${order.id}` }));
   const options = [{ value: "", label: "Saisie rapide" }, ...orders];
   const html = options.map((option) => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`).join("");
   const vSel = document.getElementById("v-order-select");
@@ -10583,10 +10624,9 @@ async function syncStateSilently() {
     cmdPollDupStaleMeta = incoming.length > 0 && pollMetaUnchanged;
     hadCmdDelta = incoming.length > 0 && !pollMetaUnchanged;
     if (incoming.length) {
-      const byId = new Map((state.commandes || []).map((order) => [order.id, order]));
-      incoming.forEach((order) => byId.set(order.id, order));
-      state.commandes = Array.from(byId.values()).sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+      mergeCommandesFromPoll(incoming, { skipStaleDup: cmdPollDupStaleMeta });
     }
+    pruneFinalizedCommandesFromState();
     if (delta?.meta) {
       state.meta = delta.meta;
     }
@@ -10995,6 +11035,9 @@ async function persistStatePatch(patch) {
     body: JSON.stringify(body),
   });
   state = mergeStateFromServerResponse(incoming, prev, patchedKeys);
+  if (patchedKeys.has("commandes")) {
+    pruneFinalizedCommandesFromState();
+  }
   if (Array.isArray(patch.workShifts) && patchedKeys.has("workShifts")) {
     applyWorkShiftsAfterSave(patch.workShifts, { snapshot: Boolean(patch.workShiftsScopedSnapshot) });
   }
@@ -12348,6 +12391,7 @@ async function finalizeOrder(orderId = activeOrderId) {
     pendingFinalizeOrderId = null;
     recordStaffAudit("create", "encaissement", `Facture ${factureNumber} · ${order.client || "Client"}`, `Total ${fmt(orderTotal)} FCFA · ${paymentMethod}${paymentMix.creditName ? ` · debiteur ${paymentMix.creditName}` : ""}`);
 
+    pruneFinalizedCommandesFromState();
     await persistStatePatch({
       ventes: state.ventes,
       commandes: state.commandes,
@@ -16509,6 +16553,7 @@ async function bootstrapAuthenticatedApp(opts = {}) {
   if (!Array.isArray(state.casierMouvements)) state.casierMouvements = [];
   if (!Array.isArray(state.staffAuditLog)) state.staffAuditLog = [];
   if (!Array.isArray(state.workShifts)) state.workShifts = [];
+  pruneFinalizedCommandesFromState();
   const siteId = String(currentSiteId() || "").trim();
   if (siteId && workShiftsForSite(siteId).length) {
     lsSaveWorkShifts();
