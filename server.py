@@ -1023,11 +1023,105 @@ def row_effective_site_id(row: dict[str, Any], site_ids: list[str], allowed: set
     return None
 
 
+def _order_status_finalized(status: Any) -> bool:
+    s = str(status or "").strip().lower()
+    return s in ("paye", "payé", "annule", "annulé")
+
+
+def _order_payment_fingerprint(order: dict[str, Any]) -> str:
+    client = str(order.get("client") or "").strip().lower()
+    table = str(order.get("table") or order.get("client") or "").strip().lower()
+    day = str(order.get("date") or "")[:10]
+    lines = sorted(
+        f"{str(l.get('article', '')).strip()}|{int(l.get('qty') or 0)}|{float(l.get('prix') or 0)}"
+        for l in (order.get("lignes") or [])
+        if isinstance(l, dict)
+    )
+    return f"{day}|{client}|{table}|{';'.join(lines)}"
+
+
+def _order_create_fingerprint(order: dict[str, Any]) -> str:
+    crid = str(order.get("clientRequestId") or "").strip()
+    if crid:
+        return f"crid|{crid}"
+    mode = str(order.get("saisieMode") or order.get("source") or "").strip().lower()
+    srv = str(order.get("server") or order.get("serveur") or "").strip().lower()
+    return f"{_order_payment_fingerprint(order)}|{mode}|{srv}"
+
+
+def dedupe_commandes_list(
+    commandes: list[Any],
+    ventes: list[Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Supprime doublons id ou empreinte sur commandes actives (reseau / double PUT)."""
+    rows = [r for r in (commandes or []) if isinstance(r, dict) and r.get("id") is not None]
+    if not rows:
+        return []
+
+    finalized_ids: set[int] = set()
+    for v in ventes or []:
+        if not isinstance(v, dict):
+            continue
+        sid = v.get("sourceOrderId")
+        if sid is None or sid == "":
+            continue
+        try:
+            finalized_ids.add(int(sid))
+        except (TypeError, ValueError):
+            continue
+
+    by_id: dict[int, dict[str, Any]] = {}
+    for o in rows:
+        try:
+            oid = int(o["id"])
+        except (TypeError, ValueError):
+            continue
+        prev = by_id.get(oid)
+        if not prev or str(o.get("createdAt") or o.get("date") or "") >= str(
+            prev.get("createdAt") or prev.get("date") or ""
+        ):
+            by_id[oid] = o
+    list_unique = list(by_id.values())
+
+    def is_active(o: dict[str, Any]) -> bool:
+        try:
+            oid = int(o.get("id"))
+        except (TypeError, ValueError):
+            return False
+        if oid in finalized_ids:
+            return False
+        if _order_status_finalized(o.get("status")):
+            return False
+        return True
+
+    fp_seen: dict[str, int] = {}
+    drop: set[int] = set()
+    for o in sorted(
+        list_unique,
+        key=lambda x: str(x.get("createdAt") or x.get("date") or ""),
+        reverse=True,
+    ):
+        if not is_active(o):
+            continue
+        fp = _order_create_fingerprint(o)
+        try:
+            oid = int(o["id"])
+        except (TypeError, ValueError):
+            continue
+        if fp in fp_seen:
+            drop.add(oid)
+        else:
+            fp_seen[fp] = oid
+
+    return [o for o in list_unique if int(o["id"]) not in drop]
+
+
 def merge_commandes_scoped(
     current: list[Any],
     incoming: list[Any],
     allowed: set[str],
     site_ids: list[str],
+    ventes: list[Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Remplace les commandes du perimetre autorise : absentes du payload = retirees (encaissement)."""
     current_list = [r for r in (current or []) if isinstance(r, dict) and r.get("id") is not None]
@@ -1040,7 +1134,7 @@ def merge_commandes_scoped(
     incoming_for_scope = [r for r in incoming_list if in_allowed_scope(r)]
     kept = [r for r in current_list if not in_allowed_scope(r)]
     kept.extend(incoming_for_scope)
-    return kept
+    return dedupe_commandes_list(kept, ventes)
 
 
 def merge_scoped_rows(
@@ -2438,7 +2532,11 @@ class DataStore:
                         )
                     elif _key == "commandes":
                         current[_key] = merge_commandes_scoped(
-                            current.get(_key, []), payload[_key], allowed, sid_list
+                            current.get(_key, []),
+                            payload[_key],
+                            allowed,
+                            sid_list,
+                            ventes=current.get("ventes", []),
                         )
                     else:
                         current[_key] = merge_scoped_rows(

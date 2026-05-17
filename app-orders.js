@@ -723,6 +723,10 @@ let pendingFinalizeOrderId = null;
 const finalizeOrderInFlight = new Set();
 /** Évite double création commande (réseau lent / double clic). */
 const saisieRapideSubmitInFlight = new Set();
+/** Idempotence saisie rapide : réutilisé si le PUT échoue et l'utilisateur réessaie. */
+let srPendingClientRequestId = null;
+/** Id commande saisie rapide en attente de confirmation serveur (réseau). */
+let srPendingOrderId = null;
 let liveSyncTimer = null;
 let appLiveClockTimer = null;
 let autoClotureTimer = null;
@@ -7526,6 +7530,69 @@ function orderPaymentFingerprint(order) {
   return `${day}|${client}|${table}|${lines}`;
 }
 
+function newOrderClientRequestId() {
+  return `cmd-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+}
+
+/** Empreinte création commande (id client réseau ou contenu). */
+function orderCreateFingerprint(order) {
+  const crid = String(order?.clientRequestId || "").trim();
+  if (crid) return `crid|${crid}`;
+  const mode = String(order?.saisieMode || order?.source || "").trim().toLowerCase();
+  const srv = String(order?.server || order?.serveur || "").trim().toLowerCase();
+  return `${orderPaymentFingerprint(order)}|${mode}|${srv}`;
+}
+
+/** Commande active déjà identique (réseau / double clic). */
+function findActiveOrderDuplicate(orderLike, sourceState = state) {
+  const sid = String(orderLike?.siteId || currentSiteId() || "");
+  const crid = String(orderLike?.clientRequestId || "").trim();
+  const active = activeCommandesExcludingFinalized(sourceState?.commandes || [], sourceState)
+    .filter((o) => rowMatchesSite(o, sid, multiSiteActive()));
+  if (crid) {
+    const hit = active.find((o) => String(o.clientRequestId || "").trim() === crid);
+    if (hit) return hit;
+  }
+  const fp = orderCreateFingerprint(orderLike);
+  return active.find((o) => orderCreateFingerprint(o) === fp) || null;
+}
+
+/** Supprime doublons id ou contenu dans state.commandes (commandes actives). */
+function dedupeCommandesInState(sourceState = state) {
+  const all = Array.isArray(sourceState?.commandes) ? [...sourceState.commandes] : [];
+  if (!all.length) return false;
+  const finalizedIds = new Set();
+  recordsForSite(sourceState?.ventes || []).forEach((v) => {
+    if (v.sourceOrderId != null && v.sourceOrderId !== "") finalizedIds.add(Number(v.sourceOrderId));
+  });
+  const byId = new Map();
+  all.forEach((o) => {
+    const id = Number(o.id);
+    if (!Number.isFinite(id)) return;
+    const prev = byId.get(id);
+    if (!prev || String(o.createdAt || o.date || "") >= String(prev.createdAt || prev.date || "")) {
+      byId.set(id, o);
+    }
+  });
+  let list = Array.from(byId.values());
+  const fpSeen = new Map();
+  const drop = new Set();
+  const sorted = [...list].sort(
+    (a, b) => String(b.createdAt || b.date || "").localeCompare(String(a.createdAt || a.date || "")),
+  );
+  sorted.forEach((o) => {
+    if (finalizedIds.has(Number(o.id))) return;
+    if (!activeCommandesExcludingFinalized([o], sourceState).length) return;
+    const fp = orderCreateFingerprint(o);
+    if (fpSeen.has(fp)) drop.add(Number(o.id));
+    else fpSeen.set(fp, Number(o.id));
+  });
+  const next = list.filter((o) => !drop.has(Number(o.id)));
+  if (next.length === all.length && byId.size === all.length) return false;
+  sourceState.commandes = next;
+  return true;
+}
+
 /** Masque les commandes déjà encaissées (ventes liées) pour éviter doublon Servi + Payé. */
 function activeCommandesExcludingFinalized(commandes, sourceState = state) {
   const finalizedIds = new Set();
@@ -7573,6 +7640,7 @@ function mergeCommandesFromPoll(incoming, { skipStaleDup = false } = {}) {
     byId.set(order.id, order);
   });
   state.commandes = activeCommandesExcludingFinalized(Array.from(byId.values()));
+  dedupeCommandesInState();
 }
 
 function paidOrdersFromSales() {
@@ -8145,21 +8213,40 @@ async function submitSaisieRapide() {
     if (!assertCanSellOrToast(date, currentSiteId())) return;
     const tableLabel = document.getElementById("sr-client")?.value?.trim() || "Comptoir";
     state.nextId = state.nextId || {};
-    state.nextId.commande = (Number(state.nextId.commande) || 0) + 1;
-    const order = {
-      id: state.nextId.commande,
-      siteId: currentSiteId(),
-      table: tableLabel,
-      client: tableLabel,
-      saisieMode: "Saisie rapide",
-      date,
-      createdAt: new Date().toISOString(),
-      status: "Servi",
-      type: "sur-place",
-      server: sessionUser || "Serveuse",
-      note: "",
-      lignes: [],
-    };
+    const clientRequestId = srPendingClientRequestId || newOrderClientRequestId();
+    srPendingClientRequestId = clientRequestId;
+    let order = (state.commandes || []).find(
+      (o) => String(o.clientRequestId || "").trim() === clientRequestId,
+    );
+    if (!order && srPendingOrderId) {
+      order = (state.commandes || []).find((o) => Number(o.id) === Number(srPendingOrderId));
+    }
+    if (!order) {
+      state.nextId.commande = (Number(state.nextId.commande) || 0) + 1;
+      srPendingOrderId = state.nextId.commande;
+      order = {
+        id: srPendingOrderId,
+        siteId: currentSiteId(),
+        table: tableLabel,
+        client: tableLabel,
+        saisieMode: "Saisie rapide",
+        date,
+        createdAt: new Date().toISOString(),
+        status: "Servi",
+        type: "sur-place",
+        server: sessionUser || "Serveuse",
+        note: "",
+        lignes: [],
+        clientRequestId,
+      };
+    } else {
+      srPendingOrderId = order.id;
+      order.clientRequestId = clientRequestId;
+      order.table = tableLabel;
+      order.client = tableLabel;
+      order.date = date;
+      order.lignes = [];
+    }
     const errors = [];
     for (const item of srCart) {
       const product = findKnownProduct(item.article);
@@ -8189,10 +8276,26 @@ async function submitSaisieRapide() {
       showToast(errors.length ? `Aucune ligne ajoutee : ${errors.join(", ")}` : "Aucune ligne valide.");
       return;
     }
+    order.clientRequestId = clientRequestId;
+    const dup = findActiveOrderDuplicate(order);
+    if (dup && Number(dup.id) !== Number(order.id)) {
+      srPendingClientRequestId = null;
+      srPendingOrderId = null;
+      activeOrderId = dup.id;
+      closeModal("modal-saisie-rapide");
+      srCart = [];
+      renderVentesPage();
+      showToast(`Commande déjà enregistrée (#${dup.id}) — pas de doublon créé.`);
+      return;
+    }
     state.commandes = state.commandes || [];
-    state.commandes.unshift(order);
+    const already = state.commandes.some((o) => Number(o.id) === Number(order.id));
+    if (!already) state.commandes.unshift(order);
     activeOrderId = order.id;
+    dedupeCommandesInState();
     await persistState({ commandes: state.commandes, nextId: state.nextId });
+    srPendingClientRequestId = null;
+    srPendingOrderId = null;
     closeModal("modal-saisie-rapide");
     srCart = [];
     renderVentesPage();
@@ -10998,6 +11101,11 @@ async function purgeMaquisDataViaStatePut(siteId, keepStockCatalog) {
 
 async function persistState(overrides = {}) {
   const _stockChecks = overrides.stockChecks ?? state.stockChecks ?? [];
+  if (overrides.commandes !== undefined || !Object.keys(overrides || {}).length) {
+    dedupeCommandesInState();
+    pruneFinalizedCommandesFromState();
+    if (overrides.commandes !== undefined) overrides.commandes = state.commandes;
+  }
   const prev = state;
   const body = buildStatePutBody(overrides);
   const isFullSave = !Object.keys(overrides || {}).length;
@@ -11019,6 +11127,11 @@ async function persistStatePatch(patch) {
   if (!patch || typeof patch !== "object") throw new Error("persistStatePatch: patch invalide.");
   const keys = Object.keys(patch);
   if (!keys.length) throw new Error("persistStatePatch: patch vide.");
+  if (patch.commandes !== undefined) {
+    dedupeCommandesInState();
+    pruneFinalizedCommandesFromState();
+    patch.commandes = state.commandes;
+  }
   const _stockChecks = patch.stockChecks ?? [];
   const prev = state;
   const body = buildStatePutBody(
@@ -12115,12 +12228,28 @@ function syncOrderClientFromVentesFormIfEditing(order) {
   if (t) order.client = t;
 }
 
-function ensureOrder(clientName, date, note, selectedOrderIdOverride = undefined) {
+function ensureOrder(clientName, date, note, selectedOrderIdOverride = undefined, { clientRequestId = "" } = {}) {
   const selectedOrderId = selectedOrderIdOverride !== undefined && selectedOrderIdOverride !== null
     ? Number(selectedOrderIdOverride) || 0
     : (Number(document.getElementById("v-order-select")?.value) || activeOrderId);
   let order = selectedOrderId ? recordsForSite(state.commandes).find((item) => item.id === selectedOrderId) : null;
   if (!order) {
+    const draft = {
+      siteId: currentSiteId(),
+      client: clientName.trim() || "Client",
+      table: clientName.trim() || "Client",
+      date,
+      saisieMode: "Commande",
+      server: sessionUser || "Serveur",
+      lignes: [],
+      clientRequestId: String(clientRequestId || "").trim(),
+    };
+    const dup = findActiveOrderDuplicate(draft);
+    if (dup) {
+      order = dup;
+      activeOrderId = order.id;
+      return order;
+    }
     order = {
       id: state.nextId.commande++,
       siteId: currentSiteId(),
@@ -12132,7 +12261,9 @@ function ensureOrder(clientName, date, note, selectedOrderIdOverride = undefined
       server: sessionUser || "Serveur",
       note: note.trim(),
       lignes: [],
+      clientRequestId: draft.clientRequestId || newOrderClientRequestId(),
     };
+    dedupeCommandesInState();
     state.commandes.unshift(order);
   } else {
     order.client = clientName.trim() || order.client;
