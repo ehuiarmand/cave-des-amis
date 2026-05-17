@@ -3999,8 +3999,10 @@ function pdjApplyCloseDayButtonGate(button, { disabled = false, title = null } =
 function pdjCalendarDate() {
   const sid = currentSiteId();
   const t = today();
+  const tomorrow = addCalendarDaysIso(t, 1);
   const forced = String(state?.pdjWorkDateBySite?.[sid] || "").trim().slice(0, 10);
-  const hasForced = Boolean(forced && /^\d{4}-\d{2}-\d{2}$/.test(forced) && forced <= t);
+  // Autoriser "demain" comme date forcée après ouverture auto (clôture du jour en cours)
+  const hasForced = Boolean(forced && /^\d{4}-\d{2}-\d{2}$/.test(forced) && forced <= tomorrow);
 
   if (isPdjBrowseConsultationOnly()) {
     const view = String(pdjViewDateBySite[sid] || "").trim().slice(0, 10);
@@ -4025,10 +4027,12 @@ function syncPdjWorkDateInput() {
   const el = document.getElementById("pdj-work-date");
   if (!el || !canAnyAdmin()) return;
   const t = today();
-  el.max = t;
+  const tomorrow = addCalendarDaysIso(t, 1);
   const sid = currentSiteId();
   const forced = String(state?.pdjWorkDateBySite?.[sid] || "").trim().slice(0, 10);
-  const useForced = forced && /^\d{4}-\d{2}-\d{2}$/.test(forced) && forced <= t;
+  // Autoriser "demain" si c'est une ouverture auto après clôture du jour en cours
+  const useForced = forced && /^\d{4}-\d{2}-\d{2}$/.test(forced) && forced <= tomorrow;
+  el.max = useForced && forced > t ? tomorrow : t;
   el.value = useForced ? forced : workingDate();
   const workDate = pdjCalendarDate();
   syncVentesJournalDateInputsFromPdj(workDate, { force: false });
@@ -4151,9 +4155,10 @@ async function persistPdjWorkDateFromSuperPicker() {
   const t = today();
   const siteId = currentSiteId();
   const map = { ...(state.pdjWorkDateBySite || {}) };
+  const tomorrow = addCalendarDaysIso(t, 1);
   if (!raw) {
     delete map[siteId];
-  } else if (/^\d{4}-\d{2}-\d{2}$/.test(raw) && raw <= t) {
+  } else if (/^\d{4}-\d{2}-\d{2}$/.test(raw) && raw <= tomorrow) {
     map[siteId] = raw;
   } else {
     showToast("Date invalide.");
@@ -6204,7 +6209,9 @@ function autoOpenNextAccountingDayAfterClose(siteId, closedDateStr, closingCashF
   if (!sid || !/^\d{4}-\d{2}-\d{2}$/.test(closed)) return null;
   const nextDate = addCalendarDaysIso(closed, 1);
   const t = today();
-  if (nextDate > t) return null;
+  const tomorrow = addCalendarDaysIso(t, 1);
+  // Autoriser l'ouverture du lendemain même si c'est demain (maquis : clôture du service → soirée ou lendemain matin)
+  if (nextDate > tomorrow) return null;
 
   const openingAmount = Math.max(0, Math.round(Number(closingCashFcfa) || 0));
   const ts = new Date().toISOString();
@@ -6354,14 +6361,24 @@ function renderPdjManagerConfirmationBlock() {
   if (canManagePdjAccounting()) {
     host.classList.remove("hidden");
     const sentAtGe = pending.createdAt ? ` à ${new Date(pending.createdAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}` : "";
+    const caJour = fmt(Number(pending.caEncaisse) || 0);
+    const nbVentes = Number(pending.nbVentes) || 0;
+    const expectedCash = fmt(Number(pending.expectedEspecesCash) || 0);
     host.innerHTML = `
       <div class="inline-card" style="margin-bottom:14px;border-left:3px solid #ff9800;padding:14px 16px">
         <p class="eyebrow" style="margin-bottom:6px">Fin de service — validation requise</p>
         <strong>${escapeHtml(pending.closedBy || "La serveuse")} a terminé son service</strong>
-        <p class="muted" style="margin:8px 0 12px;line-height:1.45;font-size:0.88rem">
+        <p class="muted" style="margin:8px 0 10px;line-height:1.45;font-size:0.88rem">
           La clôture du <strong>${escapeHtml(label)}</strong> a été soumise par <strong>${escapeHtml(pending.closedBy || "la serveuse")}</strong>${sentAtGe}.
-          Confirmez pour autoriser l'ouverture de la journée suivante.
         </p>
+        <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:12px;font-size:0.88rem">
+          <span>CA encaissé : <strong>${escapeHtml(caJour)} FCFA</strong></span>
+          <span>Ventes : <strong>${fmt(nbVentes)}</strong></span>
+          <span>Caisse théorique : <strong>${escapeHtml(expectedCash)} FCFA</strong></span>
+        </div>
+        <label for="pdj-manager-closing-cash" style="display:block;font-size:0.85rem;margin-bottom:4px;font-weight:600">Montant espèces dénombrées en caisse (FCFA)</label>
+        <input id="pdj-manager-closing-cash" type="number" min="0" step="1" placeholder="Comptage réel avant validation" style="width:100%;max-width:260px;padding:8px 10px;border:1px solid #ccc;border-radius:6px;font-size:1rem;margin-bottom:12px">
+        <br>
         <button type="button" class="btn btn-primary" id="pdj-manager-confirm-btn" style="width:auto;min-height:44px">
           Valider la fin de service de ${escapeHtml(pending.closedBy || "la serveuse")}
         </button>
@@ -6398,14 +6415,25 @@ async function confirmDayClosureByManager(dateStr) {
     showToast("Cette journée est déjà confirmée.");
     return;
   }
+  const cashInput = document.getElementById("pdj-manager-closing-cash");
+  const cashRaw = cashInput?.value?.trim() || "";
+  if (!cashRaw) {
+    showToast("Saisissez le montant espèces dénombrées avant de valider.");
+    return;
+  }
+  const closingCashFcfa = Math.max(0, Number(cashRaw) || 0);
+  const expectedCash = Number(check.expectedEspecesCash) || 0;
+  const cashEcart = closingCashFcfa - expectedCash;
+  const ecartTxt = cashEcart === 0 ? "aucun écart" : `écart ${cashEcart > 0 ? "+" : ""}${fmt(cashEcart)} FCFA`;
   if (!window.confirm(
-    `Confirmer la clôture du ${formatDateDdMmYyyy(d)} ?\n\nLa journée suivante pourra être ouverte (automatiquement si possible).`,
+    `Valider la fin de service du ${formatDateDdMmYyyy(d)} ?\n\nCaisse : théorique ${fmt(expectedCash)} · dénombré ${fmt(closingCashFcfa)} · ${ecartTxt}.\n\nLa journée suivante sera ouverte automatiquement.`,
   )) return;
   const ts = new Date().toISOString();
   check.managerConfirmedAt = ts;
   check.managerConfirmedBy = sessionUser || "";
-  const closingCash = Number(check.closingCashFcfa);
-  const autoOpen = autoOpenNextAccountingDayAfterClose(siteId, d, closingCash, { actorLabel: sessionUser });
+  check.closingCashFcfa = closingCashFcfa;
+  check.cashEcartEspeces = cashEcart;
+  const autoOpen = autoOpenNextAccountingDayAfterClose(siteId, d, closingCashFcfa, { actorLabel: sessionUser });
   const pdjMapClose = { ...(state.pdjWorkDateBySite || {}) };
   if (!autoOpen && pdjMapClose[siteId] === d) delete pdjMapClose[siteId];
   pdjMapClose[`_fc_${siteId}`] = { date: d, confirmedBy: sessionUser || "", closedBy: check.closedBy || "", at: ts };
@@ -6414,7 +6442,7 @@ async function confirmDayClosureByManager(dateStr) {
     "update",
     "cloture_jour",
     `Confirmation clôture ${formatDateDdMmYyyy(d)}`,
-    `Validée par ${sessionUser || "gérant"}`,
+    `Validée par ${sessionUser || "gérant"} · caisse dénombrée ${fmt(closingCashFcfa)} FCFA · écart ${cashEcart > 0 ? "+" : ""}${fmt(cashEcart)} FCFA`,
   );
   await persistStatePatch({
     stockChecks: state.stockChecks,
