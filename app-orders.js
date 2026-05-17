@@ -2588,9 +2588,10 @@ function canGlobalSuperAdmin() {
   return Boolean(globalSuperadmin);
 }
 
-/** Sauvegarde / restauration par maquis (admins scopés ou superadmin global). */
+/** Sauvegarde / restauration par maquis (admins scopés ou superadmin global — pas la gérante). */
 function canManageMaquisBackups() {
   if (maquisBackupAllowed === false) return false;
+  if (isGerantRole()) return false;
   if (canGlobalSuperAdmin()) return true;
   if (!canAnyAdmin()) return false;
   return (allowedSiteIds || []).length > 0;
@@ -4753,17 +4754,32 @@ function applyRoleVisibility() {
   updatePdjRoleVisibility();
 }
 
-/** Gérant : Paramètres limités à Mon compte + Export (pas config maquis, users, admin). */
-function syncGerantParamsAccess() {
+/** Serveuse / gérante : onglet Profil seul ; sauvegarde réservée aux admins (pas gérante). */
+function syncParamsTabsAccess() {
+  const root = document.getElementById("page-params");
+  if (!root) return;
+  const serveuse = isServeuseAccount();
   const gerant = isGerantRole();
-  document.querySelector("#page-params .params-subtabs")?.classList.toggle("hidden-by-role", gerant);
-  document.querySelectorAll("#page-params [data-subtab-params]").forEach((btn) => {
+  const profilOnly = serveuse || gerant;
+
+  root.querySelector(".params-subtabs")?.classList.toggle("hidden-by-role", profilOnly);
+
+  root.querySelectorAll("[data-subtab-params]").forEach((btn) => {
     const tab = btn.dataset.subtabParams;
-    btn.classList.toggle("hidden-by-role", gerant && tab !== "profil");
+    let hide = false;
+    if (profilOnly) hide = tab !== "profil";
+    else if (tab === "sauvegarde") hide = !canManageMaquisBackups();
+    else if (tab === "catalogue" || tab === "acces" || tab === "admin") hide = !canAnyAdmin();
+    btn.classList.toggle("hidden-by-role", hide);
   });
-  if (gerant && currentPage === "params" && paramsSubTab !== "profil") {
+
+  if (profilOnly && currentPage === "params" && paramsSubTab !== "profil") {
     setParamsSubTab("profil");
   }
+}
+
+function syncGerantParamsAccess() {
+  syncParamsTabsAccess();
 }
 
 function renderTopbar() {
