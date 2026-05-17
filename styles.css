@@ -399,6 +399,16 @@ textarea { font: inherit; }
   opacity: 0.75;
 }
 .nav-btn.active .nav-icon { opacity: 1; }
+.nav-btn--disabled,
+.nav-btn--disabled:hover,
+.nav-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+  background: transparent;
+  color: var(--muted);
+  transform: none;
+}
 
 /* ── Main wrapper ────────────────────────────────────────────── */
 .main-wrapper {

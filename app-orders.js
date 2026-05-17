@@ -2794,6 +2794,53 @@ function activeWorkShiftsNow(username = sessionUser, siteId = currentSiteId()) {
   return out;
 }
 
+/** Créneau de nuit (fin après minuit). */
+function workShiftIsOvernight(shift) {
+  const d = String(shift?.date || "").slice(0, 10);
+  const st = String(shift?.startTime || "").trim();
+  const en = String(shift?.endTime || "").trim();
+  if (!d || !st || !en) return false;
+  const [sh, sm] = st.split(":").map(Number);
+  const [eh, em] = en.split(":").map(Number);
+  if ([sh, sm, eh, em].some((n) => Number.isNaN(n))) return false;
+  const endSameDay = new Date(`${d}T${pad2(eh)}:${pad2(em)}:00`);
+  const startSameDay = new Date(`${d}T${pad2(sh)}:${pad2(sm)}:00`);
+  return endSameDay <= startSameDay;
+}
+
+/**
+ * Relais entre deux jours planifiés : ex. créneau 17/05 11h→02h puis 18/05 11h→02h
+ * autorise ventes/encaissements entre 02h01 et 10h59 le 18/05 (clients de la nuit).
+ */
+function staffInShiftBridgeGap(username = sessionUser, siteId = currentSiteId()) {
+  const un = String(username || "").trim().toLowerCase();
+  if (!un) return false;
+  const now = Date.now();
+  const todayIso = today();
+  const yesterdayIso = addCalendarDaysIso(todayIso, -1);
+  const prevShifts = workShiftsForUserOnDate(un, siteId, yesterdayIso).filter(workShiftIsOvernight);
+  const todayShifts = workShiftsForUserOnDate(un, siteId, todayIso);
+  if (!prevShifts.length || !todayShifts.length) return false;
+
+  let latestPrevEnd = null;
+  prevShifts.forEach((shift) => {
+    const iv = workShiftInterval(shift);
+    if (!iv || planningIsoDate(iv.end) !== todayIso) return;
+    if (!latestPrevEnd || iv.end > latestPrevEnd) latestPrevEnd = iv.end;
+  });
+
+  let earliestTodayStart = null;
+  todayShifts.forEach((shift) => {
+    const iv = workShiftInterval(shift);
+    if (!iv) return;
+    if (!earliestTodayStart || iv.start < earliestTodayStart) earliestTodayStart = iv.start;
+  });
+
+  if (!latestPrevEnd || !earliestTodayStart) return false;
+  if (earliestTodayStart.getTime() <= latestPrevEnd.getTime()) return false;
+  return now > latestPrevEnd.getTime() && now < earliestTodayStart.getTime();
+}
+
 /** Créneau planning obligatoire pour vendre : serveuses uniquement (gérant / admin jamais bloqués). */
 function staffRequiresShiftWindowForSales() {
   return String(currentRole || "").trim() === "serveuse";
@@ -2801,7 +2848,8 @@ function staffRequiresShiftWindowForSales() {
 
 function staffIsOnDutyNow(siteId = currentSiteId()) {
   if (!staffRequiresShiftWindowForSales()) return true;
-  return activeWorkShiftsNow(sessionUser, siteId).length > 0;
+  if (activeWorkShiftsNow(sessionUser, siteId).length > 0) return true;
+  return staffInShiftBridgeGap(sessionUser, siteId);
 }
 
 function formatShiftWindowLabel(shift) {
@@ -2898,6 +2946,21 @@ function serveuseHasShiftOnDate(username, siteId, dateIso) {
   );
 }
 
+/** Jour sans créneau planifié (planning du mois actif sur le maquis). */
+function serveuseIsRestDay(dateIso, siteId = currentSiteId()) {
+  if (!staffRequiresShiftWindowForSales()) return false;
+  const d = String(dateIso || "").slice(0, 10);
+  const sid = siteId || currentSiteId();
+  if (!sid || !/^\d{4}-\d{2}-\d{2}$/.test(d)) return false;
+  if (!teamHasPlanningOnDate(sid, d)) return false;
+  return !serveuseHasShiftOnDate(sessionUser, sid, d);
+}
+
+/** Module Ventes indisponible aujourd'hui (serveuse en repos). */
+function serveuseVentesModuleBlocked(siteId = currentSiteId()) {
+  return serveuseIsRestDay(today(), siteId);
+}
+
 /** Message si serveuse hors créneau ou jour de repos (gérant / admin : jamais bloqué). */
 function serveusePlanningBlocksSale(saleDateStr, siteId = currentSiteId()) {
   if (!staffRequiresShiftWindowForSales()) return null;
@@ -2905,14 +2968,68 @@ function serveusePlanningBlocksSale(saleDateStr, siteId = currentSiteId()) {
   const sid = siteId || currentSiteId();
   if (!sid || !/^\d{4}-\d{2}-\d{2}$/.test(d)) return null;
   if (!teamHasPlanningOnDate(sid, d)) return null;
-  if (staffIsOnDutyNow(sid)) return null;
   const label = formatDateDdMmYyyy(d);
+  if (serveuseIsRestDay(d, sid)) {
+    return `Jour de repos (${label}) : le module Ventes est indisponible. Consultez Planning → Mes horaires ou contactez votre gérante.`;
+  }
+  if (staffIsOnDutyNow(sid)) return null;
   const todayShifts = workShiftsForUserOnDate(sessionUser, sid, d);
   if (todayShifts.length) {
     const windows = todayShifts.map(formatShiftWindowLabel).join(", ");
     return `Hors période de service (${label}) : vos créneaux sont ${windows}. Revenez pendant votre service ou demandez à la gérante d'ajuster le planning.`;
   }
   return `Jour de repos (${label}) : vous ne pouvez pas vendre. Voyez votre gérante pour vous autoriser — elle pourra ajouter un créneau dans Planning → Équipe.`;
+}
+
+function syncServeuseVentesNavDisabled() {
+  const blocked = serveuseVentesModuleBlocked();
+  document.querySelectorAll('.nav-btn[data-page="ventes"]').forEach((btn) => {
+    btn.disabled = blocked;
+    btn.classList.toggle("nav-btn--disabled", blocked);
+    btn.setAttribute("aria-disabled", blocked ? "true" : "false");
+    if (blocked) btn.title = "Jour de repos — module Ventes indisponible";
+    else btn.removeAttribute("title");
+  });
+}
+
+function syncServeuseVentesPageRestDay() {
+  syncServeuseVentesNavDisabled();
+  if (currentPage !== "ventes") return;
+  const blocked = serveuseVentesModuleBlocked();
+  const restGate = document.getElementById("ventes-rest-day-gate");
+  const tabs = document.querySelector("#page-ventes > .tabs.page-subtabs");
+  const journalGate = document.getElementById("ventes-journal-gate");
+  const msg = blocked ? serveusePlanningBlocksSale(today(), currentSiteId()) : "";
+  if (restGate) {
+    if (blocked && msg) {
+      restGate.classList.remove("hidden");
+      restGate.removeAttribute("hidden");
+      restGate.innerHTML = `<div class="inline-card ventes-rest-day-alert" role="alert">
+        <strong>Jour de repos</strong>
+        <p class="ventes-rest-day-alert-msg">${escapeHtml(msg)}</p>
+      </div>`;
+    } else {
+      restGate.classList.add("hidden");
+      restGate.setAttribute("hidden", "");
+      restGate.innerHTML = "";
+    }
+  }
+  tabs?.classList.toggle("hidden", blocked);
+  journalGate?.classList.toggle("hidden", blocked);
+  const cardIds = ["ventes-card-board", "ventes-card-gestion", "ventes-card-consignes", "ventes-card-qr", "ventes-card-historique"];
+  if (blocked) {
+    cardIds.forEach((id) => document.getElementById(id)?.classList.add("hidden"));
+    return;
+  }
+  const isCommandes = ventesSubTab === "commandes";
+  const isCaisse = ventesSubTab === "caisse";
+  const isQr = ventesSubTab === "qr";
+  const isConsignes = ventesSubTab === "consignes";
+  document.getElementById("ventes-card-gestion")?.classList.toggle("hidden", !isCommandes);
+  document.getElementById("ventes-card-board")?.classList.toggle("hidden", !isCommandes);
+  document.getElementById("ventes-card-qr")?.classList.toggle("hidden", !isQr);
+  document.getElementById("ventes-card-historique")?.classList.toggle("hidden", !isCaisse);
+  document.getElementById("ventes-card-consignes")?.classList.toggle("hidden", !isConsignes);
 }
 
 function schedulableStaffForCurrentSite() {
@@ -3183,10 +3300,18 @@ function renderPlanningMine() {
       </div>`;
     } else if (staffIsOnDutyNow()) {
       const active = activeWorkShiftsNow(sessionUser, currentSiteId());
-      const win = active.map(formatShiftWindowLabel).join(", ");
-      sumEl.innerHTML = `<div class="inline-card" style="border-left:3px solid #72d7a9;padding:10px 12px;font-size:0.88rem">
-        <strong>En service maintenant</strong> · ${escapeHtml(win)}
-      </div>`;
+      if (!active.length && staffInShiftBridgeGap(sessionUser, currentSiteId())) {
+        const todaySh = workShiftsForUserOnDate(sessionUser, currentSiteId(), today());
+        const nextWin = todaySh.length ? formatShiftWindowLabel(todaySh[0]) : "votre prochain créneau";
+        sumEl.innerHTML = `<div class="inline-card" style="border-left:3px solid #72d7a9;padding:10px 12px;font-size:0.88rem">
+          <strong>Relais de service</strong> · entre la fin de nuit et ${escapeHtml(nextWin)} (ventes et encaissements autorisés)
+        </div>`;
+      } else {
+        const win = active.map(formatShiftWindowLabel).join(", ");
+        sumEl.innerHTML = `<div class="inline-card" style="border-left:3px solid #72d7a9;padding:10px 12px;font-size:0.88rem">
+          <strong>En service maintenant</strong> · ${escapeHtml(win)}
+        </div>`;
+      }
     } else {
       sumEl.textContent = rows.length
         ? `${rows.length} créneau(x) · ${formatDurationMinutes(totalMins)} sur ${periodLab}`
@@ -3661,6 +3786,7 @@ async function renderPlanningPage() {
   if (!document.getElementById("planning-range-start")?.value) setPlanningRangeCurrentWeek();
   resetWorkShiftForm();
   setPlanningSubTab(planningSubTab);
+  syncServeuseVentesNavDisabled();
 }
 
 function bindPlanningEvents() {
@@ -4514,8 +4640,13 @@ function applyRoleVisibility() {
   document.querySelectorAll(".manager-more-item").forEach((node) => {
     node.classList.toggle("hidden", !canManage());
   });
+  syncServeuseVentesNavDisabled();
+  if (serveuseVentesModuleBlocked() && currentPage === "ventes") {
+    navigate("planning");
+    return;
+  }
   if (!canManage() && restrictedPages.includes(currentPage)) {
-    navigate("ventes");
+    navigate(serveuseVentesModuleBlocked() ? "planning" : "ventes");
     return;
   }
   document.querySelectorAll(".manager-only").forEach((node) => {
@@ -4744,6 +4875,11 @@ function updatePdjSubTabHints() {
 
 function setVentesSubTab(tab) {
   ventesSubTab = tab;
+  if (serveuseVentesModuleBlocked()) {
+    syncServeuseVentesPageRestDay();
+    syncNavActiveState();
+    return;
+  }
   const isCommandes = tab === "commandes";
   const isCaisse = tab === "caisse";
   const isQr = tab === "qr";
@@ -5251,7 +5387,16 @@ function navigate(page, opts = {}) {
     setPdjSubTab(pdjSubTab);
     renderPointDuJour();
   }
-  if (page === "ventes") { syncPdjWorkDateInput(); setVentesSubTab(ventesSubTab); renderVentesPage(); }
+  if (page === "ventes") {
+    if (serveuseVentesModuleBlocked()) {
+      showToast("Jour de repos : le module Ventes est indisponible.");
+      navigate("planning");
+      return;
+    }
+    syncPdjWorkDateInput();
+    setVentesSubTab(ventesSubTab);
+    renderVentesPage();
+  }
   if (page === "stock") { setStockSubTab(stockSubTab); renderStock(); }
   if (page === "charges") renderCharges();
   if (page === "params") {
@@ -5267,6 +5412,10 @@ function navigate(page, opts = {}) {
 function handleNavButtonClick(button) {
   const page = button?.dataset?.page;
   if (!page) return;
+  if (page === "ventes" && serveuseVentesModuleBlocked()) {
+    showToast("Jour de repos : le module Ventes est indisponible.");
+    return;
+  }
   navigate(page, {
     ventesSubtab: button.dataset.ventesSubtab,
     caisseInner: button.dataset.caisseInner,
@@ -8652,18 +8801,8 @@ function renderSrCart() {
 }
 
 function openSaisieRapide() {
-  syncDualZonePricingUi();
-  const ctx = document.getElementById("sr-order-context-wrap");
-  if (ctx) ctx.classList.add("hidden");
-  const titleEl = document.getElementById("sr-modal-title");
-  if (titleEl) titleEl.textContent = "Saisie rapide";
-  srCart = [];
-  const searchEl = document.getElementById("sr-search");
-  if (searchEl) searchEl.value = "";
-  renderSrMenu("");
-  renderSrCart();
-  openModal("modal-saisie-rapide");
-  window.requestAnimationFrame(() => searchEl?.focus());
+  activeOrderId = null;
+  openOrderEditor(null);
 }
 
 async function submitSaisieRapide() {
@@ -8858,6 +8997,8 @@ async function submitSaisieRapide() {
 
 function renderVentesPage() {
   syncDualZonePricingUi();
+  syncServeuseVentesPageRestDay();
+  if (serveuseVentesModuleBlocked()) return;
   const gate = document.getElementById("ventes-journal-gate");
   if (gate) {
     const d = journalSaleDateFromDom();
@@ -10909,7 +11050,7 @@ function openOrderEditor(orderId = null) {
     renderSrMenu("");
     renderSrCart();
     openModal("modal-saisie-rapide");
-    window.requestAnimationFrame(() => searchEl?.focus());
+    window.requestAnimationFrame(() => document.getElementById("sr-client")?.focus());
     return;
   }
   if (orderId && !order) {
