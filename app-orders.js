@@ -5220,7 +5220,7 @@ function navigate(page, opts = {}) {
     maybeAdjustParamsSubTab();
   }
   if (page === "planning") renderPlanningPage().catch(handleApiError);
-  if (page === "historique-ventes") renderServeuseSalesHistoryPage();
+  if (page === "historique-ventes") renderServeuseSalesHistoryPage().catch(handleApiError);
   syncFabLabelForStockPage();
   applyRoleVisibility();
 }
@@ -7571,6 +7571,74 @@ function salesForHistory() {
 }
 
 let srvHistCategoryFilter = "all";
+let srvHistServerPatchDone = false;
+
+/** Extrait un nom après « Saisie rapide - marthe » ou « Saisie rapide · marthe ». */
+function parseSaisieRapideClientLabel(label) {
+  const s = String(label || "").trim();
+  if (!s) return "";
+  const dashMatch = s.match(/^saisie\s*rapide\s*[-–—]\s*(.+)$/i);
+  if (dashMatch) return dashMatch[1].trim();
+  const parts = s.split(/[-–—·]/).map((x) => x.trim()).filter(Boolean);
+  if (parts.length >= 2 && /saisie\s*rapide/i.test(parts[0])) return parts.slice(1).join(" ").trim();
+  return s;
+}
+
+/** Associe un libellé table/client à un identifiant compte (serveuse/gérante du maquis). */
+function matchStaffUsernameFromLabel(label, siteId = currentSiteId()) {
+  const raw = String(label || "").trim().toLowerCase();
+  if (!raw) return "";
+  const sid = String(siteId || "").trim();
+  const users = (state?.auth?.users || []).filter((u) => {
+    const role = String(u.role || "").trim();
+    if (role !== "serveuse" && role !== "manager") return false;
+    if (!sid) return true;
+    return (u.allowedSiteIds || []).some((id) => String(id) === sid);
+  });
+  for (const u of users) {
+    const un = String(u.username || "").trim().toLowerCase();
+    const dn = String(u.displayName || "").trim().toLowerCase();
+    if (raw === un || raw === dn) return String(u.username || "").trim();
+    if (dn && (raw === dn || raw.endsWith(dn) || raw.includes(dn))) return String(u.username || "").trim();
+    if (un && (raw === un || raw.endsWith(un) || raw.includes(un))) return String(u.username || "").trim();
+  }
+  return "";
+}
+
+/** Serveur / encaisseur : champs vente, commande, crédit, ou déduction depuis table-client saisie rapide. */
+function resolveSaleServerUsername(record) {
+  if (!record) return "";
+  const bad = (x) => {
+    const t = String(x || "").trim();
+    return !t || t === "-" || t === "—" || t === "–";
+  };
+  for (const field of ["server", "serveur"]) {
+    const v = String(record[field] || "").trim();
+    if (!bad(v)) return v;
+  }
+  const credit = String(record.creditIssuedBy || "").trim();
+  if (!bad(credit)) return credit;
+  if (Array.isArray(record.lignes)) {
+    for (const line of record.lignes) {
+      const fromLine = resolveSaleServerUsername(line);
+      if (fromLine) return fromLine;
+    }
+  }
+  if (record.sourceOrderId != null && record.sourceOrderId !== "") {
+    const order = (state?.commandes || []).find((o) => Number(o.id) === Number(record.sourceOrderId));
+    if (order) {
+      const fromOrder = resolveSaleServerUsername(order);
+      if (fromOrder) return fromOrder;
+    }
+  }
+  const siteId = record.siteId || currentSiteId();
+  for (const label of [record.table, record.client]) {
+    const parsed = parseSaisieRapideClientLabel(label);
+    const hit = matchStaffUsernameFromLabel(parsed || label, siteId);
+    if (hit) return hit;
+  }
+  return "";
+}
 
 function isServeuseAccount() {
   return String(currentRole || "").trim() === "serveuse";
@@ -7579,8 +7647,32 @@ function isServeuseAccount() {
 function venteBelongsToSessionServer(vente) {
   const sn = String(sessionUser || "").trim().toLowerCase();
   if (!sn) return false;
-  const who = String(vente?.server || vente?.serveur || "").trim().toLowerCase();
-  return who === sn;
+  const who = resolveSaleServerUsername(vente).trim().toLowerCase();
+  if (!who) return false;
+  if (who === sn) return true;
+  const dn = staffDisplayName(sessionUser).trim().toLowerCase();
+  return Boolean(dn && who === dn);
+}
+
+/** Corrige en base les ventes sans serveur quand le libellé client/table permet de les attribuer au compte connecté. */
+async function patchMyVentasMissingServer() {
+  if (!sessionUser || !Array.isArray(state?.ventes)) return;
+  const sn = String(sessionUser).trim().toLowerCase();
+  let changed = false;
+  state.ventes.forEach((v) => {
+    if (String(v.server || v.serveur || "").trim()) return;
+    const inferred = resolveSaleServerUsername(v);
+    if (!inferred || inferred.trim().toLowerCase() !== sn) return;
+    v.server = inferred;
+    v.serveur = inferred;
+    changed = true;
+  });
+  if (!changed) return;
+  try {
+    await persistStatePatch({ ventes: state.ventes });
+  } catch (_) {
+    /* affichage déjà corrigé par resolveSaleServerUsername */
+  }
 }
 
 function serveuseHistoryPeriod() {
@@ -7630,8 +7722,12 @@ function renderServeuseHistTabs() {
   ).join("");
 }
 
-function renderServeuseSalesHistoryPage() {
+async function renderServeuseSalesHistoryPage() {
   if (!isServeuseAccount()) return;
+  if (!srvHistServerPatchDone) {
+    srvHistServerPatchDone = true;
+    await patchMyVentasMissingServer();
+  }
   const startEl = document.getElementById("srv-hist-period-start");
   if (startEl && !startEl.value) applyServeuseHistoryPreset("today");
   renderServeuseHistTabs();
@@ -7881,19 +7977,8 @@ function orderPrintDetailBlock(order) {
 /** Serveur affiché : commande active, puis ventes liées (champs server / creditIssuedBy). */
 function orderServerDisplay(order) {
   if (String(order?.source || "").trim() === "qr") return "Client QR";
-  const bad = (x) => {
-    const t = String(x || "").trim();
-    return !t || t === "-" || t === "—" || t === "–";
-  };
-  let s = String(order?.server || order?.serveur || "").trim();
-  if (!bad(s)) return s;
-  for (const v of order?.lignes || []) {
-    const t = String(v.server || v.serveur || "").trim();
-    if (!bad(t)) return t;
-    const by = String(v.creditIssuedBy || "").trim();
-    if (!bad(by)) return by;
-  }
-  return "Non renseigné";
+  const who = resolveSaleServerUsername(order);
+  return who ? staffDisplayName(who) : "Non renseigné";
 }
 
 function orderTime(order) {
@@ -8072,7 +8157,7 @@ function paidOrdersFromSales() {
       };
     }
     paidByFacture[key].lignes.push(v);
-    const vs = String(v.server || v.serveur || "").trim();
+    const vs = resolveSaleServerUsername(v);
     if (vs && !String(paidByFacture[key].server || "").trim()) paidByFacture[key].server = vs;
     const ts = v.soldAt || v.createdAt;
     if (ts && !paidByFacture[key].createdAt) paidByFacture[key].createdAt = ts;
@@ -8081,18 +8166,9 @@ function paidOrdersFromSales() {
     let srv = String(o.server || "").trim();
     if (!srv || srv === "-") {
       for (const v of o.lignes || []) {
-        const t = String(v.server || v.serveur || "").trim();
+        const t = resolveSaleServerUsername(v);
         if (t) {
           srv = t;
-          break;
-        }
-      }
-    }
-    if (!srv || srv === "-") {
-      for (const v of o.lignes || []) {
-        const by = String(v.creditIssuedBy || "").trim();
-        if (by) {
-          srv = by;
           break;
         }
       }
@@ -8656,6 +8732,10 @@ async function submitSaisieRapide() {
       order.client = tableLabel;
       order.date = date;
       order.lignes = [];
+      if (!String(order.server || order.serveur || "").trim()) {
+        order.server = sessionUser || "Serveuse";
+        order.serveur = order.server;
+      }
     }
     const errors = [];
     for (const item of srCart) {
@@ -8760,7 +8840,7 @@ function renderVentesPage() {
   renderQrAlertBadge();
   renderOrders();
   renderSalesHistory();
-  if (currentPage === "historique-ventes") renderServeuseSalesHistoryPage();
+  if (currentPage === "historique-ventes") renderServeuseSalesHistoryPage().catch(() => {});
   renderCreditRecovery();
   renderConsignes();
   if (currentPage === "pdj") renderPointDuJour();
@@ -12862,6 +12942,7 @@ async function finalizeOrder(orderId = activeOrderId) {
   const creditIssuedBy = paymentMix.details.some((d) => isCreditClientMethod(d.method))
     ? String(sessionUser || "").trim()
     : "";
+  const encaisseur = String(sessionUser || order.server || order.serveur || "").trim() || "Serveur";
 
   const rollback = {
     ventes: state.ventes,
@@ -12898,8 +12979,8 @@ async function finalizeOrder(orderId = activeOrderId) {
       paiementDetails: splitPaymentDetails(paymentMix.details, calcNet(line), orderTotal),
       debiteur: paymentMix.creditName,
       creditIssuedBy: creditIssuedBy || undefined,
-      server: order.server || order.serveur || sessionUser || "",
-      serveur: order.server || order.serveur || sessionUser || "",
+      server: encaisseur,
+      serveur: encaisseur,
       note: line.note || order.note || "",
     }));
     state.ventes = [...ventes, ...state.ventes];
@@ -17732,7 +17813,7 @@ document.getElementById("fab-btn").addEventListener("click", () => {
   });
   ["srv-hist-period-start", "srv-hist-period-end"].forEach((id) => {
     document.getElementById(id)?.addEventListener("change", () => {
-      if (currentPage === "historique-ventes") renderServeuseSalesHistoryPage();
+      if (currentPage === "historique-ventes") renderServeuseSalesHistoryPage().catch(() => {});
     });
   });
   document.getElementById("print-stock-report-btn").addEventListener("click", printStockReport);
