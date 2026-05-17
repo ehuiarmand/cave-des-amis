@@ -5453,9 +5453,14 @@ function navigate(page, opts = {}) {
   renderSiteSwitcher();
   if (page === "home") renderDashboard();
   if (page === "pdj") {
-    if (!opts.keepPdjSubTab) pdjSubTab = suggestPdjSubTabForDay();
-    setPdjSubTab(pdjSubTab);
+    const forcedPdj = opts.pdjSubTab;
+    if (forcedPdj && ["synthese", "cloture", "ventes"].includes(String(forcedPdj))) {
+      pdjSubTab = forcedPdj;
+    } else if (!opts.keepPdjSubTab) {
+      pdjSubTab = suggestPdjSubTabForDay();
+    }
     renderPointDuJour();
+    setPdjSubTab(pdjSubTab, { scrollTop: Boolean(forcedPdj === "cloture") });
   }
   if (page === "ventes") {
     syncPdjWorkDateInput();
@@ -18455,8 +18460,8 @@ document.getElementById("fab-btn").addEventListener("click", () => {
   document.getElementById("export-charges-excel-btn")?.addEventListener("click", exportExcelChargesMonth);
   document.getElementById("export-compta-excel-btn")?.addEventListener("click", exportExcelComptaMonth);
   document.getElementById("top-journal-close-btn")?.addEventListener("click", () => {
-    navigate("pdj");
-    showToast("Cloturez la journee comptable depuis cette page.");
+    navigate("pdj", { pdjSubTab: "cloture" });
+    showToast("Onglet Clôture : vérifiez le stock et clôturez la journée comptable.");
   });
   document.getElementById("stock-filter-bar")?.addEventListener("click", (e) => {
     const catBtn = e.target.closest("[data-stock-cat-filter]");
