@@ -3185,3 +3185,9 @@ textarea { font: inherit; }
 .kit-mix-panel h4 {
   color: var(--mm-primary-dark);
 }
+
+#kit-mixte-btn.active {
+  background: var(--mm-primary);
+  color: #fff;
+  border-color: var(--mm-primary);
+}

@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Flex:wght@500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./styles.css?v=43">
+  <link rel="stylesheet" href="./styles.css?v=44">
 </head>
 <body>
   <div class="app-bg"></div>
@@ -525,10 +525,55 @@
             </div>
             <div style="display:flex;gap:8px;flex-wrap:wrap">
               <button id="saisie-rapide-btn" class="btn btn-primary" type="button" style="width:auto;font-size:0.85rem">Saisie rapide</button>
-              <button id="kit-mixte-btn" class="btn btn-outline" type="button" style="width:auto;font-size:0.85rem">Kit mixte</button>
+              <button id="kit-mixte-btn" class="btn btn-outline" type="button" style="width:auto;font-size:0.85rem" aria-expanded="false" aria-controls="kit-mix-board-panel">Kit mixte</button>
               <button id="new-order-btn" class="icon-btn" type="button">Nouveau client</button>
             </div>
           </div>
+
+          <div id="kit-mix-board-panel" class="kit-mix-panel hidden" hidden>
+            <p class="eyebrow" style="margin:0 0 6px">Kit mixte</p>
+            <p class="muted" style="font-size:0.82rem;margin:0 0 10px;line-height:1.45">Meme prix, bouteilles differentes (ex. 1 Heineken + 2 Desperados = 2 500 FCFA). Indiquez combien de kits identiques.</p>
+            <div class="form-grid three-cols" style="margin-bottom:10px">
+              <div class="form-group form-group--zero">
+                <label for="kit-board-client">Client / table</label>
+                <input id="kit-board-client" type="text" placeholder="ex: Table 4">
+              </div>
+              <div class="form-group form-group--zero">
+                <label for="kit-mix-count">Nombre de kits</label>
+                <input id="kit-mix-count" type="number" min="1" max="99" value="1" inputmode="numeric">
+              </div>
+              <div class="form-group form-group--zero">
+                <label for="kit-board-date">Date</label>
+                <input id="kit-board-date" type="date">
+              </div>
+            </div>
+            <div class="form-grid three-cols">
+              <div class="form-group form-group--zero">
+                <label for="kit-size">Bouteilles / kit</label>
+                <select id="kit-size">
+                  <option value="2">2</option>
+                  <option value="3" selected>3</option>
+                  <option value="4">4</option>
+                  <option value="5">5</option>
+                </select>
+              </div>
+              <div class="form-group form-group--zero">
+                <label for="kit-price">Prix du kit (FCFA)</label>
+                <input id="kit-price" type="number" min="0" placeholder="2500">
+              </div>
+              <div class="form-group form-group--zero" id="kit-location-wrap">
+                <label for="kit-location">Lieu</label>
+                <select id="kit-location">
+                  <option value="Intérieur">Intérieur</option>
+                  <option value="Extérieur">Extérieur</option>
+                </select>
+              </div>
+            </div>
+            <p id="kit-count-info" class="form-hint"></p>
+            <div id="kit-products-list" class="kit-mix-list"></div>
+            <button id="confirm-kit-btn" class="btn btn-primary" type="button" style="margin-top:8px;width:100%;max-width:320px">Ajouter a la commande</button>
+          </div>
+
           <div id="order-board"></div>
         </article>
 
@@ -1815,36 +1860,6 @@
           <input id="v-note" type="text" placeholder="ex: sans glacons, client presse">
         </div>
       </details>
-      <div class="kit-mix-panel" id="kit-mix-panel">
-        <p class="eyebrow" style="margin:0 0 6px">Kit mixte</p>
-        <h4 style="margin:0 0 8px;font-size:1rem">Meme prix, bouteilles differentes</h4>
-        <p class="muted" style="font-size:0.82rem;margin-bottom:10px;line-height:1.45">Ex. 1 Heineken + 2 Desperados pour 2 500 FCFA. Renseignez d&apos;abord le <strong>client / table</strong> ci-dessus, puis le prix et les quantites par article.</p>
-        <div class="form-grid two-cols">
-          <div class="form-group form-group--zero">
-            <label for="kit-size">Bouteilles dans le kit</label>
-            <select id="kit-size">
-              <option value="2">2 bouteilles</option>
-              <option value="3" selected>3 bouteilles</option>
-              <option value="4">4 bouteilles</option>
-              <option value="5">5 bouteilles</option>
-            </select>
-          </div>
-          <div class="form-group form-group--zero">
-            <label for="kit-price">Prix du kit (FCFA)</label>
-            <input id="kit-price" type="number" min="0" placeholder="ex: 2500">
-          </div>
-        </div>
-        <div class="form-group" id="kit-location-wrap">
-          <label for="kit-location">Lieu</label>
-          <select id="kit-location">
-            <option value="Intérieur">Intérieur (cave)</option>
-            <option value="Extérieur">Extérieur (terrasse)</option>
-          </select>
-        </div>
-        <p id="kit-count-info" class="form-hint"></p>
-        <div id="kit-products-list" class="kit-mix-list"></div>
-        <button id="confirm-kit-btn" class="btn btn-primary" type="button" style="margin-top:6px;width:100%">Ajouter le kit a la commande</button>
-      </div>
       <div class="button-stack">
         <button id="save-vente-btn" class="btn btn-primary" type="button">Ajouter un article</button>
         <button id="finalize-order-btn" class="btn btn-outline hidden" type="button">Encaisser</button>
@@ -2645,6 +2660,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=287"></script>
+  <script src="./app-orders.js?v=288"></script>
 </body>
 </html>

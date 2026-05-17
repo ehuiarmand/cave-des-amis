@@ -9416,14 +9416,15 @@ function updateKitCountInfo() {
   const total = kitMixTotalSelected();
   const info = document.getElementById("kit-count-info");
   const price = Number(document.getElementById("kit-price")?.value) || 0;
+  const nbKits = Math.max(1, Math.min(99, Math.floor(Number(document.getElementById("kit-mix-count")?.value) || 1)));
   if (info) {
     const rest = size - total;
-    info.textContent = rest > 0
-      ? `${fmt(total)} / ${fmt(size)} bouteille(s) · reste ${fmt(rest)} a repartir${price > 0 ? ` · kit ${fmt(price)} FCFA` : ""}`
-      : total === size
-        ? `Kit complet : ${fmt(size)} bouteille(s) pour ${fmt(price)} FCFA`
-        : `Trop de bouteilles : retirez ${fmt(total - size)}`;
-    info.style.color = total === size ? "var(--ok, #72d7a9)" : total > size ? "#ff8e82" : "";
+    const kitOk = total === size;
+    const totalFcfa = price > 0 ? nbKits * price : 0;
+    info.textContent = !kitOk
+      ? `${fmt(total)} / ${fmt(size)} btl par kit · reste ${fmt(rest)} a repartir`
+      : `${fmt(nbKits)} kit(s) × ${fmt(size)} btl = ${fmt(nbKits * size)} btl · ${fmt(totalFcfa)} FCFA`;
+    info.style.color = kitOk ? "var(--ok, #72d7a9)" : total > size ? "#ff8e82" : "";
   }
   const atMax = total >= size;
   document.querySelectorAll("#kit-products-list .kit-mix-inc").forEach((btn) => {
@@ -9440,6 +9441,29 @@ function kitMixCompositionSummary(parts) {
 }
 
 function orderLineHtmlForBoard(order, line) {
+  const batch = line.kitBatchId;
+  if (batch) {
+    const batchLines = (order.lignes || []).filter((l) => l.kitBatchId === batch);
+    const first = batchLines[0];
+    if (first && first.id !== line.id) return "";
+    const nbKits = Number(line.kitUnitCount) || 1;
+    const oneKitLines = batchLines.filter((l) => Number(l.kitUnitIndex) === 1);
+    const mix = kitMixCompositionSummary(oneKitLines.map((l) => ({ article: l.article, qty: Number(l.qty) || 0 })));
+    const total = batchLines.reduce((s, l) => s + calcNet(l), 0);
+    const priceKit = Number(line.kitPrice) || 0;
+    const title = nbKits > 1
+      ? `${fmt(nbKits)}× Kit mixte ${fmt(priceKit)} FCFA`
+      : `Kit mixte ${fmt(priceKit)} FCFA`;
+    return `<div class="order-line order-line-kit-mix">
+      <div>
+        <p class="list-item-title">${escapeHtml(title)}</p>
+        <p class="list-item-sub">${escapeHtml(mix)} · ${fmt(total)} FCFA · ${escapeHtml(line.paiement || "A regler")}</p>
+      </div>
+      <div class="line-actions">
+        <button type="button" class="mini-btn" data-remove-kit-batch="${escapeHtml(batch)}" data-order-id="${order.id}">Retirer</button>
+      </div>
+    </div>`;
+  }
   const kg = line.kitGroupId;
   if (kg) {
     const group = (order.lignes || []).filter((l) => l.kitGroupId === kg);
@@ -9461,11 +9485,49 @@ function orderLineHtmlForBoard(order, line) {
   return `<div class="order-line"><div><p class="list-item-title">${escapeHtml(line.article)}</p><p class="list-item-sub">${escapeHtml(line.cat)} · ${escapeHtml(lineQtyPriceLabel(line, stockItemForArticle(line.article)))}${line.remise ? ` · -${fmt(line.remise)}` : ""} · ${escapeHtml(line.paiement)}</p></div><div class="line-actions"><button type="button" class="mini-btn" data-replace-line="${line.id}" data-order-id="${order.id}">Remplacer</button><button type="button" class="mini-btn" data-remove-line="${line.id}" data-order-id="${order.id}">Retirer</button></div></div>`;
 }
 
+function toggleKitMixBoard(show) {
+  const panel = document.getElementById("kit-mix-board-panel");
+  const btn = document.getElementById("kit-mixte-btn");
+  if (!panel) return;
+  const visible = show !== undefined ? Boolean(show) : panel.classList.contains("hidden");
+  panel.classList.toggle("hidden", !visible);
+  if (visible) panel.removeAttribute("hidden");
+  else panel.setAttribute("hidden", "");
+  if (btn) {
+    btn.classList.toggle("active", visible);
+    btn.setAttribute("aria-expanded", visible ? "true" : "false");
+  }
+  if (visible) {
+    syncDualZonePricingUi();
+    const dEl = document.getElementById("kit-board-date");
+    if (dEl) dEl.value = pdjCalendarDate();
+    kitMixCounts = {};
+    renderKitProducts();
+    window.requestAnimationFrame(() => document.getElementById("kit-board-client")?.focus());
+  }
+}
+
+function openKitMixForOrder(orderId = null) {
+  const oid = orderId != null ? Number(orderId) : 0;
+  if (oid) {
+    const order = recordsForSite(state.commandes).find((item) => item.id === oid);
+    if (order) {
+      activeOrderId = order.id;
+      const c = document.getElementById("kit-board-client");
+      const d = document.getElementById("kit-board-date");
+      if (c) c.value = order.client || "";
+      if (d) d.value = order.date || pdjCalendarDate();
+    }
+  }
+  toggleKitMixBoard(true);
+}
+
 async function confirmKit() {
   readKitMixCountsFromDom();
   const size = Number(document.getElementById("kit-size")?.value) || 3;
   const price = Number(document.getElementById("kit-price")?.value) || 0;
   const location = document.getElementById("kit-location")?.value || "Intérieur";
+  const nbKits = Math.max(1, Math.min(99, Math.floor(Number(document.getElementById("kit-mix-count")?.value) || 1)));
   const parts = Object.entries(kitMixCounts)
     .map(([article, qty]) => ({ article, qty: Math.max(0, Math.floor(Number(qty) || 0)) }))
     .filter((p) => p.qty > 0);
@@ -9473,86 +9535,75 @@ async function confirmKit() {
   if (!parts.length) { showToast("Indiquez au moins une bouteille."); return; }
   if (price <= 0) { showToast("Saisissez le prix du kit."); return; }
   if (totalBottles !== size) {
-    showToast(`Repartissez exactement ${fmt(size)} bouteille(s) (actuellement ${fmt(totalBottles)}).`);
+    showToast(`Repartissez exactement ${fmt(size)} bouteille(s) par kit (actuellement ${fmt(totalBottles)}).`);
     return;
   }
-  const clientName = (document.getElementById("v-client")?.value || "").trim();
-  const date = document.getElementById("v-date")?.value || pdjCalendarDate();
+  const clientName = (
+    document.getElementById("kit-board-client")?.value
+    || document.getElementById("v-client")?.value
+    || ""
+  ).trim();
+  const date = document.getElementById("kit-board-date")?.value
+    || document.getElementById("v-date")?.value
+    || pdjCalendarDate();
   const note = document.getElementById("v-note")?.value || "";
-  const selectedOrderId = Number(document.getElementById("v-order-select")?.value) || activeOrderId;
+  const selectedOrderId = Number(activeOrderId) || Number(document.getElementById("v-order-select")?.value) || 0;
   const existingOrder = selectedOrderId
     ? recordsForSite(state.commandes).find((item) => item.id === selectedOrderId)
     : null;
   if (!assertNomClientQrCommandeOuToast(clientName, existingOrder)) return;
   if (!assertCanSellOrToast(date, currentSiteId())) return;
   for (const part of parts) {
-    const availability = stockAvailabilityForLine(part.article, part.qty, activeOrderId, null);
-    if (!availability.stockItem || availability.available < part.qty) {
-      showToast(`Stock insuffisant : ${part.article} (besoin ${fmt(part.qty)} btl, dispo ${fmt(availability.available)}).`);
+    const need = part.qty * nbKits;
+    const availability = stockAvailabilityForLine(part.article, need, activeOrderId, null);
+    if (!availability.stockItem || availability.available < need) {
+      showToast(`Stock insuffisant : ${part.article} (besoin ${fmt(need)} btl, dispo ${fmt(availability.available)}).`);
       return;
     }
   }
   const order = ensureOrder(clientName, date, note);
-  const kitGroupId = `kitmix-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const mixLabel = kitMixCompositionSummary(parts);
+  const kitBatchId = `kitbatch-${Date.now()}`;
+  const mixBase = kitMixCompositionSummary(parts);
   state.nextId = state.nextId || {};
-  parts.forEach((part, idx) => {
-    const product = findKnownProduct(part.article, date);
-    if (!product) return;
-    state.nextId.ligneCommande = (Number(state.nextId.ligneCommande) || 0) + 1;
-    order.lignes.push({
-      id: state.nextId.ligneCommande,
-      date,
-      article: product.article,
-      cat: product.cat || "Autres",
-      location,
-      formatQuantite: 1,
-      packSize: 1,
-      prix: idx === 0 ? price : 0,
-      qty: part.qty,
-      remise: 0,
-      paiement: "A regler",
-      kitGroupId,
-      kitPrice: price,
-      kitSize: size,
-      kitMixLabel: idx === 0 ? mixLabel : undefined,
-      saisieMode: "Kit mixte",
+  for (let k = 0; k < nbKits; k++) {
+    const kitGroupId = `${kitBatchId}-${k}`;
+    const mixLabel = nbKits > 1 ? `${mixBase} (kit ${k + 1}/${nbKits})` : mixBase;
+    parts.forEach((part, idx) => {
+      const product = findKnownProduct(part.article, date);
+      if (!product) return;
+      state.nextId.ligneCommande = (Number(state.nextId.ligneCommande) || 0) + 1;
+      order.lignes.push({
+        id: state.nextId.ligneCommande,
+        date,
+        article: product.article,
+        cat: product.cat || "Autres",
+        location,
+        formatQuantite: 1,
+        packSize: 1,
+        prix: idx === 0 ? price : 0,
+        qty: part.qty,
+        remise: 0,
+        paiement: "A regler",
+        kitGroupId,
+        kitBatchId,
+        kitPrice: price,
+        kitSize: size,
+        kitUnitCount: nbKits,
+        kitUnitIndex: k + 1,
+        kitMixLabel: idx === 0 ? mixLabel : undefined,
+        saisieMode: "Kit mixte",
+      });
     });
-  });
+  }
   await persistState({ commandes: state.commandes, nextId: state.nextId });
   kitMixCounts = {};
+  const bc = document.getElementById("kit-board-client");
+  if (bc) bc.value = "";
+  document.getElementById("kit-mix-count").value = "1";
+  toggleKitMixBoard(false);
   renderVentesPage();
-  showToast(`Kit mixte ajoute : ${mixLabel} (${fmt(price)} FCFA).`);
-}
-
-/** Ouvre le formulaire commande sur le panneau kit mixte (visible, pas la saisie rapide). */
-function openKitMixModal(orderId = null) {
-  syncDualZonePricingUi();
-  const oid = orderId != null ? Number(orderId) : (Number(activeOrderId) || 0);
-  activeOrderId = oid || null;
-  const order = oid ? recordsForSite(state.commandes).find((item) => item.id === oid) : null;
-  populateOrderSelect();
-  document.getElementById("v-date").value = order?.date || pdjCalendarDate();
-  document.getElementById("v-client").value = order?.client || "";
-  document.getElementById("v-order-select").value = order ? String(order.id) : "";
-  document.getElementById("v-note").value = order?.note || "";
-  document.getElementById("v-article").value = "";
-  document.getElementById("v-qty").value = "1";
-  kitMixCounts = {};
-  const vLoc = document.getElementById("v-location")?.value || "Intérieur";
-  const kitLoc = document.getElementById("kit-location");
-  if (kitLoc) kitLoc.value = vLoc;
-  renderKitProducts();
-  syncFinalizeButtonJournalState();
-  updateVentePreview();
-  const vSearch = document.getElementById("v-article-search");
-  if (vSearch) vSearch.value = "";
-  renderVenteArticlePicker();
-  openModal("modal-vente");
-  window.requestAnimationFrame(() => {
-    document.getElementById("kit-mix-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
-    document.getElementById("kit-price")?.focus();
-  });
+  const totalFcfa = nbKits * price;
+  showToast(`${fmt(nbKits)} kit(s) ajoute(s) : ${mixBase} · ${fmt(totalFcfa)} FCFA.`);
 }
 
 // ─── REMPLACEMENT D'ARTICLE ───────────────────────────────────────────────────
@@ -17617,7 +17668,7 @@ function attachEvents() {
   });
   // Saisie rapide
   document.getElementById("saisie-rapide-btn")?.addEventListener("click", openSaisieRapide);
-  document.getElementById("kit-mixte-btn")?.addEventListener("click", () => openKitMixModal(activeOrderId || null));
+  document.getElementById("kit-mixte-btn")?.addEventListener("click", () => toggleKitMixBoard());
   document.getElementById("sr-submit-btn")?.addEventListener("click", () => submitSaisieRapide().catch(handleApiError));
   document.getElementById("sr-search")?.addEventListener("input", (e) => renderSrMenu(e.target.value));
   document.getElementById("sr-order-select")?.addEventListener("change", () => {
@@ -17870,6 +17921,8 @@ function attachEvents() {
   document.getElementById("kit-price")?.addEventListener("input", renderKitProducts);
   document.getElementById("kit-size")?.addEventListener("change", () => { kitMixCounts = {}; renderKitProducts(); });
   document.getElementById("kit-location")?.addEventListener("change", renderKitProducts);
+  document.getElementById("kit-mix-count")?.addEventListener("input", updateKitCountInfo);
+  document.getElementById("kit-mix-count")?.addEventListener("change", updateKitCountInfo);
   document.getElementById("kit-products-list")?.addEventListener("click", (e) => {
     const dec = e.target.closest(".kit-mix-dec");
     const inc = e.target.closest(".kit-mix-inc");
@@ -18531,7 +18584,24 @@ document.getElementById("fab-btn").addEventListener("click", () => {
     }
     const kitMixOrder = event.target.closest("[data-kit-mix-order]");
     if (kitMixOrder) {
-      openKitMixModal(Number(kitMixOrder.dataset.kitMixOrder));
+      openKitMixForOrder(Number(kitMixOrder.dataset.kitMixOrder));
+      return;
+    }
+    const removeKitBatch = event.target.closest("[data-remove-kit-batch]");
+    if (removeKitBatch && window.confirm("Retirer tout le lot de kits mixtes ?")) {
+      const order = state.commandes.find((item) => item.id === Number(removeKitBatch.dataset.orderId));
+      const batch = removeKitBatch.dataset.removeKitBatch;
+      if (order && batch) {
+        order.lignes = order.lignes.filter((l) => l.kitBatchId !== batch);
+        if (!order.lignes.length) {
+          state.commandes = state.commandes.filter((item) => item.id !== order.id);
+          if (activeOrderId === order.id) activeOrderId = null;
+        }
+        persistState({ commandes: state.commandes }).then(() => {
+          renderVentesPage();
+          showToast("Kit(s) mixte(s) retire(s).");
+        }).catch(handleApiError);
+      }
       return;
     }
     const removeKitGroup = event.target.closest("[data-remove-kit-group]");
