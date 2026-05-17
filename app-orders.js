@@ -4023,7 +4023,7 @@ function pdjCalendarDate() {
   return workingDate();
 }
 
-function syncPdjWorkDateInput() {
+function syncPdjWorkDateInput({ keepCurrentValue = false } = {}) {
   const el = document.getElementById("pdj-work-date");
   if (!el || !canAnyAdmin()) return;
   const t = today();
@@ -4033,7 +4033,9 @@ function syncPdjWorkDateInput() {
   // Autoriser "demain" si c'est une ouverture auto après clôture du jour en cours
   const useForced = forced && /^\d{4}-\d{2}-\d{2}$/.test(forced) && forced <= tomorrow;
   el.max = useForced && forced > t ? tomorrow : t;
-  el.value = useForced ? forced : workingDate();
+  if (!keepCurrentValue) {
+    el.value = useForced ? forced : workingDate();
+  }
   const workDate = pdjCalendarDate();
   syncVentesJournalDateInputsFromPdj(workDate, { force: false });
   if (currentPage === "ventes") renderVentesPage();
@@ -18442,7 +18444,7 @@ document.getElementById("fab-btn").addEventListener("click", () => {
     pdjBrowseConsultationOnly = false;
     delete pdjViewDateBySite[currentSiteId()];
     ventesDomPdjStamp = "";
-    syncPdjWorkDateInput();
+    syncPdjWorkDateInput({ keepCurrentValue: true });
     renderTopbar();
     renderOrdersManagement();
     if (currentPage === "pdj") {
