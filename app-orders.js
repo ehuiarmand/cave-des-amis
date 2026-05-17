@@ -3897,7 +3897,10 @@ function canManagePdjAccounting() {
 function canClosePdjDay() {
   if (!sessionUser) return false;
   if (canManagePdjAccounting()) return true;
-  return staffRequiresShiftWindowForSales() && staffIsOnDutyNow();
+  if (!staffRequiresShiftWindowForSales()) return false;
+  // Maquis sans créneaux configurés : serveuse toujours autorisée (fin de service → gérant valide)
+  if (workShiftsForSite(currentSiteId()).length === 0) return true;
+  return staffIsOnDutyNow();
 }
 
 function stockCheckIsManagerConfirmed(check) {
