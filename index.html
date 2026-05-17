@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Flex:wght@500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./styles.css?v=41">
+  <link rel="stylesheet" href="./styles.css?v=42">
 </head>
 <body>
   <div class="app-bg"></div>
@@ -1815,21 +1815,21 @@
         </div>
       </details>
       <details class="form-collapse" id="kit-mode-details">
-        <summary>Ajouter un kit de produits (meme prix)</summary>
-        <p class="muted" style="font-size:0.8rem;margin-bottom:8px">Choisissez un prix : seuls les produits a ce prix s'affichent. Cochez jusqu'a N produits puis validez.</p>
+        <summary>Kit mixte (meme prix, ex. 1 Heineken + 2 Desperados)</summary>
+        <p class="muted" style="font-size:0.8rem;margin-bottom:8px">Prix du kit et nombre de bouteilles : repartissez les quantites entre les articles proposes (meme tarif kit au catalogue).</p>
         <div class="form-grid two-cols">
           <div class="form-group form-group--zero">
-            <label for="kit-size">Taille du kit</label>
+            <label for="kit-size">Bouteilles dans le kit</label>
             <select id="kit-size">
-              <option value="2">2 produits</option>
-              <option value="3" selected>3 produits</option>
-              <option value="4">4 produits</option>
-              <option value="5">5 produits</option>
+              <option value="2">2 bouteilles</option>
+              <option value="3" selected>3 bouteilles</option>
+              <option value="4">4 bouteilles</option>
+              <option value="5">5 bouteilles</option>
             </select>
           </div>
           <div class="form-group form-group--zero">
-            <label for="kit-price">Prix unitaire (FCFA)</label>
-            <input id="kit-price" type="number" min="0" placeholder="ex: 1500">
+            <label for="kit-price">Prix du kit (FCFA)</label>
+            <input id="kit-price" type="number" min="0" placeholder="ex: 2500">
           </div>
         </div>
         <div class="form-group" id="kit-location-wrap">
@@ -1840,7 +1840,7 @@
           </select>
         </div>
         <p id="kit-count-info" class="form-hint"></p>
-        <div id="kit-products-list" style="display:flex;flex-wrap:wrap;gap:6px;margin:8px 0"></div>
+        <div id="kit-products-list" class="kit-mix-list"></div>
         <button id="confirm-kit-btn" class="btn btn-primary" type="button" style="margin-top:6px">Ajouter le kit a la commande</button>
       </details>
       <div class="button-stack">
@@ -2643,6 +2643,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=284"></script>
+  <script src="./app-orders.js?v=286"></script>
 </body>
 </html>

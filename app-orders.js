@@ -1749,6 +1749,45 @@ function lineBottleQty(line, stockItem = null) {
   return (Number(line?.qty) || 0) * linePackSize(line, stockItem);
 }
 
+/** Complète formatQuantite / packSize sur une vente (anciennes lignes ou kits). */
+function ensureVentePackMetadata(vente) {
+  if (!vente) return 1;
+  const si = stockItemForArticle(vente.article, vente.siteId);
+  const pack = linePackSize(vente, si);
+  if (pack > 1) {
+    if (!Number(vente.formatQuantite)) vente.formatQuantite = pack;
+    if (!Number(vente.packSize)) vente.packSize = pack;
+  }
+  return pack;
+}
+
+function syncReplaceQtyFieldLabel(vente) {
+  const label = document.querySelector('label[for="replace-qty"]');
+  const qtyWrap = document.getElementById("replace-qty-wrap");
+  let hintEl = document.getElementById("replace-qty-hint");
+  if (!hintEl && qtyWrap) {
+    hintEl = document.createElement("p");
+    hintEl.id = "replace-qty-hint";
+    hintEl.className = "muted";
+    hintEl.style.cssText = "font-size:0.82rem;margin:4px 0 0;line-height:1.4";
+    qtyWrap.appendChild(hintEl);
+  }
+  const pack = ensureVentePackMetadata(vente);
+  const qty = Math.max(1, Number(vente?.qty) || 1);
+  if (label) {
+    label.textContent = pack > 1 ? "Nombre de kits à remplacer" : "Quantité à remplacer";
+  }
+  if (hintEl) {
+    if (pack > 1) {
+      hintEl.textContent = `1 kit = ${fmt(pack)} bouteille(s). Ligne actuelle : ${fmt(qty)} kit(s) soit ${fmt(qty * pack)} btl au stock.`;
+      hintEl.classList.remove("hidden");
+    } else {
+      hintEl.textContent = "";
+      hintEl.classList.add("hidden");
+    }
+  }
+}
+
 function lineQtyLabel(line, stockItem = null) {
   const qty = Number(line?.qty) || 0;
   const packSize = linePackSize(line, stockItem);
@@ -7932,12 +7971,24 @@ function orderManagementArticlesCell(order, maxLines = 25) {
   const lines = order?.lignes || [];
   if (!lines.length) return escapeHtml("—");
   const slice = lines.slice(0, maxLines);
-  const rows = slice.map((l) => {
+  const seenKit = new Set();
+  const rows = [];
+  for (const l of slice) {
+    const kg = l.kitGroupId;
+    if (kg) {
+      if (seenKit.has(kg)) continue;
+      seenKit.add(kg);
+      const group = lines.filter((x) => x.kitGroupId === kg);
+      const mix = kitMixCompositionSummary(group.map((x) => ({ article: x.article, qty: Number(x.qty) || 0 })));
+      const total = group.reduce((s, x) => s + calcNet(x), 0);
+      rows.push(`Kit mixte ${fmt(Number(group[0]?.kitPrice) || total)} FCFA : ${escapeHtml(mix)}`);
+      continue;
+    }
     const art = String(l.article || l.libelle || "").trim() || "—";
     const si = stockItemForArticle(l.article);
     const qLabel = lineQtyLabel(l, si);
-    return `${escapeHtml(art)} ×${qLabel} <span style="color:#555">(${fmt(calcNet(l))} FCFA)</span>`;
-  });
+    rows.push(`${escapeHtml(art)} ×${qLabel} <span style="color:#555">(${fmt(calcNet(l))} FCFA)</span>`);
+  }
   const more = lines.length > maxLines
     ? `<br><span style="color:#888;font-size:0.92em">… +${lines.length - maxLines} ligne(s)</span>`
     : "";
@@ -8224,14 +8275,20 @@ function renderReplaceFactureLines(factureKey) {
   const wd = workingDate();
   const dayOpen = wd && !stockCheckForSiteDate(wd, currentSiteId());
   tbody.innerHTML = order.lignes.map((v) => {
+    const si = stockItemForArticle(v.article);
+    ensureVentePackMetadata(v);
+    const pack = linePackSize(v, si);
     const total = calcNet(v);
     const replaceCell = sessionUser && dayOpen
       ? `<button type="button" class="mini-btn" data-replace-vente="${v.id}" style="white-space:nowrap">Remplacer</button>`
       : `<span class="muted" style="font-size:0.8rem">Journée clôturée</span>`;
+    const prixCell = pack > 1
+      ? `${fmt(v.prix)} FCFA <span class="muted" style="font-size:0.78rem">/ kit</span>`
+      : `${fmt(v.prix)} FCFA`;
     return `<tr>
       <td><strong>${escapeHtml(v.article)}</strong></td>
-      <td>${escapeHtml(String(v.qty || 1))}</td>
-      <td style="text-align:right">${fmt(v.prix)} FCFA</td>
+      <td>${escapeHtml(lineQtyLabel(v, si))}</td>
+      <td style="text-align:right">${prixCell}</td>
       <td style="text-align:right">${fmt(total)} FCFA</td>
       <td style="text-align:right;padding-left:8px">${replaceCell}</td>
     </tr>`;
@@ -8438,7 +8495,7 @@ function renderOrders() {
           <div class="order-total">${fmt(total)} FCFA</div>
         </div>
         <div class="order-lines">
-          ${order.lignes.length ? order.lignes.map((line) => `<div class="order-line"><div><p class="list-item-title">${escapeHtml(line.article)}</p><p class="list-item-sub">${escapeHtml(line.cat)} · ${escapeHtml(lineQtyPriceLabel(line, stockItemForArticle(line.article)))}${line.remise ? ` · -${fmt(line.remise)}` : ""} · ${escapeHtml(line.paiement)}</p></div><div class="line-actions"><button type="button" class="mini-btn" data-replace-line="${line.id}" data-order-id="${order.id}">Remplacer</button><button type="button" class="mini-btn" data-remove-line="${line.id}" data-order-id="${order.id}">Retirer</button></div></div>`).join("") : emptyState("Commande vide", "Ajoutez une premiere boisson a cette commande.")}
+          ${order.lignes.length ? order.lignes.map((line) => orderLineHtmlForBoard(order, line)).filter(Boolean).join("") : emptyState("Commande vide", "Ajoutez une premiere boisson a cette commande.")}
         </div>
         <div class="order-actions">
           <button type="button" class="mini-btn" data-activate-order="${order.id}">Ouvrir la commande</button>
@@ -9271,9 +9328,42 @@ function resetConsigneForm() {
   populateConsigneFactureSelect();
 }
 
-// ─── KIT (sélection multi-produits même prix) ─────────────────────────────────
+// ─── KIT MIXTE (plusieurs articles, meme prix kit, repartition bouteilles) ───
+
+let kitMixCounts = {};
+
+function kitMixTotalSelected() {
+  return Object.values(kitMixCounts).reduce((s, n) => s + (Number(n) || 0), 0);
+}
+
+function readKitMixCountsFromDom() {
+  const next = {};
+  document.querySelectorAll("#kit-products-list .kit-mix-qty").forEach((input) => {
+    const art = input.dataset.kitArticle;
+    if (!art) return;
+    next[art] = Math.max(0, Math.floor(Number(input.value) || 0));
+  });
+  kitMixCounts = next;
+}
+
+/** Produits ayant un format vente « kit » (ex. 3 btl = 2500 FCFA). */
+function productsForKitOffer(price, location, size, asOfDate = ventePriceContextDate()) {
+  const p = Number(price) || 0;
+  const sz = Math.max(1, Number(size) || 3);
+  if (p <= 0) return [];
+  return knownProducts(asOfDate).filter((product) => {
+    const stockItem = stockItemForArticle(product.article);
+    const item = stockItem || product;
+    const formats = normalizeSaleFormats(item, asOfDate);
+    return formats.some((f) => {
+      const q = Math.max(1, Number(f.quantite) || 1);
+      return q === sz && formatPrice(f, location) === p;
+    });
+  });
+}
 
 function renderKitProducts() {
+  readKitMixCountsFromDom();
   const price = Number(document.getElementById("kit-price")?.value) || 0;
   const location = document.getElementById("kit-location")?.value || "Intérieur";
   const size = Number(document.getElementById("kit-size")?.value) || 3;
@@ -9282,51 +9372,108 @@ function renderKitProducts() {
   if (!container) return;
   if (price <= 0) {
     container.innerHTML = "";
-    if (info) info.textContent = "Saisissez un prix pour voir les produits disponibles.";
+    kitMixCounts = {};
+    if (info) info.textContent = "Saisissez le prix du kit pour voir les articles compatibles.";
     return;
   }
-  const products = knownProducts(ventePriceContextDate()).filter((p) => {
-    const pInt = Number(p.prixInt) || Number(p.prix) || 0;
-    const pExt = Number(p.prixExt) || pInt;
-    const unitPrice = String(location).startsWith("Ext") ? pExt : pInt;
-    return unitPrice === price;
-  });
+  const products = productsForKitOffer(price, location, size);
   if (!products.length) {
-    container.innerHTML = `<p class="muted" style="font-size:0.85rem">Aucun produit a ce prix.</p>`;
+    container.innerHTML = `<p class="muted" style="font-size:0.85rem">Aucun article avec un kit de ${fmt(size)} btl a ${fmt(price)} FCFA. Verifiez les formats de vente dans le catalogue stock.</p>`;
+    kitMixCounts = {};
     if (info) info.textContent = "";
     return;
   }
-  const checked = container.querySelectorAll("input[type=checkbox]:checked");
-  const checkedArticles = new Set([...checked].map((cb) => cb.value));
+  const totalBefore = kitMixTotalSelected();
   container.innerHTML = products.map((p) => {
-    const id = `kit-cb-${p.article.replace(/\s+/g, "-")}`;
-    const isChecked = checkedArticles.has(p.article) ? "checked" : "";
-    return `<label style="display:flex;align-items:center;gap:6px;background:var(--card-bg,#1e1e2e);border:1px solid var(--border);border-radius:6px;padding:6px 10px;cursor:pointer;font-size:0.85rem">
-      <input type="checkbox" id="${escapeHtml(id)}" class="kit-cb" value="${escapeHtml(p.article)}" ${isChecked}>
-      ${escapeHtml(p.article)}
-    </label>`;
+    const art = p.article;
+    const artEsc = escapeHtml(art);
+    const cur = Math.max(0, Math.min(size, Number(kitMixCounts[art]) || 0));
+    kitMixCounts[art] = cur;
+    return `<div class="kit-mix-row" data-kit-article="${artEsc}">
+      <span class="kit-mix-name">${artEsc}</span>
+      <div class="kit-mix-qty-wrap">
+        <button type="button" class="mini-btn kit-mix-dec" data-kit-article="${artEsc}" aria-label="Moins">−</button>
+        <input type="number" class="kit-mix-qty" min="0" max="${size}" value="${cur}" data-kit-article="${artEsc}" inputmode="numeric">
+        <button type="button" class="mini-btn kit-mix-inc" data-kit-article="${artEsc}" aria-label="Plus">+</button>
+      </div>
+    </div>`;
   }).join("");
+  if (totalBefore > 0) {
+    products.forEach((p) => {
+      const kept = Math.min(size, Number(kitMixCounts[p.article]) || 0);
+      const input = container.querySelector(`.kit-mix-qty[data-kit-article="${CSS.escape(p.article)}"]`);
+      if (input) input.value = String(kept);
+    });
+  }
   updateKitCountInfo();
 }
 
 function updateKitCountInfo() {
+  readKitMixCountsFromDom();
   const size = Number(document.getElementById("kit-size")?.value) || 3;
-  const checked = document.querySelectorAll("#kit-products-list .kit-cb:checked").length;
+  const total = kitMixTotalSelected();
   const info = document.getElementById("kit-count-info");
-  if (info) info.textContent = `${checked} / ${size} produit(s) selectionne(s)`;
-  // disable extra checkboxes when full
-  document.querySelectorAll("#kit-products-list .kit-cb").forEach((cb) => {
-    cb.disabled = !cb.checked && checked >= size;
+  const price = Number(document.getElementById("kit-price")?.value) || 0;
+  if (info) {
+    const rest = size - total;
+    info.textContent = rest > 0
+      ? `${fmt(total)} / ${fmt(size)} bouteille(s) · reste ${fmt(rest)} a repartir${price > 0 ? ` · kit ${fmt(price)} FCFA` : ""}`
+      : total === size
+        ? `Kit complet : ${fmt(size)} bouteille(s) pour ${fmt(price)} FCFA`
+        : `Trop de bouteilles : retirez ${fmt(total - size)}`;
+    info.style.color = total === size ? "var(--ok, #72d7a9)" : total > size ? "#ff8e82" : "";
+  }
+  const atMax = total >= size;
+  document.querySelectorAll("#kit-products-list .kit-mix-inc").forEach((btn) => {
+    btn.disabled = atMax;
+  });
+  document.querySelectorAll("#kit-products-list .kit-mix-qty").forEach((input) => {
+    const v = Number(input.value) || 0;
+    input.disabled = atMax && v === 0;
   });
 }
 
+function kitMixCompositionSummary(parts) {
+  return parts.map((p) => `${p.article} ×${p.qty}`).join(" + ");
+}
+
+function orderLineHtmlForBoard(order, line) {
+  const kg = line.kitGroupId;
+  if (kg) {
+    const group = (order.lignes || []).filter((l) => l.kitGroupId === kg);
+    const first = group[0];
+    if (first && first.id !== line.id) return "";
+    const mix = kitMixCompositionSummary(group.map((l) => ({ article: l.article, qty: Number(l.qty) || 0 })));
+    const total = group.reduce((s, l) => s + calcNet(l), 0);
+    const priceKit = Number(line.kitPrice) || total;
+    return `<div class="order-line order-line-kit-mix">
+      <div>
+        <p class="list-item-title">Kit mixte ${fmt(priceKit)} FCFA</p>
+        <p class="list-item-sub">${escapeHtml(mix)} · ${escapeHtml(line.cat || "Autres")} · ${escapeHtml(line.paiement || "A regler")}</p>
+      </div>
+      <div class="line-actions">
+        <button type="button" class="mini-btn" data-remove-kit-group="${escapeHtml(kg)}" data-order-id="${order.id}">Retirer le kit</button>
+      </div>
+    </div>`;
+  }
+  return `<div class="order-line"><div><p class="list-item-title">${escapeHtml(line.article)}</p><p class="list-item-sub">${escapeHtml(line.cat)} · ${escapeHtml(lineQtyPriceLabel(line, stockItemForArticle(line.article)))}${line.remise ? ` · -${fmt(line.remise)}` : ""} · ${escapeHtml(line.paiement)}</p></div><div class="line-actions"><button type="button" class="mini-btn" data-replace-line="${line.id}" data-order-id="${order.id}">Remplacer</button><button type="button" class="mini-btn" data-remove-line="${line.id}" data-order-id="${order.id}">Retirer</button></div></div>`;
+}
+
 async function confirmKit() {
+  readKitMixCountsFromDom();
   const size = Number(document.getElementById("kit-size")?.value) || 3;
   const price = Number(document.getElementById("kit-price")?.value) || 0;
   const location = document.getElementById("kit-location")?.value || "Intérieur";
-  const checked = [...document.querySelectorAll("#kit-products-list .kit-cb:checked")].map((cb) => cb.value);
-  if (!checked.length) { showToast("Selectionnez au moins un produit."); return; }
-  if (price <= 0) { showToast("Saisissez le prix unitaire."); return; }
+  const parts = Object.entries(kitMixCounts)
+    .map(([article, qty]) => ({ article, qty: Math.max(0, Math.floor(Number(qty) || 0)) }))
+    .filter((p) => p.qty > 0);
+  const totalBottles = parts.reduce((s, p) => s + p.qty, 0);
+  if (!parts.length) { showToast("Indiquez au moins une bouteille."); return; }
+  if (price <= 0) { showToast("Saisissez le prix du kit."); return; }
+  if (totalBottles !== size) {
+    showToast(`Repartissez exactement ${fmt(size)} bouteille(s) (actuellement ${fmt(totalBottles)}).`);
+    return;
+  }
   const clientName = (document.getElementById("v-client")?.value || "").trim();
   const date = document.getElementById("v-date")?.value || pdjCalendarDate();
   const note = document.getElementById("v-note")?.value || "";
@@ -9335,18 +9482,21 @@ async function confirmKit() {
     ? recordsForSite(state.commandes).find((item) => item.id === selectedOrderId)
     : null;
   if (!assertNomClientQrCommandeOuToast(clientName, existingOrder)) return;
-  let anyAdded = false;
-  for (const article of checked) {
-    const product = findKnownProduct(article);
-    if (!product) continue;
-    const packSize = Math.max(1, Number(product.packSize) || 1);
-    const availability = stockAvailabilityForLine(product.article, packSize, activeOrderId, null);
-    if (!availability.stockItem || availability.available < packSize) {
-      showToast(`Stock insuffisant : ${product.article}`);
-      continue;
+  if (!assertCanSellOrToast(date, currentSiteId())) return;
+  for (const part of parts) {
+    const availability = stockAvailabilityForLine(part.article, part.qty, activeOrderId, null);
+    if (!availability.stockItem || availability.available < part.qty) {
+      showToast(`Stock insuffisant : ${part.article} (besoin ${fmt(part.qty)} btl, dispo ${fmt(availability.available)}).`);
+      return;
     }
-    const order = ensureOrder(clientName, date, note);
-    state.nextId = state.nextId || {};
+  }
+  const order = ensureOrder(clientName, date, note);
+  const kitGroupId = `kitmix-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const mixLabel = kitMixCompositionSummary(parts);
+  state.nextId = state.nextId || {};
+  parts.forEach((part, idx) => {
+    const product = findKnownProduct(part.article, date);
+    if (!product) return;
     state.nextId.ligneCommande = (Number(state.nextId.ligneCommande) || 0) + 1;
     order.lignes.push({
       id: state.nextId.ligneCommande,
@@ -9354,19 +9504,24 @@ async function confirmKit() {
       article: product.article,
       cat: product.cat || "Autres",
       location,
-      formatQuantite: packSize,
-      prix: price,
-      qty: 1,
+      formatQuantite: 1,
+      packSize: 1,
+      prix: idx === 0 ? price : 0,
+      qty: part.qty,
       remise: 0,
       paiement: "A regler",
+      kitGroupId,
+      kitPrice: price,
+      kitSize: size,
+      kitMixLabel: idx === 0 ? mixLabel : undefined,
+      saisieMode: "Kit mixte",
     });
-    anyAdded = true;
-  }
-  if (!anyAdded) { showToast("Aucun article n'a pu etre ajoute."); return; }
+  });
   await persistState({ commandes: state.commandes, nextId: state.nextId });
+  kitMixCounts = {};
   document.getElementById("kit-mode-details")?.removeAttribute("open");
   renderVentesPage();
-  showToast(`Kit de ${checked.length} produit(s) ajoute.`);
+  showToast(`Kit mixte ajoute : ${mixLabel} (${fmt(price)} FCFA).`);
 }
 
 // ─── REMPLACEMENT D'ARTICLE ───────────────────────────────────────────────────
@@ -9513,20 +9668,26 @@ async function confirmReplace(newArticleName) {
 function openReplaceVenteModal(venteId) {
   const vente = recordsForSite(state.ventes).find((v) => v.id === Number(venteId));
   if (!vente) return;
+  ensureVentePackMetadata(vente);
   replacingVenteId = Number(venteId);
   replacingLine = null;
+  const si = stockItemForArticle(vente.article);
+  const pack = linePackSize(vente, si);
+  const bottles = lineBottleQty(vente, si);
   const infoEl = document.getElementById("replace-current-info");
   if (infoEl) {
     infoEl.innerHTML = `Article encaisse a remplacer : <strong>${escapeHtml(vente.article)}</strong>`
-      + ` · ${escapeHtml(lineQtyPriceLabel(vente, stockItemForArticle(vente.article)))}`
+      + ` · ${escapeHtml(lineQtyPriceLabel(vente, si))}`
       + `${vente.client ? ` · ${escapeHtml(vente.client)}` : ""}`
       + ` · Facture ${escapeHtml(vente.factureNumber || "")}`
-      + `<br><span class="muted" style="font-size:0.82rem">Le stock de l'ancien article sera restitue, le prix et le stock du nouveau seront appliques.</span>`;
+      + `<br><span class="muted" style="font-size:0.82rem">Le stock de l'ancien article sera restitue (${fmt(bottles)} btl)`
+      + `, le prix et le stock du nouveau seront appliques${pack > 1 ? ` (par kit de ${fmt(pack)} btl)` : ""}.</span>`;
   }
   const qtyWrap = document.getElementById("replace-qty-wrap");
   const qtyInput = document.getElementById("replace-qty");
   if (qtyWrap) qtyWrap.style.display = "";
-  if (qtyInput) qtyInput.value = String(Number(vente.qty) || 1);
+  if (qtyInput) qtyInput.value = String(Math.max(1, Number(vente.qty) || 1));
+  syncReplaceQtyFieldLabel(vente);
   const searchEl = document.getElementById("replace-search");
   if (searchEl) searchEl.value = "";
   renderReplaceVentePicker("", vente);
@@ -9579,10 +9740,11 @@ async function confirmReplaceVente(newArticleName) {
     showToast("Choisissez un produit different.");
     return;
   }
-  // Quantite saisie dans le champ du modal (peut etre differente de l'originale)
+  ensureVentePackMetadata(vente);
+  // Quantite saisie = nombre de kits (ou d'unites) ; le stock utilise qty × formatQuantite
   const qtyInput = document.getElementById("replace-qty");
   const newQty = Math.max(1, Math.floor(Number(qtyInput?.value) || Number(vente.qty) || 1));
-  const originalQty = Number(vente.qty) || 1;
+  const originalQty = Math.max(1, Number(vente.qty) || 1);
   const newProduct = findKnownProduct(article, vente.date);
   if (!newProduct) {
     showToast("Produit introuvable dans le catalogue.");
@@ -9609,9 +9771,12 @@ async function confirmReplaceVente(newArticleName) {
   const oldTotal = prevPrix * originalQty;
   const newTotal = newPrix * newQty;
   const diff = Math.round(newTotal - oldTotal);
-  const qtyLine = newQty !== originalQty ? `\nQuantité : ${originalQty} → ${newQty}` : "";
+  const oldPack = linePackSize(vente, oldStockItem);
+  const qtyLine = newQty !== originalQty
+    ? `\nQuantité : ${originalQty} → ${newQty}${oldPack > 1 ? ` kit(s) (${fmt(originalQty * oldPack)} → ${fmt(newQty * newFormatQty)} btl)` : ""}`
+    : (oldPack > 1 ? `\n${fmt(originalQty)} kit(s) = ${fmt(oldBottles)} btl` : "");
   const prixLine = (newPrix !== prevPrix || newQty !== originalQty)
-    ? `\nMontant : ${fmt(prevPrix)} × ${originalQty} = ${fmt(oldTotal)} FCFA → ${fmt(newPrix)} × ${newQty} = ${fmt(newTotal)} FCFA`
+    ? `\nMontant : ${fmt(prevPrix)} × ${originalQty}${oldPack > 1 ? " kit" : ""} = ${fmt(oldTotal)} FCFA → ${fmt(newPrix)} × ${newQty}${newFormatQty > 1 ? " kit" : ""} = ${fmt(newTotal)} FCFA`
     + (diff > 0 ? ` — supplément ${fmt(diff)} FCFA à encaisser` : diff < 0 ? ` — différence ${fmt(Math.abs(diff))} FCFA` : "")
     : "";
   if (!window.confirm(
@@ -12982,6 +13147,9 @@ async function finalizeOrder(orderId = activeOrderId) {
       server: encaisseur,
       serveur: encaisseur,
       note: line.note || order.note || "",
+      kitGroupId: line.kitGroupId || undefined,
+      kitMixLabel: line.kitMixLabel || undefined,
+      kitPrice: line.kitPrice || undefined,
     }));
     state.ventes = [...ventes, ...state.ventes];
 
@@ -15080,8 +15248,11 @@ async function removeOrderLine(orderId, lineId) {
   const order = state.commandes.find((item) => item.id === orderId);
   if (!order) return;
   const line = order.lignes.find((item) => item.id === lineId);
+  const kitGroupId = line?.kitGroupId;
   recordStaffAudit("delete", "commande_ligne", `Ligne retiree · commande #${orderId} · ${order.client || ""}`, line ? `${line.article} · ${fmt(calcNet(line))} FCFA` : "");
-  order.lignes = order.lignes.filter((item) => item.id !== lineId);
+  order.lignes = kitGroupId
+    ? order.lignes.filter((item) => item.kitGroupId !== kitGroupId)
+    : order.lignes.filter((item) => item.id !== lineId);
   if (!order.lignes.length) {
     state.commandes = state.commandes.filter((item) => item.id !== orderId);
     if (activeOrderId === orderId) activeOrderId = null;
@@ -17665,10 +17836,33 @@ function attachEvents() {
   });
   // Kit
   document.getElementById("kit-price")?.addEventListener("input", renderKitProducts);
-  document.getElementById("kit-size")?.addEventListener("change", () => { renderKitProducts(); updateKitCountInfo(); });
+  document.getElementById("kit-size")?.addEventListener("change", () => { kitMixCounts = {}; renderKitProducts(); });
   document.getElementById("kit-location")?.addEventListener("change", renderKitProducts);
-  document.getElementById("kit-products-list")?.addEventListener("change", (e) => {
-    if (e.target.classList.contains("kit-cb")) updateKitCountInfo();
+  document.getElementById("kit-products-list")?.addEventListener("click", (e) => {
+    const dec = e.target.closest(".kit-mix-dec");
+    const inc = e.target.closest(".kit-mix-inc");
+    const row = e.target.closest(".kit-mix-row");
+    if (!row) return;
+    const art = row.dataset.kitArticle;
+    if (!art) return;
+    const input = row.querySelector(".kit-mix-qty");
+    if (!input) return;
+    let v = Number(input.value) || 0;
+    if (dec) v = Math.max(0, v - 1);
+    if (inc) {
+      const size = Number(document.getElementById("kit-size")?.value) || 3;
+      if (kitMixTotalSelected() >= size) return;
+      v += 1;
+    }
+    input.value = String(v);
+    kitMixCounts[art] = v;
+    updateKitCountInfo();
+  });
+  document.getElementById("kit-products-list")?.addEventListener("input", (e) => {
+    if (!e.target.classList.contains("kit-mix-qty")) return;
+    const art = e.target.dataset.kitArticle;
+    if (art) kitMixCounts[art] = Math.max(0, Math.floor(Number(e.target.value) || 0));
+    updateKitCountInfo();
   });
   document.getElementById("confirm-kit-btn")?.addEventListener("click", () => confirmKit().catch(handleApiError));
   // Remplacement d'article (commande en cours OU vente encaissee)
@@ -18301,6 +18495,23 @@ document.getElementById("fab-btn").addEventListener("click", () => {
     const addLine = event.target.closest("[data-add-line-order]");
     if (addLine) {
       openOrderEditor(Number(addLine.dataset.addLineOrder));
+      return;
+    }
+    const removeKitGroup = event.target.closest("[data-remove-kit-group]");
+    if (removeKitGroup && window.confirm("Retirer tout le kit mixte de la commande ?")) {
+      const order = state.commandes.find((item) => item.id === Number(removeKitGroup.dataset.orderId));
+      const kg = removeKitGroup.dataset.removeKitGroup;
+      if (order && kg) {
+        order.lignes = order.lignes.filter((l) => l.kitGroupId !== kg);
+        if (!order.lignes.length) {
+          state.commandes = state.commandes.filter((item) => item.id !== order.id);
+          if (activeOrderId === order.id) activeOrderId = null;
+        }
+        persistState({ commandes: state.commandes }).then(() => {
+          renderVentesPage();
+          showToast("Kit mixte retire.");
+        }).catch(handleApiError);
+      }
       return;
     }
     const removeLine = event.target.closest("[data-remove-line]");
