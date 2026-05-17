@@ -3966,8 +3966,10 @@ function pdjVentesCountForDate(dateIso) {
 function pdjClosureBlockedNoSales(dateIso) {
   const d = String(dateIso || "").slice(0, 10);
   if (pdjVentesCountForDate(d) > 0) return false;
+  // Admins et gérants peuvent clôturer une journée sans ventes (confirmation demandée dans closeAccountingDay)
+  if (canAnyAdmin()) return false;
   const closed = stockCheckForSiteDate(d, currentSiteId());
-  return !(closed && canAnyAdmin());
+  return !closed;
 }
 
 function pdjNoSalesClosureBannerHtml(dateIso) {
@@ -4149,7 +4151,7 @@ async function persistPdjWorkDateFromSuperPicker() {
   const t = today();
   const siteId = currentSiteId();
   const map = { ...(state.pdjWorkDateBySite || {}) };
-  if (!raw || raw === t) {
+  if (!raw) {
     delete map[siteId];
   } else if (/^\d{4}-\d{2}-\d{2}$/.test(raw) && raw <= t) {
     map[siteId] = raw;
@@ -17895,7 +17897,7 @@ function attachEvents() {
     loadParamsForm();
     if (currentPage === "planning") renderPlanningPage().catch(handleApiError);
     resetOrderForm();
-    persistState().catch(handleApiError);
+    persistStatePatch({ activeSiteId: siteId }).catch(handleApiError);
   });
   document.getElementById("new-order-btn").addEventListener("click", () => {
     activeOrderId = null;
