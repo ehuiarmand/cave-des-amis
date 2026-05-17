@@ -2961,6 +2961,22 @@ function serveuseVentesModuleBlocked(siteId = currentSiteId()) {
   return serveuseIsRestDay(today(), siteId);
 }
 
+/** Pages accessibles pour une serveuse en jour de repos. */
+const SERVEUSE_REST_DAY_PAGES = new Set(["planning", "historique-ventes"]);
+
+function serveuseRestDayActive(siteId = currentSiteId()) {
+  return serveuseVentesModuleBlocked(siteId);
+}
+
+function serveusePageAllowedDuringRest(page) {
+  if (!staffRequiresShiftWindowForSales() || !serveuseRestDayActive()) return true;
+  return SERVEUSE_REST_DAY_PAGES.has(String(page || "").trim());
+}
+
+function serveuseRestDayBlockToast() {
+  showToast("Jour de repos : seuls Planning et Mes ventes sont disponibles.");
+}
+
 /** Message si serveuse hors créneau ou jour de repos (gérant / admin : jamais bloqué). */
 function serveusePlanningBlocksSale(saleDateStr, siteId = currentSiteId()) {
   if (!staffRequiresShiftWindowForSales()) return null;
@@ -2981,19 +2997,51 @@ function serveusePlanningBlocksSale(saleDateStr, siteId = currentSiteId()) {
   return `Jour de repos (${label}) : vous ne pouvez pas vendre. Voyez votre gérante pour vous autoriser — elle pourra ajouter un créneau dans Planning → Équipe.`;
 }
 
-function syncServeuseVentesNavDisabled() {
-  const blocked = serveuseVentesModuleBlocked();
-  document.querySelectorAll('.nav-btn[data-page="ventes"]').forEach((btn) => {
-    btn.disabled = blocked;
-    btn.classList.toggle("nav-btn--disabled", blocked);
-    btn.setAttribute("aria-disabled", blocked ? "true" : "false");
-    if (blocked) btn.title = "Jour de repos — module Ventes indisponible";
-    else btn.removeAttribute("title");
+function syncServeuseRestDayNavAccess() {
+  const rest = staffRequiresShiftWindowForSales() && serveuseRestDayActive();
+  const roleRestricted = (page) => !canManage() && ["home", "stock", "charges"].includes(page);
+
+  document.querySelectorAll(".nav-btn[data-page]").forEach((btn) => {
+    const page = btn.dataset.page;
+    if (!page) return;
+    const allowed = serveusePageAllowedDuringRest(page);
+    const hide = roleRestricted(page) || (rest && !allowed);
+    btn.classList.toggle("hidden", hide);
+    btn.disabled = rest && !allowed;
+    btn.classList.toggle("nav-btn--disabled", rest && !allowed);
+    btn.setAttribute("aria-disabled", rest && !allowed ? "true" : "false");
+    if (rest && !allowed) btn.title = "Jour de repos — indisponible";
+    else if (btn.title === "Jour de repos — indisponible") btn.removeAttribute("title");
   });
+
+  const moreNavOk = (nav) => {
+    if (!rest) return true;
+    if (nav === "logout") return true;
+    return nav === "planning" || nav === "historique-ventes";
+  };
+  document.querySelectorAll("[data-more-nav]").forEach((btn) => {
+    const nav = btn.dataset.moreNav;
+    if (!nav) return;
+    const row = btn.closest(".mobile-more-feature") || btn.closest(".mobile-more-footer-link") || btn;
+    if (row) row.classList.toggle("hidden", !moreNavOk(nav));
+  });
+  document.querySelectorAll(".mobile-more-footer-primary, .mobile-more-footer-secondary").forEach((btn) => {
+    btn.classList.toggle("hidden", rest);
+  });
+
+  document.getElementById("serveuse-rest-planning-nav")?.classList.toggle("hidden", !rest);
+  if (rest) document.getElementById("fab-btn")?.classList.add("hidden");
+}
+
+function ensureServeuseRestDayPage() {
+  if (serveusePageAllowedDuringRest(currentPage)) return false;
+  serveuseRestDayBlockToast();
+  navigate("planning");
+  return true;
 }
 
 function syncServeuseVentesPageRestDay() {
-  syncServeuseVentesNavDisabled();
+  syncServeuseRestDayNavAccess();
   if (currentPage !== "ventes") return;
   const blocked = serveuseVentesModuleBlocked();
   const restGate = document.getElementById("ventes-rest-day-gate");
@@ -3786,7 +3834,7 @@ async function renderPlanningPage() {
   if (!document.getElementById("planning-range-start")?.value) setPlanningRangeCurrentWeek();
   resetWorkShiftForm();
   setPlanningSubTab(planningSubTab);
-  syncServeuseVentesNavDisabled();
+  syncServeuseRestDayNavAccess();
 }
 
 function bindPlanningEvents() {
@@ -4640,13 +4688,10 @@ function applyRoleVisibility() {
   document.querySelectorAll(".manager-more-item").forEach((node) => {
     node.classList.toggle("hidden", !canManage());
   });
-  syncServeuseVentesNavDisabled();
-  if (serveuseVentesModuleBlocked() && currentPage === "ventes") {
-    navigate("planning");
-    return;
-  }
+  syncServeuseRestDayNavAccess();
+  if (ensureServeuseRestDayPage()) return;
   if (!canManage() && restrictedPages.includes(currentPage)) {
-    navigate(serveuseVentesModuleBlocked() ? "planning" : "ventes");
+    navigate(serveuseRestDayActive() ? "planning" : "ventes");
     return;
   }
   document.querySelectorAll(".manager-only").forEach((node) => {
@@ -5363,6 +5408,10 @@ function syncNavActiveState() {
 
 function navigate(page, opts = {}) {
   if (page === "historique-ventes" && !isServeuseAccount()) page = "ventes";
+  if (!serveusePageAllowedDuringRest(page)) {
+    serveuseRestDayBlockToast();
+    page = "planning";
+  }
   currentPage = page;
   const vstab = opts.ventesSubtab;
   const cinner = opts.caisseInner;
@@ -5388,11 +5437,6 @@ function navigate(page, opts = {}) {
     renderPointDuJour();
   }
   if (page === "ventes") {
-    if (serveuseVentesModuleBlocked()) {
-      showToast("Jour de repos : le module Ventes est indisponible.");
-      navigate("planning");
-      return;
-    }
     syncPdjWorkDateInput();
     setVentesSubTab(ventesSubTab);
     renderVentesPage();
@@ -5412,8 +5456,8 @@ function navigate(page, opts = {}) {
 function handleNavButtonClick(button) {
   const page = button?.dataset?.page;
   if (!page) return;
-  if (page === "ventes" && serveuseVentesModuleBlocked()) {
-    showToast("Jour de repos : le module Ventes est indisponible.");
+  if (!serveusePageAllowedDuringRest(page)) {
+    serveuseRestDayBlockToast();
     return;
   }
   navigate(page, {
@@ -5453,6 +5497,14 @@ function bindMobileMoreSheet() {
     if (!link) return;
     const nav = link.dataset.moreNav;
     closeMobileMoreSheet();
+    if (nav === "planning" && !serveusePageAllowedDuringRest("planning")) {
+      serveuseRestDayBlockToast();
+      return;
+    }
+    if (nav === "historique-ventes" && !serveusePageAllowedDuringRest("historique-ventes")) {
+      serveuseRestDayBlockToast();
+      return;
+    }
     if (nav === "qr") navigate("ventes", { ventesSubtab: "qr" });
     else if (nav === "consignes") navigate("ventes", { ventesSubtab: "consignes" });
     else if (nav === "guide") navigate("guide");
