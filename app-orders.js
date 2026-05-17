@@ -3957,6 +3957,43 @@ function isPdjBrowseConsultationOnly() {
   return Boolean(pdjBrowseConsultationOnly);
 }
 
+function pdjVentesCountForDate(dateIso) {
+  const d = String(dateIso || "").slice(0, 10);
+  return recordsForSite(state.ventes).filter((v) => (v.date || "").slice(0, 10) === d).length;
+}
+
+/** Bloque une nouvelle clôture sans vente ; un admin peut encore corriger une clôture existante. */
+function pdjClosureBlockedNoSales(dateIso) {
+  const d = String(dateIso || "").slice(0, 10);
+  if (pdjVentesCountForDate(d) > 0) return false;
+  const closed = stockCheckForSiteDate(d, currentSiteId());
+  return !(closed && canAnyAdmin());
+}
+
+function pdjNoSalesClosureBannerHtml(dateIso) {
+  const d = String(dateIso || "").slice(0, 10);
+  return `<div class="inline-card pdj-closure-alert" style="margin-bottom:12px;border-left:3px solid #ff8e82">
+        <strong>Clôture impossible — aucune vente</strong>
+        <p class="muted" style="margin-top:6px;font-size:0.86rem;line-height:1.45">
+          Aucune vente enregistrée pour le <strong>${escapeHtml(formatDateDdMmYyyy(d))}</strong>.
+          Depuis <strong>Ventes</strong>, enregistrez au moins une vente (statut <strong>Servi</strong>) avant de clôturer la journée.
+        </p>
+      </div>`;
+}
+
+function pdjApplyCloseDayButtonGate(button, { disabled = false, title = null } = {}) {
+  if (!button) return;
+  const blockedNoSales = pdjClosureBlockedNoSales(pdjCalendarDate());
+  button.disabled = Boolean(disabled || blockedNoSales);
+  if (blockedNoSales && !disabled) {
+    button.title = "Aucune vente enregistrée pour cette date — enregistrez des ventes avant de clôturer.";
+  } else if (title) {
+    button.title = title;
+  } else {
+    button.removeAttribute("title");
+  }
+}
+
 function pdjCalendarDate() {
   const sid = currentSiteId();
   const t = today();
@@ -7138,6 +7175,8 @@ function renderDailyStockCheck() {
   }
   const pendingForClose = pendingOrdersForJournalDate(dStr, currentSiteId());
   const closeBlockedByPending = pendingForClose.length > 0;
+  const blockedNoSales = pdjClosureBlockedNoSales(dStr);
+  const noSalesBanner = blockedNoSales ? pdjNoSalesClosureBannerHtml(dStr) : "";
   const container = document.getElementById("pdj-stock-check");
   const button = document.getElementById("close-day-btn");
   if (!container || !button) return;
@@ -7180,31 +7219,30 @@ function renderDailyStockCheck() {
     return;
   }
   if (!items.length) {
-    container.innerHTML = emptyState("Aucun stock", "Ajoutez des articles avant de faire le point de fermeture.");
-    button.disabled = closeBlockedByPending;
-    if (closeBlockedByPending) {
-      button.title = `${pendingForClose.length} commande(s) en attente — traitez-les depuis Ventes avant clôture.`;
-    } else {
-      button.removeAttribute("title");
-    }
+    container.innerHTML = `${noSalesBanner}${emptyState("Aucun stock", "Ajoutez des articles avant de faire le point de fermeture.")}`;
+    pdjApplyCloseDayButtonGate(button, {
+      disabled: closeBlockedByPending,
+      title: closeBlockedByPending
+        ? `${pendingForClose.length} commande(s) en attente — traitez-les depuis Ventes avant clôture.`
+        : null,
+    });
     return;
   }
 
   if (!closed && openingBlocked && !(isPastDate && canAnyAdmin()) && canManagePdjAccounting()) {
-    container.innerHTML = emptyState(
+    container.innerHTML = `${noSalesBanner}${emptyState(
       "Ouverture de caisse requise",
       "Validez le montant en caisse en haut de cette page avant la vérification stock et la clôture.",
-    );
-    button.disabled = true;
-    button.removeAttribute("title");
+    )}`;
+    pdjApplyCloseDayButtonGate(button, { disabled: true });
     return;
   }
-  button.disabled = closeBlockedByPending;
-  if (closeBlockedByPending) {
-    button.title = `${pendingForClose.length} commande(s) en attente — traitez-les depuis Ventes avant clôture.`;
-  } else {
-    button.removeAttribute("title");
-  }
+  pdjApplyCloseDayButtonGate(button, {
+    disabled: closeBlockedByPending,
+    title: closeBlockedByPending
+      ? `${pendingForClose.length} commande(s) en attente — traitez-les depuis Ventes avant clôture.`
+      : null,
+  });
 
   if (!canManagePdjAccounting()) {
     button.disabled = true;
@@ -7241,7 +7279,7 @@ function renderDailyStockCheck() {
       </tr>`;
     }).join("");
     container.innerHTML = `
-      ${pendingBanner}
+      ${noSalesBanner}${pendingBanner}
       <p class="muted" style="margin-bottom:10px;font-size:0.88rem">
         Lecture seule — la saisie de fermeture et la clôture sont réservées au <strong>gérant</strong> ou à un <strong>administrateur</strong>.
       </p>
@@ -7345,23 +7383,23 @@ function renderDailyStockCheck() {
     : "";
   const openedLabel = dayBook?.openedAt ? formatDateTimeDdMmYyyy(dayBook.openedAt) : "—";
   const hadClosingFocus = document.activeElement?.id === "pdj-closing-cash";
-  const stockFp = `check|${currentSiteId()}|${dStr}|n${items.length}|${closed ? "c" : "o"}|${superadminCorrection ? "adm" : "std"}`;
+  const stockFp = `check|${currentSiteId()}|${dStr}|n${items.length}|v${pdjVentesCountForDate(dStr)}|${blockedNoSales ? "ns" : "ok"}|${closed ? "c" : "o"}|${superadminCorrection ? "adm" : "std"}`;
   const aeStock = document.activeElement;
   const focusInPdjCheck = aeStock instanceof HTMLElement && container.contains(aeStock) && (
     aeStock.id === "pdj-closing-cash" || aeStock.classList.contains("stock-check-input")
   );
   if (focusInPdjCheck && container.getAttribute("data-pdj-stock-fp") === stockFp) {
-    button.disabled = closeBlockedByPending;
-    if (closeBlockedByPending) {
-      button.title = `${pendingForClose.length} commande(s) en attente — traitez-les depuis Ventes avant clôture.`;
-    } else {
-      button.removeAttribute("title");
-    }
+    pdjApplyCloseDayButtonGate(button, {
+      disabled: closeBlockedByPending,
+      title: closeBlockedByPending
+        ? `${pendingForClose.length} commande(s) en attente — traitez-les depuis Ventes avant clôture.`
+        : null,
+    });
     return;
   }
   container.setAttribute("data-pdj-stock-fp", stockFp);
   container.innerHTML = `
-      ${pendingBanner}${correctionBanner}
+      ${noSalesBanner}${pendingBanner}${correctionBanner}
       <div class="inline-card" style="margin-bottom:12px">
         <span class="muted">Référence ouverture</span>
         <strong>${escapeHtml(openedLabel)}</strong>
@@ -7410,12 +7448,12 @@ function renderDailyStockCheck() {
       }
     }
   }
-  button.disabled = closeBlockedByPending;
-  if (closeBlockedByPending) {
-    button.title = `${pendingForClose.length} commande(s) en attente — traitez-les depuis Ventes avant clôture.`;
-  } else {
-    button.removeAttribute("title");
-  }
+  pdjApplyCloseDayButtonGate(button, {
+    disabled: closeBlockedByPending,
+    title: closeBlockedByPending
+      ? `${pendingForClose.length} commande(s) en attente — traitez-les depuis Ventes avant clôture.`
+      : null,
+  });
   } finally {
     updatePdjPrintButtons();
   }
@@ -14325,6 +14363,10 @@ async function closeAccountingDay() {
     );
     return;
   }
+  if (pdjClosureBlockedNoSales(dStr)) {
+    showToast("Clôture impossible : aucune vente enregistrée pour cette date. Enregistrez au moins une vente avant de clôturer.");
+    return;
+  }
   const closingRaw = document.getElementById("pdj-closing-cash")?.value;
   if (!isPastDateCorrection && (closingRaw === undefined || closingRaw === null || String(closingRaw).trim() === "")) {
     showToast("Saisissez le montant espèces dénombrées à la fermeture.");
@@ -16306,68 +16348,6 @@ function casiersForBrasserie(brasserie, siteId = currentSiteId()) {
     .filter((c) => normalizeBrasserieName(c.article) === b);
 }
 
-function fillBrasserieCasiers(brasserie, bottles, { source = "vente", commentaire = "" } = {}) {
-  const b = normalizeBrasserieName(brasserie) || "Sans brasserie";
-  let remaining = Math.max(0, Math.floor(Number(bottles) || 0));
-  if (remaining <= 0) return { filled: 0, created: 0 };
-  state.casiers = state.casiers || [];
-  state.casierMouvements = state.casierMouvements || [];
-  state.nextId = state.nextId || {};
-  if (!state.nextId.casier || Number.isNaN(Number(state.nextId.casier))) state.nextId.casier = 1;
-  if (!state.nextId.casierMouvement || Number.isNaN(Number(state.nextId.casierMouvement))) state.nextId.casierMouvement = 1;
-
-  const all = casiersForBrasserie(b).slice();
-  // Remplir dans l'ordre des codes CAS-XXXX : on complète le premier casier disponible,
-  // puis on passe au suivant quand il est plein.
-  all.sort((a, b2) => String(a.code || "").localeCompare(String(b2.code || ""), "fr"));
-
-  let filled = 0;
-  let created = 0;
-  const now = new Date().toISOString();
-  for (const c of all) {
-    if (remaining <= 0) break;
-    const cap = Math.max(1, Number(c.capacite) || 24);
-    const cur = Math.max(0, Number(c.quantiteActuelle) || 0);
-    const free = cap - cur;
-    if (free <= 0) continue;
-    const add = Math.min(free, remaining);
-    const before = { quantiteActuelle: cur };
-    c.quantiteActuelle = cur + add;
-    recomputeCasierStatus(c);
-    c.lastMoveAt = now;
-    c.lastMoveBy = sessionUser || "system";
-    state.casierMouvements.unshift({
-      id: state.nextId.casierMouvement++,
-      siteId: currentSiteId(),
-      casierId: c.id,
-      casierCode: c.code,
-      article: c.article,
-      type: "entree",
-      quantite: add,
-      source,
-      motif: "",
-      commentaire,
-      user: sessionUser || "system",
-      role: currentRole || "-",
-      date: today(),
-      createdAt: now,
-    });
-    logCasierAudit("create", c, before, null, null, add, { type: "ENTREE", label: "Remplissage casier", source, commentaire, entity: "casier_entree" });
-    remaining -= add;
-    filled += add;
-  }
-
-  // Si pas assez de place, on n'auto-crée pas : il faut créer des casiers manuellement (objectif du module).
-  if (remaining > 0) {
-    recordStaffAudit(
-      "create",
-      "casier_entree",
-      `Remplissage casiers (incomplet) · ${b}`,
-      `${fmt(filled)} btl affectée(s) · ${fmt(remaining)} btl non affectée(s) (pas assez de casiers disponibles)${commentaire ? ` · ${commentaire}` : ""}`,
-    );
-  }
-  return { filled, created };
-}
 
 function drainArticleCasiers(article, bottles, opts = {}) {
   if (!article || bottles <= 0) return;
@@ -16464,7 +16444,17 @@ function distributeVidesEnCasiers(article, cap, bottles, now, opts = {}) {
     remaining -= add;
   }
 
-  // Si pas assez de casiers de collecte disponibles → créer un nouveau casier de collecte
+  // Auto-créer un casier de collecte uniquement si la brasserie+format est déjà suivie en casiers physiques.
+  // Sans casier existant, le module n'est pas activé pour cette brasserie → pas de prolifération.
+  if (remaining > 0) {
+    const hasExistingForBr = state.casiers.some((c) => {
+      if (c.siteId !== siteId) return false;
+      const cBr = normalizeBrasserieName(stockItemForArticle(c.article)?.brasserie || "");
+      return (srcBr ? cBr === srcBr : String(c.article || "").toLowerCase() === String(article || "").toLowerCase())
+        && Math.max(1, Number(c.capacite) || 24) === cap;
+    });
+    if (!hasExistingForBr) return;
+  }
   while (remaining > 0) {
     const fill = Math.min(cap, remaining);
     const code = nextCasierCode();
@@ -16885,11 +16875,32 @@ async function casierSortie(casierId, qty, { motif = "autre", commentaire = "" }
   }
   const motifKey = String(motif || "autre").trim().toLowerCase();
   let frigoPlan = null;
+  let stockDeducted = false;
   if (motifKey === "frigo") {
     frigoPlan = buildCasierToFrigoStockPlan(casier, q);
     if (!frigoPlan.ok) {
       showToast(frigoPlan.msg || "Transfert frigo impossible.");
       return false;
+    }
+  } else {
+    // Vente, casse, transfert, autre → déduire du stock catalogue pour rester cohérent
+    const candidates = stockCandidatesForCasierFrigoTransfer(casier);
+    if (candidates.length) {
+      const now = new Date().toISOString();
+      let rem = q;
+      candidates.forEach((it) => normalizePhysicalStock(it));
+      for (const it of candidates) {
+        if (rem <= 0) break;
+        const avail = stockActuel(it);
+        if (avail <= 0) continue;
+        const take = Math.min(rem, avail);
+        consumePhysicalStock(it, take);
+        it.sorties = (Number(it.sorties) || 0) + take;
+        it.lastSortieAt = now;
+        it.lastSortieBy = sessionUser || "-";
+        rem -= take;
+      }
+      stockDeducted = true;
     }
   }
   const before = JSON.parse(JSON.stringify(casier));
@@ -16934,7 +16945,7 @@ async function casierSortie(casierId, qty, { motif = "autre", commentaire = "" }
     casiers: state.casiers,
     casierMouvements: state.casierMouvements,
     nextId: state.nextId,
-    ...(frigoPlan && frigoPlan.ok ? { stock: state.stock } : {}),
+    ...((frigoPlan && frigoPlan.ok) || stockDeducted ? { stock: state.stock } : {}),
   });
   return true;
 }
@@ -17034,6 +17045,10 @@ async function retourVidesCasier(casierId, qty) {
   if (!canMoveCasier()) { showToast("Connexion requise."); return false; }
   const casier = findCasierById(casierId);
   if (!casier) { showToast("Casier introuvable."); return false; }
+  if (String(casier.statut || "").toLowerCase() === "retourne" && (Number(casier.bouteillesVides) || 0) === 0) {
+    showToast("Ce casier a déjà été retourné au fournisseur.");
+    return false;
+  }
   const cap = Math.max(1, Number(casier.capacite) || 24);
   const q = Math.max(0, Math.floor(Number(qty) || 0));
   if (q <= 0) { showToast("Quantité invalide."); return false; }
@@ -17043,7 +17058,7 @@ async function retourVidesCasier(casierId, qty) {
   if (q > vides) { showToast(`Seulement ${fmt(vides)} bouteille(s) vide(s) dans ce casier.`); return false; }
   const nbCasiers = Math.floor(q / cap);
   casier.bouteillesVides = Math.max(0, vides - q);
-  if (casier.bouteillesVides < cap) casier.statut = "retourne";
+  if (casier.bouteillesVides === 0) casier.statut = "retourne";
   recomputeCasierStatus(casier);
   casier.lastMoveAt = new Date().toISOString();
   casier.lastMoveBy = sessionUser || "system";

@@ -217,14 +217,19 @@
             </p>
             <button type="button" id="print-pdj-serveuse-btn" class="btn btn-outline">Imprimer le point du jour</button>
           </div>
-          <div class="section-head pdj-detail-head pdj-accounting-close-only">
-            <h3 class="pdj-detail-title">Fermeture &amp; stock</h3>
-            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-              <button id="close-day-btn" class="mini-btn" type="button">Clôturer la journée</button>
-              <button id="print-closure-btn" class="btn btn-outline hidden" type="button">Imprimer le rapport de clôture</button>
+          <div id="pdj-closure-workflow" class="pdj-closure-workflow pdj-accounting-close-only">
+            <div class="pdj-closure-toolbar">
+              <div class="pdj-closure-toolbar-text">
+                <h3 class="pdj-detail-title">Clôture du jour</h3>
+                <p class="muted pdj-closure-hint">Caisse espèces → stock physique → validation.</p>
+              </div>
+              <div class="pdj-closure-actions">
+                <button id="close-day-btn" class="btn btn-danger" type="button">Clôturer la journée</button>
+                <button id="print-closure-btn" class="btn btn-outline hidden" type="button">Imprimer le rapport</button>
+              </div>
             </div>
+            <div id="pdj-stock-check"></div>
           </div>
-          <div id="pdj-stock-check" class="pdj-accounting-close-only"></div>
           <div id="pdj-closed-archive" class="pdj-accounting-only"></div>
           <div id="pdj-reopen-closures" class="pdj-accounting-only"></div>
           </div>
@@ -2668,6 +2673,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=298"></script>
+  <script src="./app-orders.js?v=300"></script>
 </body>
 </html>

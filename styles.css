@@ -928,6 +928,52 @@ textarea { font: inherit; }
 
 /* Ne plus verrouiller pdj-main-wrap entier (ancien HTML / fallback bloquait tout le point du jour). */
 
+.pdj-closure-workflow {
+  margin-top: 12px;
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+  background: var(--mm-surface);
+}
+
+.pdj-closure-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px 16px;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.pdj-closure-toolbar .pdj-detail-title {
+  margin: 0;
+}
+
+.pdj-closure-hint {
+  margin: 6px 0 0;
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.pdj-closure-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.pdj-closure-actions .btn {
+  width: auto;
+  min-height: 44px;
+  white-space: nowrap;
+}
+
+#pdj-stock-check .pdj-closing-cash-panel {
+  margin-top: 0;
+}
+
 .pdj-closing-cash-panel {
   margin-bottom: 12px;
   padding: 14px 16px;
