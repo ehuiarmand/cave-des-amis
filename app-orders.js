@@ -17669,6 +17669,12 @@ function attachEvents() {
   // Saisie rapide
   document.getElementById("saisie-rapide-btn")?.addEventListener("click", openSaisieRapide);
   document.getElementById("kit-mixte-btn")?.addEventListener("click", () => toggleKitMixBoard());
+  document.querySelectorAll(".js-kit-mixte-open").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.getElementById("ventes-card-board")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      toggleKitMixBoard(true);
+    });
+  });
   document.getElementById("sr-submit-btn")?.addEventListener("click", () => submitSaisieRapide().catch(handleApiError));
   document.getElementById("sr-search")?.addEventListener("input", (e) => renderSrMenu(e.target.value));
   document.getElementById("sr-order-select")?.addEventListener("change", () => {
