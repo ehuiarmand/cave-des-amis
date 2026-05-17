@@ -4503,6 +4503,11 @@ function canDeleteCharge() {
   return canAnyAdmin();
 }
 
+/** Modification d'un article catalogue existant : administrateurs uniquement (pas la gérante). */
+function canEditStockCatalog() {
+  return canAnyAdmin();
+}
+
 function canAccessSite(siteId) {
   return allowedSiteIds.includes(siteId);
 }
@@ -10437,7 +10442,7 @@ function renderStock() {
       <td class="stock-actions-cell">
         ${isFrigoLow && reserve > 0 ? `<button type="button" class="mini-btn" data-auto-fill-fridge="${item.id}">Remplir frigo</button>` : ""}
         <button type="button" class="stock-del-btn" style="background:rgba(197,79,65,0.18);color:#ff8e82" data-perte-id="${item.id}">Perte</button>
-        ${canManage() ? `<button type="button" class="mini-btn" data-edit-stock="${item.id}">Modifier</button>` : ""}
+        ${canEditStockCatalog() ? `<button type="button" class="mini-btn" data-edit-stock="${item.id}">Modifier</button>` : ""}
         ${canAnyAdmin() ? `<button class="stock-del-btn" type="button" data-delete-type="stock" data-id="${item.id}">Suppr.</button>` : ""}
       </td>
     </tr>`;
@@ -13908,8 +13913,8 @@ function resetStockForm() {
 }
 
 function openEditStock(itemId) {
-  if (!canManage()) {
-    showToast("Modification du catalogue reservee au gerant ou administrateur.");
+  if (!canEditStockCatalog()) {
+    showToast("Modification du catalogue reservee aux administrateurs.");
     return;
   }
   const item = state.stock.find((i) => i.id === itemId);
@@ -13947,11 +13952,15 @@ function openEditStock(itemId) {
 
 async function saveStock() {
   commitStockPriceInput();
-  if (!canManage()) {
-    showToast("Modification du catalogue reservee au gerant ou administrateur.");
+  const editId = document.getElementById("s-edit-id").value;
+  if (editId && !canEditStockCatalog()) {
+    showToast("Modification du catalogue reservee aux administrateurs.");
     return;
   }
-  const editId = document.getElementById("s-edit-id").value;
+  if (!editId && !canManage()) {
+    showToast("Ajout au catalogue reserve au gerant ou administrateur.");
+    return;
+  }
   const articleName = document.getElementById("s-article").value.trim();
   if (!articleName) {
     showToast("Nom de l'article obligatoire.");
