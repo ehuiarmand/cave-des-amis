@@ -1119,6 +1119,9 @@ function workingDate() {
   if (unclosed && String(unclosed).slice(0, 10) < t) {
     return String(unclosed).slice(0, 10);
   }
+  // Aujourd'hui clôturé + lendemain déjà ouvert → avancer au lendemain
+  const tomorrow = addCalendarDaysIso(t, 1);
+  if (unclosed === tomorrow && stockCheckForSiteDate(t, siteId)) return tomorrow;
   const now = new Date();
   if (now.getHours() < NIGHT_SHIFT_CUTOFF_HOUR) {
     const yest = new Date(now);
@@ -4009,18 +4012,28 @@ function pdjCalendarDate() {
     if (view && /^\d{4}-\d{2}-\d{2}$/.test(view) && view <= t) return view;
   }
 
+  let result;
   if (canAnyAdmin()) {
     const el = document.getElementById("pdj-work-date");
     const v = el?.value?.trim();
     if (v && /^\d{4}-\d{2}-\d{2}$/.test(v)) {
-      return v > t ? t : v;
+      result = v > t ? t : v;
+    } else if (hasForced) {
+      result = forced;
+    } else {
+      result = workingDate();
     }
-    if (hasForced) return forced;
-    return workingDate();
+  } else {
+    result = hasForced ? forced : workingDate();
   }
 
-  if (hasForced) return forced;
-  return workingDate();
+  // Si la date résultante est clôturée et qu'un jour suivant est ouvert (≤ demain), avancer automatiquement
+  if (!isPdjBrowseConsultationOnly() && result && stockCheckForSiteDate(result, sid)) {
+    const nextOpen = firstUnclosedJournalDate(sid);
+    if (nextOpen && nextOpen <= tomorrow) return nextOpen;
+  }
+
+  return result;
 }
 
 function syncPdjWorkDateInput({ keepCurrentValue = false } = {}) {
@@ -4034,7 +4047,13 @@ function syncPdjWorkDateInput({ keepCurrentValue = false } = {}) {
   const useForced = forced && /^\d{4}-\d{2}-\d{2}$/.test(forced) && forced <= tomorrow;
   el.max = useForced && forced > t ? tomorrow : t;
   if (!keepCurrentValue) {
-    el.value = useForced ? forced : workingDate();
+    let targetDate = useForced ? forced : workingDate();
+    // Si ce jour est clôturé, afficher le prochain jour ouvert (≤ demain)
+    if (stockCheckForSiteDate(targetDate, sid)) {
+      const nextOpen = firstUnclosedJournalDate(sid);
+      if (nextOpen && nextOpen <= tomorrow) targetDate = nextOpen;
+    }
+    el.value = targetDate;
   }
   const workDate = pdjCalendarDate();
   syncVentesJournalDateInputsFromPdj(workDate, { force: false });
