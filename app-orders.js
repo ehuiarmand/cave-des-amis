@@ -2755,9 +2755,9 @@ function activeWorkShiftsNow(username = sessionUser, siteId = currentSiteId()) {
   return out;
 }
 
+/** Créneau planning obligatoire pour vendre : serveuses uniquement (gérant / admin jamais bloqués). */
 function staffRequiresShiftWindowForSales() {
-  const r = String(currentRole || "").trim();
-  return r === "serveuse" || r === "manager";
+  return String(currentRole || "").trim() === "serveuse";
 }
 
 function staffIsOnDutyNow(siteId = currentSiteId()) {
@@ -2859,7 +2859,7 @@ function serveuseHasShiftOnDate(username, siteId, dateIso) {
   );
 }
 
-/** Message si serveuse / gérante en service ne peut pas vendre (hors créneau ou repos). */
+/** Message si serveuse hors créneau ou jour de repos (gérant / admin : jamais bloqué). */
 function serveusePlanningBlocksSale(saleDateStr, siteId = currentSiteId()) {
   if (!staffRequiresShiftWindowForSales()) return null;
   const d = String(saleDateStr || "").slice(0, 10);
