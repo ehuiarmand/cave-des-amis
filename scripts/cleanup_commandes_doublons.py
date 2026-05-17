@@ -285,13 +285,6 @@ def main() -> None:
                 if o is not keep:
                     ids_to_remove.add(int(o.get("id")))
 
-    if dup_ids and args.auto_fingerprint:
-        for rows in dup_ids.values():
-            keep = pick_keep_order(rows, ventes_map)
-            for o in rows:
-                if o is not keep:
-                    ids_to_remove.add(int(o.get("id")))
-
     dedupe_removed = 0
     if args.dedupe_same_id:
         new_list, dedupe_removed = dedupe_same_id_rows(
