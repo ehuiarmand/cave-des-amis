@@ -7248,7 +7248,8 @@ function renderDailyStockCheck() {
   });
 
   if (!canManagePdjAccounting()) {
-    button.disabled = true;
+    // Serveuse en service : bouton actif pour soumettre la fin de service
+    button.disabled = !canClosePdjDay();
     if (openingBlocked) {
       container.innerHTML = emptyState(
         "Ouverture de caisse (gérant)",
@@ -7284,7 +7285,7 @@ function renderDailyStockCheck() {
     container.innerHTML = `
       ${noSalesBanner}${pendingBanner}
       <p class="muted" style="margin-bottom:10px;font-size:0.88rem">
-        Lecture seule — la saisie de fermeture et la clôture sont réservées au <strong>gérant</strong> ou à un <strong>administrateur</strong>.
+        Vérification en lecture seule — le gérant confirmera le stock et la caisse. Cliquez sur <strong>Fin de service</strong> pour transmettre votre clôture.
       </p>
       <div class="stock-table-wrap"><table class="stock-table">
         <thead><tr>
@@ -14378,13 +14379,14 @@ async function closeAccountingDay() {
     showToast("Clôture impossible : aucune vente enregistrée pour cette date. Enregistrez au moins une vente avant de clôturer.");
     return;
   }
+  const isFinDeService = !canManagePdjAccounting();
   const closingRaw = document.getElementById("pdj-closing-cash")?.value;
-  if (!isPastDateCorrection && (closingRaw === undefined || closingRaw === null || String(closingRaw).trim() === "")) {
+  if (!isFinDeService && !isPastDateCorrection && (closingRaw === undefined || closingRaw === null || String(closingRaw).trim() === "")) {
     showToast("Saisissez le montant espèces dénombrées à la fermeture.");
     return;
   }
-  const closingCashFcfa = Math.max(0, Number(closingRaw) || 0);
-  if (Number.isNaN(closingCashFcfa)) {
+  const closingCashFcfa = isFinDeService ? 0 : Math.max(0, Number(closingRaw) || 0);
+  if (!isFinDeService && Number.isNaN(closingCashFcfa)) {
     showToast("Montant de fermeture invalide.");
     return;
   }
@@ -14408,23 +14410,35 @@ async function closeAccountingDay() {
   const expectedEspecesCash = openingCash + especesVentes + especesRecouvrement;
   const cashEcartEspeces = closingCashFcfa - expectedEspecesCash;
 
-  const recapCloture = [
-    `Date : ${formatDateDdMmYyyy(dStr)}`,
-    `CA encaissé : ${fmt(caEncaisse)} FCFA`,
-    `Reste à recouvrer (crédit) : ${fmt(caCreances)} FCFA`,
-    `Ventes du jour : ${ventesJour.length}`,
-    `Caisse espèces : théorique ${fmt(expectedEspecesCash)} · dénombré ${fmt(closingCashFcfa)} · écart ${cashEcartEspeces > 0 ? "+" : ""}${fmt(cashEcartEspeces)}`,
-  ].join("\n");
-  if (!window.confirm(
-    `Confirmer la clôture de journée ?\n\nCette opération enregistre le stock et la caisse pour la date choisie.\n\n${recapCloture}`,
-  )) {
+  const recapCloture = isFinDeService
+    ? [
+        `Date : ${formatDateDdMmYyyy(dStr)}`,
+        `CA encaissé : ${fmt(caEncaisse)} FCFA`,
+        `Ventes du jour : ${ventesJour.length}`,
+        `Stock : le gérant vérifiera le stock physique et la caisse lors de la validation.`,
+      ].join("\n")
+    : [
+        `Date : ${formatDateDdMmYyyy(dStr)}`,
+        `CA encaissé : ${fmt(caEncaisse)} FCFA`,
+        `Reste à recouvrer (crédit) : ${fmt(caCreances)} FCFA`,
+        `Ventes du jour : ${ventesJour.length}`,
+        `Caisse espèces : théorique ${fmt(expectedEspecesCash)} · dénombré ${fmt(closingCashFcfa)} · écart ${cashEcartEspeces > 0 ? "+" : ""}${fmt(cashEcartEspeces)}`,
+      ].join("\n");
+  const confirmMsg = isFinDeService
+    ? `Confirmer la fin de service ?\n\nLa journée du ${formatDateDdMmYyyy(dStr)} sera transmise au gérant pour validation. Vous ne pourrez plus ajouter de ventes après confirmation.\n\n${recapCloture}`
+    : `Confirmer la clôture de journée ?\n\nCette opération enregistre le stock et la caisse pour la date choisie.\n\n${recapCloture}`;
+  if (!window.confirm(confirmMsg)) {
     return;
   }
 
   const existingCloseCheck = stockCheckForSiteDate(dStr, currentSiteId());
   const checkedItems = items.map((item) => {
-    const frigo = Math.max(0, Number(document.querySelector(`[data-check-frigo="${item.id}"]`)?.value) || 0);
-    const reserve = Math.max(0, Number(document.querySelector(`[data-check-reserve="${item.id}"]`)?.value) || 0);
+    const frigo = isFinDeService
+      ? Math.max(0, stockFrigo(item))
+      : Math.max(0, Number(document.querySelector(`[data-check-frigo="${item.id}"]`)?.value) || 0);
+    const reserve = isFinDeService
+      ? Math.max(0, stockReserve(item))
+      : Math.max(0, Number(document.querySelector(`[data-check-reserve="${item.id}"]`)?.value) || 0);
     const existingCloseItem = existingCloseCheck ? (existingCloseCheck.items || []).find((ci) => Number(ci.id) === Number(item.id)) : null;
     const stockAtOpen = stockOpeningFromDayBook(item, dayBook)
       ?? existingCloseItem?.stockAvant
@@ -14448,8 +14462,8 @@ async function closeAccountingDay() {
   });
   const stockGaps = checkedItems.filter((item) => item.ecart !== 0);
   // Les ecarts sont acceptes et enregistres dans le stock (entrees/sorties)
-  // Avertissement informatif uniquement pour les non-admins
-  if (stockGaps.length && !canAnyAdmin()) {
+  // Avertissement informatif uniquement pour les non-admins (pas pour la serveuse : le gérant vérifie)
+  if (stockGaps.length && !canAnyAdmin() && !isFinDeService) {
     const confirm = window.confirm(`${stockGaps.length} article(s) ont des ecarts entre le stock physique et le theorique. Ces ecarts seront enregistres. Confirmer quand meme ?`);
     if (!confirm) return;
   }
@@ -14571,13 +14585,17 @@ async function closeAccountingDay() {
     renderDashboard();
     renderPointDuJour();
     setPdjSubTab(pdjSubTab, { scrollTop: true });
-    const cashHint = cashEcartEspeces === 0 ? "" : ` Écart espèces : ${cashEcartEspeces > 0 ? "+" : ""}${fmt(cashEcartEspeces)} FCFA.`;
-    const nextMsg = autoOpen?.nextDate
-      ? ` Journée suivante (${formatDateDdMmYyyy(autoOpen.nextDate)}) ouverte automatiquement avec ${fmt(closingCashFcfa)} FCFA en caisse.`
-      : managerClose
-        ? " Onglet Clôture : imprimez le rapport si besoin."
-        : " En attente de confirmation par la gérante avant ouverture du jour suivant.";
-    showToast(`Journée du ${formatDateDdMmYyyy(dStr)} clôturée.${cashHint}${nextMsg}`);
+    if (isFinDeService) {
+      showToast(`Fin de service du ${formatDateDdMmYyyy(dStr)} transmise au gérant. En attente de validation.`);
+    } else {
+      const cashHint = cashEcartEspeces === 0 ? "" : ` Écart espèces : ${cashEcartEspeces > 0 ? "+" : ""}${fmt(cashEcartEspeces)} FCFA.`;
+      const nextMsg = autoOpen?.nextDate
+        ? ` Journée suivante (${formatDateDdMmYyyy(autoOpen.nextDate)}) ouverte automatiquement avec ${fmt(closingCashFcfa)} FCFA en caisse.`
+        : managerClose
+          ? " Onglet Clôture : imprimez le rapport si besoin."
+          : " En attente de confirmation par la gérante avant ouverture du jour suivant.";
+      showToast(`Journée du ${formatDateDdMmYyyy(dStr)} clôturée.${cashHint}${nextMsg}`);
+    }
   } finally {
     if (closeBtn) { closeBtn.disabled = false; closeBtn.textContent = prevCloseText; }
   }
