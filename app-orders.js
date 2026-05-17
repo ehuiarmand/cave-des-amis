@@ -6353,16 +6353,17 @@ function renderPdjManagerConfirmationBlock() {
   const label = formatDateDdMmYyyy(d);
   if (canManagePdjAccounting()) {
     host.classList.remove("hidden");
+    const sentAtGe = pending.createdAt ? ` à ${new Date(pending.createdAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}` : "";
     host.innerHTML = `
       <div class="inline-card" style="margin-bottom:14px;border-left:3px solid #ff9800;padding:14px 16px">
-        <p class="eyebrow" style="margin-bottom:6px">Validation gérante</p>
-        <strong>Clôture du ${escapeHtml(label)} à confirmer</strong>
+        <p class="eyebrow" style="margin-bottom:6px">Fin de service — validation requise</p>
+        <strong>${escapeHtml(pending.closedBy || "La serveuse")} a terminé son service</strong>
         <p class="muted" style="margin:8px 0 12px;line-height:1.45;font-size:0.88rem">
-          Enregistrée par <strong>${escapeHtml(pending.closedBy || "serveuse")}</strong>.
+          La clôture du <strong>${escapeHtml(label)}</strong> a été soumise par <strong>${escapeHtml(pending.closedBy || "la serveuse")}</strong>${sentAtGe}.
           Confirmez pour autoriser l'ouverture de la journée suivante.
         </p>
         <button type="button" class="btn btn-primary" id="pdj-manager-confirm-btn" style="width:auto;min-height:44px">
-          Confirmer la journée clôturée
+          Valider la fin de service de ${escapeHtml(pending.closedBy || "la serveuse")}
         </button>
       </div>`;
     document.getElementById("pdj-manager-confirm-btn")?.addEventListener("click", () => {
@@ -6371,11 +6372,12 @@ function renderPdjManagerConfirmationBlock() {
     return;
   }
   host.classList.remove("hidden");
+  const sentAtSe = pending.createdAt ? ` à ${new Date(pending.createdAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}` : "";
   host.innerHTML = `
     <div class="inline-card" style="margin-bottom:14px;border-left:3px solid #1565c0;padding:12px 14px">
-      <strong>Clôture en attente</strong>
+      <strong>Fin de service envoyée au gérant</strong>
       <p class="muted" style="margin:8px 0 0;line-height:1.45;font-size:0.88rem">
-        La journée du <strong>${escapeHtml(label)}</strong> est clôturée. La gérante doit la confirmer avant l'ouverture du jour suivant.
+        Votre fin de service du <strong>${escapeHtml(label)}</strong> a été transmise${sentAtSe} et attend la validation du gérant. Vous serez notifié(e) dès confirmation.
       </p>
     </div>`;
 }
@@ -6404,11 +6406,10 @@ async function confirmDayClosureByManager(dateStr) {
   check.managerConfirmedBy = sessionUser || "";
   const closingCash = Number(check.closingCashFcfa);
   const autoOpen = autoOpenNextAccountingDayAfterClose(siteId, d, closingCash, { actorLabel: sessionUser });
-  if (!autoOpen) {
-    const pdjMapClose = { ...(state.pdjWorkDateBySite || {}) };
-    if (pdjMapClose[siteId] === d) delete pdjMapClose[siteId];
-    state.pdjWorkDateBySite = pdjMapClose;
-  }
+  const pdjMapClose = { ...(state.pdjWorkDateBySite || {}) };
+  if (!autoOpen && pdjMapClose[siteId] === d) delete pdjMapClose[siteId];
+  pdjMapClose[`_fc_${siteId}`] = { date: d, confirmedBy: sessionUser || "", closedBy: check.closedBy || "", at: ts };
+  state.pdjWorkDateBySite = pdjMapClose;
   recordStaffAudit(
     "update",
     "cloture_jour",
@@ -11783,6 +11784,14 @@ async function syncStateSilently() {
     const incPdj = delta.pdjWorkDateBySite;
     const prevPdj = state.pdjWorkDateBySite || {};
     skipPdjFullRender = currentPage === "pdj" && !hadCmdDelta && shallowEqualPdjWorkDateMaps(prevPdj, incPdj);
+    // Notification serveuse : le gérant vient de valider sa fin de service
+    const sid = currentSiteId();
+    const fcKey = `_fc_${sid}`;
+    const newFc = incPdj[fcKey];
+    const prevFc = prevPdj[fcKey];
+    if (newFc && newFc.closedBy === sessionUser && (!prevFc || prevFc.at !== newFc.at)) {
+      showToast(`Votre fin de service du ${isoDateToDdMmYyyy(newFc.date)} a été validée par ${newFc.confirmedBy || "le gérant"}. Bonne journée !`);
+    }
     state.pdjWorkDateBySite = { ...prevPdj, ...incPdj };
     applyPdjWorkDateToVentesAndOrderDom();
     syncPdjWorkDateInput();
