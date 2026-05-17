@@ -11319,12 +11319,12 @@ function getMainShellScrollEl() {
 }
 
 /** Évite que la synchro live remonte la page en haut après un re-rendu. */
-function withPreservedMainShellScroll(fn) {
+function withPreservedMainShellScroll(fn, { preScrollX = null } = {}) {
   const shell = getMainShellScrollEl();
   const shellY = shell ? shell.scrollTop : 0;
   const winY = window.scrollY || window.pageYOffset || 0;
   const stockWrap = document.getElementById("main-stock-table-wrap");
-  const stockScrollX = stockWrap ? stockWrap.scrollLeft : 0;
+  const stockScrollX = preScrollX !== null ? preScrollX : (stockWrap ? stockWrap.scrollLeft : 0);
   fn();
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
@@ -11833,6 +11833,8 @@ async function syncStateSilently() {
     } catch (e) { return; }
     applyPdjWorkDateToVentesAndOrderDom();
     syncPdjWorkDateInput();
+    // Capturer le scroll horizontal AVANT renderSiteSwitcher (qui appelle renderStock et remet scrollLeft à 0)
+    const _preScrollX = (() => { const w = document.getElementById("main-stock-table-wrap"); return w ? w.scrollLeft : 0; })();
     renderTopbar();
     renderSiteSwitcher();
     if (!deferRender) {
@@ -11842,7 +11844,7 @@ async function syncStateSilently() {
         else if (stockSubTab === "achats") renderPurchaseOrders();
         else if (stockSubTab === "creanciers") renderCreanciers();
         else if (stockSubTab === "casiers") renderCasiers();
-      });
+      }, { preScrollX: _preScrollX });
     }
     return;
   }
