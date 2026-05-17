@@ -11833,19 +11833,21 @@ async function syncStateSilently() {
     } catch (e) { return; }
     applyPdjWorkDateToVentesAndOrderDom();
     syncPdjWorkDateInput();
-    // Capturer le scroll horizontal AVANT renderSiteSwitcher (qui appelle renderStock et remet scrollLeft à 0)
-    const _preScrollX = (() => { const w = document.getElementById("main-stock-table-wrap"); return w ? w.scrollLeft : 0; })();
     renderTopbar();
-    renderSiteSwitcher();
-    if (!deferRender) {
-      withPreservedMainShellScroll(() => {
+    // renderSiteSwitcher appelle syncDualZonePricingUi → renderStock → scrollLeft=0
+    // On capture le scroll AVANT et on englobe tout dans withPreservedMainShellScroll
+    // pour restaurer dans les deux cas (deferRender ou non)
+    const _preScrollX = (() => { const w = document.getElementById("main-stock-table-wrap"); return w ? w.scrollLeft : 0; })();
+    withPreservedMainShellScroll(() => {
+      renderSiteSwitcher();
+      if (!deferRender) {
         renderStock();
         if (stockSubTab === "mouvements") renderStockMovements();
         else if (stockSubTab === "achats") renderPurchaseOrders();
         else if (stockSubTab === "creanciers") renderCreanciers();
         else if (stockSubTab === "casiers") renderCasiers();
-      }, { preScrollX: _preScrollX });
-    }
+      }
+    }, { preScrollX: _preScrollX });
     return;
   }
 
