@@ -5499,6 +5499,7 @@ function navigate(page, opts = {}) {
   renderSiteSwitcher();
   if (page === "home") renderDashboard();
   if (page === "pdj") {
+    syncPdjWorkDateInput();
     const forcedPdj = opts.pdjSubTab;
     if (forcedPdj && ["synthese", "cloture", "ventes"].includes(String(forcedPdj))) {
       pdjSubTab = forcedPdj;
@@ -5920,7 +5921,7 @@ function isCreditSale(v) {
 }
 
 function renderPointDuJour() {
-  syncPdjWorkDateInput();
+  syncPdjWorkDateInput({ keepCurrentValue: true });
   const dStr = pdjCalendarDate();
   const ventesJour = recordsForSite(state.ventes).filter((v) => v.date.slice(0, 10) === dStr);
   const totalsJour = paymentTotals(ventesJour);
