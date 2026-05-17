@@ -3173,3 +3173,15 @@ textarea { font: inherit; }
   border-left: 3px solid var(--mm-primary);
   padding-left: 10px;
 }
+
+.kit-mix-panel {
+  margin: 14px 0;
+  padding: 12px 14px;
+  border: 2px solid var(--mm-primary);
+  border-radius: 10px;
+  background: rgba(33, 150, 243, 0.06);
+}
+
+.kit-mix-panel h4 {
+  color: var(--mm-primary-dark);
+}

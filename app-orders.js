@@ -8455,6 +8455,7 @@ function renderOrdersManagement() {
           <div class="order-actions-cell">
             <button type="button" class="mini-btn" data-order-details="${escapeHtml(order.id)}">Details</button>
             ${order._isPaid ? "" : `<button type="button" class="mini-btn" data-activate-order="${order.id}">Ouvrir</button>`}
+            ${order._isPaid ? "" : `<button type="button" class="mini-btn" data-kit-mix-order="${order.id}">Kit mixte</button>`}
             ${advanceBtn}
             ${encBlocked ? `<button type="button" class="mini-btn" disabled title="${encTitle}">Encaisser</button>` : ""}
             ${!order._isPaid && canDeleteOrder(order) ? `<button type="button" class="mini-btn del-btn" data-delete-order="${order.id}">Annuler</button>` : ""}
@@ -8500,6 +8501,7 @@ function renderOrders() {
         <div class="order-actions">
           <button type="button" class="mini-btn" data-activate-order="${order.id}">Ouvrir la commande</button>
           <button type="button" class="mini-btn" data-add-line-order="${order.id}">Ajouter un article</button>
+          <button type="button" class="mini-btn" data-kit-mix-order="${order.id}">Kit mixte</button>
           <button type="button" class="mini-btn" data-print-order="${order.id}">Ticket</button>
           ${nextAction}
           ${canDeleteOrder(order) ? `<button type="button" class="mini-btn" data-delete-order="${order.id}">Annuler commande</button>` : ""}
@@ -9519,9 +9521,38 @@ async function confirmKit() {
   });
   await persistState({ commandes: state.commandes, nextId: state.nextId });
   kitMixCounts = {};
-  document.getElementById("kit-mode-details")?.removeAttribute("open");
   renderVentesPage();
   showToast(`Kit mixte ajoute : ${mixLabel} (${fmt(price)} FCFA).`);
+}
+
+/** Ouvre le formulaire commande sur le panneau kit mixte (visible, pas la saisie rapide). */
+function openKitMixModal(orderId = null) {
+  syncDualZonePricingUi();
+  const oid = orderId != null ? Number(orderId) : (Number(activeOrderId) || 0);
+  activeOrderId = oid || null;
+  const order = oid ? recordsForSite(state.commandes).find((item) => item.id === oid) : null;
+  populateOrderSelect();
+  document.getElementById("v-date").value = order?.date || pdjCalendarDate();
+  document.getElementById("v-client").value = order?.client || "";
+  document.getElementById("v-order-select").value = order ? String(order.id) : "";
+  document.getElementById("v-note").value = order?.note || "";
+  document.getElementById("v-article").value = "";
+  document.getElementById("v-qty").value = "1";
+  kitMixCounts = {};
+  const vLoc = document.getElementById("v-location")?.value || "Intérieur";
+  const kitLoc = document.getElementById("kit-location");
+  if (kitLoc) kitLoc.value = vLoc;
+  renderKitProducts();
+  syncFinalizeButtonJournalState();
+  updateVentePreview();
+  const vSearch = document.getElementById("v-article-search");
+  if (vSearch) vSearch.value = "";
+  renderVenteArticlePicker();
+  openModal("modal-vente");
+  window.requestAnimationFrame(() => {
+    document.getElementById("kit-mix-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    document.getElementById("kit-price")?.focus();
+  });
 }
 
 // ─── REMPLACEMENT D'ARTICLE ───────────────────────────────────────────────────
@@ -17586,6 +17617,7 @@ function attachEvents() {
   });
   // Saisie rapide
   document.getElementById("saisie-rapide-btn")?.addEventListener("click", openSaisieRapide);
+  document.getElementById("kit-mixte-btn")?.addEventListener("click", () => openKitMixModal(activeOrderId || null));
   document.getElementById("sr-submit-btn")?.addEventListener("click", () => submitSaisieRapide().catch(handleApiError));
   document.getElementById("sr-search")?.addEventListener("input", (e) => renderSrMenu(e.target.value));
   document.getElementById("sr-order-select")?.addEventListener("change", () => {
@@ -18495,6 +18527,11 @@ document.getElementById("fab-btn").addEventListener("click", () => {
     const addLine = event.target.closest("[data-add-line-order]");
     if (addLine) {
       openOrderEditor(Number(addLine.dataset.addLineOrder));
+      return;
+    }
+    const kitMixOrder = event.target.closest("[data-kit-mix-order]");
+    if (kitMixOrder) {
+      openKitMixModal(Number(kitMixOrder.dataset.kitMixOrder));
       return;
     }
     const removeKitGroup = event.target.closest("[data-remove-kit-group]");
