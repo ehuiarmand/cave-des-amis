@@ -1273,17 +1273,6 @@ function creditRecoveryPaidAtMs(p) {
   return Number.isFinite(t) ? t : 0;
 }
 
-/** Dernier versement enregistré pour un débiteur sur le maquis courant. */
-function debtorLastCreditRecoveryMs(debtorKey, sourceState = state) {
-  const dk = debtorDisplayKey(debtorKey);
-  let max = 0;
-  creditRecoveriesForSite(sourceState).forEach((r) => {
-    if (debtorDisplayKey(r.debiteur) !== dk) return;
-    max = Math.max(max, creditRecoveryPaidAtMs(r));
-  });
-  return max;
-}
-
 function calendarDaysSince(ms) {
   if (!ms) return 0;
   const start = new Date(ms);
@@ -1293,27 +1282,28 @@ function calendarDaysSince(ms) {
   return Math.floor((now - start) / 86400000);
 }
 
-/** Débiteur soldé depuis plus de N jours calendaires (dernier versement). */
-function isDebtorSettledBeyondHistoryRetention(debtorKey, sourceState = state, retentionDays = CREDIT_HISTORY_SETTLED_RETENTION_DAYS) {
-  const dk = debtorDisplayKey(debtorKey);
-  if (Math.round(Number(creditOutstandingMap(sourceState)[dk]) || 0) > 0) return false;
-  if (issuedCreditTotalForDebtor(dk, sourceState) <= 0) return false;
-  const lastMs = debtorLastCreditRecoveryMs(dk, sourceState);
-  if (!lastMs) return false;
-  return calendarDaysSince(lastMs) > Math.max(1, retentionDays);
+/** Versement individuel : masqué si client soldé et date du versement > N jours. */
+function isCreditRecoveryPaymentBeyondHistoryRetention(
+  p,
+  sourceState = state,
+  retentionDays = CREDIT_HISTORY_SETTLED_RETENTION_DAYS,
+) {
+  const payMs = creditRecoveryPaidAtMs(p);
+  if (!payMs) return false;
+  return calendarDaysSince(payMs) > Math.max(1, retentionDays);
 }
 
 /**
  * Versements visibles dans l’historique :
- * - dette encore ouverte → toujours ;
- * - solde complet → masqué après CREDIT_HISTORY_SETTLED_RETENTION_DAYS depuis le dernier versement.
+ * - dette encore ouverte → tous les versements du client ;
+ * - client soldé → chaque versement disparaît N jours après sa propre date.
  */
 function isCreditRecoveryVisibleInHistoryUi(p, sourceState = state) {
   const dk = debtorDisplayKey(p.debiteur);
   const remaining = Math.round(Number(creditOutstandingMap(sourceState)[dk]) || 0);
   if (remaining > 0) return true;
   if (issuedCreditTotalForDebtor(dk, sourceState) <= 0) return false;
-  return !isDebtorSettledBeyondHistoryRetention(dk, sourceState);
+  return !isCreditRecoveryPaymentBeyondHistoryRetention(p, sourceState);
 }
 
 function creditRecoveriesForHistoryUi(sourceState = state) {
@@ -1377,7 +1367,7 @@ function buildCreditRecoveryHistoryHtml() {
         <tbody>${rows}</tbody>
       </table>
     </div>
-    <p class="muted" style="font-size:0.78rem;margin-top:8px;line-height:1.4">Versements liés à des ventes « crédit client » de ce maquis. Après solde complet, l’historique d’un client disparaît ${CREDIT_HISTORY_SETTLED_RETENTION_DAYS} jours après son dernier paiement. Les encaissements sans vente crédit correspondante ne s’affichent pas ici.</p>
+    <p class="muted" style="font-size:0.78rem;margin-top:8px;line-height:1.4">Versements liés à des ventes « crédit client » de ce maquis. Client soldé : chaque ligne disparaît ${CREDIT_HISTORY_SETTLED_RETENTION_DAYS} jours après sa date de paiement. Les encaissements sans vente crédit correspondante ne s’affichent pas ici.</p>
   </div>`;
 }
 
@@ -7837,22 +7827,27 @@ function renderOrdersManagement() {
       const next = order._isPaid ? "" : nextOrderStatus(orderStatus(order));
       const encBlocked = next === "Encaisser" && journalEncaisseDisabledForOrder(order);
       const encTitle = encBlocked ? escapeHtml(journalEncaisseBlockTitle(order)) : "";
+      const advanceBtn = next && !(next === "Encaisser" && encBlocked)
+        ? `<button type="button" class="mini-btn${next === "Encaisser" ? " btn-encaisser" : ""}" data-advance-order="${order.id}">${escapeHtml(next)}</button>`
+        : "";
       return `<tr>
         <td>#${escapeHtml(order.factureNumber || String(order.id))}</td>
         <td>${escapeHtml(orderPhysicalTable(order))}</td>
-        <td>${escapeHtml(orderSaisieMode(order))}</td>
+        <td class="col-hide-sm">${escapeHtml(orderSaisieMode(order))}</td>
         <td>${escapeHtml(orderServerDisplay(order))}</td>
         <td>${escapeHtml(orderStatus(order))}</td>
-        <td>${orderType(order) === "a-emporter" ? "A emporter" : "Sur place"}</td>
-        <td style="text-align:left;max-width:min(360px,48vw);font-size:0.82rem;line-height:1.35;vertical-align:top" class="order-art-cell">${orderManagementArticlesCell(order)}</td>
-        <td style="text-align:right">${fmt(orderTotal(order))} FCFA</td>
-        <td>${escapeHtml(orderTime(order))}</td>
-        <td>
-          <button type="button" class="mini-btn" data-order-details="${escapeHtml(order.id)}">Details</button>
-          ${order._isPaid ? "" : `<button type="button" class="mini-btn" data-activate-order="${order.id}">Ouvrir</button>`}
-          ${next && !(next === "Encaisser" && encBlocked) ? `<button type="button" class="mini-btn" data-advance-order="${order.id}">${escapeHtml(next)}</button>` : ""}
-          ${encBlocked ? `<button type="button" class="mini-btn" disabled title="${encTitle}">Encaisser</button>` : ""}
-          ${!order._isPaid && canDeleteOrder(order) ? `<button type="button" class="mini-btn" data-delete-order="${order.id}">Annuler</button>` : ""}
+        <td class="col-hide-sm">${orderType(order) === "a-emporter" ? "A emporter" : "Sur place"}</td>
+        <td class="order-art-cell">${orderManagementArticlesCell(order, 4)}</td>
+        <td style="text-align:right;white-space:nowrap">${fmt(orderTotal(order))} FCFA</td>
+        <td class="col-hide-sm">${escapeHtml(orderTime(order))}</td>
+        <td class="col-actions">
+          <div class="order-actions-cell">
+            <button type="button" class="mini-btn" data-order-details="${escapeHtml(order.id)}">Details</button>
+            ${order._isPaid ? "" : `<button type="button" class="mini-btn" data-activate-order="${order.id}">Ouvrir</button>`}
+            ${advanceBtn}
+            ${encBlocked ? `<button type="button" class="mini-btn" disabled title="${encTitle}">Encaisser</button>` : ""}
+            ${!order._isPaid && canDeleteOrder(order) ? `<button type="button" class="mini-btn del-btn" data-delete-order="${order.id}">Annuler</button>` : ""}
+          </div>
         </td>
       </tr>`;
     }).join("")
@@ -11074,7 +11069,7 @@ function renderCreditRecovery() {
   if (!entries.length) {
     list.innerHTML = `
       <div class="muted" style="margin-bottom:14px;padding:12px;border:1px solid var(--border);border-radius:8px;font-size:0.92rem">
-        <strong>Aucun solde débiteur actif</strong> — soit tous les crédits sont soldés, soit aucune vente n’a été encaissée en « Crédit client » pour ce maquis. L’historique ci‑dessous affiche les versements récents (clients soldés : ${CREDIT_HISTORY_SETTLED_RETENTION_DAYS} jours après le dernier paiement).
+        <strong>Aucun solde débiteur actif</strong> — soit tous les crédits sont soldés, soit aucune vente n’a été encaissée en « Crédit client » pour ce maquis. L’historique ci‑dessous masque chaque versement ${CREDIT_HISTORY_SETTLED_RETENTION_DAYS} jours après sa date (si le client est soldé).
       </div>
       ${historyHtml}`;
     return;

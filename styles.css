@@ -3032,3 +3032,97 @@ textarea { font: inherit; }
     background: rgba(255, 183, 77, 0.28);
   }
 }
+
+/* Gestion des commandes — colonne Actions visible (mobile) */
+.orders-mgmt-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  max-width: 100%;
+  margin-top: 8px;
+  padding-bottom: 12px;
+}
+
+.orders-mgmt-table {
+  min-width: 640px;
+}
+
+.orders-mgmt-table .order-art-cell {
+  white-space: normal;
+  max-width: 120px;
+  min-width: 88px;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  vertical-align: top;
+  word-break: break-word;
+}
+
+.orders-mgmt-table th.col-actions,
+.orders-mgmt-table td.col-actions {
+  position: sticky;
+  right: 0;
+  z-index: 2;
+  background: var(--mm-surface);
+  box-shadow: -6px 0 10px rgba(0, 0, 0, 0.07);
+  vertical-align: top;
+}
+
+.orders-mgmt-table thead th.col-actions {
+  z-index: 3;
+  background: rgba(33, 150, 243, 0.08);
+}
+
+.orders-mgmt-table .order-actions-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 108px;
+}
+
+.orders-mgmt-table .order-actions-cell .mini-btn {
+  width: 100%;
+  text-align: center;
+  padding: 9px 8px;
+  font-size: 0.8rem;
+}
+
+.orders-mgmt-table .mini-btn.btn-encaisser {
+  background: rgba(114, 215, 169, 0.22);
+  border: 1px solid rgba(114, 215, 169, 0.55);
+  color: #1b5e20;
+  font-weight: 800;
+}
+
+@media (max-width: 900px) {
+  .orders-mgmt-table .col-hide-sm {
+    display: none;
+  }
+
+  .orders-mgmt-scroll-hint {
+    display: block;
+  }
+
+  .orders-mgmt-table {
+    min-width: 520px;
+  }
+
+  .orders-mgmt-table .order-art-cell {
+    max-width: 96px;
+  }
+}
+
+@media (min-width: 901px) {
+  .orders-mgmt-scroll-hint {
+    display: none;
+  }
+
+  .orders-mgmt-table .order-actions-cell {
+    flex-direction: row;
+    flex-wrap: wrap;
+    min-width: 200px;
+  }
+
+  .orders-mgmt-table .order-actions-cell .mini-btn {
+    width: auto;
+    flex: 0 1 auto;
+  }
+}

@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Flex:wght@500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./styles.css?v=39">
+  <link rel="stylesheet" href="./styles.css?v=40">
 </head>
 <body>
   <div class="app-bg"></div>
@@ -432,20 +432,21 @@
               <button id="print-orders-management-btn" class="btn btn-outline" type="button">Imprimer la periode</button>
             </div>
           </div>
-          <div class="stock-table-wrap" style="margin-top:18px">
-            <table class="stock-table">
+          <p class="muted orders-mgmt-scroll-hint" style="font-size:0.8rem;margin:14px 0 0;line-height:1.4">Sur mobile : faites glisser le tableau vers la gauche — la colonne <strong>Actions</strong> (Encaisser) reste visible à droite.</p>
+          <div class="stock-table-wrap orders-mgmt-table-wrap">
+            <table class="stock-table orders-mgmt-table">
               <thead>
                 <tr>
                   <th>Numero</th>
                   <th>Table</th>
-                  <th>Mode</th>
+                  <th class="col-hide-sm">Mode</th>
                   <th>Serveur</th>
                   <th>Statut</th>
-                  <th>Type</th>
+                  <th class="col-hide-sm">Type</th>
                   <th style="text-align:left">Articles</th>
                   <th style="text-align:right">Montant</th>
-                  <th>Heure</th>
-                  <th>Actions</th>
+                  <th class="col-hide-sm">Heure</th>
+                  <th class="col-actions">Actions</th>
                 </tr>
               </thead>
               <tbody id="orders-management-table"></tbody>
@@ -2587,6 +2588,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=277"></script>
+  <script src="./app-orders.js?v=279"></script>
 </body>
 </html>
