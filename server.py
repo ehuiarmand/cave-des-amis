@@ -1049,6 +1049,56 @@ def _order_create_fingerprint(order: dict[str, Any]) -> str:
     return f"{_order_payment_fingerprint(order)}|{mode}|{srv}"
 
 
+def _stock_check_manager_confirmed(check: dict[str, Any]) -> bool:
+    if check.get("managerConfirmedAt"):
+        return True
+    role = str(check.get("closedByRole") or "").strip().lower()
+    if not role:
+        return True
+    return role != "serveuse"
+
+
+def sanitize_stock_checks_for_session(
+    incoming: list[Any],
+    session: dict[str, Any],
+) -> list[Any]:
+    """Serveuse : clôture sans validation gérante ; pas de confirmation usurpée."""
+    role = str(session.get("role", "")).strip().lower()
+    un = str(session.get("username", "")).strip()
+    out: list[Any] = []
+    for row in incoming or []:
+        if not isinstance(row, dict):
+            continue
+        sc = json.loads(json.dumps(row))
+        if role == "serveuse":
+            sc["closedBy"] = un
+            sc["closedByRole"] = "serveuse"
+            sc.pop("managerConfirmedAt", None)
+            sc.pop("managerConfirmedBy", None)
+        elif role in ("manager", "admin", "superadmin") and sc.get("date"):
+            if not sc.get("managerConfirmedAt") and _stock_check_manager_confirmed(sc):
+                sc["managerConfirmedAt"] = sc.get("createdAt") or time.strftime(
+                    "%Y-%m-%dT%H:%M:%SZ", time.gmtime()
+                )
+                sc["managerConfirmedBy"] = sc.get("managerConfirmedBy") or un
+        out.append(sc)
+    return out
+
+
+def validate_serveuse_pdj_payload(session: dict[str, Any], payload: dict[str, Any]) -> None:
+    role = str(session.get("role", "")).strip().lower()
+    if role != "serveuse":
+        return
+    if "pdjWorkDateBySite" in payload:
+        raise ValueError("La date comptable est modifiable uniquement par le gerant.")
+    if "dayBooks" in payload:
+        for book in payload.get("dayBooks") or []:
+            if not isinstance(book, dict):
+                continue
+            if book.get("openingCashRecorded") is True:
+                raise ValueError("Ouverture de caisse reservee au gerant ou administrateur.")
+
+
 def dedupe_commandes_list(
     commandes: list[Any],
     ventes: list[Any] | None = None,
@@ -2495,6 +2545,8 @@ class DataStore:
             if not allowed:
                 raise ValueError("Session sans maquis autorise.")
 
+            validate_serveuse_pdj_payload(session, payload)
+
             # Ne merger une collection que si elle est explicitement presente dans le payload.
             # Si elle est absente (patch partiel), conserver la valeur courante intacte.
             _SCOPED_KEYS = [
@@ -2537,6 +2589,13 @@ class DataStore:
                             allowed,
                             sid_list,
                             ventes=current.get("ventes", []),
+                        )
+                    elif _key == "stockChecks":
+                        incoming_sc = sanitize_stock_checks_for_session(
+                            payload[_key], session
+                        )
+                        current[_key] = merge_scoped_rows(
+                            current.get(_key, []), incoming_sc, allowed, sid_list
                         )
                     else:
                         current[_key] = merge_scoped_rows(

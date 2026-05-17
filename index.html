@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Flex:wght@500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./styles.css?v=40">
+  <link rel="stylesheet" href="./styles.css?v=41">
 </head>
 <body>
   <div class="app-bg"></div>
@@ -76,6 +76,10 @@
         <button class="nav-btn staff-schedule-nav" data-page="planning" type="button">
           <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M3.5 0a.5.5 0 0 1 .5.5V1h8V.5a.5.5 0 0 1 1 0V1h1a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2h1V.5a.5.5 0 0 1 .5-.5zM2 2a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1H2zm0 4h12v1H2V6z"/></svg>
           <span>Planning</span>
+        </button>
+        <button class="nav-btn serveuse-only-nav hidden" data-page="historique-ventes" type="button">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M2 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2zm2-1a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1H4zM4.5 5a.5.5 0 0 0 0 1h7a.5.5 0 0 0 0-1h-7zm0 3a.5.5 0 0 0 0 1h5a.5.5 0 0 0 0-1h-5z"/></svg>
+          <span>Mes ventes</span>
         </button>
         <button class="nav-btn" data-page="stock" type="button">
           <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8.186 1.113a.5.5 0 0 0-.372 0L1.846 3.5 4.25 4.461 10.404 2l-2.218-.887zm3.564 1.426L5.596 5 8 5.961 14.154 3.5l-2.404-.961zm3.25 1.7-6.5 2.6v7.922l6.5-2.6V4.24zM7.5 14.762V6.838L1 4.239v7.923l6.5 2.6zM7.443.184a1.5 1.5 0 0 1 1.114 0l7.129 2.852A.5.5 0 0 1 16 3.5v8.35a1.5 1.5 0 0 1-.914 1.387l-6.857 2.743a.5.5 0 0 1-.372 0L1.914 13.237A1.5 1.5 0 0 1 1 11.85V3.5a.5.5 0 0 1 .314-.464L7.443.184z"/></svg>
@@ -204,22 +208,23 @@
           </div>
           </div>
           <div id="pdj-panel-cloture" class="pdj-panel hidden">
-          <div id="pdj-cash-opening" class="pdj-cash-opening pdj-accounting-only"></div>
+          <div id="pdj-manager-confirm-block" class="hidden"></div>
+          <div id="pdj-cash-opening" class="pdj-cash-opening pdj-accounting-open-only"></div>
           <div id="pdj-serveuse-print-block" class="pdj-serveuse-print-only inline-card" style="margin-bottom:14px;padding:14px 16px">
             <p class="eyebrow" style="margin-bottom:6px">Rapport du jour</p>
             <p class="muted" style="font-size:0.88rem;line-height:1.45;margin:0 0 12px">
-              Imprimez la synthèse des ventes du jour (contrôle ou journée déjà clôturée). La clôture et la vérification stock sont réservées au gérant.
+              Imprimez la synthèse des ventes (consultation). Pendant votre créneau de service, vous pouvez aussi clôturer la journée ci-dessous.
             </p>
             <button type="button" id="print-pdj-serveuse-btn" class="btn btn-outline">Imprimer le point du jour</button>
           </div>
-          <div class="section-head pdj-detail-head pdj-accounting-only">
+          <div class="section-head pdj-detail-head pdj-accounting-close-only">
             <h3 class="pdj-detail-title">Fermeture &amp; stock</h3>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
               <button id="close-day-btn" class="mini-btn" type="button">Clôturer la journée</button>
               <button id="print-closure-btn" class="btn btn-outline hidden" type="button">Imprimer le rapport de clôture</button>
             </div>
           </div>
-          <div id="pdj-stock-check" class="pdj-accounting-only"></div>
+          <div id="pdj-stock-check" class="pdj-accounting-close-only"></div>
           <div id="pdj-closed-archive" class="pdj-accounting-only"></div>
           <div id="pdj-reopen-closures" class="pdj-accounting-only"></div>
           </div>
@@ -616,7 +621,7 @@
               <p class="muted caisse-shell-copy">Historique des factures encaissées · suivi des crédits et versements clients.</p>
             </div>
             <div class="tabs" style="margin-bottom:14px">
-              <button type="button" class="tab" data-caisse-inner="historique" role="tab" aria-selected="false">Historique ventes</button>
+              <button type="button" class="tab manager-only" data-caisse-inner="historique" role="tab" aria-selected="false">Historique ventes</button>
               <button type="button" class="tab active" data-caisse-inner="recouvrement" role="tab" aria-selected="true">Recouvrement crédit</button>
             </div>
 
@@ -1241,6 +1246,43 @@
         </div>
       </section>
 
+      <section id="page-historique-ventes" class="page">
+        <article class="card srv-hist-card">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Serveuse</p>
+              <h3>Mes ventes</h3>
+              <p class="muted" style="margin:8px 0 0;font-size:0.88rem;line-height:1.45">
+                Factures que <strong>vous</strong> avez encaissées sur ce maquis — consultation et impression uniquement.
+              </p>
+            </div>
+            <span id="srv-hist-count-meta" class="section-meta">0 facture</span>
+          </div>
+          <div class="srv-hist-quick-period tabs" role="tablist" aria-label="Période rapide">
+            <button type="button" class="tab active" data-srv-hist-preset="today">Aujourd&apos;hui</button>
+            <button type="button" class="tab" data-srv-hist-preset="7d">7 jours</button>
+            <button type="button" class="tab" data-srv-hist-preset="month">Ce mois</button>
+          </div>
+          <div class="form-grid three-cols" style="margin-top:12px">
+            <div class="form-group">
+              <label for="srv-hist-period-start">Du</label>
+              <input id="srv-hist-period-start" type="date">
+            </div>
+            <div class="form-group">
+              <label for="srv-hist-period-end">Au</label>
+              <input id="srv-hist-period-end" type="date">
+            </div>
+            <div class="form-group">
+              <label>&nbsp;</label>
+              <button id="print-srv-hist-btn" class="btn btn-outline" type="button">Imprimer la période</button>
+            </div>
+          </div>
+          <div id="srv-hist-kpis" class="pdj-kpis" style="margin:14px 0 10px"></div>
+          <div id="srv-hist-tabs" class="tabs"></div>
+          <div id="srv-hist-list" class="stack-list"></div>
+        </article>
+      </section>
+
       <section id="page-params" class="page">
         <div class="tabs page-subtabs params-subtabs" role="tablist" aria-label="Sous-menus paramètres">
           <button type="button" class="tab active" data-subtab-params="profil" role="tab" aria-selected="true">Profil</button>
@@ -1587,7 +1629,13 @@
         </span>
         <span class="bottom-nav-label">Commandes</span>
       </button>
-      <button type="button" class="nav-btn bottom-nav-item" data-page="ventes" data-ventes-subtab="caisse" data-caisse-inner="recouvrement" aria-current="false">
+      <button type="button" class="nav-btn bottom-nav-item serveuse-only-nav hidden" data-page="historique-ventes" aria-current="false">
+        <span class="bottom-nav-icon-wrap">
+          <svg class="nav-icon bottom-nav-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M2 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2zm2-1a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1H4zM4.5 5a.5.5 0 0 0 0 1h7a.5.5 0 0 0 0-1h-7zm0 3a.5.5 0 0 0 0 1h5a.5.5 0 0 0 0-1h-5z"/></svg>
+        </span>
+        <span class="bottom-nav-label">Mes ventes</span>
+      </button>
+      <button type="button" class="nav-btn bottom-nav-item manager-caisse-nav" data-page="ventes" data-ventes-subtab="caisse" data-caisse-inner="recouvrement" aria-current="false">
         <span class="bottom-nav-icon-wrap">
           <svg class="nav-icon bottom-nav-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1.5 2A1.5 1.5 0 0 0 0 3.5v2h15v-2A1.5 1.5 0 0 0 13.5 2h-12zM15 7H1v5.5a1.5 1.5 0 0 0 1.5 1.5h11a1.5 1.5 0 0 0 1.5-1.5V7z"/></svg>
         </span>
@@ -1646,6 +1694,13 @@
             <span class="mobile-more-feature-copy">
               <strong>Guide</strong>
               <span class="mobile-more-feature-desc">Mode d&apos;emploi et bonnes pratiques.</span>
+            </span>
+          </button>
+          <button type="button" class="mobile-more-feature serveuse-only-nav hidden" data-more-nav="historique-ventes">
+            <span class="mobile-more-feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M6 2h12v20H6V2zM8 6h8M8 10h8M8 14h5"/></svg></span>
+            <span class="mobile-more-feature-copy">
+              <strong>Mes ventes</strong>
+              <span class="mobile-more-feature-desc">Historique de vos factures encaissées.</span>
             </span>
           </button>
           <button type="button" class="mobile-more-feature staff-schedule-nav" data-more-nav="planning">
@@ -2588,6 +2643,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=280"></script>
+  <script src="./app-orders.js?v=282"></script>
 </body>
 </html>

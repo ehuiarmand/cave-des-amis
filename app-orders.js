@@ -706,10 +706,12 @@ function renderStockFilterBar(allItems, site) {
 
 function updateCloseDayButtonLabel() {
   const btn = document.getElementById("close-day-btn");
-  if (!btn || !canManagePdjAccounting()) return;
+  if (!btn || !canClosePdjDay()) return;
   const d = pdjCalendarDate();
   btn.className = "btn btn-danger";
-  btn.textContent = `Cloturer definitivement la journee du ${formatDateDdMmYyyy(d)}`;
+  const role = String(currentRole || "").trim();
+  const suffix = role === "serveuse" ? " (fin de service)" : "";
+  btn.textContent = `Clôturer la journée du ${formatDateDdMmYyyy(d)}${suffix}`;
 }
 let activeOrderId = null;
 /** Date PDJ affichee (consultation / impression) sans imposer la journee serveur — par maquis. */
@@ -2707,6 +2709,68 @@ function workShiftDurationMinutes(shift) {
   return Math.max(0, Math.round((end - start) / 60000));
 }
 
+/** Intervalle réel d'un créneau (fin après minuit si endTime <= startTime). */
+function workShiftInterval(shift) {
+  const d = String(shift?.date || "").slice(0, 10);
+  const st = String(shift?.startTime || "").trim();
+  const en = String(shift?.endTime || "").trim();
+  if (!d || !/^\d{4}-\d{2}-\d{2}$/.test(d) || !st || !en) return null;
+  const [sh, sm] = st.split(":").map(Number);
+  const [eh, em] = en.split(":").map(Number);
+  if ([sh, sm, eh, em].some((n) => Number.isNaN(n))) return null;
+  let start = new Date(`${d}T${pad2(sh)}:${pad2(sm)}:00`);
+  let end = new Date(`${d}T${pad2(eh)}:${pad2(em)}:00`);
+  if (end <= start) end = new Date(end.getTime() + 24 * 60 * 60 * 1000);
+  return { start, end, shift };
+}
+
+function workShiftsForUserOnDate(username, siteId, dateIso) {
+  const un = String(username || "").trim().toLowerCase();
+  const d = String(dateIso || "").slice(0, 10);
+  if (!un || !/^\d{4}-\d{2}-\d{2}$/.test(d)) return [];
+  return workShiftsForSite(siteId).filter(
+    (s) => String(s.username || "").trim().toLowerCase() === un
+      && String(s.date || "").slice(0, 10) === d,
+  );
+}
+
+/** Créneaux actifs maintenant (jour du créneau et veille pour les fins après minuit). */
+function activeWorkShiftsNow(username = sessionUser, siteId = currentSiteId()) {
+  const un = String(username || "").trim();
+  if (!un) return [];
+  const now = Date.now();
+  const days = [today(), addCalendarDaysIso(today(), -1)];
+  const seen = new Set();
+  const out = [];
+  days.forEach((d) => {
+    workShiftsForUserOnDate(un, siteId, d).forEach((shift) => {
+      const iv = workShiftInterval(shift);
+      if (!iv || now < iv.start.getTime() || now > iv.end.getTime()) return;
+      const key = Number(shift.id) || `${shift.date}|${shift.startTime}|${shift.endTime}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push(shift);
+    });
+  });
+  return out;
+}
+
+function staffRequiresShiftWindowForSales() {
+  const r = String(currentRole || "").trim();
+  return r === "serveuse" || r === "manager";
+}
+
+function staffIsOnDutyNow(siteId = currentSiteId()) {
+  if (!staffRequiresShiftWindowForSales()) return true;
+  return activeWorkShiftsNow(sessionUser, siteId).length > 0;
+}
+
+function formatShiftWindowLabel(shift) {
+  const st = String(shift?.startTime || "").trim().slice(0, 5);
+  const en = String(shift?.endTime || "").trim().slice(0, 5);
+  return st && en ? `${st} – ${en}` : "votre créneau";
+}
+
 function formatDurationMinutes(mins) {
   const m = Math.max(0, Math.round(Number(mins) || 0));
   const h = Math.floor(m / 60);
@@ -2795,15 +2859,20 @@ function serveuseHasShiftOnDate(username, siteId, dateIso) {
   );
 }
 
-/** Message si la serveuse ne peut pas vendre (jour de repos planifié). */
+/** Message si serveuse / gérante en service ne peut pas vendre (hors créneau ou repos). */
 function serveusePlanningBlocksSale(saleDateStr, siteId = currentSiteId()) {
-  if (String(currentRole || "").trim() !== "serveuse") return null;
+  if (!staffRequiresShiftWindowForSales()) return null;
   const d = String(saleDateStr || "").slice(0, 10);
   const sid = siteId || currentSiteId();
   if (!sid || !/^\d{4}-\d{2}-\d{2}$/.test(d)) return null;
   if (!teamHasPlanningOnDate(sid, d)) return null;
-  if (serveuseHasShiftOnDate(sessionUser, sid, d)) return null;
+  if (staffIsOnDutyNow(sid)) return null;
   const label = formatDateDdMmYyyy(d);
+  const todayShifts = workShiftsForUserOnDate(sessionUser, sid, d);
+  if (todayShifts.length) {
+    const windows = todayShifts.map(formatShiftWindowLabel).join(", ");
+    return `Hors période de service (${label}) : vos créneaux sont ${windows}. Revenez pendant votre service ou demandez à la gérante d'ajuster le planning.`;
+  }
   return `Jour de repos (${label}) : vous ne pouvez pas vendre. Voyez votre gérante pour vous autoriser — elle pourra ajouter un créneau dans Planning → Équipe.`;
 }
 
@@ -3070,8 +3139,14 @@ function renderPlanningMine() {
   if (sumEl) {
     if (restToday) {
       sumEl.innerHTML = `<div class="inline-card ventes-rest-day-alert" role="alert">
-        <strong>Jour de repos</strong>
+        <strong>Hors service</strong>
         <p class="ventes-rest-day-alert-msg">${escapeHtml(restToday)}</p>
+      </div>`;
+    } else if (staffIsOnDutyNow()) {
+      const active = activeWorkShiftsNow(sessionUser, currentSiteId());
+      const win = active.map(formatShiftWindowLabel).join(", ");
+      sumEl.innerHTML = `<div class="inline-card" style="border-left:3px solid #72d7a9;padding:10px 12px;font-size:0.88rem">
+        <strong>En service maintenant</strong> · ${escapeHtml(win)}
       </div>`;
     } else {
       sumEl.textContent = rows.length
@@ -3596,18 +3671,54 @@ function bindPlanningEvents() {
   });
 }
 
-/** Ouverture / clôture journée comptable (PDJ) : tout utilisateur connecté sauf les comptes serveuse. */
+/** Ouverture caisse, réouverture, date PDJ admin : gérant / administrateurs (pas serveuse). */
 function canManagePdjAccounting() {
   return Boolean(sessionUser) && String(currentRole || "").trim() !== "serveuse";
 }
 
+/** Clôture journée : gérant / admin ; serveuse ou gérante uniquement pendant son créneau de service. */
+function canClosePdjDay() {
+  if (!sessionUser) return false;
+  if (canManagePdjAccounting()) return true;
+  return staffRequiresShiftWindowForSales() && staffIsOnDutyNow();
+}
+
+function stockCheckIsManagerConfirmed(check) {
+  if (!check || typeof check !== "object") return false;
+  if (check.managerConfirmedAt) return true;
+  const role = String(check.closedByRole || "").trim().toLowerCase();
+  if (!role) return true;
+  return role !== "serveuse";
+}
+
+/** Dernière clôture du maquis en attente de validation gérante. */
+function pendingManagerConfirmationCheck(siteId = currentSiteId()) {
+  const sid = String(siteId || "").trim();
+  if (!sid) return null;
+  let best = null;
+  for (const sc of state.stockChecks || []) {
+    if (!sc || sc.siteId !== sid || !sc.date) continue;
+    if (stockCheckIsManagerConfirmed(sc)) continue;
+    const d = String(sc.date).slice(0, 10);
+    if (!best || d.localeCompare(String(best.date).slice(0, 10)) > 0) best = sc;
+  }
+  return best;
+}
+
 function updatePdjRoleVisibility() {
   const accounting = canManagePdjAccounting();
+  const canClose = canClosePdjDay();
   document.querySelectorAll(".pdj-accounting-only").forEach((node) => {
     node.classList.toggle("hidden-by-role", !accounting);
   });
+  document.querySelectorAll(".pdj-accounting-open-only").forEach((node) => {
+    node.classList.toggle("hidden-by-role", !accounting);
+  });
+  document.querySelectorAll(".pdj-accounting-close-only").forEach((node) => {
+    node.classList.toggle("hidden-by-role", !canClose);
+  });
   document.querySelectorAll(".pdj-serveuse-print-only").forEach((node) => {
-    node.classList.toggle("hidden-by-role", accounting);
+    node.classList.toggle("hidden-by-role", accounting || canClose);
   });
 }
 
@@ -4402,6 +4513,21 @@ function applyRoleVisibility() {
       roleSelect.value = "serveuse";
     }
   }
+  const serveuse = isServeuseAccount();
+  document.querySelectorAll(".serveuse-only-nav").forEach((node) => {
+    node.classList.toggle("hidden", !serveuse);
+  });
+  document.querySelectorAll(".manager-caisse-nav").forEach((node) => {
+    node.classList.toggle("hidden", serveuse);
+  });
+  if (!serveuse && currentPage === "historique-ventes") {
+    navigate("ventes");
+    return;
+  }
+  if (serveuse && currentPage === "ventes" && ventesSubTab === "caisse" && caisseInnerTab === "historique") {
+    navigate("historique-ventes");
+    return;
+  }
   syncGerantParamsAccess();
   maybeAdjustParamsSubTab();
   updatePdjRoleVisibility();
@@ -4478,16 +4604,18 @@ function renderHero() {
     charges: "Les sorties d'argent restent centralisées.",
     params: "Paramètres : profil personnel pour tous ; catalogue, accès et administration pour les rôles autorisés.",
     planning: "Consultez vos horaires et, si vous êtes gérant, planifiez l'équipe.",
+    "historique-ventes": "Vos factures encaissées, filtrées par période.",
   };
   const copies = {
     home: "Le serveur garde les sessions et l'état complet de l'application.",
-    pdj: "Ouverture puis fermeture de journée : gérant et administrateurs ; les ventes sont bloquées tant que la journée n'est pas ouverte. Les serveuses consultent le reste.",
+    pdj: "Ouverture : gérant / admin. Clôture : gérant ou équipe en créneau de service ; la gérante confirme avant le jour suivant. Ventes autorisées uniquement pendant votre service planifié.",
     ventes: "Une commande peut être modifiée autant de fois que nécessaire avant la facture finale, si la journée est ouverte.",
     guide: "Sommaire, liens vers le guide imprimable PDF ; même les comptes serveuse peuvent consulter cette page.",
     stock: "Renseignez prix achat et prix vente pour accélérer la prise de commande.",
     charges: "Toutes les dépenses sont historisées côté serveur.",
     params: "Onglet Profil : mon compte (nom affiché, mot de passe) pour tous ; réglages du maquis réservés au gérant ou aux administrateurs.",
     planning: "Mes horaires : lecture pour toute l'équipe. Onglet Équipe : création des créneaux (gérant / admin).",
+    "historique-ventes": "Consultation et impression de vos ventes uniquement — pas l'historique caisse du gérant.",
   };
   document.getElementById("hero-title").textContent = titles[currentPage];
   document.getElementById("hero-copy").textContent = copies[currentPage];
@@ -4515,6 +4643,10 @@ function syncCaisseInnerPanels() {
 
 function setCaisseInnerTab(tab) {
   if (tab !== "historique" && tab !== "recouvrement") return;
+  if (tab === "historique" && isServeuseAccount()) {
+    navigate("historique-ventes");
+    return;
+  }
   caisseInnerTab = tab;
   syncCaisseInnerPanels();
   syncNavActiveState();
@@ -5055,6 +5187,7 @@ function syncNavActiveState() {
 }
 
 function navigate(page, opts = {}) {
+  if (page === "historique-ventes" && !isServeuseAccount()) page = "ventes";
   currentPage = page;
   const vstab = opts.ventesSubtab;
   const cinner = opts.caisseInner;
@@ -5087,6 +5220,7 @@ function navigate(page, opts = {}) {
     maybeAdjustParamsSubTab();
   }
   if (page === "planning") renderPlanningPage().catch(handleApiError);
+  if (page === "historique-ventes") renderServeuseSalesHistoryPage();
   syncFabLabelForStockPage();
   applyRoleVisibility();
 }
@@ -5137,6 +5271,7 @@ function bindMobileMoreSheet() {
     else if (nav === "charges") navigate("charges");
     else if (nav === "params") navigate("params");
     else if (nav === "planning") navigate("planning");
+    else if (nav === "historique-ventes") navigate("historique-ventes");
     else if (nav === "logout") logout();
   });
 }
@@ -5511,6 +5646,7 @@ function renderPointDuJour() {
     }
   }
   renderCashOpeningPanel();
+  renderPdjManagerConfirmationBlock();
   document.getElementById("pdj-ca").textContent = `${fmt(caEncaisseTotal)} FCFA`;
   document.getElementById("pdj-creances").textContent = `${fmt(caCreances)} FCFA`;
   const pdjCreancesSub = document.getElementById("pdj-creances-sub");
@@ -5898,6 +6034,94 @@ function captureOpeningStockSnapshot() {
   return snapshot;
 }
 
+function renderPdjManagerConfirmationBlock() {
+  const host = document.getElementById("pdj-manager-confirm-block");
+  if (!host) return;
+  const siteId = currentSiteId();
+  const pending = pendingManagerConfirmationCheck(siteId);
+  if (!pending) {
+    host.classList.add("hidden");
+    host.innerHTML = "";
+    return;
+  }
+  const d = String(pending.date || "").slice(0, 10);
+  const label = formatDateDdMmYyyy(d);
+  if (canManagePdjAccounting()) {
+    host.classList.remove("hidden");
+    host.innerHTML = `
+      <div class="inline-card" style="margin-bottom:14px;border-left:3px solid #ff9800;padding:14px 16px">
+        <p class="eyebrow" style="margin-bottom:6px">Validation gérante</p>
+        <strong>Clôture du ${escapeHtml(label)} à confirmer</strong>
+        <p class="muted" style="margin:8px 0 12px;line-height:1.45;font-size:0.88rem">
+          Enregistrée par <strong>${escapeHtml(pending.closedBy || "serveuse")}</strong>.
+          Confirmez pour autoriser l'ouverture de la journée suivante.
+        </p>
+        <button type="button" class="btn btn-primary" id="pdj-manager-confirm-btn" style="width:auto;min-height:44px">
+          Confirmer la journée clôturée
+        </button>
+      </div>`;
+    document.getElementById("pdj-manager-confirm-btn")?.addEventListener("click", () => {
+      confirmDayClosureByManager(d).catch(handleApiError);
+    }, { once: true });
+    return;
+  }
+  host.classList.remove("hidden");
+  host.innerHTML = `
+    <div class="inline-card" style="margin-bottom:14px;border-left:3px solid #1565c0;padding:12px 14px">
+      <strong>Clôture en attente</strong>
+      <p class="muted" style="margin:8px 0 0;line-height:1.45;font-size:0.88rem">
+        La journée du <strong>${escapeHtml(label)}</strong> est clôturée. La gérante doit la confirmer avant l'ouverture du jour suivant.
+      </p>
+    </div>`;
+}
+
+async function confirmDayClosureByManager(dateStr) {
+  if (!canManagePdjAccounting()) {
+    showToast("Réservé au gérant ou à un administrateur.");
+    return;
+  }
+  const siteId = currentSiteId();
+  const d = String(dateStr || "").slice(0, 10);
+  const check = stockCheckForSiteDate(d, siteId);
+  if (!check) {
+    showToast("Aucune clôture trouvée pour cette date.");
+    return;
+  }
+  if (stockCheckIsManagerConfirmed(check)) {
+    showToast("Cette journée est déjà confirmée.");
+    return;
+  }
+  if (!window.confirm(
+    `Confirmer la clôture du ${formatDateDdMmYyyy(d)} ?\n\nLa journée suivante pourra être ouverte (automatiquement si possible).`,
+  )) return;
+  const ts = new Date().toISOString();
+  check.managerConfirmedAt = ts;
+  check.managerConfirmedBy = sessionUser || "";
+  const closingCash = Number(check.closingCashFcfa);
+  const autoOpen = autoOpenNextAccountingDayAfterClose(siteId, d, closingCash, { actorLabel: sessionUser });
+  if (!autoOpen) {
+    const pdjMapClose = { ...(state.pdjWorkDateBySite || {}) };
+    if (pdjMapClose[siteId] === d) delete pdjMapClose[siteId];
+    state.pdjWorkDateBySite = pdjMapClose;
+  }
+  recordStaffAudit(
+    "update",
+    "cloture_jour",
+    `Confirmation clôture ${formatDateDdMmYyyy(d)}`,
+    `Validée par ${sessionUser || "gérant"}`,
+  );
+  await persistStatePatch({
+    stockChecks: state.stockChecks,
+    dayBooks: state.dayBooks,
+    pdjWorkDateBySite: state.pdjWorkDateBySite,
+  });
+  renderPointDuJour();
+  renderVentesPage();
+  showToast(autoOpen?.nextDate
+    ? `Journée confirmée. Ouverture du ${formatDateDdMmYyyy(autoOpen.nextDate)}.`
+    : "Journée confirmée.");
+}
+
 async function recordCashOpening() {
   if (!canManagePdjAccounting()) {
     showToast("Ouverture de journée réservée au gérant ou à un administrateur.");
@@ -5924,7 +6148,12 @@ async function recordCashOpening() {
   const dateStr = pdjCalendarDate();
   const blockOpen = blockingJournalBeforeOpeningNewDate(dateStr, siteId);
   if (blockOpen && !canBypassBlockingJournalForCashOpening(dateStr)) {
-    showToast(`La journée du ${isoDateToDdMmYyyy(blockOpen)} doit être clôturée avant d'ouvrir la suivante.`);
+    const pending = pendingManagerConfirmationCheck(siteId);
+    if (pending && String(pending.date || "").slice(0, 10) === blockOpen) {
+      showToast(`La gérante doit confirmer la clôture du ${isoDateToDdMmYyyy(blockOpen)} avant d'ouvrir la journée suivante.`);
+    } else {
+      showToast(`La journée du ${isoDateToDdMmYyyy(blockOpen)} doit être clôturée avant d'ouvrir la suivante.`);
+    }
     return;
   }
   if (!canSuperAdmin() && dateStr !== today()) {
@@ -6015,22 +6244,29 @@ function renderCashOpeningPanel() {
   if (lockBlock) {
     lockBlock.classList.toggle("pdj-main--locked", needs && canManagePdjAccounting());
   }
+  renderPdjManagerConfirmationBlock();
   if (closed) {
     const nextD = addCalendarDaysIso(dStr, 1);
     const nextBook = dayBookFor(nextD, siteId);
-    const nextReady = nextBook && !dayBookNeedsCashOpening(nextBook) && !stockCheckForSiteDate(nextD, siteId);
+    const confirmed = stockCheckIsManagerConfirmed(closed);
+    const nextReady = confirmed && nextBook && !dayBookNeedsCashOpening(nextBook) && !stockCheckForSiteDate(nextD, siteId);
     container.removeAttribute("data-pdj-opening-fp");
     container.innerHTML = `
       <div class="pdj-opening-card pdj-opening-card--done" style="border-left:3px solid #1565c0;background:#f4f8ff">
         <p class="eyebrow" style="margin-bottom:4px">Journée clôturée</p>
         <strong>${escapeHtml(formatDateDdMmYyyy(dStr))}</strong>
-        ${nextReady
+        ${!confirmed
     ? `<p class="muted" style="margin-top:8px;line-height:1.45">
-          La journée suivante (<strong>${escapeHtml(formatDateDdMmYyyy(nextD))}</strong>) est ouverte automatiquement
+          Clôture enregistrée par <strong>${escapeHtml(closed.closedBy || "l'équipe")}</strong>.
+          La <strong>gérante</strong> doit confirmer cette journée avant l'ouverture de la suivante.
+        </p>`
+    : nextReady
+      ? `<p class="muted" style="margin-top:8px;line-height:1.45">
+          La journée suivante (<strong>${escapeHtml(formatDateDdMmYyyy(nextD))}</strong>) est ouverte
           avec <strong>${fmt(nextBook.openingCashFcfa)} FCFA</strong> en caisse (reprise du dénombrement de fermeture).
         </p>`
-    : `<p class="muted" style="margin-top:8px;line-height:1.45">
-          Les ventes pour cette date sont bloquées. La journée suivante s’ouvre automatiquement à la clôture lorsque possible.
+      : `<p class="muted" style="margin-top:8px;line-height:1.45">
+          Les ventes pour cette date sont bloquées. Ouvrez la journée suivante depuis cette page (gérant).
         </p>`}
         <p class="muted" style="margin-top:8px;font-size:0.82rem;line-height:1.45">
           Une réouverture de journée nécessite un profil gérant ou administrateur et sera journalisée.
@@ -6469,6 +6705,12 @@ function firstUnclosedJournalDate(siteId = currentSiteId()) {
  * Exception : compléter l'ouverture de la même `dateStr` lorsque le fonds de caisse n'est pas encore saisi.
  */
 function blockingJournalBeforeOpeningNewDate(dateStr, siteId = currentSiteId()) {
+  const pending = pendingManagerConfirmationCheck(siteId);
+  if (pending) {
+    const closed = String(pending.date || "").slice(0, 10);
+    const nextAfter = addCalendarDaysIso(closed, 1);
+    if (dateStr >= nextAfter) return closed;
+  }
   const u = firstUnclosedJournalDate(siteId);
   if (!u) return null;
   if (u === dateStr && dayBookNeedsCashOpening(dayBookFor(dateStr, siteId))) return null;
@@ -6633,8 +6875,10 @@ function renderDailyStockCheck() {
   const container = document.getElementById("pdj-stock-check");
   const button = document.getElementById("close-day-btn");
   if (!container || !button) return;
-  if (!canManagePdjAccounting()) {
-    container.innerHTML = "";
+  if (!canClosePdjDay()) {
+    container.innerHTML = staffRequiresShiftWindowForSales()
+      ? `<p class="muted" style="font-size:0.88rem;line-height:1.45">La clôture est disponible pendant votre créneau de service (Planning → Mes horaires).</p>`
+      : "";
     button.disabled = true;
     return;
   }
@@ -7324,6 +7568,172 @@ function salesForHistory() {
     const endOk = !end || value <= end;
     return categoryOk && startOk && endOk;
   });
+}
+
+let srvHistCategoryFilter = "all";
+
+function isServeuseAccount() {
+  return String(currentRole || "").trim() === "serveuse";
+}
+
+function venteBelongsToSessionServer(vente) {
+  const sn = String(sessionUser || "").trim().toLowerCase();
+  if (!sn) return false;
+  const who = String(vente?.server || vente?.serveur || "").trim().toLowerCase();
+  return who === sn;
+}
+
+function serveuseHistoryPeriod() {
+  return {
+    start: document.getElementById("srv-hist-period-start")?.value || "",
+    end: document.getElementById("srv-hist-period-end")?.value || "",
+  };
+}
+
+function salesForServeuseHistory() {
+  const { start, end } = serveuseHistoryPeriod();
+  return recordsForSite(state.ventes)
+    .filter((item) => venteBelongsToSessionServer(item))
+    .filter((item) => {
+      const value = saleDateValue(item);
+      const categoryOk = srvHistCategoryFilter === "all" || item.cat === srvHistCategoryFilter;
+      const startOk = !start || value >= start;
+      const endOk = !end || value <= end;
+      return categoryOk && startOk && endOk;
+    });
+}
+
+function applyServeuseHistoryPreset(preset) {
+  const t = today();
+  let start = t;
+  let end = t;
+  if (preset === "7d") start = addCalendarDaysIso(t, -6);
+  else if (preset === "month") {
+    start = `${t.slice(0, 7)}-01`;
+    end = t;
+  }
+  const startEl = document.getElementById("srv-hist-period-start");
+  const endEl = document.getElementById("srv-hist-period-end");
+  if (startEl) startEl.value = start;
+  if (endEl) endEl.value = end;
+  document.querySelectorAll("[data-srv-hist-preset]").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.srvHistPreset === preset);
+  });
+}
+
+function renderServeuseHistTabs() {
+  const host = document.getElementById("srv-hist-tabs");
+  if (!host) return;
+  const filters = [{ key: "all", label: "Toutes" }, ...categoryList().map((cat) => ({ key: cat, label: cat }))];
+  host.innerHTML = filters.map(
+    (f) => `<button type="button" class="tab ${f.key === srvHistCategoryFilter ? "active" : ""}" data-srv-hist-filter="${escapeHtml(f.key)}">${escapeHtml(f.label)}</button>`,
+  ).join("");
+}
+
+function renderServeuseSalesHistoryPage() {
+  if (!isServeuseAccount()) return;
+  const startEl = document.getElementById("srv-hist-period-start");
+  if (startEl && !startEl.value) applyServeuseHistoryPreset("today");
+  renderServeuseHistTabs();
+  const ventes = salesForServeuseHistory().slice().sort((a, b) => b.date.localeCompare(a.date));
+  const invoices = new Map();
+  ventes.forEach((vente) => {
+    const key = vente.factureNumber || `vente-${vente.id}`;
+    if (!invoices.has(key)) {
+      invoices.set(key, {
+        factureNumber: vente.factureNumber || `VENTE-${vente.id}`,
+        date: vente.date,
+        client: vente.client || "Client comptoir",
+        paiement: paymentLabel(vente),
+        lignes: [],
+      });
+    }
+    invoices.get(key).lignes.push(vente);
+  });
+  const total = ventes.reduce((sum, v) => sum + calcNet(v), 0);
+  const metaEl = document.getElementById("srv-hist-count-meta");
+  if (metaEl) {
+    metaEl.textContent = invoices.size
+      ? `${invoices.size} facture${invoices.size > 1 ? "s" : ""} · ${ventes.length} ligne(s)`
+      : "0 facture";
+  }
+  const kpiHost = document.getElementById("srv-hist-kpis");
+  if (kpiHost) {
+    kpiHost.innerHTML = `
+      <div class="pdj-kpi">
+        <span class="kpi-label">Total période</span>
+        <strong class="pdj-val amber">${fmt(total)} FCFA</strong>
+      </div>
+      <div class="pdj-kpi">
+        <span class="kpi-label">Factures</span>
+        <strong class="pdj-val amber">${fmt(invoices.size)}</strong>
+      </div>
+      <div class="pdj-kpi">
+        <span class="kpi-label">Serveuse</span>
+        <strong class="pdj-val" style="font-size:0.95rem">${escapeHtml(staffDisplayName(sessionUser))}</strong>
+      </div>`;
+  }
+  const listEl = document.getElementById("srv-hist-list");
+  if (!listEl) return;
+  listEl.innerHTML = invoices.size
+    ? [...invoices.values()].map((invoice) => {
+      const invTotal = invoice.lignes.reduce((sum, line) => sum + calcNet(line), 0);
+      return `<article class="order-card">
+        <div class="section-head">
+          <div>
+            <h3>${escapeHtml(invoice.factureNumber)}</h3>
+            <p class="list-item-sub">${escapeHtml(invoice.client)} · ${escapeHtml(formatDateDdMmYyyy(invoice.date))} · ${escapeHtml(invoice.paiement)}</p>
+          </div>
+          <div class="order-total">${fmt(invTotal)} FCFA</div>
+        </div>
+        <div class="order-lines">
+          ${invoice.lignes.map((vente) => `<div class="order-line"><div><p class="list-item-title">${escapeHtml(vente.article)}</p><p class="list-item-sub">${escapeHtml(vente.cat)} · ${escapeHtml(lineQtyPriceLabel(vente, stockItemForArticle(vente.article)))}${vente.remise ? ` · -${fmt(vente.remise)}` : ""}</p></div><strong>${fmt(calcNet(vente))} FCFA</strong></div>`).join("")}
+        </div>
+        <div class="order-actions">
+          <button type="button" class="mini-btn" data-print-invoice="${escapeHtml(invoice.factureNumber)}">Imprimer facture</button>
+        </div>
+      </article>`;
+    }).join("")
+    : emptyState("Aucune vente", "Aucune facture encaissée par vous sur cette période.");
+}
+
+function printServeuseSalesHistory() {
+  const ventes = salesForServeuseHistory().slice().sort((a, b) => saleDateValue(a).localeCompare(saleDateValue(b)));
+  if (!ventes.length) {
+    showToast("Aucune vente à imprimer pour cette période.");
+    return;
+  }
+  const site = currentSite();
+  const { start, end } = serveuseHistoryPeriod();
+  const periodLabel = start || end
+    ? `Période : ${start ? formatDateDdMmYyyy(start) : "…"} au ${end ? formatDateDdMmYyyy(end) : "…"}`
+    : "Période : toutes les dates";
+  const total = ventes.reduce((sum, vente) => sum + calcNet(vente), 0);
+  const payRows = Object.entries(paymentTotals(ventes))
+    .map(([method, amount]) => `<tr><td>${escapeHtml(method)}</td><td>${fmt(amount)} FCFA</td></tr>`)
+    .join("");
+  const rows = ventes.map((vente) => `
+    <tr>
+      <td>${escapeHtml(formatDateDdMmYyyy(saleDateValue(vente)))}</td>
+      <td>${escapeHtml(vente.factureNumber || `VENTE-${vente.id}`)}</td>
+      <td>${escapeHtml(vente.client || "Client comptoir")}</td>
+      <td>${escapeHtml(vente.article)}</td>
+      <td>${escapeHtml(lineQtyLabel(vente, stockItemForArticle(vente.article)))}</td>
+      <td>${escapeHtml(paymentLabel(vente))}</td>
+      <td>${fmt(calcNet(vente))} FCFA</td>
+    </tr>
+  `).join("");
+  const w = window.open("", "_blank", "width=900,height=900");
+  if (!w) { showToast("Impossible d'ouvrir l'impression."); return; }
+  w.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>Mes ventes</title><style>body{font-family:Arial,sans-serif;padding:24px;color:#111}h1{margin:0 0 8px}table{width:100%;border-collapse:collapse;margin-top:14px;font-size:12px}th,td{border-bottom:1px solid #ddd;padding:6px;text-align:left}th{background:#f5f5f5}.meta{color:#555;font-size:13px}</style></head><body>
+    <h1>${escapeHtml(site?.nom || "Maquis")} — Mes ventes</h1>
+    <p class="meta">${escapeHtml(staffDisplayName(sessionUser))} · ${escapeHtml(periodLabel)}</p>
+    <p><strong>Total : ${fmt(total)} FCFA</strong> · ${ventes.length} ligne(s)</p>
+    <table><thead><tr><th>Date</th><th>Facture</th><th>Client</th><th>Article</th><th>Qté</th><th>Paiement</th><th>Total</th></tr></thead><tbody>${rows}</tbody></table>
+    <h2 style="margin-top:18px;font-size:14px">Par mode de paiement</h2>
+    <table><tbody>${payRows}</tbody></table>
+    <script>window.onload=function(){window.print();}</script></body></html>`);
+  w.document.close();
 }
 
 function renderSalesHistory() {
@@ -8318,14 +8728,17 @@ function renderVentesPage() {
     const parts = [];
     if (restMsg) {
       parts.push(`<div class="inline-card ventes-rest-day-alert" role="alert">
-        <strong>Jour de repos — ventes bloquées</strong>
+        <strong>Hors service — ventes bloquées</strong>
         <p class="ventes-rest-day-alert-msg">${escapeHtml(restMsg)}</p>
       </div>`);
     }
     if (PDJ_REQUIRE_CASH_OPENING) {
       if (j.ok && !restMsg) {
+        const closeHint = canClosePdjDay()
+          ? " Clôturez la journée sur le <strong>Point du jour</strong> en fin de service."
+          : "";
         parts.push(`<div class="inline-card" style="border-left:3px solid #72d7a9;margin-bottom:12px">
-          <strong>Journée ouverte</strong> (${escapeHtml(isoDateToDdMmYyyy(d))}) — vous pouvez enregistrer des lignes de commande et encaisser. Clôturez la journée sur le <strong>Point du jour</strong> en fin de service.
+          <strong>Journée ouverte</strong> (${escapeHtml(isoDateToDdMmYyyy(d))}) — vous pouvez enregistrer des lignes de commande et encaisser.${closeHint}
         </div>`);
       } else if (!j.ok) {
         parts.push(`<div class="inline-card" style="border-left:3px solid #ff8e82;margin-bottom:12px">
@@ -8347,6 +8760,7 @@ function renderVentesPage() {
   renderQrAlertBadge();
   renderOrders();
   renderSalesHistory();
+  if (currentPage === "historique-ventes") renderServeuseSalesHistoryPage();
   renderCreditRecovery();
   renderConsignes();
   if (currentPage === "pdj") renderPointDuJour();
@@ -13281,8 +13695,13 @@ function closureCashSnapshot(dStr) {
 }
 
 async function closeAccountingDay() {
-  if (!canManagePdjAccounting()) {
-    showToast("Clôture de journée réservée au gérant ou à un administrateur.");
+  if (!canClosePdjDay()) {
+    const shifts = activeWorkShiftsNow(sessionUser, currentSiteId());
+    if (staffRequiresShiftWindowForSales() && !shifts.length) {
+      showToast("Clôture réservée à votre créneau de service (voir Planning → Mes horaires).");
+    } else {
+      showToast("Clôture de journée non autorisée pour ce compte.");
+    }
     return;
   }
   const items = recordsForSite(state.stock);
@@ -13419,6 +13838,8 @@ async function closeAccountingDay() {
     if (checked.ecart > 0) item.entrees = (Number(item.entrees) || 0) + checked.ecart;
     if (checked.ecart < 0) item.sorties = (Number(item.sorties) || 0) + Math.abs(checked.ecart);
   });
+  const closedByRole = String(currentRole || "").trim();
+  const managerClose = canManagePdjAccounting();
   const check = {
     id: Date.now(),
     siteId: currentSiteId(),
@@ -13436,6 +13857,10 @@ async function closeAccountingDay() {
     nbVentes: ventesJour.length,
     totauxJour,
     items: checkedItems,
+    closedBy: sessionUser || "",
+    closedByRole,
+    managerConfirmedAt: managerClose ? new Date().toISOString() : null,
+    managerConfirmedBy: managerClose ? (sessionUser || "") : null,
   };
   state.stockChecks = [
     check,
@@ -13467,8 +13892,10 @@ async function closeAccountingDay() {
     `${cashBlock}${stockBlock}`,
   );
   const sidClose = currentSiteId();
-  const autoOpen = autoOpenNextAccountingDayAfterClose(sidClose, dStr, closingCashFcfa, { actorLabel: sessionUser });
-  if (!autoOpen) {
+  const autoOpen = managerClose
+    ? autoOpenNextAccountingDayAfterClose(sidClose, dStr, closingCashFcfa, { actorLabel: sessionUser })
+    : null;
+  if (!autoOpen && managerClose) {
     const pdjMapClose = { ...(state.pdjWorkDateBySite || {}) };
     if (pdjMapClose[sidClose] === dStr) delete pdjMapClose[sidClose];
     state.pdjWorkDateBySite = pdjMapClose;
@@ -13503,7 +13930,9 @@ async function closeAccountingDay() {
     const cashHint = cashEcartEspeces === 0 ? "" : ` Écart espèces : ${cashEcartEspeces > 0 ? "+" : ""}${fmt(cashEcartEspeces)} FCFA.`;
     const nextMsg = autoOpen?.nextDate
       ? ` Journée suivante (${formatDateDdMmYyyy(autoOpen.nextDate)}) ouverte automatiquement avec ${fmt(closingCashFcfa)} FCFA en caisse.`
-      : " Onglet Clôture : imprimez le rapport si besoin.";
+      : managerClose
+        ? " Onglet Clôture : imprimez le rapport si besoin."
+        : " En attente de confirmation par la gérante avant ouverture du jour suivant.";
     showToast(`Journée du ${formatDateDdMmYyyy(dStr)} clôturée.${cashHint}${nextMsg}`);
   } finally {
     if (closeBtn) { closeBtn.disabled = false; closeBtn.textContent = prevCloseText; }
@@ -17287,6 +17716,25 @@ document.getElementById("fab-btn").addEventListener("click", () => {
   document.getElementById("save-params-btn").addEventListener("click", () => saveParams().catch(handleApiError));
   document.getElementById("save-user-profile-btn")?.addEventListener("click", () => saveMyUserProfile().catch(handleApiError));
   document.getElementById("print-sales-history-btn").addEventListener("click", printSalesHistory);
+  document.getElementById("print-srv-hist-btn")?.addEventListener("click", printServeuseSalesHistory);
+  document.getElementById("page-historique-ventes")?.addEventListener("click", (event) => {
+    const preset = event.target.closest("[data-srv-hist-preset]");
+    if (preset) {
+      applyServeuseHistoryPreset(preset.dataset.srvHistPreset);
+      renderServeuseSalesHistoryPage();
+      return;
+    }
+    const filterBtn = event.target.closest("[data-srv-hist-filter]");
+    if (filterBtn) {
+      srvHistCategoryFilter = filterBtn.dataset.srvHistFilter || "all";
+      renderServeuseSalesHistoryPage();
+    }
+  });
+  ["srv-hist-period-start", "srv-hist-period-end"].forEach((id) => {
+    document.getElementById(id)?.addEventListener("change", () => {
+      if (currentPage === "historique-ventes") renderServeuseSalesHistoryPage();
+    });
+  });
   document.getElementById("print-stock-report-btn").addEventListener("click", printStockReport);
   document.getElementById("export-stock-excel-btn").addEventListener("click", exportStockExcel);
   document.getElementById("import-stock-excel-btn").addEventListener("click", () => document.getElementById("import-stock-file").click());
@@ -17342,8 +17790,12 @@ document.getElementById("fab-btn").addEventListener("click", () => {
     persistPdjWorkDateFromSuperPicker().catch(handleApiError);
   });
   document.getElementById("close-day-btn").addEventListener("click", () => {
-    if (!canManagePdjAccounting()) {
-      showToast("Clôture réservée au gérant ou à un administrateur.");
+    if (!canClosePdjDay()) {
+      if (staffRequiresShiftWindowForSales() && !staffIsOnDutyNow()) {
+        showToast("Clôture réservée à votre créneau de service (Planning → Mes horaires).");
+      } else {
+        showToast("Clôture réservée au gérant ou à un administrateur.");
+      }
       return;
     }
     if (isPdjBrowseConsultationOnly()) {
