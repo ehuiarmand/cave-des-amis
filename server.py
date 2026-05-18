@@ -3189,9 +3189,11 @@ class DataStore:
 
                 auth_payload = payload.get("auth", {})
                 users_payload = auth_payload.get("users")
+                is_partial_users = bool(auth_payload.get("partial"))
                 if isinstance(users_payload, list):
                     existing_by_name = {u["username"]: u for u in current["auth"]["users"]}
                     new_users = []
+                    payload_usernames: set[str] = set()
                     for user_data in users_payload:
                         username = str(user_data.get("username", "")).strip()
                         role = str(user_data.get("role", "serveuse"))
@@ -3199,6 +3201,7 @@ class DataStore:
                             role = "superadmin"
                         if not username or role not in VALID_USER_ROLES:
                             continue
+                        payload_usernames.add(username.lower())
                         password = str(user_data.get("password", "")).strip()
                         if password:
                             password_hash = hash_password(password)
@@ -3231,6 +3234,12 @@ class DataStore:
                         if existing.get("twoFactorSecret"):
                             user_entry["twoFactorSecret"] = existing["twoFactorSecret"]
                         new_users.append(user_entry)
+                    if is_partial_users:
+                        # Mise à jour partielle (profil) : conserver les utilisateurs absents du payload
+                        for eu in current["auth"]["users"]:
+                            eu_un = str(eu.get("username", "")).strip().lower()
+                            if eu_un and eu_un not in payload_usernames:
+                                new_users.append(eu)
                     if not new_users:
                         raise ValueError("Aucun utilisateur valide.")
                     if not any(u["role"] in ("superadmin", "admin", "manager") for u in new_users):

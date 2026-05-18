@@ -11260,7 +11260,7 @@ async function saveMyUserProfile() {
     ...(pw1 ? { password: pw1 } : {}),
   };
   recordStaffAudit("update", "profil_utilisateur", `Profil ${me.username}`, displayName ? `Nom affiche : ${displayName}` : "Mise a jour");
-  await persistState({ auth: { users: [payload] } });
+  await persistState({ auth: { users: [payload], partial: true } });
   document.getElementById("ua-password").value = "";
   document.getElementById("ua-password-confirm").value = "";
   renderTopbar();
