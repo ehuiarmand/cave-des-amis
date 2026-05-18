@@ -1564,20 +1564,31 @@
         </div>
 
         <div data-params-panel="acces" class="params-panel hidden">
-          <article class="card">
+
+          <!-- Barre de commande -->
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+            <input id="users-search" type="search" placeholder="Rechercher un utilisateur…" style="flex:1;min-width:160px;padding:10px 14px;border-radius:12px;border:1px solid var(--line);font-size:0.93rem;background:var(--mm-surface,#fff)">
+            <div id="users-stats" style="font-size:0.82rem;color:var(--muted,#888);white-space:nowrap"></div>
+            <button id="toggle-add-user-form-btn" class="btn btn-primary" type="button" style="white-space:nowrap">+ Ajouter</button>
+          </div>
+
+          <!-- Liste des utilisateurs -->
+          <input id="edit-user-username" type="hidden">
+          <div id="users-list" style="display:grid;gap:10px;margin-bottom:16px"></div>
+
+          <!-- Formulaire ajout/modification (masqué par défaut) -->
+          <article class="card" id="user-form-card" style="display:none;margin-top:4px">
             <div class="section-head">
-              <h3>Gestion des utilisateurs</h3>
-              <span class="section-meta">Comptes</span>
+              <h3 id="user-form-title">Nouvel utilisateur</h3>
+              <span class="section-meta" id="user-form-meta">Remplissez les champs ci-dessous</span>
             </div>
-            <input id="edit-user-username" type="hidden">
-            <div id="users-list" class="stack-list"></div>
-            <div class="form-grid" style="margin-top:16px">
+            <div class="form-grid" style="margin-top:12px">
               <div class="form-group">
-                <label for="new-user-username">Nom d'utilisateur</label>
-                <input id="new-user-username" type="text" placeholder="ex: marie">
+                <label for="new-user-username">Identifiant de connexion</label>
+                <input id="new-user-username" type="text" placeholder="ex: marie" autocomplete="off">
               </div>
               <div class="form-group">
-                <label for="new-user-role">Role</label>
+                <label for="new-user-role">Rôle</label>
                 <select id="new-user-role">
                   <option value="serveuse">Serveuse</option>
                   <option value="manager" class="any-admin">Gérant</option>
@@ -1587,23 +1598,24 @@
               </div>
               <div class="form-group">
                 <label for="new-user-password">Mot de passe</label>
-                <input id="new-user-password" type="password" placeholder="Obligatoire a la creation">
+                <input id="new-user-password" type="password" placeholder="Obligatoire à la création" autocomplete="new-password">
               </div>
               <div class="form-group">
-                <label for="new-user-wa-phone">Numero WhatsApp (optionnel)</label>
+                <label for="new-user-wa-phone">Téléphone WhatsApp</label>
                 <input id="new-user-wa-phone" type="tel" placeholder="+2250701020304" autocomplete="tel">
-                <p class="muted" style="font-size:0.82rem;margin-top:4px">Format international. Recevra les notifications selon son role (serveuse : commandes QR ; gerant : fin de service, clotures, alertes stock).</p>
+                <p class="muted" style="font-size:0.78rem;margin-top:4px;line-height:1.35">Notifications : commandes QR (serveuse), clôtures et alertes (gérant).</p>
               </div>
             </div>
-            <div id="new-user-sites-section" class="form-group" style="margin-top:10px">
-              <label>Maquis geres / autorises</label>
+            <div id="new-user-sites-section" class="form-group" style="margin-top:12px">
+              <label>Maquis autorisés</label>
               <div id="new-user-sites" class="checkbox-list" style="margin-top:8px"></div>
             </div>
-            <div class="button-stack">
-              <button id="add-user-btn" class="btn btn-primary" type="button">Ajouter l'utilisateur</button>
-              <button id="cancel-edit-user-btn" class="btn btn-outline hidden" type="button">Annuler la modification</button>
+            <div class="button-stack" style="margin-top:14px">
+              <button id="add-user-btn" class="btn btn-primary" type="button">Enregistrer</button>
+              <button id="cancel-edit-user-btn" class="btn btn-outline" type="button">Annuler</button>
             </div>
           </article>
+
         </div>
 
         <div data-params-panel="sauvegarde" class="params-panel hidden">

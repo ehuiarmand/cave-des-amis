@@ -10813,11 +10813,18 @@ function resetUserForm() {
   document.getElementById("new-user-username").disabled = false;
   document.getElementById("new-user-role").value = "serveuse";
   document.getElementById("new-user-password").value = "";
-  document.getElementById("new-user-password").placeholder = "Obligatoire a la creation";
+  document.getElementById("new-user-password").placeholder = "Obligatoire à la création";
   const pWaUser = document.getElementById("new-user-wa-phone");
   if (pWaUser) pWaUser.value = "";
-  document.getElementById("add-user-btn").textContent = "Ajouter l'utilisateur";
-  document.getElementById("cancel-edit-user-btn").classList.add("hidden");
+  document.getElementById("add-user-btn").textContent = "Enregistrer";
+  const formCard = document.getElementById("user-form-card");
+  if (formCard) formCard.style.display = "none";
+  const toggleBtn = document.getElementById("toggle-add-user-form-btn");
+  if (toggleBtn) toggleBtn.textContent = "+ Ajouter";
+  const titleEl = document.getElementById("user-form-title");
+  if (titleEl) titleEl.textContent = "Nouvel utilisateur";
+  const metaEl = document.getElementById("user-form-meta");
+  if (metaEl) metaEl.textContent = "Remplissez les champs ci-dessous";
   renderUserSiteCheckboxes();
 }
 
@@ -10833,7 +10840,14 @@ function editUser(username) {
   const pWaUserEdit = document.getElementById("new-user-wa-phone");
   if (pWaUserEdit) pWaUserEdit.value = user.waPhone || "";
   document.getElementById("add-user-btn").textContent = "Enregistrer les modifications";
-  document.getElementById("cancel-edit-user-btn").classList.remove("hidden");
+  const formCard = document.getElementById("user-form-card");
+  if (formCard) { formCard.style.display = ""; formCard.scrollIntoView({ behavior: "smooth", block: "nearest" }); }
+  const titleEl = document.getElementById("user-form-title");
+  if (titleEl) titleEl.textContent = `Modifier — ${user.username}`;
+  const metaEl = document.getElementById("user-form-meta");
+  if (metaEl) metaEl.textContent = roleLabel(user.role, user.username);
+  const toggleBtn = document.getElementById("toggle-add-user-form-btn");
+  if (toggleBtn) toggleBtn.textContent = "Fermer";
   renderEditableUserSites(user);
 }
 
@@ -10854,42 +10868,91 @@ function roleLabel(role, username = "") {
   return "Serveuse";
 }
 
+function _userRoleColor(role, username) {
+  if (String(username || "").trim().toLowerCase() === "admin" || role === "superadmin") return "#7c3aed";
+  if (role === "admin") return "#2563eb";
+  if (role === "manager") return "#0891b2";
+  return "#059669";
+}
+
+function _userInitials(user) {
+  const name = String(user.displayName || user.username || "?").trim();
+  const parts = name.split(/\s+/);
+  return parts.length >= 2
+    ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+    : name.slice(0, 2).toUpperCase();
+}
+
 function renderUsersList() {
   const container = document.getElementById("users-list");
   if (!container) return;
+  const search = String(document.getElementById("users-search")?.value || "").trim().toLowerCase();
   const allUsers = state.auth.users || [];
-  // Manager ne voit que les serveuses de ses propres maquis
-  const users = canSuperAdmin() || canSiteAdmin()
+  let users = canSuperAdmin() || canSiteAdmin()
     ? allUsers
     : allUsers.filter((u) => u.role === "serveuse" && (u.allowedSiteIds || []).some((sid) => allowedSiteIds.includes(sid)));
+  if (search) {
+    users = users.filter((u) =>
+      String(u.username || "").toLowerCase().includes(search) ||
+      String(u.displayName || "").toLowerCase().includes(search) ||
+      roleLabel(u.role, u.username).toLowerCase().includes(search)
+    );
+  }
+
+  // Compteurs
+  const statsEl = document.getElementById("users-stats");
+  if (statsEl) {
+    const counts = {};
+    allUsers.forEach((u) => { counts[u.role] = (counts[u.role] || 0) + 1; });
+    const parts = [];
+    if (counts.superadmin || counts.admin) parts.push(`${(counts.superadmin || 0) + (counts.admin || 0)} admin`);
+    if (counts.manager) parts.push(`${counts.manager} gérant${counts.manager > 1 ? "s" : ""}`);
+    if (counts.serveuse) parts.push(`${counts.serveuse} serveuse${counts.serveuse > 1 ? "s" : ""}`);
+    statsEl.textContent = parts.join(" · ");
+  }
+
   if (!users.length) {
-    container.innerHTML = emptyState("Aucun utilisateur", "Ajoutez des serveuses ci-dessous.");
+    container.innerHTML = emptyState(search ? "Aucun résultat" : "Aucun utilisateur", search ? `Aucun compte ne correspond à « ${escapeHtml(search)} ».` : "Cliquez sur « + Ajouter » pour créer un compte.");
     return;
   }
+
   container.innerHTML = users.map((user) => {
+    const color = _userRoleColor(user.role, user.username);
+    const initials = escapeHtml(_userInitials(user));
+    const label = roleLabel(user.role, user.username);
     const siteNames = (user.allowedSiteIds || []).map((sid) => {
       const site = (state.sites || []).find((s) => s.id === sid);
-      return site ? escapeHtml(site.nom) : escapeHtml(sid);
-    }).join(", ") || "Aucun maquis";
-    const twoFaBadge = user.twoFactorEnabled
-      ? `<span class="badge badge-green" style="margin-left:6px">2FA</span>`
-      : `<span class="badge badge-red" style="margin-left:6px">Sans 2FA</span>`;
+      return escapeHtml(site ? site.nom : sid);
+    }).join(" · ") || "Aucun maquis";
+    const isSelf = user.username === sessionUser;
     const canEdit = canAnyAdmin() || user.role === "serveuse";
-    const canDelete = user.username !== sessionUser && (canAnyAdmin() || user.role === "serveuse");
+    const canDelete = !isSelf && (canAnyAdmin() || user.role === "serveuse");
+    const waTag = user.waPhone ? `<span style="font-size:0.78rem;color:var(--muted,#888)">📱 ${escapeHtml(user.waPhone)}</span>` : "";
+    const twoFaTag = user.twoFactorEnabled
+      ? `<span style="font-size:0.75rem;padding:2px 7px;border-radius:20px;background:#dcfce7;color:#166534;font-weight:600">2FA</span>`
+      : `<span style="font-size:0.75rem;padding:2px 7px;border-radius:20px;background:#fef9c3;color:#713f12">Sans 2FA</span>`;
+    const selfTag = isSelf ? `<span style="font-size:0.75rem;padding:2px 7px;border-radius:20px;background:#eff6ff;color:#1d4ed8;font-weight:600">Connecté(e)</span>` : "";
     return `
-      <div class="site-row">
-        <div>
-          <p class="list-item-title">${escapeHtml(user.username)}${twoFaBadge}</p>
-          <p class="list-item-sub">${user.displayName ? `${escapeHtml(String(user.displayName).trim())} · ` : ""}${roleLabel(user.role, user.username)} · ${siteNames}${user.waPhone ? ` · 📱 ${escapeHtml(user.waPhone)}` : ""}</p>
+      <div style="display:flex;align-items:center;gap:12px;background:var(--mm-surface,#fff);border:1px solid var(--line,#e5e7eb);border-radius:14px;padding:12px 14px;transition:box-shadow .15s" onmouseover="this.style.boxShadow='0 2px 12px rgba(0,0,0,0.08)'" onmouseout="this.style.boxShadow=''">
+        <div style="width:42px;height:42px;border-radius:50%;background:${color};color:#fff;display:flex;align-items:center;justify-content:center;font-size:0.95rem;font-weight:700;flex-shrink:0">${initials}</div>
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:3px">
+            <span style="font-weight:600;font-size:0.96rem">${escapeHtml(user.username)}</span>
+            ${user.displayName ? `<span style="color:var(--muted,#888);font-size:0.85rem">· ${escapeHtml(String(user.displayName).trim())}</span>` : ""}
+            <span style="font-size:0.75rem;padding:2px 8px;border-radius:20px;background:${color}22;color:${color};font-weight:600">${escapeHtml(label)}</span>
+            ${twoFaTag}${selfTag}
+          </div>
+          <div style="font-size:0.82rem;color:var(--muted,#888);display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <span>${siteNames}</span>
+            ${waTag}
+          </div>
         </div>
-        <div class="line-actions">
+        <div style="display:flex;flex-direction:column;gap:5px;flex-shrink:0">
           ${canEdit ? `<button type="button" class="mini-btn" data-edit-user="${escapeHtml(user.username)}">Modifier</button>` : ""}
-          ${user.username === sessionUser
-            ? `<span class="list-item-sub">Connecte(e)</span>`
-            : canDelete ? `<button type="button" class="mini-btn" data-delete-user="${escapeHtml(user.username)}">Supprimer</button>` : ""}
+          ${canDelete ? `<button type="button" class="mini-btn mini-btn--warn" data-delete-user="${escapeHtml(user.username)}">Supprimer</button>` : ""}
           ${user.twoFactorEnabled
-            ? `<button type="button" class="mini-btn" data-disable-2fa="${escapeHtml(user.username)}">Desactiver 2FA</button>`
-            : `<button type="button" class="mini-btn mini-btn--warn" data-setup-2fa="${escapeHtml(user.username)}">Activer 2FA</button>`}
+            ? `<button type="button" class="mini-btn" data-disable-2fa="${escapeHtml(user.username)}">Désactiver 2FA</button>`
+            : `<button type="button" class="mini-btn" data-setup-2fa="${escapeHtml(user.username)}">Activer 2FA</button>`}
         </div>
       </div>
     `;
@@ -18675,6 +18738,21 @@ document.getElementById("fab-btn").addEventListener("click", () => {
   document.getElementById("add-user-btn").addEventListener("click", () => addUser().catch(handleApiError));
   document.getElementById("add-site-btn")?.addEventListener("click", () => addSite().catch(handleApiError));
   document.getElementById("cancel-edit-user-btn").addEventListener("click", resetUserForm);
+  document.getElementById("toggle-add-user-form-btn")?.addEventListener("click", () => {
+    const formCard = document.getElementById("user-form-card");
+    const btn = document.getElementById("toggle-add-user-form-btn");
+    if (!formCard) return;
+    const isVisible = formCard.style.display !== "none";
+    if (isVisible) {
+      resetUserForm();
+    } else {
+      formCard.style.display = "";
+      if (btn) btn.textContent = "Fermer";
+      renderUserSiteCheckboxes();
+      formCard.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  });
+  document.getElementById("users-search")?.addEventListener("input", () => renderUsersList());
   document.getElementById("new-user-role").addEventListener("change", renderUserSiteCheckboxes);
   document.getElementById("save-reappro-btn").addEventListener("click", () => saveReappro().catch(handleApiError));
   document.getElementById("toggle-stock-detail-btn").addEventListener("click", () => {
