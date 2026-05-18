@@ -962,6 +962,61 @@ def _generate_cloture_pdf(
     return bytes(pdf.output())
 
 
+def _format_cloture_text(site: dict[str, Any], check: dict[str, Any], ventes: list[dict[str, Any]], stock_rows: list[dict[str, Any]]) -> str:
+    """Formate le rapport de clôture en texte pour WhatsApp."""
+    nom = str(site.get("nom") or site.get("id") or "Maquis")
+    date_str = str(check.get("date") or "")[:10]
+    try:
+        y_r, m_r, d_r = date_str.split("-")
+        date_label = f"{d_r}/{m_r}/{y_r}"
+    except ValueError:
+        date_label = date_str
+    closed_by = str(check.get("managerConfirmedBy") or check.get("closedBy") or "")
+    ca = int(check.get("caEncaisse") or 0)
+    nb_ventes = int(check.get("nbVentes") or 0)
+    opening = int(check.get("openingCashFcfa") or 0)
+    closing = int(check.get("closingCashFcfa") or 0)
+    ecart = int(check.get("cashEcartEspeces") or 0)
+    site_id = str(site.get("id", ""))
+    ventes_jour = [v for v in ventes if isinstance(v, dict) and str(v.get("siteId", "")) == site_id and str(v.get("date", ""))[:10] == date_str]
+    totaux: dict[str, int] = {}
+    for v in ventes_jour:
+        m = str(v.get("paiement") or "Autre")
+        prix = int(v.get("prix") or 0)
+        remise = int(v.get("remise") or 0)
+        totaux[m] = totaux.get(m, 0) + max(0, prix - remise)
+    paiements_lines = " | ".join(f"{m}: {t:,} FCFA".replace(",", " ") for m, t in sorted(totaux.items()))
+    stock_alerts: list[str] = []
+    for item in stock_rows:
+        if not isinstance(item, dict) or str(item.get("siteId", "")) != site_id:
+            continue
+        seuil = int(item.get("seuilMin") or 0)
+        total = int(item.get("init") or 0) + int(item.get("entrees") or 0) - int(item.get("sorties") or 0)
+        if seuil > 0 and total <= seuil:
+            stock_alerts.append(f"  - {item.get('article', '?')}: {total} (seuil {seuil})")
+    lines = [
+        f"*Rapport de cloture — {nom}*",
+        f"Date : {date_label}",
+        f"Clos par : {closed_by}",
+        "",
+        f"CA encaisse : *{ca:,} FCFA*".replace(",", " "),
+        f"Nb ventes : {nb_ventes}",
+    ]
+    if paiements_lines:
+        lines.append(f"Paiements : {paiements_lines}")
+    lines += [
+        "",
+        f"Caisse ouverture : {opening:,} FCFA".replace(",", " "),
+        f"Caisse denombree : {closing:,} FCFA".replace(",", " "),
+        f"Ecart especes : {'+' if ecart >= 0 else ''}{ecart:,} FCFA".replace(",", " "),
+    ]
+    if stock_alerts:
+        lines.append("")
+        lines.append(f"Alertes stock ({len(stock_alerts)}) :")
+        lines += stock_alerts[:5]
+    return "\n".join(lines)
+
+
 def _send_cloture_report_wa_async(
     site: dict[str, Any],
     check: dict[str, Any],
@@ -969,17 +1024,14 @@ def _send_cloture_report_wa_async(
     ventes: list[dict[str, Any]],
     stock_rows: list[dict[str, Any]],
 ) -> None:
-    """Génère le rapport PDF de clôture et l'envoie via WhatsApp (thread daemon)."""
-    if not _FPDF_AVAILABLE:
-        print("[WA PDF] ERREUR : fpdf2 non installe. Faire: pip install fpdf2", flush=True)
-        return
+    """Envoie le rapport de clôture via WhatsApp (message texte, thread daemon)."""
     phone_id = os.environ.get("WHATSAPP_PHONE_NUMBER_ID", "").strip()
     token = os.environ.get("WHATSAPP_ACCESS_TOKEN", "").strip()
     if not phone_id:
-        print("[WA PDF] ERREUR : WHATSAPP_PHONE_NUMBER_ID non defini. Demarrer via lancer.bat.", flush=True)
+        print("[WA RAPPORT] ERREUR : WHATSAPP_PHONE_NUMBER_ID non defini.", flush=True)
         return
     if not token:
-        print("[WA PDF] ERREUR : WHATSAPP_ACCESS_TOKEN non defini. Demarrer via lancer.bat.", flush=True)
+        print("[WA RAPPORT] ERREUR : WHATSAPP_ACCESS_TOKEN non defini.", flush=True)
         return
 
     site_id = str(site.get("id", ""))
@@ -1006,37 +1058,20 @@ def _send_cloture_report_wa_async(
     _check = dict(check)
 
     def run() -> None:
-        print(f"[WA PDF] Debut envoi rapport cloture site={site_id} destinataires={phones}", flush=True)
+        print(f"[WA RAPPORT] Envoi rapport texte site={site_id} destinataires={phones}", flush=True)
         try:
-            pdf_bytes = _generate_cloture_pdf(_site, _check, _ventes, _stock)
-            print(f"[WA PDF] PDF genere ({len(pdf_bytes)} octets)", flush=True)
+            msg = _format_cloture_text(_site, _check, _ventes, _stock)
         except Exception as ex:
-            print(f"[WA PDF] ERREUR generation PDF: {ex}", flush=True)
-            audit_log("wa_cloture_pdf_gen_failed", {"error": str(ex), "siteId": site_id})
-            return
-        date_str = str(_check.get("date") or "")[:10]
-        try:
-            y_r, m_r, d_r = date_str.split("-")
-            date_label = f"{d_r}-{m_r}-{y_r}"
-        except ValueError:
-            date_label = date_str
-        filename = f"rapport-cloture-{date_label}.pdf"
-        nom = str(_site.get("nom") or site_id)
-        caption = f"Rapport de cloture - {nom} - {date_label}"
-        try:
-            media_id = _wa_upload_media(pdf_bytes, filename)
-            print(f"[WA PDF] Upload OK media_id={media_id}", flush=True)
-        except Exception as ex:
-            print(f"[WA PDF] ERREUR upload media: {ex}", flush=True)
-            audit_log("wa_cloture_media_upload_failed", {"error": str(ex), "siteId": site_id})
+            print(f"[WA RAPPORT] ERREUR formatage: {ex}", flush=True)
+            audit_log("wa_cloture_format_failed", {"error": str(ex), "siteId": site_id})
             return
         for phone in phones:
             try:
-                _wa_send_document(phone, media_id, caption, filename)
-                print(f"[WA PDF] Document envoye a {phone}", flush=True)
+                _whatsapp_send(phone, msg)
+                print(f"[WA RAPPORT] Rapport envoye a {phone}", flush=True)
             except (OSError, HTTPError, URLError, ValueError) as ex:
-                print(f"[WA PDF] ERREUR envoi document a {phone}: {ex}", flush=True)
-                audit_log("wa_cloture_doc_send_failed", {"error": str(ex), "siteId": site_id, "to": phone})
+                print(f"[WA RAPPORT] ERREUR envoi a {phone}: {ex}", flush=True)
+                audit_log("wa_cloture_rapport_failed", {"error": str(ex), "siteId": site_id, "to": phone})
 
     threading.Thread(target=run, daemon=True).start()
 
