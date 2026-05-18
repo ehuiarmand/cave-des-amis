@@ -6435,7 +6435,7 @@ function renderPdjManagerConfirmationBlock() {
       </div>`;
     document.getElementById("pdj-manager-confirm-btn")?.addEventListener("click", () => {
       confirmDayClosureByManager(d).catch(handleApiError);
-    }, { once: true });
+    });
     return;
   }
   host.classList.remove("hidden");
