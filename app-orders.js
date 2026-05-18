@@ -725,6 +725,7 @@ let activeOrderId = null;
 let pdjViewDateBySite = {};
 /** true = affichage archive « Afficher » : journee deja cloturee, pas de nouvelle cloture. */
 let pdjBrowseConsultationOnly = false;
+let _pdjNoSalesReasonDraft = "";
 let currentQrLinkInt = "";
 let currentQrLinkExt = "";
 let pendingFinalizeOrderId = null;
@@ -1100,6 +1101,12 @@ function installFcfaThousandsDelegation() {
   document.body.addEventListener("input", (e) => {
     const t = e.target;
     if (isFcfaThousandsInput(t)) formatFcfaThousandsField(t);
+    // Champ cause journée sans vente : mettre à jour l'état du bouton en temps réel
+    if (t.id === "pdj-no-sales-reason") {
+      _pdjNoSalesReasonDraft = t.value;
+      const btn = document.getElementById("close-day-btn");
+      if (btn) pdjApplyCloseDayButtonGate(btn, {});
+    }
   });
   document.body.addEventListener("blur", (e) => {
     const t = e.target;
@@ -3975,25 +3982,36 @@ function pdjVentesCountForDate(dateIso) {
   return recordsForSite(state.ventes).filter((v) => (v.date || "").slice(0, 10) === d).length;
 }
 
-/** Bloque une nouvelle clôture sans vente ; un admin peut encore corriger une clôture existante. */
-function pdjClosureBlockedNoSales(dateIso) {
+/** Vrai si la date n'a aucune vente et n'est pas encore clôturée (bannière journée sans vente). */
+function pdjNoSalesForDate(dateIso) {
   const d = String(dateIso || "").slice(0, 10);
   if (pdjVentesCountForDate(d) > 0) return false;
-  // Admins et gérants peuvent clôturer une journée sans ventes (confirmation demandée dans closeAccountingDay)
-  if (canAnyAdmin()) return false;
   const closed = stockCheckForSiteDate(d, currentSiteId());
   return !closed;
 }
 
+/** Bloque le bouton tant qu'aucune cause n'est saisie (journée sans vente). Admins non bloqués. */
+function pdjClosureBlockedNoSales(dateIso) {
+  if (!pdjNoSalesForDate(dateIso)) return false;
+  if (canAnyAdmin()) return false;
+  const reasonEl = document.getElementById("pdj-no-sales-reason");
+  return String(reasonEl?.value ?? _pdjNoSalesReasonDraft).trim().length === 0;
+}
+
 function pdjNoSalesClosureBannerHtml(dateIso) {
   const d = String(dateIso || "").slice(0, 10);
-  return `<div class="inline-card pdj-closure-alert" style="margin-bottom:12px;border-left:3px solid #ff8e82">
-        <strong>Clôture impossible — aucune vente</strong>
-        <p class="muted" style="margin-top:6px;font-size:0.86rem;line-height:1.45">
-          Aucune vente enregistrée pour le <strong>${escapeHtml(formatDateDdMmYyyy(d))}</strong>.
-          Depuis <strong>Ventes</strong>, enregistrez au moins une vente (statut <strong>Servi</strong>) avant de clôturer la journée.
-        </p>
-      </div>`;
+  const draft = escapeHtml(_pdjNoSalesReasonDraft);
+  return `<div class="inline-card" style="margin-bottom:12px;border-left:3px solid #fb8c00;padding:12px 16px">
+    <strong>Journée sans vente — cause requise</strong>
+    <p class="muted" style="margin-top:6px;margin-bottom:10px;font-size:0.86rem;line-height:1.45">
+      Aucune vente enregistrée pour le <strong>${escapeHtml(formatDateDdMmYyyy(d))}</strong>.
+      Indiquez la cause pour pouvoir clôturer la journée.
+    </p>
+    <label for="pdj-no-sales-reason" style="font-size:0.85rem;font-weight:600;display:block;margin-bottom:4px">Cause de la non-vente <span style="color:#ff8e82">*</span></label>
+    <input id="pdj-no-sales-reason" type="text" value="${draft}"
+      placeholder="Ex : jour férié, fermeture exceptionnelle, panne électrique…"
+      style="width:100%;max-width:420px;padding:8px 10px;border:1px solid #ccc;border-radius:6px;font-size:0.95rem">
+  </div>`;
 }
 
 function pdjApplyCloseDayButtonGate(button, { disabled = false, title = null } = {}) {
@@ -4001,7 +4019,7 @@ function pdjApplyCloseDayButtonGate(button, { disabled = false, title = null } =
   const blockedNoSales = pdjClosureBlockedNoSales(pdjCalendarDate());
   button.disabled = Boolean(disabled || blockedNoSales);
   if (blockedNoSales && !disabled) {
-    button.title = "Aucune vente enregistrée pour cette date — enregistrez des ventes avant de clôturer.";
+    button.title = "Indiquez la cause de la journée sans vente avant de clôturer.";
   } else if (title) {
     button.title = title;
   } else {
@@ -7251,7 +7269,7 @@ function renderDailyStockCheck() {
   const pendingForClose = pendingOrdersForJournalDate(dStr, currentSiteId());
   const closeBlockedByPending = pendingForClose.length > 0;
   const blockedNoSales = pdjClosureBlockedNoSales(dStr);
-  const noSalesBanner = blockedNoSales ? pdjNoSalesClosureBannerHtml(dStr) : "";
+  const noSalesBanner = pdjNoSalesForDate(dStr) ? pdjNoSalesClosureBannerHtml(dStr) : "";
   const container = document.getElementById("pdj-stock-check");
   const button = document.getElementById("close-day-btn");
   if (!container || !button) return;
@@ -14663,11 +14681,15 @@ async function closeAccountingDay() {
     closedByRole,
     managerConfirmedAt: managerClose ? new Date().toISOString() : null,
     managerConfirmedBy: managerClose ? (sessionUser || "") : null,
+    noSalesReason: ventesJour.length === 0
+      ? String(document.getElementById("pdj-no-sales-reason")?.value ?? _pdjNoSalesReasonDraft).trim() || undefined
+      : undefined,
   };
   state.stockChecks = [
     check,
     ...(state.stockChecks || []).filter((item) => !(item.siteId === check.siteId && item.date === check.date)),
   ];
+  _pdjNoSalesReasonDraft = "";
   // Clôture manuelle : effacer le marqueur de réouverture pour ce jour
   _autoClotureManualReopened.delete(`${check.siteId}|${check.date}`);
   const dayBookToUnmark = (state.dayBooks || []).find((b) => b.siteId === check.siteId && b.date === check.date);
