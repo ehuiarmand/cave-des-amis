@@ -708,6 +708,11 @@ function updateCloseDayButtonLabel() {
   const btn = document.getElementById("close-day-btn");
   if (!btn || !canClosePdjDay()) return;
   const d = pdjCalendarDate();
+  // Gérant (non-admin) : si la serveuse a soumis sa fin de service, ne pas écraser le bouton
+  if (canManagePdjAccounting() && !canAnyAdmin()) {
+    const pend = pendingManagerConfirmationCheck(currentSiteId());
+    if (pend && String(pend.date || "").slice(0, 10) === d) return;
+  }
   btn.className = "btn btn-danger";
   const role = String(currentRole || "").trim();
   const suffix = role === "serveuse" ? " (fin de service)" : "";
@@ -7248,6 +7253,17 @@ function renderDailyStockCheck() {
   const container = document.getElementById("pdj-stock-check");
   const button = document.getElementById("close-day-btn");
   if (!container || !button) return;
+  // Gérant (non-admin) : si la serveuse a soumis sa fin de service, masquer le bouton de clôture directe
+  if (canManagePdjAccounting() && !canAnyAdmin()) {
+    const pendingServ = pendingManagerConfirmationCheck(currentSiteId());
+    if (pendingServ && String(pendingServ.date || "").slice(0, 10) === dStr) {
+      container.innerHTML = "";
+      button.disabled = true;
+      button.className = "btn btn-secondary";
+      button.textContent = "Fin de service en attente de validation";
+      return;
+    }
+  }
   if (!canClosePdjDay()) {
     container.innerHTML = staffRequiresShiftWindowForSales()
       ? `<p class="muted" style="font-size:0.88rem;line-height:1.45">La clôture est disponible pendant votre créneau de service (Planning → Mes horaires).</p>`
