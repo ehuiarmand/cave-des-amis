@@ -11210,6 +11210,8 @@ function syncUserAccountPanel() {
   if (nameEl) nameEl.value = String(me?.displayName || "").trim();
   if (pw) pw.value = "";
   if (pwc) pwc.value = "";
+  const waPhoneEl = document.getElementById("ua-wa-phone");
+  if (waPhoneEl) waPhoneEl.value = String(me?.waPhone || "").trim();
   const twoFaHost = document.getElementById("ua-2fa-actions");
   if (twoFaHost && me) {
     twoFaHost.innerHTML = me.twoFactorEnabled
@@ -11236,6 +11238,7 @@ async function saveMyUserProfile() {
     return;
   }
   const displayName = String(document.getElementById("ua-display-name")?.value || "").trim().slice(0, 120);
+  const waPhone = String(document.getElementById("ua-wa-phone")?.value || "").trim();
   const pw1 = String(document.getElementById("ua-password")?.value || "");
   const pw2 = String(document.getElementById("ua-password-confirm")?.value || "");
   if (pw1 || pw2) {
@@ -11253,6 +11256,7 @@ async function saveMyUserProfile() {
     role: me.role,
     allowedSiteIds: [...(me.allowedSiteIds || [])],
     displayName,
+    waPhone,
     ...(pw1 ? { password: pw1 } : {}),
   };
   recordStaffAudit("update", "profil_utilisateur", `Profil ${me.username}`, displayName ? `Nom affiche : ${displayName}` : "Mise a jour");
