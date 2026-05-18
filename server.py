@@ -533,7 +533,11 @@ def _twilio_send_sms(to_e164: str, body: str) -> None:
 def _whatsapp_send(to_e164: str, body: str) -> None:
     phone_id = os.environ.get("WHATSAPP_PHONE_NUMBER_ID", "").strip()
     token = os.environ.get("WHATSAPP_ACCESS_TOKEN", "").strip()
-    if not (phone_id and token):
+    if not phone_id:
+        print("[WA] ERREUR : WHATSAPP_PHONE_NUMBER_ID non defini. Demarrer via lancer.bat.", flush=True)
+        return
+    if not token:
+        print("[WA] ERREUR : WHATSAPP_ACCESS_TOKEN non defini. Demarrer via lancer.bat.", flush=True)
         return
     to_clean = _normalize_international_phone(to_e164.strip())
     if not to_clean:
@@ -568,7 +572,13 @@ def _whatsapp_send(to_e164: str, body: str) -> None:
             "Content-Type": "application/json; charset=utf-8",
         },
     )
-    urlopen(req, timeout=18)  # nosec — Meta HTTPS
+    try:
+        resp = urlopen(req, timeout=18)  # nosec — Meta HTTPS
+        print(f"[WA] OK envoye a {to_clean} (HTTP {resp.status})", flush=True)
+    except HTTPError as e:
+        body_err = e.read().decode("utf-8", errors="replace")
+        print(f"[WA] ERREUR HTTP {e.code} pour {to_clean}: {body_err}", flush=True)
+        raise
 
 
 def _wa_phones_for_site(site: dict[str, Any], event: str) -> list[str]:
@@ -961,10 +971,15 @@ def _send_cloture_report_wa_async(
 ) -> None:
     """Génère le rapport PDF de clôture et l'envoie via WhatsApp (thread daemon)."""
     if not _FPDF_AVAILABLE:
+        print("[WA PDF] ERREUR : fpdf2 non installe. Faire: pip install fpdf2", flush=True)
         return
     phone_id = os.environ.get("WHATSAPP_PHONE_NUMBER_ID", "").strip()
     token = os.environ.get("WHATSAPP_ACCESS_TOKEN", "").strip()
-    if not (phone_id and token):
+    if not phone_id:
+        print("[WA PDF] ERREUR : WHATSAPP_PHONE_NUMBER_ID non defini. Demarrer via lancer.bat.", flush=True)
+        return
+    if not token:
+        print("[WA PDF] ERREUR : WHATSAPP_ACCESS_TOKEN non defini. Demarrer via lancer.bat.", flush=True)
         return
 
     site_id = str(site.get("id", ""))
@@ -991,9 +1006,12 @@ def _send_cloture_report_wa_async(
     _check = dict(check)
 
     def run() -> None:
+        print(f"[WA PDF] Debut envoi rapport cloture site={site_id} destinataires={phones}", flush=True)
         try:
             pdf_bytes = _generate_cloture_pdf(_site, _check, _ventes, _stock)
+            print(f"[WA PDF] PDF genere ({len(pdf_bytes)} octets)", flush=True)
         except Exception as ex:
+            print(f"[WA PDF] ERREUR generation PDF: {ex}", flush=True)
             audit_log("wa_cloture_pdf_gen_failed", {"error": str(ex), "siteId": site_id})
             return
         date_str = str(_check.get("date") or "")[:10]
@@ -1007,13 +1025,17 @@ def _send_cloture_report_wa_async(
         caption = f"Rapport de cloture - {nom} - {date_label}"
         try:
             media_id = _wa_upload_media(pdf_bytes, filename)
+            print(f"[WA PDF] Upload OK media_id={media_id}", flush=True)
         except Exception as ex:
+            print(f"[WA PDF] ERREUR upload media: {ex}", flush=True)
             audit_log("wa_cloture_media_upload_failed", {"error": str(ex), "siteId": site_id})
             return
         for phone in phones:
             try:
                 _wa_send_document(phone, media_id, caption, filename)
+                print(f"[WA PDF] Document envoye a {phone}", flush=True)
             except (OSError, HTTPError, URLError, ValueError) as ex:
+                print(f"[WA PDF] ERREUR envoi document a {phone}: {ex}", flush=True)
                 audit_log("wa_cloture_doc_send_failed", {"error": str(ex), "siteId": site_id, "to": phone})
 
     threading.Thread(target=run, daemon=True).start()
@@ -1030,6 +1052,7 @@ def _trigger_stockcheck_wa_notifications(
     _auth = auth_users or []
     _ventes = ventes or []
     _stock = stock_rows or []
+    print(f"[WA TRIGGER] Verification {len(new_checks)} stockChecks, snap={len(old_snap)} entrees", flush=True)
     for check in new_checks:
         if not isinstance(check, dict):
             continue
@@ -1039,6 +1062,7 @@ def _trigger_stockcheck_wa_notifications(
         site_id = str(check.get("siteId", ""))
         site = sites_by_id.get(site_id)
         if not site:
+            print(f"[WA TRIGGER] check {cid}: site '{site_id}' introuvable dans sites_by_id={list(sites_by_id.keys())}", flush=True)
             continue
         old = old_snap.get(cid)
         role = str(check.get("closedByRole") or "").strip().lower()
@@ -1050,13 +1074,18 @@ def _trigger_stockcheck_wa_notifications(
                 submitted_by = str(check.get("closedBy") or "")
             elif role in ("manager", "admin", "superadmin"):
                 msg_event = "cloture_journee"
+            else:
+                print(f"[WA TRIGGER] check {cid} NOUVEAU mais role='{role}' non reconnu → pas de notif", flush=True)
         else:
             # Gérant confirme la fin de service de la serveuse
             if not old.get("managerConfirmedAt") and check.get("managerConfirmedAt"):
                 msg_event = "cloture_journee"
                 submitted_by = str(check.get("closedBy") or "")
+            else:
+                print(f"[WA TRIGGER] check {cid} EXISTANT role={role} managerConfirmedAt={bool(check.get('managerConfirmedAt'))} → pas de changement detecte", flush=True)
         if not msg_event:
             continue
+        print(f"[WA TRIGGER] check {cid} → event={msg_event} site={site_id}", flush=True)
         msg = _wa_stock_check_message(site, check, msg_event)
         # Site-level broadcast (message texte)
         _whatsapp_notify_event_async(site, msg_event, msg)
@@ -3310,7 +3339,9 @@ class DataStore:
             self._write(current)
             _sites_by_id = {str(s.get("id", "")): s for s in (current.get("sites") or []) if isinstance(s, dict)}
             _auth_u = current.get("auth", {}).get("users", [])
+            print(f"[PUT scoped] payload keys={list(payload.keys())[:10]} sites_by_id={list(_sites_by_id.keys())}", flush=True)
             if "stockChecks" in payload:
+                print(f"[PUT scoped] stockChecks detecte dans payload → lancement trigger WA", flush=True)
                 _trigger_stockcheck_wa_notifications(current.get("stockChecks") or [], _old_sc_snap, _sites_by_id, _auth_u, current.get("ventes") or [], current.get("stock") or [])
             if "stock" in payload:
                 _trigger_stock_alert_wa_notifications(current.get("stock") or [], _old_stock_snap, _sites_by_id, _auth_u)
@@ -4688,6 +4719,12 @@ def main() -> None:
     print(f"Maquis Manager server running on http://127.0.0.1:{bound_port}")
     print(f"Storage mode: {STORAGE_MODE}")
     print(f"Sauvegardes automatiques dans {BACKUP_DIR} (garder jusqu'a {BACKUP_KEEP_COUNT} fichiers par type)")
+    _wa_phone_id = os.environ.get("WHATSAPP_PHONE_NUMBER_ID", "").strip()
+    _wa_token = os.environ.get("WHATSAPP_ACCESS_TOKEN", "").strip()
+    if _wa_phone_id and _wa_token:
+        print(f"\033[92mWhatsApp: ACTIF (Phone ID={_wa_phone_id})\033[0m")
+    else:
+        print("\033[93mWhatsApp: NON CONFIGURE - demarrer via lancer.bat pour activer les notifications\033[0m")
     try:
         hostname = socket.gethostname()
         lan_ip = socket.gethostbyname(hostname)
