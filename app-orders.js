@@ -10905,7 +10905,7 @@ function getUserPermissions(user) {
   if (!user) return {};
   // 1. Rôle custom du maquis actif
   if (user.customRoleId) {
-    const site = activeSite();
+    const site = currentSite();
     const cr = (site?.customRoles || []).find((r) => r.id === user.customRoleId);
     if (cr?.permissions) return cr.permissions;
   }
@@ -10933,7 +10933,7 @@ function renderPermissionCheckboxes(targetUser = null) {
   let perms = {};
   let source = "";
   if (customRoleId) {
-    const site = activeSite();
+    const site = currentSite();
     const cr = (site?.customRoles || []).find((r) => r.id === customRoleId);
     perms = cr?.permissions || {};
     source = `(hérité du rôle « ${escapeHtml(cr?.nom || customRoleId)} »)`;
@@ -10960,7 +10960,7 @@ function renderPermissionCheckboxes(targetUser = null) {
 function populateCustomRoleSelect() {
   const sel = document.getElementById("new-user-custom-role");
   if (!sel) return;
-  const site = activeSite();
+  const site = currentSite();
   const roles = site?.customRoles || [];
   const current = sel.value;
   sel.innerHTML = `<option value="">— Permissions par défaut du rôle —</option>` +
@@ -10972,7 +10972,7 @@ function renderCustomRolesList() {
   const container = document.getElementById("custom-roles-list");
   const siteLabel = document.getElementById("custom-roles-site-label");
   if (!container) return;
-  const site = activeSite();
+  const site = currentSite();
   if (siteLabel) siteLabel.textContent = site?.nom || "Maquis courant";
   const roles = site?.customRoles || [];
   if (!roles.length) {
@@ -10998,7 +10998,7 @@ function renderCustomRolesList() {
 }
 
 async function saveCustomRole(roleId = null) {
-  const site = activeSite();
+  const site = currentSite();
   if (!site) return;
   const nomInput = document.getElementById("new-role-name");
   const nom = String(nomInput?.value || "").trim();
@@ -11026,7 +11026,7 @@ async function saveCustomRole(roleId = null) {
 }
 
 async function deleteCustomRole(roleId) {
-  const site = activeSite();
+  const site = currentSite();
   if (!site) return;
   const role = (site.customRoles || []).find((r) => r.id === roleId);
   if (!window.confirm(`Supprimer le rôle « ${role?.nom || roleId} » ?`)) return;
@@ -11042,7 +11042,7 @@ async function deleteCustomRole(roleId) {
 
 function showRolePermForm(roleId = null) {
   document.getElementById("role-perm-form")?.remove();
-  const site = activeSite();
+  const site = currentSite();
   const existing = roleId ? (site?.customRoles || []).find((r) => r.id === roleId) : null;
   const perms = existing?.permissions || {};
   const form = document.createElement("div");
