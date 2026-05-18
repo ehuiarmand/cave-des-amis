@@ -10814,6 +10814,8 @@ function resetUserForm() {
   document.getElementById("new-user-role").value = "serveuse";
   document.getElementById("new-user-password").value = "";
   document.getElementById("new-user-password").placeholder = "Obligatoire a la creation";
+  const pWaUser = document.getElementById("new-user-wa-phone");
+  if (pWaUser) pWaUser.value = "";
   document.getElementById("add-user-btn").textContent = "Ajouter l'utilisateur";
   document.getElementById("cancel-edit-user-btn").classList.add("hidden");
   renderUserSiteCheckboxes();
@@ -10828,6 +10830,8 @@ function editUser(username) {
   document.getElementById("new-user-role").value = String(user.username || "").trim().toLowerCase() === "admin" ? "superadmin" : user.role;
   document.getElementById("new-user-password").value = "";
   document.getElementById("new-user-password").placeholder = "Laisser vide pour garder l'ancien";
+  const pWaUserEdit = document.getElementById("new-user-wa-phone");
+  if (pWaUserEdit) pWaUserEdit.value = user.waPhone || "";
   document.getElementById("add-user-btn").textContent = "Enregistrer les modifications";
   document.getElementById("cancel-edit-user-btn").classList.remove("hidden");
   renderEditableUserSites(user);
@@ -10876,7 +10880,7 @@ function renderUsersList() {
       <div class="site-row">
         <div>
           <p class="list-item-title">${escapeHtml(user.username)}${twoFaBadge}</p>
-          <p class="list-item-sub">${user.displayName ? `${escapeHtml(String(user.displayName).trim())} · ` : ""}${roleLabel(user.role, user.username)} · ${siteNames}</p>
+          <p class="list-item-sub">${user.displayName ? `${escapeHtml(String(user.displayName).trim())} · ` : ""}${roleLabel(user.role, user.username)} · ${siteNames}${user.waPhone ? ` · 📱 ${escapeHtml(user.waPhone)}` : ""}</p>
         </div>
         <div class="line-actions">
           ${canEdit ? `<button type="button" class="mini-btn" data-edit-user="${escapeHtml(user.username)}">Modifier</button>` : ""}
@@ -10939,11 +10943,12 @@ async function addUser() {
     const hiddenSiteIds = (targetUser?.allowedSiteIds || []).filter((siteId) => !canAccessSite(siteId));
     allowedSiteIds = [...new Set([...selectedSiteIds, ...hiddenSiteIds])];
   }
+  const waPhone = (document.getElementById("new-user-wa-phone")?.value || "").trim();
   const newUsers = editUsername
     ? users.map((user) => user.username === editUsername
-      ? { ...user, username, ...(password ? { password } : {}), role, allowedSiteIds }
+      ? { ...user, username, ...(password ? { password } : {}), role, allowedSiteIds, waPhone }
       : user)
-    : [...users, { username, password, role, allowedSiteIds }];
+    : [...users, { username, password, role, allowedSiteIds, waPhone }];
   await persistState({ auth: { users: newUsers } });
   const saved = (state.auth.users || []).find((user) => user.username === username);
   if (!saved || saved.role !== role || JSON.stringify([...(saved.allowedSiteIds || [])].sort()) !== JSON.stringify([...allowedSiteIds].sort())) {
@@ -11153,6 +11158,17 @@ function loadParamsForm() {
   document.getElementById("p-prefixe").value = site?.prefixeFacture || "";
   const pSmsQr = document.getElementById("p-sms-qr");
   if (pSmsQr) pSmsQr.value = site?.smsQrAlert || "";
+  const pWaPhones = document.getElementById("p-wa-phones");
+  if (pWaPhones) pWaPhones.value = site?.waNotifyPhones || "";
+  const waEvents = Array.isArray(site?.waEvents) ? site.waEvents : [];
+  const pWaEvCommande = document.getElementById("p-wa-ev-commande");
+  if (pWaEvCommande) pWaEvCommande.checked = waEvents.includes("commande_qr");
+  const pWaEvFinService = document.getElementById("p-wa-ev-fin-service");
+  if (pWaEvFinService) pWaEvFinService.checked = waEvents.includes("fin_service");
+  const pWaEvCloture = document.getElementById("p-wa-ev-cloture");
+  if (pWaEvCloture) pWaEvCloture.checked = waEvents.includes("cloture_journee");
+  const pWaEvStock = document.getElementById("p-wa-ev-stock");
+  if (pWaEvStock) pWaEvStock.checked = waEvents.includes("alerte_stock");
   const pSingleEnabled = document.getElementById("p-single-br-enabled");
   const pSingleName = document.getElementById("p-single-br-name");
   if (pSingleEnabled) pSingleEnabled.checked = Boolean(site?.singleBreweryOnly);
@@ -14823,6 +14839,13 @@ async function saveParams() {
     prefixeFacture: (document.getElementById("p-prefixe").value.trim() || item.prefixeFacture || "FAC").toUpperCase(),
     dualZonePricing: dualPricingChecked,
     smsQrAlert: (document.getElementById("p-sms-qr")?.value || "").trim(),
+    waNotifyPhones: (document.getElementById("p-wa-phones")?.value || "").trim(),
+    waEvents: [
+      document.getElementById("p-wa-ev-commande")?.checked ? "commande_qr" : null,
+      document.getElementById("p-wa-ev-fin-service")?.checked ? "fin_service" : null,
+      document.getElementById("p-wa-ev-cloture")?.checked ? "cloture_journee" : null,
+      document.getElementById("p-wa-ev-stock")?.checked ? "alerte_stock" : null,
+    ].filter(Boolean),
     singleBreweryOnly,
     singleBreweryName: singleBreweryOnly ? singleBreweryName : "",
     stockAlertInclusiveSeuil: Boolean(document.getElementById("p-stock-alert-inclusive-seuil")?.checked),

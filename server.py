@@ -22,6 +22,12 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, quote, urlparse, urlencode
 from urllib.request import Request, urlopen
 
+try:
+    from fpdf import FPDF as _FPDF  # type: ignore[import-untyped]
+    _FPDF_AVAILABLE = True
+except ImportError:
+    _FPDF_AVAILABLE = False
+
 
 BASE_DIR = Path(__file__).resolve().parent
 DEBUG_LOG_FILE = BASE_DIR / "debug-dee456.log"
@@ -522,10 +528,610 @@ def _twilio_send_sms(to_e164: str, body: str) -> None:
     urlopen(req, timeout=18)  # nosec — Twilio HTTPS
 
 
-def notify_qr_order_created_async(site: dict[str, Any], order: dict[str, Any]) -> None:
-    """Alertes SMS / webhook après commande cliente (QR). Ne bloque pas l'HTTP : thread daemon."""
+# --- WhatsApp Cloud API (Meta) ---
+
+def _whatsapp_send(to_e164: str, body: str) -> None:
+    phone_id = os.environ.get("WHATSAPP_PHONE_NUMBER_ID", "").strip()
+    token = os.environ.get("WHATSAPP_ACCESS_TOKEN", "").strip()
+    if not (phone_id and token):
+        return
+    to_clean = _normalize_international_phone(to_e164.strip())
+    if not to_clean:
+        raise ValueError("Numéro WhatsApp invalide (format international +225…).")
+    template_name = os.environ.get("WHATSAPP_TEMPLATE_NAME", "").strip()
+    if template_name:
+        lang = os.environ.get("WHATSAPP_TEMPLATE_LANG", "fr").strip() or "fr"
+        wa_payload: dict[str, Any] = {
+            "messaging_product": "whatsapp",
+            "to": to_clean,
+            "type": "template",
+            "template": {
+                "name": template_name,
+                "language": {"code": lang},
+                "components": [{"type": "body", "parameters": [{"type": "text", "text": body[:1024]}]}],
+            },
+        }
+    else:
+        wa_payload = {
+            "messaging_product": "whatsapp",
+            "to": to_clean,
+            "type": "text",
+            "text": {"body": body[:4096]},
+        }
+    data = json.dumps(wa_payload, ensure_ascii=False).encode("utf-8")
+    req = Request(
+        f"https://graph.facebook.com/v17.0/{phone_id}/messages",
+        data=data,
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json; charset=utf-8",
+        },
+    )
+    urlopen(req, timeout=18)  # nosec — Meta HTTPS
+
+
+def _wa_phones_for_site(site: dict[str, Any], event: str) -> list[str]:
+    events_enabled = site.get("waEvents") or []
+    if isinstance(events_enabled, list) and event not in events_enabled:
+        return []
+    raw = str(site.get("waNotifyPhones") or "").strip()
+    if not raw:
+        return []
+    phones: list[str] = []
+    for part in raw.replace(";", ",").split(","):
+        p = _normalize_international_phone(part.strip())
+        if p:
+            phones.append(p)
+    return phones
+
+
+def _whatsapp_notify_event_async(site: dict[str, Any], event: str, message: str) -> None:
+    phones = _wa_phones_for_site(site, event)
+    if not phones:
+        return
+    site_id = site.get("id", "?")
 
     def run() -> None:
+        for phone in phones:
+            try:
+                _whatsapp_send(phone, message)
+            except (OSError, HTTPError, URLError, ValueError) as ex:
+                audit_log("wa_notify_failed", {"error": str(ex), "siteId": site_id, "event": event, "to": phone})
+
+    threading.Thread(target=run, daemon=True).start()
+
+
+def _wa_stock_check_message(site: dict[str, Any], check: dict[str, Any], event: str) -> str:
+    nom = str(site.get("nom") or site.get("name") or site.get("id") or "Maquis")
+    date_str = str(check.get("date") or "")[:10]
+    by = str(check.get("managerConfirmedBy") or check.get("closedBy") or "")
+    if event == "fin_service":
+        return f"[PDJ] {nom} — Fin de service enregistrée pour le {date_str} (par {by})"
+    if event == "cloture_journee":
+        return f"[PDJ] {nom} — Journée du {date_str} clôturée (par {by})"
+    return f"[PDJ] {nom} — Événement {event} le {date_str}"
+
+
+def _wa_phone_for_user(username: str, auth_users: list[dict[str, Any]]) -> str:
+    un = str(username or "").strip().lower()
+    for u in auth_users:
+        if not isinstance(u, dict):
+            continue
+        if str(u.get("username", "")).strip().lower() == un:
+            return _normalize_international_phone(str(u.get("waPhone") or "").strip())
+    return ""
+
+
+def _wa_phones_for_shift_serveuses(
+    site_id: str, date_iso: str, auth_users: list[dict[str, Any]], work_shifts: list[dict[str, Any]]
+) -> list[str]:
+    """Numéros WhatsApp des utilisateurs planifiés sur ce maquis ce jour."""
+    d = str(date_iso or "")[:10]
+    phones: list[str] = []
+    seen: set[str] = set()
+    for shift in work_shifts:
+        if not isinstance(shift, dict):
+            continue
+        if str(shift.get("siteId", "")).strip() != site_id:
+            continue
+        if str(shift.get("date", ""))[:10] != d:
+            continue
+        un = str(shift.get("username", "")).strip().lower()
+        if not un or un in seen:
+            continue
+        seen.add(un)
+        p = _wa_phone_for_user(un, auth_users)
+        if p:
+            phones.append(p)
+    return phones
+
+
+def _wa_phones_for_managers_of_site(site_id: str, auth_users: list[dict[str, Any]]) -> list[str]:
+    """Numéros WhatsApp des gérants/admins ayant accès à ce maquis."""
+    phones: list[str] = []
+    for u in auth_users:
+        if not isinstance(u, dict):
+            continue
+        if str(u.get("role", "")).strip().lower() not in ("manager", "admin", "superadmin"):
+            continue
+        if site_id not in (u.get("allowedSiteIds") or []):
+            continue
+        p = _normalize_international_phone(str(u.get("waPhone") or "").strip())
+        if p:
+            phones.append(p)
+    return phones
+
+
+def _wa_user_phones_for_event(
+    event: str,
+    site_id: str,
+    auth_users: list[dict[str, Any]],
+    work_shifts: list[dict[str, Any]],
+    date_iso: str = "",
+    submitted_by: str = "",
+) -> list[str]:
+    """
+    Retourne les numéros WhatsApp des utilisateurs concernés par l'événement.
+    - commande_qr  : serveuses en service + gérants du maquis
+    - fin_service  : gérants du maquis
+    - cloture_journee : gérants + serveuse qui a soumis (si submitted_by renseigné)
+    - alerte_stock : gérants du maquis
+    """
+    phones: list[str] = []
+    seen: set[str] = set()
+
+    def add(p: str) -> None:
+        if p and p not in seen:
+            seen.add(p)
+            phones.append(p)
+
+    if event == "commande_qr":
+        d = date_iso or time.strftime("%Y-%m-%d", time.gmtime())
+        for p in _wa_phones_for_shift_serveuses(site_id, d, auth_users, work_shifts):
+            add(p)
+        for p in _wa_phones_for_managers_of_site(site_id, auth_users):
+            add(p)
+    elif event in ("fin_service", "alerte_stock"):
+        for p in _wa_phones_for_managers_of_site(site_id, auth_users):
+            add(p)
+    elif event == "cloture_journee":
+        for p in _wa_phones_for_managers_of_site(site_id, auth_users):
+            add(p)
+        if submitted_by:
+            add(_wa_phone_for_user(submitted_by, auth_users))
+
+    return phones
+
+
+def _wa_upload_media(pdf_bytes: bytes, filename: str) -> str:
+    """Upload un PDF vers l'API media WhatsApp Cloud. Retourne le media_id."""
+    phone_id = os.environ.get("WHATSAPP_PHONE_NUMBER_ID", "").strip()
+    token = os.environ.get("WHATSAPP_ACCESS_TOKEN", "").strip()
+    if not (phone_id and token):
+        raise ValueError("WHATSAPP_PHONE_NUMBER_ID ou WHATSAPP_ACCESS_TOKEN non configures.")
+    boundary = f"----WaBoundary{secrets.token_hex(12)}"
+    parts: list[bytes] = [
+        f"--{boundary}\r\nContent-Disposition: form-data; name=\"messaging_product\"\r\n\r\nwhatsapp".encode(),
+        f"--{boundary}\r\nContent-Disposition: form-data; name=\"type\"\r\n\r\napplication/pdf".encode(),
+        (
+            f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{filename}\"\r\n"
+            f"Content-Type: application/pdf\r\n\r\n"
+        ).encode() + pdf_bytes,
+        f"--{boundary}--".encode(),
+    ]
+    body = b"\r\n".join(parts)
+    req = Request(
+        f"https://graph.facebook.com/v17.0/{phone_id}/media",
+        data=body,
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+        },
+    )
+    with urlopen(req, timeout=60) as resp:  # nosec — Meta HTTPS
+        result = json.loads(resp.read().decode("utf-8"))
+    return str(result["id"])
+
+
+def _wa_send_document(to_e164: str, media_id: str, caption: str, filename: str) -> None:
+    phone_id = os.environ.get("WHATSAPP_PHONE_NUMBER_ID", "").strip()
+    token = os.environ.get("WHATSAPP_ACCESS_TOKEN", "").strip()
+    if not (phone_id and token):
+        return
+    to_clean = _normalize_international_phone(to_e164.strip())
+    if not to_clean:
+        return
+    data = json.dumps({
+        "messaging_product": "whatsapp",
+        "to": to_clean,
+        "type": "document",
+        "document": {"id": media_id, "caption": caption[:1024], "filename": filename},
+    }, ensure_ascii=False).encode("utf-8")
+    req = Request(
+        f"https://graph.facebook.com/v17.0/{phone_id}/messages",
+        data=data,
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json; charset=utf-8",
+        },
+    )
+    urlopen(req, timeout=18)  # nosec — Meta HTTPS
+
+
+def _safe_pdf_str(text: str, maxlen: int = 80) -> str:
+    """Retourne une chaine compatible cp1252 (police PDF core) tronquee a maxlen."""
+    out = text[:maxlen]
+    return out.encode("cp1252", errors="replace").decode("cp1252")
+
+
+def _generate_cloture_pdf(
+    site: dict[str, Any],
+    check: dict[str, Any],
+    ventes: list[dict[str, Any]],
+    stock_rows: list[dict[str, Any]],
+) -> bytes:
+    if not _FPDF_AVAILABLE:
+        raise RuntimeError("fpdf2 non installe (pip install fpdf2).")
+
+    site_id = str(site.get("id", ""))
+    nom = _safe_pdf_str(str(site.get("nom") or site.get("name") or site_id))
+    date_str = str(check.get("date") or "")[:10]
+    try:
+        y_p, m_p, d_p = date_str.split("-")
+        date_fmt = f"{d_p}/{m_p}/{y_p}"
+    except ValueError:
+        date_fmt = date_str
+
+    closed_by = _safe_pdf_str(str(check.get("managerConfirmedBy") or check.get("closedBy") or ""))
+    role_raw = str(check.get("closedByRole") or "").lower()
+    role_labels = {"serveuse": "Serveuse", "manager": "Gerant", "admin": "Admin", "superadmin": "Super Admin"}
+    closed_by_role = role_labels.get(role_raw, role_raw)
+    created_at = str(check.get("managerConfirmedAt") or check.get("createdAt") or "")
+    heure = created_at[11:16] if len(created_at) > 15 else ""
+
+    nb_ventes = int(check.get("nbVentes") or 0)
+    ca_encaisse = int(check.get("caEncaisse") or 0)
+    ca_creances = int(check.get("caCreances") or 0)
+    totaux_jour: dict[str, Any] = check.get("totauxJour") or {}
+    opening_cash = int(check.get("openingCashFcfa") or 0)
+    closing_cash = int(check.get("closingCashFcfa") or 0)
+    ecart_cash = int(check.get("cashEcartEspeces") or 0)
+    no_sales_reason = _safe_pdf_str(str(check.get("noSalesReason") or ""))
+
+    # Détail articles vendus ce jour
+    site_ventes = [v for v in ventes if str(v.get("siteId", "")) == site_id and str(v.get("date", ""))[:10] == date_str]
+    article_totals: dict[str, dict[str, int]] = {}
+    for v in site_ventes:
+        article = _safe_pdf_str(str(v.get("article") or "—"), 50)
+        qty = max(1, int(v.get("qty") or 1))
+        prix = int(v.get("prix") or 0)
+        remise = int(v.get("remise") or 0)
+        net = prix * qty - remise
+        if article not in article_totals:
+            article_totals[article] = {"qty": 0, "total": 0}
+        article_totals[article]["qty"] += qty
+        article_totals[article]["total"] += net
+
+    # Alertes stock
+    site_stock = [s for s in stock_rows if str(s.get("siteId", "")) == site_id]
+    low_items: list[dict[str, Any]] = []
+    for item in site_stock:
+        total = stock_total(item)
+        seuil = max(0, int(item.get("seuilMin") or 0))
+        if total == 0 or (seuil > 0 and total <= seuil):
+            low_items.append({
+                "article": _safe_pdf_str(str(item.get("article") or ""), 45),
+                "total": total,
+                "seuil": seuil,
+                "status": "Rupture" if total == 0 else "Bas",
+            })
+
+    def fmt_f(n: int) -> str:
+        s = str(abs(n))
+        groups: list[str] = []
+        while len(s) > 3:
+            groups.append(s[-3:])
+            s = s[:-3]
+        groups.append(s)
+        formatted = " ".join(reversed(groups))
+        return ("-" if n < 0 else "") + formatted + " FCFA"
+
+    pdf = _FPDF()
+    pdf.add_page()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.set_margins(15, 15, 15)
+
+    # En-tête
+    pdf.set_font("Helvetica", "B", 16)
+    pdf.cell(0, 10, "Rapport de Cloture de Journee", new_x="LMARGIN", new_y="NEXT", align="C")
+    pdf.set_font("Helvetica", "", 11)
+    pdf.cell(0, 7, f"Maquis : {nom}", new_x="LMARGIN", new_y="NEXT", align="C")
+    pdf.cell(0, 7, f"Date : {date_fmt}   Heure : {heure}", new_x="LMARGIN", new_y="NEXT", align="C")
+    pdf.cell(0, 7, f"Cloture par : {closed_by} ({closed_by_role})", new_x="LMARGIN", new_y="NEXT", align="C")
+    pdf.ln(4)
+    pdf.set_draw_color(180, 180, 180)
+    pdf.line(15, pdf.get_y(), 195, pdf.get_y())
+    pdf.ln(5)
+
+    # Résumé des ventes
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.cell(0, 9, "Resume des ventes", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 11)
+    if nb_ventes == 0 and no_sales_reason:
+        pdf.set_text_color(200, 100, 0)
+        pdf.multi_cell(0, 7, f"Journee sans vente - Cause : {no_sales_reason}")
+        pdf.set_text_color(0, 0, 0)
+    else:
+        pdf.cell(100, 7, "Nombre de ventes :", border=0)
+        pdf.cell(0, 7, str(nb_ventes), new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(100, 7, "CA total encaisse :", border=0)
+        pdf.set_font("Helvetica", "B", 11)
+        pdf.cell(0, 7, fmt_f(ca_encaisse), new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font("Helvetica", "", 11)
+        if ca_creances:
+            pdf.cell(100, 7, "Creances clients en cours :", border=0)
+            pdf.cell(0, 7, fmt_f(ca_creances), new_x="LMARGIN", new_y="NEXT")
+        if totaux_jour:
+            pdf.ln(2)
+            pdf.set_font("Helvetica", "B", 11)
+            pdf.cell(0, 7, "Modes de paiement :", new_x="LMARGIN", new_y="NEXT")
+            pdf.set_font("Helvetica", "", 11)
+            for method, amount in totaux_jour.items():
+                if amount:
+                    m_label = _safe_pdf_str(str(method), 40)
+                    pdf.cell(100, 6, f"  {m_label} :", border=0)
+                    pdf.cell(0, 6, fmt_f(int(amount)), new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(4)
+
+    # Caisse
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.cell(0, 9, "Caisse", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 11)
+    pdf.cell(100, 7, "Caisse ouverture :", border=0)
+    pdf.cell(0, 7, fmt_f(opening_cash), new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(100, 7, "Caisse comptee a la cloture :", border=0)
+    pdf.cell(0, 7, fmt_f(closing_cash), new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(100, 7, "Ecart de caisse :", border=0)
+    if ecart_cash < 0:
+        pdf.set_text_color(200, 0, 0)
+    elif ecart_cash > 0:
+        pdf.set_text_color(0, 150, 0)
+    pdf.cell(0, 7, fmt_f(ecart_cash), new_x="LMARGIN", new_y="NEXT")
+    pdf.set_text_color(0, 0, 0)
+
+    # Détail par article
+    if article_totals:
+        pdf.ln(4)
+        pdf.set_font("Helvetica", "B", 13)
+        pdf.cell(0, 9, "Detail par article", new_x="LMARGIN", new_y="NEXT")
+        pdf.set_fill_color(220, 220, 220)
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.cell(95, 7, "Article", border=1, fill=True)
+        pdf.cell(30, 7, "Qte", border=1, fill=True, align="C")
+        pdf.cell(55, 7, "Total FCFA", border=1, fill=True, align="R")
+        pdf.ln()
+        pdf.set_font("Helvetica", "", 10)
+        for article, data in sorted(article_totals.items()):
+            pdf.cell(95, 6, article, border=1)
+            pdf.cell(30, 6, str(data["qty"]), border=1, align="C")
+            pdf.cell(55, 6, fmt_f(data["total"]).replace(" FCFA", ""), border=1, align="R")
+            pdf.ln()
+
+    # Alertes stock
+    if low_items:
+        pdf.ln(4)
+        pdf.set_font("Helvetica", "B", 13)
+        pdf.set_text_color(180, 0, 0)
+        pdf.cell(0, 9, "Alertes stock", new_x="LMARGIN", new_y="NEXT")
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_fill_color(255, 220, 220)
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.cell(95, 7, "Article", border=1, fill=True)
+        pdf.cell(30, 7, "Stock", border=1, fill=True, align="C")
+        pdf.cell(30, 7, "Seuil", border=1, fill=True, align="C")
+        pdf.cell(25, 7, "Statut", border=1, fill=True, align="C")
+        pdf.ln()
+        pdf.set_font("Helvetica", "", 10)
+        for s in low_items:
+            pdf.cell(95, 6, s["article"], border=1)
+            pdf.cell(30, 6, str(s["total"]), border=1, align="C")
+            pdf.cell(30, 6, str(s["seuil"]) if s["seuil"] else "—", border=1, align="C")
+            pdf.cell(25, 6, s["status"], border=1, align="C")
+            pdf.ln()
+
+    # Pied de page
+    pdf.ln(8)
+    pdf.set_font("Helvetica", "I", 9)
+    pdf.set_text_color(150, 150, 150)
+    now_str = time.strftime("%d/%m/%Y a %H:%M", time.gmtime()) + " UTC"
+    pdf.cell(0, 5, f"Document genere automatiquement le {now_str}", new_x="LMARGIN", new_y="NEXT", align="C")
+
+    return bytes(pdf.output())
+
+
+def _send_cloture_report_wa_async(
+    site: dict[str, Any],
+    check: dict[str, Any],
+    auth_users: list[dict[str, Any]],
+    ventes: list[dict[str, Any]],
+    stock_rows: list[dict[str, Any]],
+) -> None:
+    """Génère le rapport PDF de clôture et l'envoie via WhatsApp (thread daemon)."""
+    if not _FPDF_AVAILABLE:
+        return
+    phone_id = os.environ.get("WHATSAPP_PHONE_NUMBER_ID", "").strip()
+    token = os.environ.get("WHATSAPP_ACCESS_TOKEN", "").strip()
+    if not (phone_id and token):
+        return
+
+    site_id = str(site.get("id", ""))
+    submitted_by = str(check.get("closedBy") or "")
+    phones: list[str] = []
+    seen: set[str] = set()
+
+    def add_p(p: str) -> None:
+        if p and p not in seen:
+            seen.add(p)
+            phones.append(p)
+
+    for p in _wa_phones_for_site(site, "cloture_journee"):
+        add_p(p)
+    for p in _wa_user_phones_for_event("cloture_journee", site_id, auth_users, [], submitted_by=submitted_by):
+        add_p(p)
+
+    if not phones:
+        return
+
+    _ventes = list(ventes)
+    _stock = list(stock_rows)
+    _site = dict(site)
+    _check = dict(check)
+
+    def run() -> None:
+        try:
+            pdf_bytes = _generate_cloture_pdf(_site, _check, _ventes, _stock)
+        except Exception as ex:
+            audit_log("wa_cloture_pdf_gen_failed", {"error": str(ex), "siteId": site_id})
+            return
+        date_str = str(_check.get("date") or "")[:10]
+        try:
+            y_r, m_r, d_r = date_str.split("-")
+            date_label = f"{d_r}-{m_r}-{y_r}"
+        except ValueError:
+            date_label = date_str
+        filename = f"rapport-cloture-{date_label}.pdf"
+        nom = str(_site.get("nom") or site_id)
+        caption = f"Rapport de cloture - {nom} - {date_label}"
+        try:
+            media_id = _wa_upload_media(pdf_bytes, filename)
+        except Exception as ex:
+            audit_log("wa_cloture_media_upload_failed", {"error": str(ex), "siteId": site_id})
+            return
+        for phone in phones:
+            try:
+                _wa_send_document(phone, media_id, caption, filename)
+            except (OSError, HTTPError, URLError, ValueError) as ex:
+                audit_log("wa_cloture_doc_send_failed", {"error": str(ex), "siteId": site_id, "to": phone})
+
+    threading.Thread(target=run, daemon=True).start()
+
+
+def _trigger_stockcheck_wa_notifications(
+    new_checks: list[dict[str, Any]],
+    old_snap: dict[str, dict[str, Any]],
+    sites_by_id: dict[str, dict[str, Any]],
+    auth_users: list[dict[str, Any]] | None = None,
+    ventes: list[dict[str, Any]] | None = None,
+    stock_rows: list[dict[str, Any]] | None = None,
+) -> None:
+    _auth = auth_users or []
+    _ventes = ventes or []
+    _stock = stock_rows or []
+    for check in new_checks:
+        if not isinstance(check, dict):
+            continue
+        cid = str(check.get("id", ""))
+        if not cid:
+            continue
+        site_id = str(check.get("siteId", ""))
+        site = sites_by_id.get(site_id)
+        if not site:
+            continue
+        old = old_snap.get(cid)
+        role = str(check.get("closedByRole") or "").strip().lower()
+        msg_event = ""
+        submitted_by = ""
+        if old is None:
+            if role == "serveuse":
+                msg_event = "fin_service"
+                submitted_by = str(check.get("closedBy") or "")
+            elif role in ("manager", "admin", "superadmin"):
+                msg_event = "cloture_journee"
+        else:
+            # Gérant confirme la fin de service de la serveuse
+            if not old.get("managerConfirmedAt") and check.get("managerConfirmedAt"):
+                msg_event = "cloture_journee"
+                submitted_by = str(check.get("closedBy") or "")
+        if not msg_event:
+            continue
+        msg = _wa_stock_check_message(site, check, msg_event)
+        # Site-level broadcast (message texte)
+        _whatsapp_notify_event_async(site, msg_event, msg)
+        # Par utilisateur (gérants + serveuse concernée selon l'événement)
+        if _auth:
+            user_phones = _wa_user_phones_for_event(msg_event, site_id, _auth, [], submitted_by=submitted_by)
+            site_phones = set(_wa_phones_for_site(site, msg_event))
+            for p in user_phones:
+                if p not in site_phones:
+                    try:
+                        threading.Thread(target=_whatsapp_send, args=(p, msg), daemon=True).start()
+                    except Exception:
+                        pass
+        # Rapport PDF de clôture
+        if msg_event == "cloture_journee":
+            _send_cloture_report_wa_async(site, check, _auth, _ventes, _stock)
+
+
+def _trigger_stock_alert_wa_notifications(
+    new_stock: list[dict[str, Any]],
+    old_snap: dict[tuple[str, str], int],
+    sites_by_id: dict[str, dict[str, Any]],
+    auth_users: list[dict[str, Any]] | None = None,
+) -> None:
+    by_site: dict[str, list[str]] = {}
+    for item in new_stock:
+        if not isinstance(item, dict):
+            continue
+        site_id = str(item.get("siteId", ""))
+        article = str(item.get("article") or "").strip()
+        if not site_id or not article:
+            continue
+        key = (site_id, article.lower())
+        new_total = stock_total(item)
+        old_total = old_snap.get(key)
+        seuil = max(0, int(item.get("seuilMin") or 0))
+        was_ok = old_total is None or old_total > max(seuil, 0)
+        now_low = seuil > 0 and new_total <= seuil
+        was_not_zero = old_total is None or old_total > 0
+        now_zero = new_total == 0
+        if (now_low and was_ok) or (now_zero and was_not_zero):
+            if site_id not in by_site:
+                by_site[site_id] = []
+            status = "rupture" if now_zero else f"bas (seuil : {seuil})"
+            by_site[site_id].append(f"{article} — stock {new_total}, {status}")
+    _auth = auth_users or []
+    for site_id, alerts in by_site.items():
+        site = sites_by_id.get(site_id)
+        if not site:
+            continue
+        nom = str(site.get("nom") or site.get("name") or site_id)
+        msg = f"[Stock] {nom} — Alerte niveau bas :\n" + "\n".join(f"• {a}" for a in alerts)
+        _whatsapp_notify_event_async(site, "alerte_stock", msg)
+        if _auth:
+            site_phones = set(_wa_phones_for_site(site, "alerte_stock"))
+            for p in _wa_user_phones_for_event("alerte_stock", site_id, _auth, []):
+                if p not in site_phones:
+                    try:
+                        threading.Thread(target=_whatsapp_send, args=(p, msg), daemon=True).start()
+                    except Exception:
+                        pass
+
+
+def notify_qr_order_created_async(
+    site: dict[str, Any],
+    order: dict[str, Any],
+    auth_users: list[dict[str, Any]] | None = None,
+    work_shifts: list[dict[str, Any]] | None = None,
+) -> None:
+    """Alertes SMS / webhook / WhatsApp après commande cliente (QR). Ne bloque pas l'HTTP : thread daemon."""
+    _auth_users = auth_users or []
+    _work_shifts = work_shifts or []
+
+    def run() -> None:
+        site_id = str(site.get("id", ""))
         alert_phone = _alert_phone_for_qr_orders(site)
         msg = _qr_order_alert_message(site, order)
         webhook_url = os.environ.get("GESTION_CAVE_QR_ALERT_WEBHOOK", "").strip()
@@ -533,14 +1139,31 @@ def notify_qr_order_created_async(site: dict[str, Any], order: dict[str, Any]) -
             try:
                 _post_qr_alert_webhook(webhook_url, site, order, msg, alert_phone)
             except (OSError, HTTPError, URLError, ValueError) as ex:
-                audit_log("qr_order_webhook_alert_failed", {"error": str(ex), "siteId": site.get("id"), "orderId": order.get("id")})
+                audit_log("qr_order_webhook_alert_failed", {"error": str(ex), "siteId": site_id, "orderId": order.get("id")})
 
         twilio_sid = os.environ.get("TWILIO_ACCOUNT_SID", "").strip()
         if twilio_sid and alert_phone:
             try:
                 _twilio_send_sms(alert_phone, msg)
             except (OSError, HTTPError, URLError, ValueError) as ex:
-                audit_log("qr_order_twilio_sms_failed", {"error": str(ex), "siteId": site.get("id"), "orderId": order.get("id")})
+                audit_log("qr_order_twilio_sms_failed", {"error": str(ex), "siteId": site_id, "orderId": order.get("id")})
+
+        # WhatsApp — combine numéros site-level (waNotifyPhones) + par utilisateur (serveuses en service + gérants)
+        _wa_seen: set[str] = set()
+        _wa_targets: list[str] = []
+        for p in _wa_phones_for_site(site, "commande_qr"):
+            if p not in _wa_seen:
+                _wa_seen.add(p)
+                _wa_targets.append(p)
+        for p in _wa_user_phones_for_event("commande_qr", site_id, _auth_users, _work_shifts):
+            if p not in _wa_seen:
+                _wa_seen.add(p)
+                _wa_targets.append(p)
+        for _wa_phone in _wa_targets:
+            try:
+                _whatsapp_send(_wa_phone, msg)
+            except (OSError, HTTPError, URLError, ValueError) as ex:
+                audit_log("wa_qr_order_failed", {"error": str(ex), "siteId": site_id, "orderId": order.get("id"), "to": _wa_phone})
 
     threading.Thread(target=run, daemon=True).start()
 
@@ -1318,7 +1941,8 @@ def merge_auth_users_scoped(
             pwd = str(pu.get("password", "")).strip()
             nhash = hash_password(pwd) if pwd else hash_password("serveuse123")
             dn_new = str(pu.get("displayName", "") or "").strip()[:120]
-            merged[un] = {
+            wa_new = _normalize_international_phone(str(pu.get("waPhone") or "").strip())
+            new_entry: dict[str, Any] = {
                 "username": un,
                 "passwordHash": nhash,
                 "role": new_role,
@@ -1326,6 +1950,9 @@ def merge_auth_users_scoped(
                 "twoFactorEnabled": False,
                 "displayName": dn_new,
             }
+            if wa_new:
+                new_entry["waPhone"] = wa_new
+            merged[un] = new_entry
             continue
 
         if not may_manage_target(exist):
@@ -1363,6 +1990,7 @@ def merge_auth_users_scoped(
         pwd = str(pu.get("password", "")).strip()
         password_hash = hash_password(pwd) if pwd else exist["passwordHash"]
         dn = str(pu.get("displayName", exist.get("displayName", "")) or "").strip()[:120]
+        wa_upd = _normalize_international_phone(str(pu.get("waPhone", exist.get("waPhone", "")) or "").strip())
         entry: dict[str, Any] = {
             "username": un,
             "passwordHash": password_hash,
@@ -1371,6 +1999,8 @@ def merge_auth_users_scoped(
             "twoFactorEnabled": bool(exist.get("twoFactorEnabled", False)),
             "displayName": dn,
         }
+        if wa_upd:
+            entry["waPhone"] = wa_upd
         if exist.get("twoFactorSecret"):
             entry["twoFactorSecret"] = exist["twoFactorSecret"]
         if exist.get("twoFactorSecretPending"):
@@ -2265,7 +2895,7 @@ class DataStore:
                     existing_order["note"] = f"{existing_order.get('note', '')} | {note.strip()}".strip(" |")
                 self._write(self._state)
                 merged_snap = json.loads(json.dumps(existing_order))
-                notify_qr_order_created_async(site, merged_snap)
+                notify_qr_order_created_async(site, merged_snap, self._state.get("auth", {}).get("users", []), self._state.get("workShifts", []))
                 return merged_snap
 
             order_id = self._state["nextId"]["commande"]
@@ -2287,7 +2917,7 @@ class DataStore:
             self._state["commandes"].insert(0, order)
             self._write(self._state)
             new_snap = json.loads(json.dumps(order))
-            notify_qr_order_created_async(site, new_snap)
+            notify_qr_order_created_async(site, new_snap, self._state.get("auth", {}).get("users", []), self._state.get("workShifts", []))
             return new_snap
 
     def public_orders(self, site_id: str, table_label: str, client: str = "") -> dict[str, Any]:
@@ -2470,6 +3100,16 @@ class DataStore:
                     "creditRecoveries", "consignes", "charges", "staffAuditLog",
                     "stockEntrees", "stockLosses",
                 ]
+                _old_sc_snap_g: dict[str, dict[str, Any]] = {
+                    str(r.get("id", "")): json.loads(json.dumps(r))
+                    for r in (current.get("stockChecks") or [])
+                    if isinstance(r, dict) and r.get("id")
+                }
+                _old_stock_snap_g: dict[tuple[str, str], int] = {
+                    (str(r.get("siteId", "")), str(r.get("article", "")).lower()): stock_total(r)
+                    for r in (current.get("stock") or [])
+                    if isinstance(r, dict)
+                }
                 for _key in _GLOBAL_PATCH_KEYS:
                     if _key in payload:
                         current[_key] = payload[_key]
@@ -2513,6 +3153,7 @@ class DataStore:
                             allowed = list(site_ids)
                         existing = existing_by_name.get(username, {})
                         dn_sup = str(user_data.get("displayName", existing.get("displayName", "")) or "").strip()[:120]
+                        wa_sup = _normalize_international_phone(str(user_data.get("waPhone", existing.get("waPhone", "")) or "").strip())
                         user_entry: dict[str, Any] = {
                             "username": username,
                             "passwordHash": password_hash,
@@ -2521,6 +3162,8 @@ class DataStore:
                             "twoFactorEnabled": existing.get("twoFactorEnabled", False),
                             "displayName": dn_sup,
                         }
+                        if wa_sup:
+                            user_entry["waPhone"] = wa_sup
                         if existing.get("twoFactorSecret"):
                             user_entry["twoFactorSecret"] = existing["twoFactorSecret"]
                         new_users.append(user_entry)
@@ -2539,6 +3182,12 @@ class DataStore:
                     current["activeSiteId"] = site_ids[0]
 
                 self._write(current)
+                _sites_by_id_g = {str(s.get("id", "")): s for s in (current.get("sites") or []) if isinstance(s, dict)}
+                _auth_g = current.get("auth", {}).get("users", [])
+                if "stockChecks" in payload:
+                    _trigger_stockcheck_wa_notifications(current.get("stockChecks") or [], _old_sc_snap_g, _sites_by_id_g, _auth_g, current.get("ventes") or [], current.get("stock") or [])
+                if "stock" in payload:
+                    _trigger_stock_alert_wa_notifications(current.get("stock") or [], _old_stock_snap_g, _sites_by_id_g, _auth_g)
                 return self.public_state()
 
             allowed = session_allowed_sites(session, sid_list)
@@ -2555,6 +3204,16 @@ class DataStore:
                 "creditRecoveries", "consignes", "charges", "staffAuditLog",
                 "stockEntrees", "stockLosses", "workShifts",
             ]
+            _old_sc_snap: dict[str, dict[str, Any]] = {
+                str(r.get("id", "")): json.loads(json.dumps(r))
+                for r in (current.get("stockChecks") or [])
+                if isinstance(r, dict) and r.get("id")
+            }
+            _old_stock_snap: dict[tuple[str, str], int] = {
+                (str(r.get("siteId", "")), str(r.get("article", "")).lower()): stock_total(r)
+                for r in (current.get("stock") or [])
+                if isinstance(r, dict)
+            }
             if "workShifts" in payload:
                 if str(session.get("role", "")).strip().lower() == "serveuse":
                     raise ValueError("Modification du planning non autorisee.")
@@ -2649,6 +3308,12 @@ class DataStore:
                 current["activeSiteId"] = site_ids[0]
 
             self._write(current)
+            _sites_by_id = {str(s.get("id", "")): s for s in (current.get("sites") or []) if isinstance(s, dict)}
+            _auth_u = current.get("auth", {}).get("users", [])
+            if "stockChecks" in payload:
+                _trigger_stockcheck_wa_notifications(current.get("stockChecks") or [], _old_sc_snap, _sites_by_id, _auth_u, current.get("ventes") or [], current.get("stock") or [])
+            if "stock" in payload:
+                _trigger_stock_alert_wa_notifications(current.get("stock") or [], _old_stock_snap, _sites_by_id, _auth_u)
             return self.public_state_for_session(session)
 
     def reset(self) -> dict[str, Any]:

@@ -1444,6 +1444,31 @@
                   (<code>GESTION_CAVE_QR_ALERT_WEBHOOK</code>, variables <code>TWILIO_*</code>). Voir commentaire dans le code serveur.</p>
               </div>
               <div class="form-group" style="grid-column:1/-1">
+                <label for="p-wa-phones">WhatsApp — numeros a notifier (optionnel)</label>
+                <input id="p-wa-phones" type="tel" placeholder="+2250701020304, +2250702030405" autocomplete="tel">
+                <p class="muted" style="font-size:0.82rem;margin-top:6px">
+                  Un ou plusieurs numeros separes par des virgules (format international +225…). Activez cote serveur les variables
+                  <code>WHATSAPP_PHONE_NUMBER_ID</code> et <code>WHATSAPP_ACCESS_TOKEN</code> (API Cloud Meta).</p>
+                <div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:12px">
+                  <label class="checkbox-label" style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:0.9rem">
+                    <input id="p-wa-ev-commande" type="checkbox" style="width:auto">
+                    <span>Nouvelle commande QR</span>
+                  </label>
+                  <label class="checkbox-label" style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:0.9rem">
+                    <input id="p-wa-ev-fin-service" type="checkbox" style="width:auto">
+                    <span>Fin de service serveuse</span>
+                  </label>
+                  <label class="checkbox-label" style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:0.9rem">
+                    <input id="p-wa-ev-cloture" type="checkbox" style="width:auto">
+                    <span>Cloture journee</span>
+                  </label>
+                  <label class="checkbox-label" style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:0.9rem">
+                    <input id="p-wa-ev-stock" type="checkbox" style="width:auto">
+                    <span>Alerte stock bas / rupture</span>
+                  </label>
+                </div>
+              </div>
+              <div class="form-group" style="grid-column:1/-1">
                 <label class="checkbox-label" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer">
                   <input id="p-single-br-enabled" type="checkbox" style="margin-top:3px;width:auto">
                   <span>Vente limitée à une seule brasserie</span>
@@ -1558,6 +1583,11 @@
               <div class="form-group">
                 <label for="new-user-password">Mot de passe</label>
                 <input id="new-user-password" type="password" placeholder="Obligatoire a la creation">
+              </div>
+              <div class="form-group">
+                <label for="new-user-wa-phone">Numero WhatsApp (optionnel)</label>
+                <input id="new-user-wa-phone" type="tel" placeholder="+2250701020304" autocomplete="tel">
+                <p class="muted" style="font-size:0.82rem;margin-top:4px">Format international. Recevra les notifications selon son role (serveuse : commandes QR ; gerant : fin de service, clotures, alertes stock).</p>
               </div>
             </div>
             <div id="new-user-sites-section" class="form-group" style="margin-top:10px">
@@ -2673,6 +2703,6 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="./app-orders.js?v=318"></script>
+  <script src="./app-orders.js?v=320"></script>
 </body>
 </html>
