@@ -4151,17 +4151,22 @@ class AppHandler(BaseHTTPRequestHandler):
 
     def do_PUT(self) -> None:
         parsed = urlparse(self.path)
+        print(f"[PUT] {parsed.path} depuis {self.client_ip()}", flush=True)
         if parsed.path == "/api/state":
             session = self.require_session()
             if session is None:
+                print("[PUT] session invalide → rejet", flush=True)
                 return
             if not self.require_csrf(session):
+                print("[PUT] CSRF invalide → rejet", flush=True)
                 return
             payload = self.read_json()
+            print(f"[PUT] payload recu, cles={sorted((payload or {}).keys())[:12]}", flush=True)
             try:
                 validate_state_put_payload(payload)
                 updated = store.update_state(payload, session)
             except ValueError as error:
+                print(f"[PUT] ValueError: {error}", flush=True)
                 self.send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
                 return
             audit_log(
