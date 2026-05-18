@@ -708,8 +708,10 @@ function updateCloseDayButtonLabel() {
   const btn = document.getElementById("close-day-btn");
   if (!btn || !canClosePdjDay()) return;
   const d = pdjCalendarDate();
-  // Gérant (non-admin) : si la serveuse a soumis sa fin de service, ne pas écraser le bouton
-  if (canManagePdjAccounting() && !canAnyAdmin()) {
+  // Gérant (non-admin) sur site avec créneaux : ne pas écraser le bouton géré par renderDailyStockCheck
+  if (canManagePdjAccounting() && !canAnyAdmin() && staffRequiresShiftWindowForSales()) {
+    const closed2 = stockCheckForSiteDate(d, currentSiteId());
+    if (!closed2) return;  // pas encore clôturé : renderDailyStockCheck gère le bouton
     const pend = pendingManagerConfirmationCheck(currentSiteId());
     if (pend && String(pend.date || "").slice(0, 10) === d) return;
   }
@@ -7253,16 +7255,26 @@ function renderDailyStockCheck() {
   const container = document.getElementById("pdj-stock-check");
   const button = document.getElementById("close-day-btn");
   if (!container || !button) return;
-  // Gérant (non-admin) : si la serveuse a soumis sa fin de service, masquer le bouton de clôture directe
-  if (canManagePdjAccounting() && !canAnyAdmin()) {
+  // Gérant (non-admin) sur site avec créneaux : clôture uniquement via fin de service serveuse
+  if (canManagePdjAccounting() && !canAnyAdmin() && staffRequiresShiftWindowForSales() && !closed) {
     const pendingServ = pendingManagerConfirmationCheck(currentSiteId());
-    if (pendingServ && String(pendingServ.date || "").slice(0, 10) === dStr) {
+    const hasPendingForDate = pendingServ && String(pendingServ.date || "").slice(0, 10) === dStr;
+    if (hasPendingForDate) {
+      // Serveuse a soumis → masquer clôture directe, laisser le bloc de confirmation gérer
       container.innerHTML = "";
       button.disabled = true;
       button.className = "btn btn-secondary";
       button.textContent = "Fin de service en attente de validation";
       return;
     }
+    // Serveuse n'a pas encore soumis → gérant doit attendre
+    container.innerHTML = `<p class="muted" style="font-size:0.88rem;line-height:1.45">
+      En attente de la fin de service de la serveuse. La clôture sera disponible dès réception.
+    </p>`;
+    button.disabled = true;
+    button.className = "btn btn-secondary";
+    button.textContent = "En attente de la serveuse";
+    return;
   }
   if (!canClosePdjDay()) {
     container.innerHTML = staffRequiresShiftWindowForSales()
