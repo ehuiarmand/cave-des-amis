@@ -4845,6 +4845,44 @@ function applyRoleVisibility() {
   syncGerantParamsAccess();
   maybeAdjustParamsSubTab();
   updatePdjRoleVisibility();
+  applyPermissionVisibility();
+}
+
+const PAGE_PERMISSIONS = {
+  home:              "rapports",
+  pdj:               "caisse",
+  stock:             "stock",
+  charges:           "charges",
+  "historique-ventes": "rapports",
+  params:            "parametres",
+};
+
+function applyPermissionVisibility() {
+  // Superadmin et admin : accès total
+  if (canSuperAdmin() || canSiteAdmin()) return;
+
+  // Contrôle nav : les permissions remplacent les restrictions de rôle pour les pages mappées
+  document.querySelectorAll(".nav-btn[data-page]").forEach((btn) => {
+    const required = PAGE_PERMISSIONS[btn.dataset.page];
+    if (!required) return;
+    btn.classList.toggle("hidden", !hasPermission(required));
+  });
+
+  // Rediriger si la page courante est interdite
+  const requiredForCurrent = PAGE_PERMISSIONS[currentPage];
+  if (requiredForCurrent && !hasPermission(requiredForCurrent)) {
+    navigate(hasPermission("ventes") ? "ventes" : "guide");
+    return;
+  }
+
+  // Onglet Accès dans Paramètres : contrôlé par permission "utilisateurs"
+  const accesTabs = document.querySelectorAll("[data-subtab-params='acces'], [data-params-panel='acces']");
+  accesTabs.forEach((el) => el.classList.toggle("hidden-by-role", !hasPermission("utilisateurs")));
+
+  // Sections avec data-require-perm="..."
+  document.querySelectorAll("[data-require-perm]").forEach((el) => {
+    el.classList.toggle("hidden-by-role", !hasPermission(el.dataset.requirePerm));
+  });
 }
 
 /** Serveuse / gérante : onglet Profil seul ; sauvegarde réservée aux admins (pas gérante). */
