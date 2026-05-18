@@ -5458,6 +5458,11 @@ function setParamsSubTab(tab) {
     populatePurgeMaquisSelect();
     renderStaffAuditLog();
   }
+  if (tab === "acces") {
+    renderUsersList();
+    renderCustomRolesList();
+    populateCustomRoleSelect();
+  }
 }
 
 function maybeAdjustParamsSubTab() {
@@ -10825,7 +10830,11 @@ function resetUserForm() {
   if (titleEl) titleEl.textContent = "Nouvel utilisateur";
   const metaEl = document.getElementById("user-form-meta");
   if (metaEl) metaEl.textContent = "Remplissez les champs ci-dessous";
+  const crSel = document.getElementById("new-user-custom-role");
+  if (crSel) crSel.value = "";
   renderUserSiteCheckboxes();
+  populateCustomRoleSelect();
+  renderPermissionCheckboxes();
 }
 
 function editUser(username) {
@@ -10848,6 +10857,10 @@ function editUser(username) {
   if (metaEl) metaEl.textContent = roleLabel(user.role, user.username);
   const toggleBtn = document.getElementById("toggle-add-user-form-btn");
   if (toggleBtn) toggleBtn.textContent = "Fermer";
+  populateCustomRoleSelect();
+  const crSel = document.getElementById("new-user-custom-role");
+  if (crSel) crSel.value = user.customRoleId || "";
+  renderPermissionCheckboxes(user);
   renderEditableUserSites(user);
 }
 
@@ -10866,6 +10879,191 @@ function roleLabel(role, username = "") {
   if (role === "admin") return "Administrateur de maquis";
   if (role === "manager") return "Gerant";
   return "Serveuse";
+}
+
+// ── Système de permissions ───────────────────────────────────────────────────
+
+const PERMISSIONS_DEF = [
+  { id: "ventes",       label: "Ventes",       desc: "Prendre commandes et encaisser" },
+  { id: "stock",        label: "Stock",         desc: "Voir et modifier le stock" },
+  { id: "caisse",       label: "Caisse / PDJ",  desc: "Point du jour et clôtures" },
+  { id: "charges",      label: "Charges",       desc: "Saisir les dépenses" },
+  { id: "catalogue",    label: "Catalogue",     desc: "Gérer les produits et prix" },
+  { id: "rapports",     label: "Rapports",      desc: "Historique et statistiques" },
+  { id: "utilisateurs", label: "Utilisateurs",  desc: "Gérer les comptes" },
+  { id: "parametres",   label: "Paramètres",    desc: "Configurer le maquis" },
+];
+
+const DEFAULT_ROLE_PERMISSIONS = {
+  superadmin: { ventes:true, stock:true, caisse:true, charges:true, catalogue:true, rapports:true, utilisateurs:true, parametres:true },
+  admin:      { ventes:true, stock:true, caisse:true, charges:true, catalogue:true, rapports:true, utilisateurs:true, parametres:true },
+  manager:    { ventes:true, stock:true, caisse:true, charges:true, catalogue:true, rapports:true, utilisateurs:false, parametres:false },
+  serveuse:   { ventes:true, stock:false, caisse:false, charges:false, catalogue:false, rapports:false, utilisateurs:false, parametres:false },
+};
+
+function getUserPermissions(user) {
+  if (!user) return {};
+  // 1. Rôle custom du maquis actif
+  if (user.customRoleId) {
+    const site = activeSite();
+    const cr = (site?.customRoles || []).find((r) => r.id === user.customRoleId);
+    if (cr?.permissions) return cr.permissions;
+  }
+  // 2. Permissions explicites sur le compte
+  if (user.permissions && typeof user.permissions === "object") return user.permissions;
+  // 3. Par défaut selon le rôle système
+  return DEFAULT_ROLE_PERMISSIONS[user.role] || DEFAULT_ROLE_PERMISSIONS.serveuse;
+}
+
+function hasPermission(permId) {
+  if (!state || !sessionUser) return false;
+  const me = (state.auth?.users || []).find((u) => String(u.username || "").toLowerCase() === String(sessionUser || "").toLowerCase());
+  if (!me) return false;
+  if (String(me.username || "").toLowerCase() === "admin" || me.role === "superadmin") return true;
+  const perms = getUserPermissions(me);
+  return perms[permId] === true;
+}
+
+function renderPermissionCheckboxes(targetUser = null) {
+  const container = document.getElementById("new-user-permissions");
+  const sourceLabel = document.getElementById("perm-source-label");
+  if (!container) return;
+  const role = document.getElementById("new-user-role")?.value || "serveuse";
+  const customRoleId = document.getElementById("new-user-custom-role")?.value || "";
+  let perms = {};
+  let source = "";
+  if (customRoleId) {
+    const site = activeSite();
+    const cr = (site?.customRoles || []).find((r) => r.id === customRoleId);
+    perms = cr?.permissions || {};
+    source = `(hérité du rôle « ${escapeHtml(cr?.nom || customRoleId)} »)`;
+  } else if (targetUser?.permissions && !customRoleId) {
+    perms = targetUser.permissions;
+    source = "(permissions personnalisées)";
+  } else {
+    perms = DEFAULT_ROLE_PERMISSIONS[role] || DEFAULT_ROLE_PERMISSIONS.serveuse;
+    source = `(défaut ${roleLabel(role)})`;
+  }
+  if (sourceLabel) sourceLabel.textContent = source;
+  const locked = Boolean(customRoleId);
+  container.innerHTML = PERMISSIONS_DEF.map((p) => `
+    <label style="display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border-radius:10px;border:1px solid var(--line,#e5e7eb);cursor:${locked ? "default" : "pointer"};background:var(--mm-surface,#fff)">
+      <input type="checkbox" data-perm="${p.id}" ${perms[p.id] ? "checked" : ""} ${locked ? "disabled" : ""} style="margin-top:2px;accent-color:#2563eb">
+      <span>
+        <span style="font-weight:600;font-size:0.88rem;display:block">${p.label}</span>
+        <span style="font-size:0.76rem;color:var(--muted,#888)">${p.desc}</span>
+      </span>
+    </label>
+  `).join("");
+}
+
+function populateCustomRoleSelect() {
+  const sel = document.getElementById("new-user-custom-role");
+  if (!sel) return;
+  const site = activeSite();
+  const roles = site?.customRoles || [];
+  const current = sel.value;
+  sel.innerHTML = `<option value="">— Permissions par défaut du rôle —</option>` +
+    roles.map((r) => `<option value="${escapeHtml(r.id)}">${escapeHtml(r.nom)}</option>`).join("");
+  if (current && roles.some((r) => r.id === current)) sel.value = current;
+}
+
+function renderCustomRolesList() {
+  const container = document.getElementById("custom-roles-list");
+  const siteLabel = document.getElementById("custom-roles-site-label");
+  if (!container) return;
+  const site = activeSite();
+  if (siteLabel) siteLabel.textContent = site?.nom || "Maquis courant";
+  const roles = site?.customRoles || [];
+  if (!roles.length) {
+    container.innerHTML = `<p class="muted" style="font-size:0.85rem">Aucun rôle personnalisé. Créez-en un ci-dessous.</p>`;
+    return;
+  }
+  container.innerHTML = roles.map((r) => {
+    const activePerms = PERMISSIONS_DEF.filter((p) => r.permissions?.[p.id]).map((p) => p.label).join(", ") || "Aucune";
+    return `
+      <div style="display:flex;align-items:flex-start;gap:10px;padding:10px 14px;border-radius:12px;border:1px solid var(--line,#e5e7eb);background:var(--mm-surface,#fff)">
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:600;margin-bottom:3px">${escapeHtml(r.nom)}</div>
+          <div style="font-size:0.78rem;color:var(--muted,#888);line-height:1.4">${escapeHtml(activePerms)}</div>
+          <div id="perm-edit-${escapeHtml(r.id)}" style="display:none;margin-top:8px;display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px"></div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:5px;flex-shrink:0">
+          <button type="button" class="mini-btn" data-edit-role="${escapeHtml(r.id)}">Modifier</button>
+          <button type="button" class="mini-btn mini-btn--warn" data-delete-role="${escapeHtml(r.id)}">Supprimer</button>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+async function saveCustomRole(roleId = null) {
+  const site = activeSite();
+  if (!site) return;
+  const nomInput = document.getElementById("new-role-name");
+  const nom = String(nomInput?.value || "").trim();
+  if (!nom) { showToast("Nom du rôle obligatoire."); return; }
+  const perms = {};
+  document.querySelectorAll("[data-role-perm]").forEach((cb) => { perms[cb.dataset.rolePerm] = cb.checked; });
+  const sites = state.sites.map((s) => {
+    if (s.id !== site.id) return s;
+    const existing = s.customRoles || [];
+    let updated;
+    if (roleId) {
+      updated = existing.map((r) => r.id === roleId ? { ...r, nom, permissions: perms } : r);
+    } else {
+      const id = "cr-" + Date.now();
+      updated = [...existing, { id, nom, permissions: perms }];
+    }
+    return { ...s, customRoles: updated };
+  });
+  await persistState({ sites });
+  if (nomInput) nomInput.value = "";
+  document.getElementById("role-perm-form")?.remove();
+  renderCustomRolesList();
+  populateCustomRoleSelect();
+  showToast(roleId ? `Rôle « ${nom} » modifié.` : `Rôle « ${nom} » créé.`);
+}
+
+async function deleteCustomRole(roleId) {
+  const site = activeSite();
+  if (!site) return;
+  const role = (site.customRoles || []).find((r) => r.id === roleId);
+  if (!window.confirm(`Supprimer le rôle « ${role?.nom || roleId} » ?`)) return;
+  const sites = state.sites.map((s) => {
+    if (s.id !== site.id) return s;
+    return { ...s, customRoles: (s.customRoles || []).filter((r) => r.id !== roleId) };
+  });
+  await persistState({ sites });
+  renderCustomRolesList();
+  populateCustomRoleSelect();
+  showToast("Rôle supprimé.");
+}
+
+function showRolePermForm(roleId = null) {
+  document.getElementById("role-perm-form")?.remove();
+  const site = activeSite();
+  const existing = roleId ? (site?.customRoles || []).find((r) => r.id === roleId) : null;
+  const perms = existing?.permissions || {};
+  const form = document.createElement("div");
+  form.id = "role-perm-form";
+  form.style.cssText = "margin-top:12px;padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--mm-surface,#fff)";
+  form.innerHTML = `
+    <p style="font-weight:600;margin-bottom:10px;font-size:0.9rem">${existing ? `Modifier « ${escapeHtml(existing.nom)} »` : "Permissions du nouveau rôle"}</p>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:6px;margin-bottom:10px">
+      ${PERMISSIONS_DEF.map((p) => `
+        <label style="display:flex;align-items:center;gap:6px;padding:6px 8px;border-radius:8px;border:1px solid var(--line);cursor:pointer;font-size:0.85rem">
+          <input type="checkbox" data-role-perm="${p.id}" ${perms[p.id] ? "checked" : ""} style="accent-color:#2563eb">
+          ${p.label}
+        </label>
+      `).join("")}
+    </div>
+    <div style="display:flex;gap:8px">
+      <button type="button" class="btn btn-primary" style="font-size:0.88rem" onclick="saveCustomRole(${roleId ? `'${roleId}'` : "null"}).catch(handleApiError)">Enregistrer</button>
+      <button type="button" class="btn btn-outline" style="font-size:0.88rem" onclick="document.getElementById('role-perm-form')?.remove()">Annuler</button>
+    </div>
+  `;
+  document.getElementById("add-custom-role-btn")?.after(form);
 }
 
 function _userRoleColor(role, username) {
@@ -11007,11 +11205,15 @@ async function addUser() {
     allowedSiteIds = [...new Set([...selectedSiteIds, ...hiddenSiteIds])];
   }
   const waPhone = (document.getElementById("new-user-wa-phone")?.value || "").trim();
+  const customRoleId = (document.getElementById("new-user-custom-role")?.value || "").trim();
+  const permChecks = document.querySelectorAll("[data-perm]");
+  const permissions = {};
+  permChecks.forEach((cb) => { permissions[cb.dataset.perm] = cb.checked; });
   const newUsers = editUsername
     ? users.map((user) => user.username === editUsername
-      ? { ...user, username, ...(password ? { password } : {}), role, allowedSiteIds, waPhone }
+      ? { ...user, username, ...(password ? { password } : {}), role, allowedSiteIds, waPhone, customRoleId, permissions }
       : user)
-    : [...users, { username, password, role, allowedSiteIds, waPhone }];
+    : [...users, { username, password, role, allowedSiteIds, waPhone, customRoleId, permissions }];
   await persistState({ auth: { users: newUsers } });
   const saved = (state.auth.users || []).find((user) => user.username === username);
   if (!saved || saved.role !== role || JSON.stringify([...(saved.allowedSiteIds || [])].sort()) !== JSON.stringify([...allowedSiteIds].sort())) {
@@ -18753,6 +18955,15 @@ document.getElementById("fab-btn").addEventListener("click", () => {
     }
   });
   document.getElementById("users-search")?.addEventListener("input", () => renderUsersList());
+  document.getElementById("new-user-role")?.addEventListener("change", () => renderPermissionCheckboxes());
+  document.getElementById("new-user-custom-role")?.addEventListener("change", () => renderPermissionCheckboxes());
+  document.getElementById("add-custom-role-btn")?.addEventListener("click", () => showRolePermForm());
+  document.getElementById("custom-roles-list")?.addEventListener("click", (e) => {
+    const editId = e.target.closest("[data-edit-role]")?.dataset.editRole;
+    const delId = e.target.closest("[data-delete-role]")?.dataset.deleteRole;
+    if (editId) showRolePermForm(editId);
+    if (delId) deleteCustomRole(delId).catch(handleApiError);
+  });
   document.getElementById("new-user-role").addEventListener("change", renderUserSiteCheckboxes);
   document.getElementById("save-reappro-btn").addEventListener("click", () => saveReappro().catch(handleApiError));
   document.getElementById("toggle-stock-detail-btn").addEventListener("click", () => {

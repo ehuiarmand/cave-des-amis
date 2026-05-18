@@ -1610,9 +1610,33 @@
               <label>Maquis autorisés</label>
               <div id="new-user-sites" class="checkbox-list" style="margin-top:8px"></div>
             </div>
+            <div class="form-group" style="margin-top:14px">
+              <label>Rôle personnalisé <span class="muted" style="font-size:0.8rem;font-weight:400">(optionnel — surcharge les permissions par défaut)</span></label>
+              <select id="new-user-custom-role" style="margin-top:6px">
+                <option value="">— Permissions par défaut du rôle —</option>
+              </select>
+            </div>
+            <div class="form-group" style="margin-top:14px">
+              <label>Permissions <span class="muted" style="font-size:0.8rem;font-weight:400" id="perm-source-label"></span></label>
+              <div id="new-user-permissions" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;margin-top:8px"></div>
+            </div>
             <div class="button-stack" style="margin-top:14px">
               <button id="add-user-btn" class="btn btn-primary" type="button">Enregistrer</button>
               <button id="cancel-edit-user-btn" class="btn btn-outline" type="button">Annuler</button>
+            </div>
+          </article>
+
+          <!-- Rôles personnalisés par maquis -->
+          <article class="card any-admin" style="margin-top:16px">
+            <div class="section-head">
+              <h3>Rôles personnalisés</h3>
+              <span class="section-meta" id="custom-roles-site-label">Maquis courant</span>
+            </div>
+            <p class="muted" style="font-size:0.85rem;margin-bottom:12px;line-height:1.45">Créez des modèles de permissions réutilisables pour ce maquis (ex: Caissière, Chef de rang).</p>
+            <div id="custom-roles-list" style="display:grid;gap:8px;margin-bottom:14px"></div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <input id="new-role-name" type="text" placeholder="Nom du rôle (ex: Caissière)" style="flex:1;min-width:160px;padding:10px 14px;border-radius:12px;border:1px solid var(--line);font-size:0.93rem">
+              <button id="add-custom-role-btn" class="btn btn-primary" type="button">Créer le rôle</button>
             </div>
           </article>
 
