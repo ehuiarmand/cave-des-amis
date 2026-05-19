@@ -1807,7 +1807,7 @@ def validate_serveuse_pdj_payload(session: dict[str, Any], payload: dict[str, An
     if role != "serveuse":
         return
     if "pdjWorkDateBySite" in payload:
-        raise ValueError("La date comptable est modifiable uniquement par le gerant.")
+        payload.pop("pdjWorkDateBySite", None)  # ignorer silencieusement pour les serveuses
     if "dayBooks" in payload:
         for book in payload.get("dayBooks") or []:
             if not isinstance(book, dict):
@@ -2572,34 +2572,49 @@ CREATE TABLE IF NOT EXISTS work_shifts (row_id BIGSERIAL PRIMARY KEY, item_id TE
                         if not items:
                             continue
                         if id_type == "int":
-                            rows = [
-                                (item.get("id"), item.get("siteId"), json.dumps(item, ensure_ascii=False))
-                                for item in items
-                            ]
+                            seen_int: set = set()
+                            rows = []
+                            for item in items:
+                                k = (item.get("id"), item.get("siteId"))
+                                if k in seen_int:
+                                    print(f"[postgres] doublon {table} ignoré: id={k[0]} siteId={k[1]}", flush=True)
+                                    continue
+                                seen_int.add(k)
+                                rows.append((item.get("id"), item.get("siteId"), json.dumps(item, ensure_ascii=False)))
                             psycopg2.extras.execute_values(
                                 cur,
                                 f"INSERT INTO {table}(item_id, site_id, data) VALUES %s",
                                 rows,
                             )
                         elif id_type == "text":
-                            rows = [
-                                (str(item.get("id", "")), item.get("siteId"), json.dumps(item, ensure_ascii=False))
-                                for item in items
-                            ]
+                            seen_txt: set = set()
+                            rows = []
+                            for item in items:
+                                k = (str(item.get("id", "")), item.get("siteId"))
+                                if k in seen_txt:
+                                    print(f"[postgres] doublon {table} ignoré: id={k[0]} siteId={k[1]}", flush=True)
+                                    continue
+                                seen_txt.add(k)
+                                rows.append((str(item.get("id", "")), item.get("siteId"), json.dumps(item, ensure_ascii=False)))
                             psycopg2.extras.execute_values(
                                 cur,
                                 f"INSERT INTO {table}(item_id, site_id, data) VALUES %s",
                                 rows,
                             )
                         elif id_type == "date_site":
-                            rows = [
-                                (
+                            seen_ds: set = set()
+                            rows = []
+                            for item in items:
+                                k = (item.get("siteId"), str(item.get("date", ""))[:10])
+                                if k in seen_ds:
+                                    print(f"[postgres] doublon {table} ignoré: siteId={k[0]} date={k[1]}", flush=True)
+                                    continue
+                                seen_ds.add(k)
+                                rows.append((
                                     item.get("siteId"),
                                     str(item.get("date", ""))[:10],
                                     json.dumps(item, ensure_ascii=False),
-                                )
-                                for item in items
-                            ]
+                                ))
                             psycopg2.extras.execute_values(
                                 cur,
                                 f"INSERT INTO {table}(site_id, date_col, data) VALUES %s",
@@ -2765,7 +2780,13 @@ CREATE TABLE IF NOT EXISTS work_shifts (row_id BIGSERIAL PRIMARY KEY, item_id TE
         body = json.dumps(payload, ensure_ascii=False, indent=2)
 
         if self._pg_enabled:
-            self._pg_write(payload)
+            try:
+                self._pg_write(payload)
+            except Exception as _pg_exc:
+                import traceback as _tb
+                print(f"[postgres] ERREUR ECRITURE: {type(_pg_exc).__name__}: {_pg_exc}", flush=True)
+                _tb.print_exc()
+                raise
             # Sauvegarde JSON automatique (rollback possible)
             try:
                 stamp = time.strftime("%Y%m%d-%H%M%S")
@@ -3389,7 +3410,7 @@ CREATE TABLE IF NOT EXISTS work_shifts (row_id BIGSERIAL PRIMARY KEY, item_id TE
                 # (évite d'écraser ventes/charges/etc. avec [] quand le client n'envoie que le stock).
                 if "workShifts" in payload:
                     if str(session.get("role", "")).strip().lower() == "serveuse":
-                        raise ValueError("Modification du planning non autorisee.")
+                        payload.pop("workShifts", None)  # ignorer silencieusement pour les serveuses
                     auth_users_sa = list(current.get("auth", {}).get("users", []))
                     allowed_sa = set(sid_list)
                     ws_snapshot = bool(payload.get("workShiftsScopedSnapshot"))
@@ -3542,7 +3563,7 @@ CREATE TABLE IF NOT EXISTS work_shifts (row_id BIGSERIAL PRIMARY KEY, item_id TE
             }
             if "workShifts" in payload:
                 if str(session.get("role", "")).strip().lower() == "serveuse":
-                    raise ValueError("Modification du planning non autorisee.")
+                    payload.pop("workShifts", None)  # ignorer silencieusement pour les serveuses
             auth_users = list(current.get("auth", {}).get("users", []))
             ws_snapshot = bool(payload.get("workShiftsScopedSnapshot"))
             for _key in _SCOPED_KEYS:
@@ -4466,6 +4487,12 @@ class AppHandler(BaseHTTPRequestHandler):
             except ValueError as error:
                 print(f"[PUT] ValueError: {error}", flush=True)
                 self.send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+                return
+            except Exception as error:
+                import traceback as _tb2
+                print(f"[PUT] ERREUR INTERNE: {type(error).__name__}: {error}", flush=True)
+                _tb2.print_exc()
+                self.send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": f"Erreur serveur interne: {error}"})
                 return
             audit_log(
                 "state_put",
