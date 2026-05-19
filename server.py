@@ -28,6 +28,13 @@ try:
 except ImportError:
     _FPDF_AVAILABLE = False
 
+try:
+    import psycopg2              # type: ignore[import-untyped]
+    import psycopg2.extras       # type: ignore[import-untyped]
+    _PSYCOPG2_OK = True
+except ImportError:
+    _PSYCOPG2_OK = False
+
 
 BASE_DIR = Path(__file__).resolve().parent
 DEBUG_LOG_FILE = BASE_DIR / "debug-dee456.log"
@@ -87,6 +94,8 @@ def _env_int_first(default: int, *names: str) -> int:
 
 # Stockage : MAQUIS_MANAGER_* en priorite, ancien nom TDB_BAR_* encore accepte.
 STORAGE_MODE = (_env_first("MAQUIS_MANAGER_STORAGE", "TDB_BAR_STORAGE", default="json") or "json").strip().lower()
+# DSN PostgreSQL : postgresql://user:pass@host:5432/dbname
+PG_DSN = _env_first("PG_DSN", "DATABASE_URL")
 # Nombre de fichiers data-*.json ou app-*.sqlite3 conserves dans backups/ (3–100).
 try:
     BACKUP_KEEP_COUNT = max(3, min(100, _env_int_first(30, "MAQUIS_MANAGER_BACKUP_KEEP", "TDB_BAR_BACKUP_KEEP")))
@@ -113,6 +122,27 @@ STATE_PUT_LIST_KEYS = (
     "dayBooks", "purchaseOrders", "supplierPrices", "casiers", "casierMouvements",
     "creditRecoveries", "consignes", "charges", "staffAuditLog", "workShifts",
 )
+# Mapping clé JSON → (table PostgreSQL, type d'id)
+# type : "int" = item.id entier, "text" = item.id texte, "date_site" = clé date+siteId
+_PG_TABLES: dict[str, tuple[str, str]] = {
+    "ventes":           ("ventes",           "int"),
+    "stock":            ("stock",            "int"),
+    "commandes":        ("commandes",        "int"),
+    "stockChecks":      ("stock_checks",     "date_site"),
+    "stockEntrees":     ("stock_entrees",    "int"),
+    "stockLosses":      ("stock_losses",     "int"),
+    "dayBooks":         ("day_books",        "date_site"),
+    "purchaseOrders":   ("purchase_orders",  "int"),
+    "supplierPrices":   ("supplier_prices",  "int"),
+    "casiers":          ("casiers",          "int"),
+    "casierMouvements": ("casier_mouvements","int"),
+    "creditRecoveries": ("credit_recoveries","int"),
+    "consignes":        ("consignes",        "int"),
+    "charges":          ("charges",          "int"),
+    "staffAuditLog":    ("staff_audit_log",  "text"),
+    "workShifts":       ("work_shifts",      "text"),
+}
+_PG_SKIP_SETTINGS = set(STATE_PUT_LIST_KEYS) | {"auth", "sites", "categories", "_meta"}
 MAX_STATE_LIST_ROWS = 50_000
 
 
@@ -2382,6 +2412,7 @@ class DataStore:
         self._updated_at = ""
         self._sqlite_path = SQLITE_FILE
         self._sqlite_enabled = STORAGE_MODE == "sqlite"
+        self._pg_enabled = STORAGE_MODE == "postgres"
         self._state = self._load()
         self._last_etag = self._compute_etag()
         self._rev = int(self._state.get("_meta", {}).get("rev") or self._rev or 1)
@@ -2417,8 +2448,168 @@ class DataStore:
         finally:
             conn.close()
 
+    # ── PostgreSQL ────────────────────────────────────────────────────────────
+
+    def _pg_connect(self):  # type: ignore[return]
+        if not _PSYCOPG2_OK:
+            raise RuntimeError("psycopg2 non installé. Exécutez : pip install psycopg2-binary")
+        if not PG_DSN:
+            raise RuntimeError("Variable PG_DSN ou DATABASE_URL requise pour le mode postgres.")
+        return psycopg2.connect(PG_DSN)
+
+    def _pg_ensure_tables(self, conn: Any) -> None:
+        schema_file = BASE_DIR / "schema.sql"
+        if schema_file.exists():
+            sql = schema_file.read_text(encoding="utf-8")
+        else:
+            # Schéma minimal inline si schema.sql absent
+            sql = """
+CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value JSONB NOT NULL);
+CREATE TABLE IF NOT EXISTS sites (id TEXT PRIMARY KEY, data JSONB NOT NULL);
+CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, data JSONB NOT NULL);
+CREATE TABLE IF NOT EXISTS ventes (row_id BIGSERIAL PRIMARY KEY, item_id INTEGER, site_id TEXT, data JSONB NOT NULL);
+CREATE TABLE IF NOT EXISTS stock (row_id BIGSERIAL PRIMARY KEY, item_id INTEGER, site_id TEXT, data JSONB NOT NULL);
+CREATE TABLE IF NOT EXISTS commandes (row_id BIGSERIAL PRIMARY KEY, item_id INTEGER, site_id TEXT, data JSONB NOT NULL);
+CREATE TABLE IF NOT EXISTS stock_checks (row_id BIGSERIAL PRIMARY KEY, site_id TEXT, date_col TEXT, data JSONB NOT NULL);
+CREATE TABLE IF NOT EXISTS stock_entrees (row_id BIGSERIAL PRIMARY KEY, item_id INTEGER, site_id TEXT, data JSONB NOT NULL);
+CREATE TABLE IF NOT EXISTS stock_losses (row_id BIGSERIAL PRIMARY KEY, item_id INTEGER, site_id TEXT, data JSONB NOT NULL);
+CREATE TABLE IF NOT EXISTS day_books (row_id BIGSERIAL PRIMARY KEY, site_id TEXT, date_col TEXT, data JSONB NOT NULL);
+CREATE TABLE IF NOT EXISTS purchase_orders (row_id BIGSERIAL PRIMARY KEY, item_id INTEGER, site_id TEXT, data JSONB NOT NULL);
+CREATE TABLE IF NOT EXISTS supplier_prices (row_id BIGSERIAL PRIMARY KEY, item_id INTEGER, site_id TEXT, data JSONB NOT NULL);
+CREATE TABLE IF NOT EXISTS casiers (row_id BIGSERIAL PRIMARY KEY, item_id INTEGER, site_id TEXT, data JSONB NOT NULL);
+CREATE TABLE IF NOT EXISTS casier_mouvements (row_id BIGSERIAL PRIMARY KEY, item_id INTEGER, site_id TEXT, data JSONB NOT NULL);
+CREATE TABLE IF NOT EXISTS credit_recoveries (row_id BIGSERIAL PRIMARY KEY, item_id INTEGER, site_id TEXT, data JSONB NOT NULL);
+CREATE TABLE IF NOT EXISTS consignes (row_id BIGSERIAL PRIMARY KEY, item_id INTEGER, site_id TEXT, data JSONB NOT NULL);
+CREATE TABLE IF NOT EXISTS charges (row_id BIGSERIAL PRIMARY KEY, item_id INTEGER, site_id TEXT, data JSONB NOT NULL);
+CREATE TABLE IF NOT EXISTS staff_audit_log (row_id BIGSERIAL PRIMARY KEY, item_id TEXT, site_id TEXT, data JSONB NOT NULL);
+CREATE TABLE IF NOT EXISTS work_shifts (row_id BIGSERIAL PRIMARY KEY, item_id TEXT, site_id TEXT, data JSONB NOT NULL);
+"""
+        with conn.cursor() as cur:
+            cur.execute(sql)
+        conn.commit()
+
+    def _pg_load(self) -> dict[str, Any]:
+        conn = self._pg_connect()
+        try:
+            self._pg_ensure_tables(conn)
+            state: dict[str, Any] = {}
+            with conn.cursor() as cur:
+                # Paramètres scalaires
+                cur.execute("SELECT key, value FROM app_settings")
+                for key, value in cur.fetchall():
+                    state[key] = value  # psycopg2 désérialise JSONB automatiquement
+
+                # Sites
+                cur.execute("SELECT data FROM sites ORDER BY id")
+                state["sites"] = [row[0] for row in cur.fetchall()]
+
+                # Utilisateurs
+                cur.execute("SELECT data FROM users ORDER BY username")
+                state["auth"] = {"users": [row[0] for row in cur.fetchall()]}
+
+                # Listes
+                for key, (table, _) in _PG_TABLES.items():
+                    cur.execute(f"SELECT data FROM {table} ORDER BY row_id")
+                    state[key] = [row[0] for row in cur.fetchall()]
+
+            return state
+        finally:
+            conn.close()
+
+    def _pg_write(self, payload: dict[str, Any]) -> None:
+        conn = self._pg_connect()
+        try:
+            self._pg_ensure_tables(conn)
+            with conn:  # transaction automatique
+                with conn.cursor() as cur:
+                    # --- Paramètres scalaires ---
+                    for k, v in payload.items():
+                        if k not in _PG_SKIP_SETTINGS:
+                            cur.execute(
+                                "INSERT INTO app_settings(key, value) VALUES(%s, %s) "
+                                "ON CONFLICT(key) DO UPDATE SET value = EXCLUDED.value",
+                                (k, json.dumps(v, ensure_ascii=False)),
+                            )
+
+                    # --- Sites ---
+                    cur.execute("SELECT id FROM sites")
+                    existing_site_ids = {row[0] for row in cur.fetchall()}
+                    new_site_ids: set[str] = set()
+                    for site in payload.get("sites", []):
+                        sid = str(site.get("id", "")).strip()
+                        if not sid:
+                            continue
+                        new_site_ids.add(sid)
+                        cur.execute(
+                            "INSERT INTO sites(id, data) VALUES(%s, %s) "
+                            "ON CONFLICT(id) DO UPDATE SET data = EXCLUDED.data",
+                            (sid, json.dumps(site, ensure_ascii=False)),
+                        )
+                    for sid in existing_site_ids - new_site_ids:
+                        cur.execute("DELETE FROM sites WHERE id = %s", (sid,))
+
+                    # --- Utilisateurs ---
+                    cur.execute("SELECT username FROM users")
+                    existing_users = {row[0] for row in cur.fetchall()}
+                    new_users: set[str] = set()
+                    for user in payload.get("auth", {}).get("users", []):
+                        uname = str(user.get("username", "")).strip()
+                        if not uname:
+                            continue
+                        new_users.add(uname)
+                        cur.execute(
+                            "INSERT INTO users(username, data) VALUES(%s, %s) "
+                            "ON CONFLICT(username) DO UPDATE SET data = EXCLUDED.data",
+                            (uname, json.dumps(user, ensure_ascii=False)),
+                        )
+                    for uname in existing_users - new_users:
+                        cur.execute("DELETE FROM users WHERE username = %s", (uname,))
+
+                    # --- Listes : DELETE + INSERT dans la transaction ---
+                    for key, (table, id_type) in _PG_TABLES.items():
+                        items = payload.get(key, [])
+                        cur.execute(f"DELETE FROM {table}")
+                        if not items:
+                            continue
+                        if id_type == "int":
+                            rows = [
+                                (item.get("id"), item.get("siteId"), json.dumps(item, ensure_ascii=False))
+                                for item in items
+                            ]
+                            psycopg2.extras.execute_values(
+                                cur,
+                                f"INSERT INTO {table}(item_id, site_id, data) VALUES %s",
+                                rows,
+                            )
+                        elif id_type == "text":
+                            rows = [
+                                (str(item.get("id", "")), item.get("siteId"), json.dumps(item, ensure_ascii=False))
+                                for item in items
+                            ]
+                            psycopg2.extras.execute_values(
+                                cur,
+                                f"INSERT INTO {table}(item_id, site_id, data) VALUES %s",
+                                rows,
+                            )
+                        elif id_type == "date_site":
+                            rows = [
+                                (
+                                    item.get("siteId"),
+                                    str(item.get("date", ""))[:10],
+                                    json.dumps(item, ensure_ascii=False),
+                                )
+                                for item in items
+                            ]
+                            psycopg2.extras.execute_values(
+                                cur,
+                                f"INSERT INTO {table}(site_id, date_col, data) VALUES %s",
+                                rows,
+                            )
+        finally:
+            conn.close()
+
     def _compute_etag(self) -> str:
-        if self._sqlite_enabled:
+        if self._sqlite_enabled or self._pg_enabled:
             # Based on logical revision.
             return f'W/"rev-{int(self._rev or 0)}"'
         try:
@@ -2429,6 +2620,50 @@ class DataStore:
             return 'W/"0-0"'
 
     def _load(self) -> dict[str, Any]:
+        if self._pg_enabled:
+            try:
+                payload = self._pg_load()
+            except Exception as exc:
+                print(f"[postgres] Échec du chargement ({exc}), état par défaut.")
+                payload = {}
+            if payload.get("sites"):
+                payload = migrate_state(payload)
+                merged = build_default_state()
+                merged.update({k: v for k, v in payload.items() if k in merged})
+                merged["auth"]["users"] = payload.get("auth", {}).get("users", merged["auth"]["users"])
+                merged["nextId"].update(payload.get("nextId", {}))
+                merged["sites"] = payload.get("sites", merged["sites"])
+                merged["activeSiteId"] = payload.get("activeSiteId", merged["activeSiteId"])
+                merged["ventes"] = payload.get("ventes", merged["ventes"])
+                merged["stock"] = payload.get("stock", merged["stock"])
+                merged["commandes"] = payload.get("commandes", merged.get("commandes", []))
+                merged["stockChecks"] = payload.get("stockChecks", merged.get("stockChecks", []))
+                merged["categories"] = payload.get("categories", merged.get("categories", DEFAULT_STATE["categories"]))
+                merged["charges"] = payload.get("charges", merged["charges"])
+                merged["dayBooks"] = payload.get("dayBooks", merged.get("dayBooks", []))
+                merged["purchaseOrders"] = payload.get("purchaseOrders", merged.get("purchaseOrders", []))
+                merged["supplierPrices"] = payload.get("supplierPrices", merged.get("supplierPrices", []))
+                merged["casiers"] = payload.get("casiers", merged.get("casiers", []))
+                merged["casierMouvements"] = payload.get("casierMouvements", merged.get("casierMouvements", []))
+                merged["creditRecoveries"] = payload.get("creditRecoveries", merged.get("creditRecoveries", []))
+                merged["consignes"] = payload.get("consignes", merged.get("consignes", []))
+                merged["staffAuditLog"] = payload.get("staffAuditLog", merged.get("staffAuditLog", []))
+                merged["workShifts"] = payload.get("workShifts", merged.get("workShifts", []))
+                merged["stockEntrees"] = payload.get("stockEntrees", merged.get("stockEntrees", []))
+                merged["stockLosses"] = payload.get("stockLosses", merged.get("stockLosses", []))
+                merged["pdjWorkDateBySite"] = payload.get("pdjWorkDateBySite", merged.get("pdjWorkDateBySite", {}))
+                for index, site in enumerate(merged["sites"], start=1):
+                    site.setdefault("prefixeFacture", f"SITE{index}")
+                    site.setdefault("dualZonePricing", True)
+                normalize_auth_users(merged)
+                merged["_meta"] = payload.get("_meta") or {"rev": 1, "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+                self._write(merged)
+                return merged
+            else:
+                initial = build_default_state()
+                self._write(initial)
+                return initial
+
         if self._sqlite_enabled:
             raw = self._sqlite_get("state")
             if raw:
@@ -2528,6 +2763,24 @@ class DataStore:
         payload["_meta"] = {"rev": self._rev, "updatedAt": self._updated_at}
 
         body = json.dumps(payload, ensure_ascii=False, indent=2)
+
+        if self._pg_enabled:
+            self._pg_write(payload)
+            # Sauvegarde JSON automatique (rollback possible)
+            try:
+                stamp = time.strftime("%Y%m%d-%H%M%S")
+                backup_path = BACKUP_DIR / f"data-{stamp}.json"
+                backup_path.write_text(body, encoding="utf-8")
+                backups = sorted(BACKUP_DIR.glob("data-*.json"), key=lambda p: p.name, reverse=True)
+                for old in backups[BACKUP_KEEP_COUNT:]:
+                    try:
+                        old.unlink()
+                    except OSError:
+                        pass
+            except OSError:
+                pass
+            self._last_etag = self._compute_etag()
+            return
 
         if self._sqlite_enabled:
             self._sqlite_set("state", body)
@@ -3502,7 +3755,7 @@ class DataStore:
             except OSError:
                 continue
         return {
-            "storageMode": "sqlite" if self._sqlite_enabled else "json",
+            "storageMode": "sqlite" if self._sqlite_enabled else ("postgres" if self._pg_enabled else "json"),
             "keepCount": BACKUP_KEEP_COUNT,
             "jsonBackups": json_rows,
             "sqliteBackups": sqlite_rows,
@@ -3575,6 +3828,7 @@ class DataStore:
                 dest = BACKUP_DIR / name
                 body = json.dumps(self._state, ensure_ascii=False, indent=2)
                 dest.write_text(body, encoding="utf-8")
+            # Postgres : même comportement que JSON (sauvegarde état en mémoire)
         self._prune_manual_backups(manual_keep)
         return {"ok": "true", "file": name}
 
