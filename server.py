@@ -1809,11 +1809,13 @@ def validate_serveuse_pdj_payload(session: dict[str, Any], payload: dict[str, An
     if "pdjWorkDateBySite" in payload:
         payload.pop("pdjWorkDateBySite", None)  # ignorer silencieusement pour les serveuses
     if "dayBooks" in payload:
-        for book in payload.get("dayBooks") or []:
-            if not isinstance(book, dict):
-                continue
-            if book.get("openingCashRecorded") is True:
-                raise ValueError("Ouverture de caisse reservee au gerant ou administrateur.")
+        # Retirer silencieusement les dayBooks avec openingCashRecorded pour les serveuses
+        # (le gérant a déjà enregistré l'ouverture ; la serveuse ne peut pas la modifier)
+        filtered = [b for b in (payload.get("dayBooks") or []) if not (isinstance(b, dict) and b.get("openingCashRecorded") is True)]
+        if filtered:
+            payload["dayBooks"] = filtered
+        else:
+            payload.pop("dayBooks", None)
 
 
 def dedupe_commandes_list(
