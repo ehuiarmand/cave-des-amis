@@ -2979,6 +2979,11 @@ function serveuseVentesModuleBlocked(siteId = currentSiteId()) {
   return serveuseIsRestDay(today(), siteId);
 }
 
+/** Vrai si la serveuse a un service ouvert aujourd'hui (dayBook sans stockCheck de clôture). */
+function serveuseHasOpenServiceToday(siteId = currentSiteId()) {
+  return !!(dayBookFor(today(), siteId) && !stockCheckForSiteDate(today(), siteId));
+}
+
 /** Pages accessibles pour une serveuse en jour de repos. */
 const SERVEUSE_REST_DAY_PAGES = new Set(["planning", "historique-ventes"]);
 
@@ -2988,7 +2993,9 @@ function serveuseRestDayActive(siteId = currentSiteId()) {
 
 function serveusePageAllowedDuringRest(page) {
   if (!staffRequiresShiftWindowForSales() || !serveuseRestDayActive()) return true;
-  return SERVEUSE_REST_DAY_PAGES.has(String(page || "").trim());
+  if (SERVEUSE_REST_DAY_PAGES.has(String(page || "").trim())) return true;
+  if (page === "pdj" && serveuseHasOpenServiceToday()) return true;
+  return false;
 }
 
 function serveuseRestDayBlockToast() {
@@ -3032,9 +3039,11 @@ function syncServeuseRestDayNavAccess() {
     else if (btn.title === "Jour de repos — indisponible") btn.removeAttribute("title");
   });
 
+  const _hasOpenService = rest && serveuseHasOpenServiceToday();
   const moreNavOk = (nav) => {
     if (!rest) return true;
     if (nav === "logout") return true;
+    if (nav === "pdj" && _hasOpenService) return true;
     return nav === "planning" || nav === "historique-ventes";
   };
   document.querySelectorAll("[data-more-nav]").forEach((btn) => {
@@ -3360,9 +3369,11 @@ function renderPlanningMine() {
   const restToday = serveusePlanningBlocksSale(today(), currentSiteId());
   if (sumEl) {
     if (restToday) {
+      const _openSvc = serveuseHasOpenServiceToday();
       sumEl.innerHTML = `<div class="inline-card ventes-rest-day-alert" role="alert">
         <strong>Hors service</strong>
         <p class="ventes-rest-day-alert-msg">${escapeHtml(restToday)}</p>
+        ${_openSvc ? `<button type="button" class="btn btn-sm btn-primary" style="margin-top:8px" onclick="navigate('pdj')">Point du jour — Fin de service</button>` : ""}
       </div>`;
     } else if (staffIsOnDutyNow()) {
       const active = activeWorkShiftsNow(sessionUser, currentSiteId());
@@ -3914,7 +3925,10 @@ function canClosePdjDay() {
   if (!staffRequiresShiftWindowForSales()) return false;
   // Maquis sans créneaux configurés : serveuse toujours autorisée (fin de service → gérant valide)
   if (workShiftsForSite(currentSiteId()).length === 0) return true;
-  return staffIsOnDutyNow();
+  if (staffIsOnDutyNow()) return true;
+  // Jour de repos mais service ouvert (non clôturé) : autoriser la clôture
+  if (serveuseIsRestDay(today(), currentSiteId()) && serveuseHasOpenServiceToday()) return true;
+  return false;
 }
 
 function stockCheckIsManagerConfirmed(check) {
@@ -4849,12 +4863,11 @@ function applyRoleVisibility() {
 }
 
 const PAGE_PERMISSIONS = {
-  home:              "rapports",
-  pdj:               "caisse",
-  stock:             "stock",
-  charges:           "charges",
-  "historique-ventes": "rapports",
-  params:            "parametres",
+  home:    "rapports",
+  pdj:     "caisse",
+  stock:   "stock",
+  charges: "charges",
+  params:  "parametres",
 };
 
 function applyPermissionVisibility() {
@@ -4862,17 +4875,23 @@ function applyPermissionVisibility() {
   if (canSuperAdmin() || canSiteAdmin()) return;
 
   // Contrôle nav : les permissions remplacent les restrictions de rôle pour les pages mappées
+  const _pdjOpenService = isServeuseAccount() && serveuseHasOpenServiceToday();
   document.querySelectorAll(".nav-btn[data-page]").forEach((btn) => {
     const required = PAGE_PERMISSIONS[btn.dataset.page];
     if (!required) return;
+    if (btn.dataset.page === "pdj" && _pdjOpenService) return; // service ouvert → accès PDJ autorisé
     btn.classList.toggle("hidden", !hasPermission(required));
   });
 
   // Rediriger si la page courante est interdite
   const requiredForCurrent = PAGE_PERMISSIONS[currentPage];
   if (requiredForCurrent && !hasPermission(requiredForCurrent)) {
-    navigate(hasPermission("ventes") ? "ventes" : "guide");
-    return;
+    if (currentPage === "pdj" && _pdjOpenService) {
+      // serveuse avec service ouvert : rester sur PDJ pour clôturer
+    } else {
+      navigate(hasPermission("ventes") ? "ventes" : "guide");
+      return;
+    }
   }
 
   // Onglet Accès dans Paramètres : contrôlé par permission "utilisateurs"
