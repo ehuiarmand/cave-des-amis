@@ -2979,9 +2979,10 @@ function serveuseVentesModuleBlocked(siteId = currentSiteId()) {
   return serveuseIsRestDay(today(), siteId);
 }
 
-/** Vrai si la serveuse a un service ouvert aujourd'hui (dayBook sans stockCheck de clôture). */
+/** Vrai si la serveuse a un service ouvert non clôturé (date de travail courante). */
 function serveuseHasOpenServiceToday(siteId = currentSiteId()) {
-  return !!(dayBookFor(today(), siteId) && !stockCheckForSiteDate(today(), siteId));
+  const d = workingDate(siteId);
+  return !!(d && dayBookFor(d, siteId) && !stockCheckForSiteDate(d, siteId));
 }
 
 /** Pages accessibles pour une serveuse en jour de repos. */
