@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS users (
 -- Ventes (lignes de facturation)
 CREATE TABLE IF NOT EXISTS ventes (
     row_id  BIGSERIAL PRIMARY KEY,
-    item_id INTEGER,
+    item_id BIGINT,
     site_id TEXT,
     data    JSONB NOT NULL
 );
@@ -36,7 +36,7 @@ CREATE INDEX IF NOT EXISTS idx_ventes_facture ON ventes ((data->>'factureNumber'
 -- Stock (articles)
 CREATE TABLE IF NOT EXISTS stock (
     row_id  BIGSERIAL PRIMARY KEY,
-    item_id INTEGER,
+    item_id BIGINT,
     site_id TEXT,
     data    JSONB NOT NULL
 );
@@ -46,7 +46,7 @@ CREATE INDEX IF NOT EXISTS idx_stock_article ON stock ((data->>'article'));
 -- Commandes en cours
 CREATE TABLE IF NOT EXISTS commandes (
     row_id  BIGSERIAL PRIMARY KEY,
-    item_id INTEGER,
+    item_id BIGINT,
     site_id TEXT,
     data    JSONB NOT NULL
 );
@@ -64,7 +64,7 @@ CREATE INDEX IF NOT EXISTS idx_stock_checks_site_date ON stock_checks (site_id, 
 -- Entrées de stock
 CREATE TABLE IF NOT EXISTS stock_entrees (
     row_id  BIGSERIAL PRIMARY KEY,
-    item_id INTEGER,
+    item_id BIGINT,
     site_id TEXT,
     data    JSONB NOT NULL
 );
@@ -73,7 +73,7 @@ CREATE INDEX IF NOT EXISTS idx_stock_entrees_site_id ON stock_entrees (site_id);
 -- Pertes de stock
 CREATE TABLE IF NOT EXISTS stock_losses (
     row_id  BIGSERIAL PRIMARY KEY,
-    item_id INTEGER,
+    item_id BIGINT,
     site_id TEXT,
     data    JSONB NOT NULL
 );
@@ -91,7 +91,7 @@ CREATE INDEX IF NOT EXISTS idx_day_books_site_date ON day_books (site_id, date_c
 -- Commandes fournisseur (purchaseOrders)
 CREATE TABLE IF NOT EXISTS purchase_orders (
     row_id  BIGSERIAL PRIMARY KEY,
-    item_id INTEGER,
+    item_id BIGINT,
     site_id TEXT,
     data    JSONB NOT NULL
 );
@@ -100,7 +100,7 @@ CREATE INDEX IF NOT EXISTS idx_purchase_orders_site_id ON purchase_orders (site_
 -- Prix fournisseurs (supplierPrices)
 CREATE TABLE IF NOT EXISTS supplier_prices (
     row_id  BIGSERIAL PRIMARY KEY,
-    item_id INTEGER,
+    item_id BIGINT,
     site_id TEXT,
     data    JSONB NOT NULL
 );
@@ -108,7 +108,7 @@ CREATE TABLE IF NOT EXISTS supplier_prices (
 -- Casiers bouteilles
 CREATE TABLE IF NOT EXISTS casiers (
     row_id  BIGSERIAL PRIMARY KEY,
-    item_id INTEGER,
+    item_id BIGINT,
     site_id TEXT,
     data    JSONB NOT NULL
 );
@@ -117,7 +117,7 @@ CREATE INDEX IF NOT EXISTS idx_casiers_site_id ON casiers (site_id);
 -- Mouvements de casiers
 CREATE TABLE IF NOT EXISTS casier_mouvements (
     row_id  BIGSERIAL PRIMARY KEY,
-    item_id INTEGER,
+    item_id BIGINT,
     site_id TEXT,
     data    JSONB NOT NULL
 );
@@ -126,7 +126,7 @@ CREATE INDEX IF NOT EXISTS idx_casier_mouvements_site_id ON casier_mouvements (s
 -- Recouvrements de crédit
 CREATE TABLE IF NOT EXISTS credit_recoveries (
     row_id  BIGSERIAL PRIMARY KEY,
-    item_id INTEGER,
+    item_id BIGINT,
     site_id TEXT,
     data    JSONB NOT NULL
 );
@@ -135,7 +135,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_recoveries_site_id ON credit_recoveries (s
 -- Consignes
 CREATE TABLE IF NOT EXISTS consignes (
     row_id  BIGSERIAL PRIMARY KEY,
-    item_id INTEGER,
+    item_id BIGINT,
     site_id TEXT,
     data    JSONB NOT NULL
 );
@@ -144,7 +144,7 @@ CREATE INDEX IF NOT EXISTS idx_consignes_site_id ON consignes (site_id);
 -- Charges (dépenses)
 CREATE TABLE IF NOT EXISTS charges (
     row_id  BIGSERIAL PRIMARY KEY,
-    item_id INTEGER,
+    item_id BIGINT,
     site_id TEXT,
     data    JSONB NOT NULL
 );

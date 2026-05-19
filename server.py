@@ -133,7 +133,7 @@ _PG_TABLES: dict[str, tuple[str, str]] = {
     "stockLosses":      ("stock_losses",     "int"),
     "dayBooks":         ("day_books",        "date_site"),
     "purchaseOrders":   ("purchase_orders",  "int"),
-    "supplierPrices":   ("supplier_prices",  "int"),
+    "supplierPrices":   ("supplier_prices",  "text"),
     "casiers":          ("casiers",          "int"),
     "casierMouvements": ("casier_mouvements","int"),
     "creditRecoveries": ("credit_recoveries","int"),
