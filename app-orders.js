@@ -13511,6 +13511,38 @@ async function applyPurchaseReceipt(po, linesReceived, opts = {}) {
         remaining -= add;
         casiersUsed++;
       });
+      // Réutiliser les casiers vides existants avant d'en créer de nouveaux
+      const vides = (state.casiers || [])
+        .filter((c) => c.siteId === siteId && String(c.article || "").toLowerCase() === String(item.article || "").toLowerCase())
+        .filter((c) => (Number(c.quantiteActuelle) || 0) === 0 && (Number(c.bouteillesVides) || 0) === 0)
+        .sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0));
+      vides.forEach((c) => {
+        if (remaining <= 0) return;
+        const cap = Math.max(1, Number(c.capacite) || cs);
+        const fill = Math.min(cap, remaining);
+        c.quantiteActuelle = fill;
+        recomputeCasierStatus(c);
+        c.lastMoveAt = new Date().toISOString();
+        c.lastMoveBy = sessionUser || "system";
+        state.casierMouvements.unshift({
+          id: state.nextId.casierMouvement++,
+          siteId,
+          casierId: c.id,
+          casierCode: c.code,
+          article: item.article,
+          type: "entree",
+          quantite: fill,
+          source: "fournisseur",
+          motif: "",
+          commentaire: `Réception ${po.supplier || "fournisseur"}`,
+          user: sessionUser || "system",
+          role: currentRole || "-",
+          date: po.date || today(),
+          createdAt: new Date().toISOString(),
+        });
+        remaining -= fill;
+        casiersUsed++;
+      });
       while (remaining > 0) {
         const code = nextCasierCode();
         const fill = Math.min(cs, remaining);
