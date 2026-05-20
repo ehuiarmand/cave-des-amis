@@ -12560,7 +12560,8 @@ function mergeStateFromServerResponse(incoming, previous, patchedKeys = null) {
       out[key] = inc;
       return;
     }
-    let arr = (inc.length > 0 || !Array.isArray(old) || old.length === 0) ? inc : old;
+    // Pour commandes : toujours appliquer le tableau serveur (même vide = suppression ok)
+    let arr = (key === "commandes" || inc.length > 0 || !Array.isArray(old) || old.length === 0) ? inc : old;
     // Dédupliquer les stockChecks par (siteId, date) : garder le plus récent
     if (key === "stockChecks" && arr.length > 1) {
       const seen = new Map();
