@@ -17882,7 +17882,7 @@ function renderCasierPhysique() {
         <tbody>
           ${head.map((m) => `<tr>
             <td>${escapeHtml(formatDateDdMmYyyy(m.date || (m.createdAt || "").slice(0, 10)))}</td>
-            <td><button type="button" class="link-btn" data-casier-mvt-detail="${Number(m.casierId) || ""}" style="font-weight:700;padding:0;border:none;background:none;color:var(--mm-primary);cursor:pointer;text-decoration:underline">${escapeHtml(m.casierCode || "-")}</button></td>
+            <td>${findCasierById(Number(m.casierId)) ? `<button type="button" class="link-btn" data-casier-mvt-detail="${Number(m.casierId) || ""}" style="font-weight:700;padding:0;border:none;background:none;color:var(--mm-primary);cursor:pointer;text-decoration:underline">${escapeHtml(m.casierCode || "-")}</button>` : `<span style="font-weight:600;color:#9e9e9e;text-decoration:line-through" title="Casier supprimé">${escapeHtml(m.casierCode || "-")}</span>`}</td>
             <td>${escapeHtml(m.article || "-")}</td>
             <td>${m.type === "retour_vide" ? "<span class='badge badge-amber'>Retour vides</span>" : m.type === "sortie" ? "<span class='badge badge-red'>Sortie</span>" : "<span class='badge badge-green'>Entrée</span>"}</td>
             <td style="text-align:right">${m.type === "retour_vide" && m.nbCasiers ? `<strong>${fmt(m.nbCasiers)} casier(s)</strong> <span class="muted">(${fmt(m.quantite)} btl)</span>` : fmt(m.quantite)}</td>
