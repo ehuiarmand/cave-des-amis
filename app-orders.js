@@ -16884,6 +16884,8 @@ function recomputeCasierStatus(casier) {
   if (!casier) return casier;
   const cap = Math.max(1, Number(casier.capacite) || 1);
   const qty = Math.max(0, Number(casier.quantiteActuelle) || 0);
+  // Garantir que bouteillesVides ne dépasse jamais la capacité
+  casier.bouteillesVides = Math.min(Math.max(0, Number(casier.bouteillesVides) || 0), cap);
   if (qty >= cap) {
     casier.statut = "plein";
   } else if (qty > 0) {
@@ -17233,6 +17235,7 @@ async function ensurePhysicalCasiersFromReserve() {
         article: item.article,
         capacite: cap,
         quantiteActuelle: cap,
+        bouteillesVides: 0,
         emplacement: "À ranger",
         statut: "plein",
         createdAt: new Date().toISOString(),
@@ -17250,6 +17253,7 @@ async function ensurePhysicalCasiersFromReserve() {
         article: item.article,
         capacite: cap,
         quantiteActuelle: remainder,
+        bouteillesVides: 0,
         emplacement: "À ranger",
         statut: "partiel",
         createdAt: new Date().toISOString(),
@@ -18273,13 +18277,15 @@ function migrateCasiersVidesBouteillesVides() {
   const now = new Date().toISOString();
   let changed = false;
 
-  // 1. Casiers vides (qty=0) sans bouteillesVides tracquées → initialiser à capacite
+  // 1. Casiers vides (qty=0) sans bouteillesVides jamais initialisées (legacy) → initialiser à capacite
+  // On ne touche PAS aux casiers où bouteillesVides est explicitement 0 (nouveau code)
   state.casiers.forEach((c) => {
     const cap = Math.max(1, Number(c.capacite) || 24);
     const qty = Math.max(0, Number(c.quantiteActuelle) || 0);
-    const vides = Math.max(0, Number(c.bouteillesVides) || 0);
     const statut = String(c.statut || "").toLowerCase();
-    if (qty <= 0 && vides < cap && statut !== "retourne") {
+    // c.bouteillesVides == null : champ absent = données legacy → migrer
+    // c.bouteillesVides === 0   : champ présent et vide volontairement → ne pas toucher
+    if (qty <= 0 && c.bouteillesVides == null && statut !== "retourne") {
       c.bouteillesVides = cap;
       c.statut = "vide";
       changed = true;
