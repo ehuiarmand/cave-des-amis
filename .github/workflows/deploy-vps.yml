@@ -27,9 +27,17 @@ jobs:
       - name: Rsync vers le VPS
         uses: burnett01/rsync-deployments@v8
         with:
-          switches: -avzr --exclude=.git --exclude=.github --exclude=node_modules
+          switches: -avzr --exclude=.git --exclude=.github --exclude=node_modules --exclude=data.json --exclude=backups/ --exclude=audit.log.jsonl --exclude=app.sqlite3 --exclude=debug-*.log
           path: ./
           remote_path: ${{ secrets.REMOTE_PATH }}
           remote_host: ${{ secrets.REMOTE_HOST }}
           remote_user: ${{ secrets.REMOTE_USER }}
           remote_key: ${{ secrets.REMOTE_PRIVATE_KEY }}
+
+      - name: Redémarrer le service
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.REMOTE_HOST }}
+          username: ${{ secrets.REMOTE_USER }}
+          key: ${{ secrets.REMOTE_PRIVATE_KEY }}
+          script: systemctl restart cave-des-amis
