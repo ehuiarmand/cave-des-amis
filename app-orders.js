@@ -9064,6 +9064,20 @@ function renderSrMenu(query) {
   container.innerHTML = html;
 }
 
+function srCartAction(idx, action, value) {
+  const item = srCart[idx];
+  if (!item) return;
+  if (action === "remove") {
+    srCart.splice(idx, 1);
+  } else if (action === "set") {
+    const qty = Math.max(0, Math.floor(Number(value) || 0));
+    if (qty === 0) srCart.splice(idx, 1);
+    else srCart[idx].qty = qty;
+  }
+  renderSrMenu(document.getElementById("sr-search")?.value || "");
+  renderSrCart();
+}
+
 function renderSrCart() {
   const container = document.getElementById("sr-cart");
   const totalEl = document.getElementById("sr-total");
@@ -9074,16 +9088,22 @@ function renderSrCart() {
     container.innerHTML = "<p style='text-align:center;font-size:0.82rem;padding:4px 0;color:#9e9e9e'>Panier vide — ajoutez des produits ci-dessus.</p>";
     return;
   }
-  const int = srCart.filter((c) => !c.location.startsWith("Ext"));
-  const ext = srCart.filter((c) => c.location.startsWith("Ext"));
+  const btnStyle = "border:1px solid #ddd;background:#f5f5f5;border-radius:6px;width:28px;height:28px;font-size:1rem;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;padding:0;line-height:1";
+  const delStyle = "border:none;background:none;color:#e53935;font-size:1.1rem;cursor:pointer;padding:0 2px;line-height:1";
+  const int = srCart.map((c, i) => ({ ...c, _idx: i })).filter((c) => !c.location.startsWith("Ext"));
+  const ext = srCart.map((c, i) => ({ ...c, _idx: i })).filter((c) => c.location.startsWith("Ext"));
   const section = (items, label, color) => {
     if (!items.length) return "";
     const sub = items.reduce((s, c) => s + c.prix * c.qty, 0);
     return `<div style="margin-bottom:10px;padding:10px;border-radius:8px;border:1px solid ${color}22;background:${color}0d">
       <p style="font-size:0.7rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:${color};margin:0 0 6px">${label}</p>
-      ${items.map((c) => `<div style="display:flex;justify-content:space-between;align-items:center;font-size:0.85rem;padding:4px 0;border-bottom:1px solid rgba(0,0,0,0.06)">
-        <span style="color:var(--mm-text)">${escapeHtml(c.article)}${c.packSize > 1 ? ` ×${c.packSize}` : ""} <span style="color:var(--muted)">× ${c.qty}</span></span>
-        <strong style="color:var(--mm-text)">${fmt(c.prix * c.qty)} FCFA</strong>
+      ${items.map((c) => `<div style="display:flex;align-items:center;gap:6px;padding:5px 0;border-bottom:1px solid rgba(0,0,0,0.06)">
+        <span style="flex:1;font-size:0.85rem;color:var(--mm-text)">${escapeHtml(c.article)}${c.packSize > 1 ? ` ×${c.packSize}` : ""}</span>
+        <button style="${btnStyle}" onclick="srCartAction(${c._idx},'set',${c.qty - 1})" type="button">−</button>
+        <span style="min-width:20px;text-align:center;font-size:0.9rem;font-weight:600">${c.qty}</span>
+        <button style="${btnStyle}" onclick="srCartAction(${c._idx},'set',${c.qty + 1})" type="button">+</button>
+        <strong style="min-width:72px;text-align:right;font-size:0.85rem">${fmt(c.prix * c.qty)} FCFA</strong>
+        <button style="${delStyle}" onclick="srCartAction(${c._idx},'remove')" type="button" title="Supprimer">✕</button>
       </div>`).join("")}
       <div style="display:flex;justify-content:flex-end;font-size:0.8rem;font-weight:600;color:${color};padding-top:5px">Sous-total : ${fmt(sub)} FCFA</div>
     </div>`;
