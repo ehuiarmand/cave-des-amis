@@ -30,6 +30,11 @@ backups/
 *.zip
 ngrok.exe
 
+# PyInstaller
+build/
+dist/
+*.spec
+
 # Fichiers bureautiques / exports
 *.xlsx
 *.pdf
