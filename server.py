@@ -2415,6 +2415,8 @@ class DataStore:
         self._sqlite_path = SQLITE_FILE
         self._sqlite_enabled = STORAGE_MODE == "sqlite"
         self._pg_enabled = STORAGE_MODE == "postgres"
+        # True si PostgreSQL était inaccessible au démarrage → bloque toute écriture
+        self._pg_startup_failed = False
         self._state = self._load()
         self._last_etag = self._compute_etag()
         self._rev = int(self._state.get("_meta", {}).get("rev") or self._rev or 1)
@@ -2519,6 +2521,11 @@ CREATE TABLE IF NOT EXISTS work_shifts (row_id BIGSERIAL PRIMARY KEY, item_id TE
             conn.close()
 
     def _pg_write(self, payload: dict[str, Any]) -> None:
+        if self._pg_startup_failed:
+            raise RuntimeError(
+                "[postgres] ÉCRITURE BLOQUÉE : PostgreSQL était inaccessible au démarrage. "
+                "Redémarrez le service une fois PostgreSQL disponible pour éviter toute perte de données."
+            )
         conn = self._pg_connect()
         try:
             self._pg_ensure_tables(conn)
@@ -2638,11 +2645,15 @@ CREATE TABLE IF NOT EXISTS work_shifts (row_id BIGSERIAL PRIMARY KEY, item_id TE
 
     def _load(self) -> dict[str, Any]:
         if self._pg_enabled:
+            pg_load_ok = True
             try:
                 payload = self._pg_load()
             except Exception as exc:
-                print(f"[postgres] Échec du chargement ({exc}), état par défaut.")
+                print(f"[postgres] Échec du chargement ({exc}), état par défaut.", flush=True)
+                print("[postgres] PROTECTION : aucune écriture ne sera faite sur PostgreSQL jusqu'au redémarrage.", flush=True)
                 payload = {}
+                pg_load_ok = False
+                self._pg_startup_failed = True
             if payload.get("sites"):
                 payload = migrate_state(payload)
                 merged = build_default_state()
@@ -2678,7 +2689,10 @@ CREATE TABLE IF NOT EXISTS work_shifts (row_id BIGSERIAL PRIMARY KEY, item_id TE
                 return merged
             else:
                 initial = build_default_state()
-                self._write(initial)
+                if pg_load_ok:
+                    # Première utilisation : PostgreSQL vide → initialiser normalement
+                    self._write(initial)
+                # Si pg_load_ok est False, on NE RIEN ÉCRIT en PostgreSQL
                 return initial
 
         if self._sqlite_enabled:

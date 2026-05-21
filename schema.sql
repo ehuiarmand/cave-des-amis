@@ -100,7 +100,7 @@ CREATE INDEX IF NOT EXISTS idx_purchase_orders_site_id ON purchase_orders (site_
 -- Prix fournisseurs (supplierPrices)
 CREATE TABLE IF NOT EXISTS supplier_prices (
     row_id  BIGSERIAL PRIMARY KEY,
-    item_id BIGINT,
+    item_id TEXT,
     site_id TEXT,
     data    JSONB NOT NULL
 );
