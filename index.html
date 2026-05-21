@@ -2135,12 +2135,17 @@
           </select>
         </div>
       </div>
-      <div id="sr-menu"></div>
-      <div style="border-top:2px solid #e0e0e0;margin:8px 0"></div>
-      <div id="sr-cart" style="margin-bottom:8px"></div>
-      <div class="inline-card" style="margin-bottom:12px">
-        <span class="muted">Total commande</span>
-        <strong id="sr-total" style="font-size:1.15rem">0 FCFA</strong>
+      <div id="sr-body">
+        <!-- Panier affiché en 1er sur mobile, après les articles sur desktop -->
+        <div id="sr-cart-section">
+          <div id="sr-cart" style="margin-bottom:4px"></div>
+          <div class="inline-card" style="margin-bottom:8px">
+            <span class="muted">Total commande</span>
+            <strong id="sr-total" style="font-size:1.15rem">0 FCFA</strong>
+          </div>
+          <div id="sr-cart-separator" style="border-top:2px solid #e0e0e0;margin:8px 0"></div>
+        </div>
+        <div id="sr-menu"></div>
       </div>
       <div class="button-stack" style="position:sticky;bottom:0;background:#fff;padding:10px 0 6px;margin-top:4px;z-index:2;box-shadow:0 -2px 8px rgba(0,0,0,.06)">
         <button id="sr-submit-btn" class="btn btn-primary" type="button">Valider la commande</button>

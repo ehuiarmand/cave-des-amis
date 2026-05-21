@@ -3271,3 +3271,25 @@ textarea { font: inherit; }
   opacity: 0.55;
   cursor: not-allowed;
 }
+
+/* Saisie rapide : layout panier / articles */
+#sr-body {
+  display: flex;
+  flex-direction: column;
+}
+/* Mobile : panier en haut (ordre par défaut dans le HTML) */
+#sr-cart-section { order: 1; }
+#sr-menu         { order: 2; }
+
+/* Desktop : articles en haut, panier en bas */
+@media (min-width: 521px) {
+  #sr-cart-section { order: 2; }
+  #sr-menu         { order: 1; }
+  #sr-cart-separator { display: none; }
+  #sr-cart-section::before {
+    content: "";
+    display: block;
+    border-top: 2px solid #e0e0e0;
+    margin: 8px 0;
+  }
+}
