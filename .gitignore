@@ -38,3 +38,6 @@ ngrok.exe
 settings.local.json
 .env
 deploy.local.env
+
+*.msi
+*.exe
