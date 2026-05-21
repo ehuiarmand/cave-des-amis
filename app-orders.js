@@ -14107,7 +14107,7 @@ async function finalizeOrder(orderId = activeOrderId) {
         stockItem.lastSortieAt = new Date().toISOString();
         stockItem.lastSortieBy = sessionUser || "Serveur";
         consumePhysicalStock(stockItem, bottles);
-        drainArticleCasiers(stockItem.article, bottles, { motif: "vente", commentaire: `Facture ${factureNumber}` });
+        drainArticleCasiers(stockItem.article, bottles, { motif: "vente", commentaire: `Facture ${factureNumber}`, factureNumber });
         const saleDate = String(line.date || order.date || today()).slice(0, 10);
         const promoForLine = activePromotion(stockItem, saleDate);
         if (promoForLine && promoForLine.stockPromoRestant != null) {
@@ -16990,6 +16990,7 @@ function drainArticleCasiers(article, bottles, opts = {}) {
       source: "",
       motif: opts.motif || "vente",
       commentaire: opts.commentaire || "",
+      factureNumber: opts.factureNumber || "",
       user: sessionUser || "system",
       role: currentRole || "-",
       date: today(),
