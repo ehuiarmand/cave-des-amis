@@ -8597,6 +8597,9 @@ function activeCommandesExcludingFinalized(commandes, sourceState = state) {
     const st = String(orderStatus(o) || "").trim();
     if (st === "Paye" || st === "Payé" || st === "Annule" || st === "Annulé") return false;
     if (!o.lignes?.length) return true;
+    // Ne pas supprimer une commande active qui a un clientRequestId unique —
+    // le check sourceOrderId (finalizedIds) est suffisant pour les commandes modernes.
+    if (o.clientRequestId) return true;
     return !paidFingerprints.has(orderPaymentFingerprint(o));
   });
 }
