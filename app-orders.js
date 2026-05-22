@@ -13400,7 +13400,7 @@ async function savePurchaseOrder() {
     `Commande fournisseur ${supplier} (#${po.id})`,
     formatPurchaseOrderAuditDetail(po),
   );
-  await persistState({ purchaseOrders: state.purchaseOrders, supplierPrices: state.supplierPrices, casiers: state.casiers });
+  await persistState({ purchaseOrders: state.purchaseOrders, supplierPrices: state.supplierPrices, casiers: state.casiers, nextId: state.nextId });
   document.getElementById("purchase-form")?.classList.add("hidden");
   purchaseDraftLines = [];
   populateSupplierList();
