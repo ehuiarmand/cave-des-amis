@@ -3559,6 +3559,25 @@ CREATE TABLE IF NOT EXISTS work_shifts (row_id BIGSERIAL PRIMARY KEY, item_id TE
 
             validate_serveuse_pdj_payload(session, payload)
 
+            # Restrictions par rôle : supprimer silencieusement les collections non autorisées.
+            # - serveuse  : ventes + commandes + dayBooks uniquement
+            # - manager/admin : tout sauf sites/auth (gérés séparément)
+            # - rôle inconnu  : aucune écriture de collection
+            _role_str = str(session.get("role", "")).strip().lower()
+            _SERVEUSE_WRITE = frozenset({"ventes", "commandes", "dayBooks"})
+            _MANAGER_WRITE = frozenset({
+                "ventes", "stock", "commandes", "stockChecks", "dayBooks",
+                "purchaseOrders", "supplierPrices", "casiers", "casierMouvements",
+                "creditRecoveries", "consignes", "charges", "staffAuditLog",
+                "stockEntrees", "stockLosses", "workShifts",
+            })
+            if _role_str == "serveuse":
+                _role_write_allowed = _SERVEUSE_WRITE
+            elif _role_str in ("manager", "admin"):
+                _role_write_allowed = _MANAGER_WRITE
+            else:
+                _role_write_allowed = frozenset()
+
             # Ne merger une collection que si elle est explicitement presente dans le payload.
             # Si elle est absente (patch partiel), conserver la valeur courante intacte.
             _SCOPED_KEYS = [
@@ -3567,6 +3586,9 @@ CREATE TABLE IF NOT EXISTS work_shifts (row_id BIGSERIAL PRIMARY KEY, item_id TE
                 "creditRecoveries", "consignes", "charges", "staffAuditLog",
                 "stockEntrees", "stockLosses", "workShifts",
             ]
+            # Retirer du payload les clés que le rôle ne peut pas écrire
+            for _rk in [k for k in list(payload.keys()) if k in _MANAGER_WRITE and k not in _role_write_allowed]:
+                payload.pop(_rk, None)
             _old_sc_snap: dict[str, dict[str, Any]] = {
                 str(r.get("id", "")): json.loads(json.dumps(r))
                 for r in (current.get("stockChecks") or [])
@@ -3654,7 +3676,8 @@ CREATE TABLE IF NOT EXISTS work_shifts (row_id BIGSERIAL PRIMARY KEY, item_id TE
             elif str(current.get("activeSiteId", "")) not in allowed:
                 current["activeSiteId"] = sorted(allowed)[0]
 
-            current["nextId"] = merge_next_id_dict(current.get("nextId", {}), payload.get("nextId"))
+            if _role_str in ("manager", "admin"):
+                current["nextId"] = merge_next_id_dict(current.get("nextId", {}), payload.get("nextId"))
 
             users_payload = payload.get("auth", {}).get("users")
             if isinstance(users_payload, list):
