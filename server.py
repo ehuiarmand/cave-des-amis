@@ -3698,8 +3698,9 @@ CREATE TABLE IF NOT EXISTS work_shifts (row_id BIGSERIAL PRIMARY KEY, item_id TE
             elif str(current.get("activeSiteId", "")) not in allowed:
                 current["activeSiteId"] = sorted(allowed)[0]
 
-            if _role_str in ("manager", "admin"):
-                current["nextId"] = merge_next_id_dict(current.get("nextId", {}), payload.get("nextId"))
+            # merge_next_id_dict utilise max() : une serveuse peut augmenter nextId
+            # mais jamais le diminuer → pas de risque de collision en autorisant tous les rôles
+            current["nextId"] = merge_next_id_dict(current.get("nextId", {}), payload.get("nextId"))
 
             users_payload = payload.get("auth", {}).get("users")
             if isinstance(users_payload, list):
