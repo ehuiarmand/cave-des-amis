@@ -2677,7 +2677,9 @@ CREATE TABLE IF NOT EXISTS work_shifts (row_id BIGSERIAL PRIMARY KEY, item_id TE
                 pg_load_ok = False
                 self._pg_startup_failed = True
             if payload.get("sites"):
+                _payload_before = json.dumps(payload, sort_keys=True, default=str)
                 payload = migrate_state(payload)
+                _was_migrated = json.dumps(payload, sort_keys=True, default=str) != _payload_before
                 merged = build_default_state()
                 merged.update({k: v for k, v in payload.items() if k in merged})
                 merged["auth"]["users"] = payload.get("auth", {}).get("users", merged["auth"]["users"])
@@ -2707,7 +2709,9 @@ CREATE TABLE IF NOT EXISTS work_shifts (row_id BIGSERIAL PRIMARY KEY, item_id TE
                     site.setdefault("dualZonePricing", True)
                 normalize_auth_users(merged)
                 merged["_meta"] = payload.get("_meta") or {"rev": 1, "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
-                self._write(merged)
+                if _was_migrated:
+                    print("[startup] Migration détectée → écriture PostgreSQL.", flush=True)
+                    self._write(merged)
                 return merged
             else:
                 initial = build_default_state()

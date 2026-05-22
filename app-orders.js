@@ -11376,6 +11376,7 @@ function renderSitesList() {
     populatePurgeMaquisSelect();
     return;
   }
+  const canDelete = canGlobalSuperAdmin() && sites.length > 1;
   container.innerHTML = sites.map((site) => `
     <article class="list-item">
       <div style="min-width:0;flex:1">
@@ -11384,6 +11385,7 @@ function renderSitesList() {
       </div>
       <div class="list-side">
         <button type="button" class="mini-btn" data-site-backup="${escapeHtml(site.id)}" title="Sauvegarder ${escapeHtml(site.nom)} sur le serveur">Sauvegarder</button>
+        ${canDelete ? `<button type="button" class="mini-btn" data-delete-site="${escapeHtml(site.id)}" style="background:#e53935;color:#fff;margin-left:6px" title="Supprimer ${escapeHtml(site.nom)}">Supprimer</button>` : ""}
       </div>
     </article>`).join("");
   container.querySelectorAll("[data-site-backup]").forEach((btn) => {
