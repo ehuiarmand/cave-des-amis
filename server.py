@@ -4036,9 +4036,13 @@ class AppHandler(BaseHTTPRequestHandler):
         self.send_header("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
         self.send_header(
             "Content-Security-Policy",
-            "default-src 'self'; script-src 'self' 'unsafe-inline'; "
-            "style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "
-            "font-src 'self' data:; connect-src 'self'; frame-ancestors 'none';",
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            "font-src 'self' data: https://fonts.gstatic.com; "
+            "img-src 'self' data: blob:; "
+            "connect-src 'self'; "
+            "frame-ancestors 'none';",
         )
 
     def client_ip(self) -> str:
