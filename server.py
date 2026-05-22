@@ -256,6 +256,28 @@ def cookie_secure_flag() -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Rate limiting endpoint public
+# ---------------------------------------------------------------------------
+_public_order_rl: dict[str, list[float]] = {}
+_public_order_rl_lock = threading.Lock()
+_PUBLIC_ORDER_MAX = 30   # requêtes max
+_PUBLIC_ORDER_WINDOW = 60  # par fenêtre de 60 secondes
+
+
+def public_order_rate_limit_check(ip: str) -> bool:
+    """Retourne True si la requête est autorisée, False sinon."""
+    now = time.time()
+    with _public_order_rl_lock:
+        hits = _public_order_rl.get(ip, [])
+        hits = [t for t in hits if now - t < _PUBLIC_ORDER_WINDOW]
+        if len(hits) >= _PUBLIC_ORDER_MAX:
+            return False
+        hits.append(now)
+        _public_order_rl[ip] = hits
+    return True
+
+
+# ---------------------------------------------------------------------------
 # TOTP (RFC 6238) — no third-party deps, Python stdlib only
 # ---------------------------------------------------------------------------
 
@@ -3996,11 +4018,27 @@ def invalidate_sessions_on_auth_changes(
 class AppHandler(BaseHTTPRequestHandler):
     server_version = "MaquisManagerServer/1.0"
 
+    def _request_is_https(self) -> bool:
+        proto = (self.headers.get("X-Forwarded-Proto") or "").strip().lower()
+        if proto == "https":
+            return True
+        cf_visitor = (self.headers.get("CF-Visitor") or "").strip()
+        return '"scheme":"https"' in cf_visitor
+
+    def _cookie_secure(self) -> str:
+        return "; Secure" if (cookie_secure_flag() or self._request_is_https()) else ""
+
     def _send_security_headers(self) -> None:
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "
+            "font-src 'self' data:; connect-src 'self'; frame-ancestors 'none';",
+        )
 
     def client_ip(self) -> str:
         # If behind cloudflared, try CF-Connecting-IP.
@@ -4195,6 +4233,12 @@ class AppHandler(BaseHTTPRequestHandler):
             self.send_json(HTTPStatus.OK, info, cache_control="no-store")
             return
         if post_path == "/api/public/order":
+            if not public_order_rate_limit_check(self.client_ip()):
+                self.send_json(
+                    HTTPStatus.TOO_MANY_REQUESTS,
+                    {"error": "Trop de commandes. Réessayez dans quelques instants."},
+                )
+                return
             payload = self.read_json()
             try:
                 order = store.create_public_order(
@@ -4684,7 +4728,7 @@ class AppHandler(BaseHTTPRequestHandler):
             self.send_header("ETag", etag)
         if use_gzip:
             self.send_header("Content-Encoding", "gzip")
-        secure = "; Secure" if cookie_secure_flag() else ""
+        secure = self._cookie_secure()
         if cookie:
             self.send_header(
                 "Set-Cookie",
