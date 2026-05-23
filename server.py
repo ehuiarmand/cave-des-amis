@@ -256,6 +256,28 @@ def cookie_secure_flag() -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Rate limiting endpoint public
+# ---------------------------------------------------------------------------
+_public_order_rl: dict[str, list[float]] = {}
+_public_order_rl_lock = threading.Lock()
+_PUBLIC_ORDER_MAX = 30   # requêtes max
+_PUBLIC_ORDER_WINDOW = 60  # par fenêtre de 60 secondes
+
+
+def public_order_rate_limit_check(ip: str) -> bool:
+    """Retourne True si la requête est autorisée, False sinon."""
+    now = time.time()
+    with _public_order_rl_lock:
+        hits = _public_order_rl.get(ip, [])
+        hits = [t for t in hits if now - t < _PUBLIC_ORDER_WINDOW]
+        if len(hits) >= _PUBLIC_ORDER_MAX:
+            return False
+        hits.append(now)
+        _public_order_rl[ip] = hits
+    return True
+
+
+# ---------------------------------------------------------------------------
 # TOTP (RFC 6238) — no third-party deps, Python stdlib only
 # ---------------------------------------------------------------------------
 
@@ -2655,7 +2677,9 @@ CREATE TABLE IF NOT EXISTS work_shifts (row_id BIGSERIAL PRIMARY KEY, item_id TE
                 pg_load_ok = False
                 self._pg_startup_failed = True
             if payload.get("sites"):
+                _payload_before = json.dumps(payload, sort_keys=True, default=str)
                 payload = migrate_state(payload)
+                _was_migrated = json.dumps(payload, sort_keys=True, default=str) != _payload_before
                 merged = build_default_state()
                 merged.update({k: v for k, v in payload.items() if k in merged})
                 merged["auth"]["users"] = payload.get("auth", {}).get("users", merged["auth"]["users"])
@@ -2685,7 +2709,9 @@ CREATE TABLE IF NOT EXISTS work_shifts (row_id BIGSERIAL PRIMARY KEY, item_id TE
                     site.setdefault("dualZonePricing", True)
                 normalize_auth_users(merged)
                 merged["_meta"] = payload.get("_meta") or {"rev": 1, "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
-                self._write(merged)
+                if _was_migrated:
+                    print("[startup] Migration détectée → écriture PostgreSQL.", flush=True)
+                    self._write(merged)
                 return merged
             else:
                 initial = build_default_state()
@@ -3559,6 +3585,25 @@ CREATE TABLE IF NOT EXISTS work_shifts (row_id BIGSERIAL PRIMARY KEY, item_id TE
 
             validate_serveuse_pdj_payload(session, payload)
 
+            # Restrictions par rôle : supprimer silencieusement les collections non autorisées.
+            # - serveuse  : ventes + commandes + dayBooks uniquement
+            # - manager/admin : tout sauf sites/auth (gérés séparément)
+            # - rôle inconnu  : aucune écriture de collection
+            _role_str = str(session.get("role", "")).strip().lower()
+            _SERVEUSE_WRITE = frozenset({"ventes", "commandes", "dayBooks"})
+            _MANAGER_WRITE = frozenset({
+                "ventes", "stock", "commandes", "stockChecks", "dayBooks",
+                "purchaseOrders", "supplierPrices", "casiers", "casierMouvements",
+                "creditRecoveries", "consignes", "charges", "staffAuditLog",
+                "stockEntrees", "stockLosses", "workShifts",
+            })
+            if _role_str == "serveuse":
+                _role_write_allowed = _SERVEUSE_WRITE
+            elif _role_str in ("manager", "admin"):
+                _role_write_allowed = _MANAGER_WRITE
+            else:
+                _role_write_allowed = frozenset()
+
             # Ne merger une collection que si elle est explicitement presente dans le payload.
             # Si elle est absente (patch partiel), conserver la valeur courante intacte.
             _SCOPED_KEYS = [
@@ -3567,6 +3612,9 @@ CREATE TABLE IF NOT EXISTS work_shifts (row_id BIGSERIAL PRIMARY KEY, item_id TE
                 "creditRecoveries", "consignes", "charges", "staffAuditLog",
                 "stockEntrees", "stockLosses", "workShifts",
             ]
+            # Retirer du payload les clés que le rôle ne peut pas écrire
+            for _rk in [k for k in list(payload.keys()) if k in _MANAGER_WRITE and k not in _role_write_allowed]:
+                payload.pop(_rk, None)
             _old_sc_snap: dict[str, dict[str, Any]] = {
                 str(r.get("id", "")): json.loads(json.dumps(r))
                 for r in (current.get("stockChecks") or [])
@@ -3654,6 +3702,8 @@ CREATE TABLE IF NOT EXISTS work_shifts (row_id BIGSERIAL PRIMARY KEY, item_id TE
             elif str(current.get("activeSiteId", "")) not in allowed:
                 current["activeSiteId"] = sorted(allowed)[0]
 
+            # merge_next_id_dict utilise max() : une serveuse peut augmenter nextId
+            # mais jamais le diminuer → pas de risque de collision en autorisant tous les rôles
             current["nextId"] = merge_next_id_dict(current.get("nextId", {}), payload.get("nextId"))
 
             users_payload = payload.get("auth", {}).get("users")
@@ -3973,11 +4023,31 @@ def invalidate_sessions_on_auth_changes(
 class AppHandler(BaseHTTPRequestHandler):
     server_version = "MaquisManagerServer/1.0"
 
+    def _request_is_https(self) -> bool:
+        proto = (self.headers.get("X-Forwarded-Proto") or "").strip().lower()
+        if proto == "https":
+            return True
+        cf_visitor = (self.headers.get("CF-Visitor") or "").strip()
+        return '"scheme":"https"' in cf_visitor
+
+    def _cookie_secure(self) -> str:
+        return "; Secure" if (cookie_secure_flag() or self._request_is_https()) else ""
+
     def _send_security_headers(self) -> None:
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            "font-src 'self' data: https://fonts.gstatic.com; "
+            "img-src 'self' data: blob:; "
+            "connect-src 'self'; "
+            "frame-ancestors 'none';",
+        )
 
     def client_ip(self) -> str:
         # If behind cloudflared, try CF-Connecting-IP.
@@ -4172,6 +4242,12 @@ class AppHandler(BaseHTTPRequestHandler):
             self.send_json(HTTPStatus.OK, info, cache_control="no-store")
             return
         if post_path == "/api/public/order":
+            if not public_order_rate_limit_check(self.client_ip()):
+                self.send_json(
+                    HTTPStatus.TOO_MANY_REQUESTS,
+                    {"error": "Trop de commandes. Réessayez dans quelques instants."},
+                )
+                return
             payload = self.read_json()
             try:
                 order = store.create_public_order(
@@ -4661,7 +4737,7 @@ class AppHandler(BaseHTTPRequestHandler):
             self.send_header("ETag", etag)
         if use_gzip:
             self.send_header("Content-Encoding", "gzip")
-        secure = "; Secure" if cookie_secure_flag() else ""
+        secure = self._cookie_secure()
         if cookie:
             self.send_header(
                 "Set-Cookie",

@@ -5512,6 +5512,9 @@ function setParamsSubTab(tab) {
       })
       .catch(() => {});
   }
+  if (tab === "correction") {
+    renderCorrectionPanel();
+  }
   if (tab === "admin") {
     populatePurgeMaquisSelect();
     renderStaffAuditLog();
@@ -8597,6 +8600,9 @@ function activeCommandesExcludingFinalized(commandes, sourceState = state) {
     const st = String(orderStatus(o) || "").trim();
     if (st === "Paye" || st === "Payé" || st === "Annule" || st === "Annulé") return false;
     if (!o.lignes?.length) return true;
+    // Ne pas supprimer une commande active qui a un clientRequestId unique —
+    // le check sourceOrderId (finalizedIds) est suffisant pour les commandes modernes.
+    if (o.clientRequestId) return true;
     return !paidFingerprints.has(orderPaymentFingerprint(o));
   });
 }
@@ -11373,6 +11379,7 @@ function renderSitesList() {
     populatePurgeMaquisSelect();
     return;
   }
+  const canDelete = canGlobalSuperAdmin() && sites.length > 1;
   container.innerHTML = sites.map((site) => `
     <article class="list-item">
       <div style="min-width:0;flex:1">
@@ -11381,6 +11388,7 @@ function renderSitesList() {
       </div>
       <div class="list-side">
         <button type="button" class="mini-btn" data-site-backup="${escapeHtml(site.id)}" title="Sauvegarder ${escapeHtml(site.nom)} sur le serveur">Sauvegarder</button>
+        ${canDelete ? `<button type="button" class="mini-btn" data-delete-site="${escapeHtml(site.id)}" style="background:#e53935;color:#fff;margin-left:6px" title="Supprimer ${escapeHtml(site.nom)}">Supprimer</button>` : ""}
       </div>
     </article>`).join("");
   container.querySelectorAll("[data-site-backup]").forEach((btn) => {
@@ -11487,6 +11495,172 @@ async function deleteSite(siteId) {
   renderUsersList();
   showToast(`Maquis "${site.nom}" supprime.`);
 }
+
+// ─── Correction de facture ───────────────────────────────────────────────────
+
+function renderCorrectionPanel() {
+  const input = document.getElementById("corr-facture-num");
+  const result = document.getElementById("corr-result");
+  if (input) input.value = "";
+  if (result) result.innerHTML = "";
+}
+
+function searchFactureForCorrection() {
+  const num = String(document.getElementById("corr-facture-num")?.value || "").trim();
+  if (!num) { showToast("Saisissez un numéro de facture."); return; }
+  const ventes = (state.ventes || []).filter(
+    (v) => String(v.factureNumber || "").trim() === num && v.siteId === currentSiteId(),
+  );
+  const result = document.getElementById("corr-result");
+  if (!result) return;
+  if (!ventes.length) {
+    result.innerHTML = `<p class="muted" style="padding:10px 0">Facture &laquo;${escapeHtml(num)}&raquo; introuvable pour ce maquis.</p>`;
+    return;
+  }
+  renderCorrectionResult(num, ventes);
+}
+
+function renderCorrectionResult(factureNum, ventes) {
+  const container = document.getElementById("corr-result");
+  if (!container) return;
+  const firstV = ventes[0];
+  const client = firstV.client || "—";
+  const date = firstV.date || "—";
+  const table = firstV.table || "—";
+  const currentPay = paymentLabel(firstV) || firstV.paiement || "—";
+  const isMultiPay = ventes.some((v) => (v.paiementDetails || []).length > 1);
+
+  const lines = ventes.map((v, i) => `
+    <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line);flex-wrap:wrap">
+      <div style="flex:1;min-width:120px">
+        <strong>${escapeHtml(v.article)}</strong>
+        <span class="muted" style="font-size:0.85rem;margin-left:8px">${fmt(v.prix)} FCFA / u</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <label style="font-size:0.85rem;color:var(--muted)">Qté :</label>
+        <input type="number" id="corr-qty-${i}" value="${Number(v.qty) || 0}" min="0" step="1"
+               style="width:72px;padding:6px 10px;border-radius:8px;border:1px solid var(--line);font-size:0.93rem"
+               data-vente-id="${escapeHtml(String(v.id))}">
+      </div>
+    </div>`).join("");
+
+  const payOptions = PAYMENT_METHODS.map(
+    (m) => `<option value="${escapeHtml(m)}" ${m === currentPay ? "selected" : ""}>${escapeHtml(m)}</option>`,
+  ).join("");
+
+  container.innerHTML = `
+    <div style="background:var(--surface2,#f5f5f5);border-radius:12px;padding:14px;margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px;margin-bottom:10px">
+        <strong>${escapeHtml(factureNum)}</strong>
+        <span class="muted">${escapeHtml(date)}</span>
+        <span class="muted">${escapeHtml(client)}${table !== "—" ? " · Table " + escapeHtml(table) : ""}</span>
+      </div>
+      ${lines}
+    </div>
+
+    <div style="margin-bottom:14px">
+      <label style="font-weight:600;display:block;margin-bottom:6px">Corriger le moyen de paiement</label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <span class="muted" style="font-size:0.88rem">Actuel : <strong>${escapeHtml(currentPay)}</strong>${isMultiPay ? " (paiement mixte — sera remplacé par un seul mode)" : ""}</span>
+        <select id="corr-pay-method" style="padding:9px 12px;border-radius:10px;border:1px solid var(--line);font-size:0.93rem">
+          ${payOptions}
+        </select>
+      </div>
+    </div>
+
+    <div style="margin-bottom:16px">
+      <label for="corr-motif" style="font-weight:600;display:block;margin-bottom:6px">Motif de la correction <span style="color:#e53935">*</span></label>
+      <input id="corr-motif" type="text" placeholder="Ex : erreur saisie paiement, rectification quantité…"
+             style="width:100%;padding:11px 14px;border-radius:12px;border:1px solid var(--line);font-size:0.93rem;box-sizing:border-box">
+    </div>
+
+    <div class="button-stack">
+      <button id="corr-apply-pay-btn" class="btn btn-primary" type="button">Appliquer correction paiement</button>
+      <button id="corr-apply-qty-btn" class="btn btn-outline" type="button">Appliquer correction quantités</button>
+    </div>`;
+
+  document.getElementById("corr-apply-pay-btn")?.addEventListener("click", () =>
+    applyPaymentCorrection(factureNum, ventes).catch(handleApiError));
+  document.getElementById("corr-apply-qty-btn")?.addEventListener("click", () =>
+    applyQtyCorrection(factureNum, ventes).catch(handleApiError));
+}
+
+async function applyPaymentCorrection(factureNum, originalVentes) {
+  const motif = String(document.getElementById("corr-motif")?.value || "").trim();
+  if (!motif) { showToast("Le motif est obligatoire."); return; }
+  const newMethod = document.getElementById("corr-pay-method")?.value;
+  if (!newMethod) return;
+  const oldMethod = paymentLabel(originalVentes[0]) || originalVentes[0].paiement || "?";
+  if (newMethod === oldMethod) { showToast("Le mode de paiement est déjà " + newMethod); return; }
+
+  const ids = new Set(originalVentes.map((v) => v.id));
+  state.ventes = (state.ventes || []).map((v) => {
+    if (!ids.has(v.id)) return v;
+    const net = (Number(v.prix) || 0) * (Number(v.qty) || 0) - (Number(v.remise) || 0);
+    return { ...v, paiement: newMethod, paiementDetails: [{ method: newMethod, amount: net }] };
+  });
+
+  recordStaffAudit("update", "correction_paiement",
+    `Correction paiement ${factureNum} : ${oldMethod} → ${newMethod}`,
+    `Motif : ${motif}`);
+  await persistState({ ventes: state.ventes, staffAuditLog: state.staffAuditLog, nextId: state.nextId });
+  showToast(`Paiement de ${factureNum} corrigé : ${newMethod}`);
+  const refreshed = (state.ventes || []).filter(
+    (v) => String(v.factureNumber || "").trim() === factureNum && v.siteId === currentSiteId(),
+  );
+  renderCorrectionResult(factureNum, refreshed);
+}
+
+async function applyQtyCorrection(factureNum, originalVentes) {
+  const motif = String(document.getElementById("corr-motif")?.value || "").trim();
+  if (!motif) { showToast("Le motif est obligatoire."); return; }
+
+  const changes = [];
+  originalVentes.forEach((v, i) => {
+    const input = document.getElementById(`corr-qty-${i}`);
+    if (!input) return;
+    const newQty = Number(input.value);
+    if (isNaN(newQty) || newQty < 0) return;
+    if (newQty !== Number(v.qty)) changes.push({ v, oldQty: Number(v.qty), newQty });
+  });
+  if (!changes.length) { showToast("Aucune quantité modifiée."); return; }
+
+  const siteId = currentSiteId();
+  const idMap = new Map(changes.map((c) => [c.v.id, c]));
+
+  state.ventes = (state.ventes || [])
+    .map((v) => {
+      const c = idMap.get(v.id);
+      if (!c) return v;
+      return { ...v, qty: c.newQty, total: c.newQty * (Number(v.prix) || 0) };
+    })
+    .filter((v) => {
+      const c = idMap.get(v.id);
+      return !c || c.newQty > 0;
+    });
+
+  changes.forEach(({ v, oldQty, newQty }) => {
+    const entry = (state.stock || []).find(
+      (s) => s.siteId === siteId &&
+             String(s.article || "").toLowerCase() === String(v.article || "").toLowerCase(),
+    );
+    if (entry) entry.sorties = Math.max(0, (Number(entry.sorties) || 0) + (newQty - oldQty));
+  });
+
+  const desc = changes.map((c) => `${c.v.article}: ${c.oldQty}→${c.newQty}`).join(", ");
+  recordStaffAudit("update", "correction_quantite",
+    `Correction qtés ${factureNum} : ${desc}`,
+    `Motif : ${motif}`);
+  await persistState({ ventes: state.ventes, stock: state.stock, staffAuditLog: state.staffAuditLog, nextId: state.nextId });
+  showToast(`Quantités de ${factureNum} corrigées.`);
+  const refreshed = (state.ventes || []).filter(
+    (v) => String(v.factureNumber || "").trim() === factureNum && v.siteId === currentSiteId(),
+  );
+  if (refreshed.length) renderCorrectionResult(factureNum, refreshed);
+  else document.getElementById("corr-result").innerHTML = `<p class="muted" style="padding:10px 0">Toutes les lignes ont été retirées (quantité 0).</p>`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 function loadParamsForm() {
   const site = currentSite();
@@ -13400,7 +13574,7 @@ async function savePurchaseOrder() {
     `Commande fournisseur ${supplier} (#${po.id})`,
     formatPurchaseOrderAuditDetail(po),
   );
-  await persistState({ purchaseOrders: state.purchaseOrders, supplierPrices: state.supplierPrices, casiers: state.casiers });
+  await persistState({ purchaseOrders: state.purchaseOrders, supplierPrices: state.supplierPrices, casiers: state.casiers, nextId: state.nextId });
   document.getElementById("purchase-form")?.classList.add("hidden");
   purchaseDraftLines = [];
   populateSupplierList();
@@ -14107,7 +14281,7 @@ async function finalizeOrder(orderId = activeOrderId) {
         stockItem.lastSortieAt = new Date().toISOString();
         stockItem.lastSortieBy = sessionUser || "Serveur";
         consumePhysicalStock(stockItem, bottles);
-        drainArticleCasiers(stockItem.article, bottles, { motif: "vente", commentaire: `Facture ${factureNumber}` });
+        drainArticleCasiers(stockItem.article, bottles, { motif: "vente", commentaire: `Facture ${factureNumber}`, factureNumber });
         const saleDate = String(line.date || order.date || today()).slice(0, 10);
         const promoForLine = activePromotion(stockItem, saleDate);
         if (promoForLine && promoForLine.stockPromoRestant != null) {
@@ -16990,6 +17164,7 @@ function drainArticleCasiers(article, bottles, opts = {}) {
       source: "",
       motif: opts.motif || "vente",
       commentaire: opts.commentaire || "",
+      factureNumber: opts.factureNumber || "",
       user: sessionUser || "system",
       role: currentRole || "-",
       date: today(),
@@ -19205,6 +19380,10 @@ document.getElementById("fab-btn").addEventListener("click", () => {
       handleApiError(error);
     }
   });
+  document.getElementById("corr-search-btn")?.addEventListener("click", () => searchFactureForCorrection());
+  document.getElementById("corr-facture-num")?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") searchFactureForCorrection();
+  });
   const saveCategoriesBtn = document.getElementById("save-categories-btn");
   if (saveCategoriesBtn) saveCategoriesBtn.addEventListener("click", () => saveParams().catch(handleApiError));
 
@@ -19814,9 +19993,5 @@ async function init() {
 init();
 
 if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./service-worker.js")
-      .then((registration) => registration.update())
-      .catch((error) => console.error(error));
-  });
+  navigator.serviceWorker.getRegistrations().then((regs) => regs.forEach((r) => r.unregister()));
 }
