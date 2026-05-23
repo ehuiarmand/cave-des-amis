@@ -11394,6 +11394,19 @@ function renderSitesList() {
   container.querySelectorAll("[data-site-backup]").forEach((btn) => {
     btn.addEventListener("click", () => createSiteBackupOnServer(btn.dataset.siteBackup));
   });
+  if (canDelete) {
+    container.querySelectorAll("[data-delete-site]").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const siteId = btn.dataset.deleteSite;
+        const site = (state.sites || []).find((s) => s.id === siteId);
+        const nom = site?.nom || siteId;
+        if (window.confirm(`Supprimer le maquis "${nom}" ?\n\nCette action est irréversible.`)) {
+          deleteSite(siteId).catch(handleApiError);
+        }
+      });
+    });
+  }
   populatePurgeMaquisSelect();
 }
 
