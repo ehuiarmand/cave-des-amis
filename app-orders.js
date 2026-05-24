@@ -6359,9 +6359,7 @@ function autoOpenNextAccountingDayAfterClose(siteId, closedDateStr, closingCashF
       book.openingCashRecorded = true;
       book.openingRecordedAt = ts;
       book.openingRecordedBy = recordedBy;
-      if (!book.openingStockById || !Object.keys(book.openingStockById).length) {
-        book.openingStockById = snapshot;
-      }
+      book.openingStockById = snapshot;
       book.autoOpenedFromClose = true;
       book.autoOpenedFromDate = closed;
       if (!book.openedAt) book.openedAt = ts;
