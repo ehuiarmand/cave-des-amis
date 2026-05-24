@@ -5525,6 +5525,11 @@ function maybeAdjustParamsSubTab() {
 function syncFabLabelForStockPage() {
   const fab = document.getElementById("fab-btn");
   if (!fab) return;
+  if (currentPage === "ventes" && ventesSubTab === "caisse" && caisseInnerTab === "recouvrement") {
+    fab.setAttribute("aria-label", "Voir factures crédit du jour");
+    fab.title = "Affiche les factures crédit client de la journée ouverte.";
+    return;
+  }
   if (currentPage === "stock" && stockSubTab === "creanciers") {
     fab.setAttribute("aria-label", "Enregistrer une dette fournisseur");
     fab.title = "Ouvre une depense avec paiement Credit fournisseur.";
@@ -12909,6 +12914,62 @@ async function persistStatePatch(patch) {
   applyPersistStateResponseExtras(patch, _stockChecks);
 }
 
+function openCreditFacturesJourModal() {
+  const dStr = pdjCalendarDate();
+  const ventesJour = recordsForSite(state.ventes).filter((v) => {
+    if (v.date.slice(0, 10) !== dStr) return false;
+    return isCreditClientMethod(v.paiement) ||
+      (v.paiementDetails || []).some((d) => isCreditClientMethod(d.method));
+  });
+
+  const grouped = new Map();
+  ventesJour.forEach((v) => {
+    const key = v.factureNumber || `V-${v.id}`;
+    if (!grouped.has(key)) grouped.set(key, { factureNumber: key, ventes: [], debiteur: v.debiteur || v.client || "" });
+    grouped.get(key).ventes.push(v);
+  });
+
+  const titleEl = document.getElementById("modal-credit-factures-title");
+  if (titleEl) titleEl.textContent = `Factures crédit — ${formatDateDdMmYyyy(dStr)}`;
+
+  const listEl = document.getElementById("modal-credit-factures-list");
+  if (!listEl) return;
+
+  if (!grouped.size) {
+    listEl.innerHTML = `<p class="muted" style="padding:10px 0">Aucune vente crédit client pour cette journée.</p>`;
+    openModal("modal-credit-factures");
+    return;
+  }
+
+  listEl.innerHTML = [...grouped.values()].map(({ factureNumber, ventes: vs, debiteur }) => {
+    const total = vs.reduce((s, v) => s + calcNet(v), 0);
+    const articles = vs.map((v) => `${v.qty > 1 ? v.qty + "×" : ""}${escapeHtml(v.article)}`).join(", ");
+    const heure = vs[0]?.createdAt ? new Date(vs[0].createdAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : "";
+    const hasDebtor = Boolean(debiteur && debiteur.trim() && debiteur.trim().toLowerCase() !== "client inconnu");
+    return `<div class="list-item" style="cursor:pointer;border-left:3px solid ${hasDebtor ? "#72d7a9" : "#ff8e82"};padding-left:10px;margin-bottom:8px"
+              data-credit-facture="${escapeHtml(factureNumber)}"
+              data-credit-debiteur="${escapeHtml(debiteur)}">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <strong>${escapeHtml(factureNumber)}</strong>
+        <span class="badge" style="background:#f5f5f5;color:#333">${fmt(total)} FCFA</span>
+      </div>
+      <div class="muted" style="font-size:0.82rem;margin-top:2px">${articles}${heure ? " · " + heure : ""}</div>
+      ${hasDebtor ? `<div style="font-size:0.82rem;color:#388e3c;margin-top:2px">Débiteur : ${escapeHtml(debiteur)}</div>` : `<div style="font-size:0.82rem;color:#d32f2f;margin-top:2px">Débiteur non renseigné</div>`}
+    </div>`;
+  }).join("");
+
+  listEl.querySelectorAll("[data-credit-facture]").forEach((el) => {
+    el.addEventListener("click", () => {
+      const debiteur = el.dataset.creditDebiteur || "";
+      const nameInput = document.getElementById("credit-name");
+      if (nameInput) { nameInput.value = debiteur; nameInput.focus(); }
+      closeModal("modal-credit-factures");
+    });
+  });
+
+  openModal("modal-credit-factures");
+}
+
 function renderCreditRecovery() {
   const list = document.getElementById("credit-list");
   if (!list) return;
@@ -19057,6 +19118,10 @@ document.getElementById("fab-btn").addEventListener("click", () => {
       if (ventesSubTab === "consignes") {
         const wrap = document.getElementById("consigne-form-wrap");
         if (wrap) { resetConsigneForm(); wrap.classList.remove("hidden"); document.getElementById("consigne-client")?.focus(); }
+        return;
+      }
+      if (ventesSubTab === "caisse" && caisseInnerTab === "recouvrement") {
+        openCreditFacturesJourModal();
         return;
       }
       openOrderEditor(activeOrderId || null);
