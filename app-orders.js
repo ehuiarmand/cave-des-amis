@@ -1625,8 +1625,11 @@ function isCreditClientPayment(method) {
 function paymentTotals(list) {
   return (list || []).reduce((acc, item) => {
     if (Array.isArray(item.paiementDetails) && item.paiementDetails.length) {
+      const detailSum = item.paiementDetails.reduce((s, d) => s + (Number(d.amount) || 0), 0);
+      const net = calcNet(item);
+      const scale = detailSum > 0 ? net / detailSum : 1;
       item.paiementDetails.forEach((detail) => {
-        acc[detail.method] = (acc[detail.method] || 0) + (Number(detail.amount) || 0);
+        acc[detail.method] = (acc[detail.method] || 0) + Math.round((Number(detail.amount) || 0) * scale);
       });
     } else {
       acc[item.paiement] = (acc[item.paiement] || 0) + calcNet(item);
@@ -1639,9 +1642,12 @@ function paymentTotals(list) {
 function paymentTotalsEncaissements(list) {
   return (list || []).reduce((acc, item) => {
     if (Array.isArray(item.paiementDetails) && item.paiementDetails.length) {
+      const detailSum = item.paiementDetails.reduce((s, d) => s + (Number(d.amount) || 0), 0);
+      const net = calcNet(item);
+      const scale = detailSum > 0 ? net / detailSum : 1;
       item.paiementDetails.forEach((detail) => {
         if (isCreditClientPayment(detail.method)) return;
-        acc[detail.method] = (acc[detail.method] || 0) + (Number(detail.amount) || 0);
+        acc[detail.method] = (acc[detail.method] || 0) + Math.round((Number(detail.amount) || 0) * scale);
       });
     } else if (!isCreditClientPayment(item.paiement)) {
       acc[item.paiement] = (acc[item.paiement] || 0) + calcNet(item);
