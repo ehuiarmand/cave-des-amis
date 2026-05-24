@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import copy
 import gzip
 import hashlib
 import hmac
@@ -2850,31 +2851,30 @@ CREATE TABLE IF NOT EXISTS work_shifts (row_id BIGSERIAL PRIMARY KEY, item_id TE
 
     def public_state(self) -> dict[str, Any]:
         with self._lock:
+            s = self._state
             return {
-                "meta": {
-                    **self.meta(),
-                },
-                "sites": json.loads(json.dumps(self._state["sites"])),
-                "activeSiteId": self._state["activeSiteId"],
-                "ventes": json.loads(json.dumps(self._state["ventes"])),
-                "stock": json.loads(json.dumps(self._state["stock"])),
-                "commandes": json.loads(json.dumps(self._state.get("commandes", []))),
-                "stockChecks": json.loads(json.dumps(self._state.get("stockChecks", []))),
-                "stockEntrees": json.loads(json.dumps(self._state.get("stockEntrees", []))),
-                "stockLosses": json.loads(json.dumps(self._state.get("stockLosses", []))),
-                "dayBooks": json.loads(json.dumps(self._state.get("dayBooks", []))),
-                "pdjWorkDateBySite": json.loads(json.dumps(self._state.get("pdjWorkDateBySite", {}))),
-                "purchaseOrders": json.loads(json.dumps(self._state.get("purchaseOrders", []))),
-                "supplierPrices": json.loads(json.dumps(self._state.get("supplierPrices", []))),
-                "casiers": json.loads(json.dumps(self._state.get("casiers", []))),
-                "casierMouvements": json.loads(json.dumps(self._state.get("casierMouvements", []))),
-                "creditRecoveries": json.loads(json.dumps(self._state.get("creditRecoveries", []))),
-                "consignes": json.loads(json.dumps(self._state.get("consignes", []))),
-                "categories": json.loads(json.dumps(self._state.get("categories", DEFAULT_STATE["categories"]))),
-                "charges": json.loads(json.dumps(self._state["charges"])),
-                "nextId": json.loads(json.dumps(self._state["nextId"])),
-                "staffAuditLog": json.loads(json.dumps(self._state.get("staffAuditLog", []))),
-                "workShifts": json.loads(json.dumps(self._state.get("workShifts", []))),
+                "meta": {**self.meta()},
+                "sites": copy.deepcopy(s["sites"]),
+                "activeSiteId": s["activeSiteId"],
+                "ventes": copy.deepcopy(s["ventes"]),
+                "stock": copy.deepcopy(s["stock"]),
+                "commandes": copy.deepcopy(s.get("commandes", [])),
+                "stockChecks": copy.deepcopy(s.get("stockChecks", [])),
+                "stockEntrees": copy.deepcopy(s.get("stockEntrees", [])),
+                "stockLosses": copy.deepcopy(s.get("stockLosses", [])),
+                "dayBooks": copy.deepcopy(s.get("dayBooks", [])),
+                "pdjWorkDateBySite": copy.deepcopy(s.get("pdjWorkDateBySite", {})),
+                "purchaseOrders": copy.deepcopy(s.get("purchaseOrders", [])),
+                "supplierPrices": copy.deepcopy(s.get("supplierPrices", [])),
+                "casiers": copy.deepcopy(s.get("casiers", [])),
+                "casierMouvements": copy.deepcopy(s.get("casierMouvements", [])),
+                "creditRecoveries": copy.deepcopy(s.get("creditRecoveries", [])),
+                "consignes": copy.deepcopy(s.get("consignes", [])),
+                "categories": copy.deepcopy(s.get("categories", DEFAULT_STATE["categories"])),
+                "charges": copy.deepcopy(s["charges"]),
+                "nextId": copy.deepcopy(s["nextId"]),
+                "staffAuditLog": copy.deepcopy(s.get("staffAuditLog", [])),
+                "workShifts": copy.deepcopy(s.get("workShifts", [])),
                 "auth": {
                     "users": [
                         {
@@ -2884,7 +2884,7 @@ CREATE TABLE IF NOT EXISTS work_shifts (row_id BIGSERIAL PRIMARY KEY, item_id TE
                             "twoFactorEnabled": bool(u.get("twoFactorEnabled", False)),
                             "displayName": str(u.get("displayName", "") or "").strip()[:120],
                         }
-                        for u in self._state["auth"]["users"]
+                        for u in s["auth"]["users"]
                     ],
                 },
             }
@@ -3428,16 +3428,14 @@ CREATE TABLE IF NOT EXISTS work_shifts (row_id BIGSERIAL PRIMARY KEY, item_id TE
                     "creditRecoveries", "consignes", "charges", "staffAuditLog",
                     "stockEntrees", "stockLosses",
                 ]
-                _old_sc_snap_g: dict[str, dict[str, Any]] = {
-                    str(r.get("id", "")): json.loads(json.dumps(r))
-                    for r in (current.get("stockChecks") or [])
-                    if isinstance(r, dict) and r.get("id")
-                }
-                _old_stock_snap_g: dict[tuple[str, str], int] = {
-                    (str(r.get("siteId", "")), str(r.get("article", "")).lower()): stock_total(r)
-                    for r in (current.get("stock") or [])
-                    if isinstance(r, dict)
-                }
+                _old_sc_snap_g: dict[str, dict[str, Any]] = (
+                    {str(r.get("id", "")): copy.deepcopy(r) for r in (current.get("stockChecks") or []) if isinstance(r, dict) and r.get("id")}
+                    if "stockChecks" in payload else {}
+                )
+                _old_stock_snap_g: dict[tuple[str, str], int] = (
+                    {(str(r.get("siteId", "")), str(r.get("article", "")).lower()): stock_total(r) for r in (current.get("stock") or []) if isinstance(r, dict)}
+                    if "stock" in payload else {}
+                )
                 for _key in _GLOBAL_PATCH_KEYS:
                     if _key in payload:
                         current[_key] = payload[_key]
@@ -3563,16 +3561,14 @@ CREATE TABLE IF NOT EXISTS work_shifts (row_id BIGSERIAL PRIMARY KEY, item_id TE
             # Retirer du payload les clés que le rôle ne peut pas écrire
             for _rk in [k for k in list(payload.keys()) if k in _MANAGER_WRITE and k not in _role_write_allowed]:
                 payload.pop(_rk, None)
-            _old_sc_snap: dict[str, dict[str, Any]] = {
-                str(r.get("id", "")): json.loads(json.dumps(r))
-                for r in (current.get("stockChecks") or [])
-                if isinstance(r, dict) and r.get("id")
-            }
-            _old_stock_snap: dict[tuple[str, str], int] = {
-                (str(r.get("siteId", "")), str(r.get("article", "")).lower()): stock_total(r)
-                for r in (current.get("stock") or [])
-                if isinstance(r, dict)
-            }
+            _old_sc_snap: dict[str, dict[str, Any]] = (
+                {str(r.get("id", "")): copy.deepcopy(r) for r in (current.get("stockChecks") or []) if isinstance(r, dict) and r.get("id")}
+                if "stockChecks" in payload else {}
+            )
+            _old_stock_snap: dict[tuple[str, str], int] = (
+                {(str(r.get("siteId", "")), str(r.get("article", "")).lower()): stock_total(r) for r in (current.get("stock") or []) if isinstance(r, dict)}
+                if "stock" in payload else {}
+            )
             if "workShifts" in payload:
                 if str(session.get("role", "")).strip().lower() == "serveuse":
                     payload.pop("workShifts", None)  # ignorer silencieusement pour les serveuses
@@ -4544,7 +4540,10 @@ class AppHandler(BaseHTTPRequestHandler):
                     "sections": sorted(str(k) for k in (payload or {}).keys()),
                 },
             )
-            self.send_json(HTTPStatus.OK, updated)
+            # Renvoyer uniquement les clés modifiées + meta/activeSiteId.
+            # Le client fusionne localement (patchedKeys guard dans mergeStateFromServerResponse).
+            _resp_keys = set((payload or {}).keys()) | {"meta", "activeSiteId"}
+            self.send_json(HTTPStatus.OK, {k: v for k, v in updated.items() if k in _resp_keys})
             return
         if parsed.path.startswith("/api/"):
             self.send_json(HTTPStatus.NOT_FOUND, {"error": "Route API introuvable. Verifiez que la derniere version du serveur est deployee."})
