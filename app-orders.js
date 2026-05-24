@@ -3921,8 +3921,11 @@ function canClosePdjDay() {
   // Maquis sans créneaux configurés : serveuse toujours autorisée (fin de service → gérant valide)
   if (workShiftsForSite(currentSiteId()).length === 0) return true;
   if (staffIsOnDutyNow()) return true;
-  // Jour de repos mais service ouvert (non clôturé) : autoriser la clôture
-  if (serveuseIsRestDay(today(), currentSiteId()) && serveuseHasOpenServiceToday()) return true;
+  // Service ouvert sur une journée passée (non clôturé J-1 ou plus) : toujours autoriser la clôture
+  if (serveuseHasOpenServiceToday()) {
+    const d = workingDate(currentSiteId());
+    if (d < today() || serveuseIsRestDay(today(), currentSiteId())) return true;
+  }
   return false;
 }
 
