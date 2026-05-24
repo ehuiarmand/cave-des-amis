@@ -6386,6 +6386,35 @@ function autoOpenNextAccountingDayAfterClose(siteId, closedDateStr, closingCashF
   return { nextDate, pdjMap };
 }
 
+function deleteDayBook(siteId, dateStr) {
+  const sid = String(siteId || "").trim();
+  const d = String(dateStr || "").slice(0, 10);
+  if (!sid || !d) return;
+  if (!canGlobalSuperAdmin()) return;
+  const ventesJour = recordsForSite(state.ventes).filter((v) => (v.date || "").slice(0, 10) === d);
+  if (ventesJour.length > 0) {
+    showToast(`Impossible : ${ventesJour.length} vente(s) enregistrée(s) pour cette journée.`);
+    return;
+  }
+  if (stockCheckForSiteDate(d, sid)) {
+    showToast("Impossible : cette journée a déjà été clôturée.");
+    return;
+  }
+  state.dayBooks = (state.dayBooks || []).filter((b) => !(b.siteId === sid && b.date === d));
+  const pdjMap = { ...(state.pdjWorkDateBySite || {}) };
+  if (pdjMap[sid] === d) delete pdjMap[sid];
+  state.pdjWorkDateBySite = pdjMap;
+  persistStatePatch({ dayBooks: state.dayBooks, pdjWorkDateBySite: pdjMap })
+    .then(() => {
+      recordStaffAudit("delete", "dayBook", `Suppression ouverture journée ${formatDateDdMmYyyy(d)}`, `Journée ${d} · ${sessionUser}`);
+      showToast(`Ouverture du ${formatDateDdMmYyyy(d)} supprimée.`);
+      renderCashOpeningPanel();
+      updateCloseDayButtonLabel?.();
+      updatePdjSubTabHints?.();
+    })
+    .catch(() => showToast("Erreur lors de la suppression."));
+}
+
 let _dayBookAutoOpenPersistTimer = null;
 
 function schedulePersistAutoOpenedDayBooks() {
@@ -6569,6 +6598,7 @@ async function confirmDayClosureByManager(dateStr) {
     dayBooks: state.dayBooks,
     pdjWorkDateBySite: state.pdjWorkDateBySite,
   });
+  await refreshStateFromServer();
   renderPointDuJour();
   renderVentesPage();
   showToast(autoOpen?.nextDate
@@ -6741,6 +6771,7 @@ function renderCashOpeningPanel() {
     return;
   }
   if (!needs && book) {
+    const canDeleteBook = canGlobalSuperAdmin() && ventesForDate.length === 0 && !closed;
     container.removeAttribute("data-pdj-opening-fp");
     container.innerHTML = `
       <div class="pdj-opening-card pdj-opening-card--done">
@@ -6751,7 +6782,16 @@ function renderCashOpeningPanel() {
           Enregistré ${escapeHtml(formatDateTimeDdMmYyyy(book.openingRecordedAt || book.openedAt))}
           ${book.openingRecordedBy ? ` · ${escapeHtml(book.openingRecordedBy)}` : ""}${book.autoOpenedFromClose ? ` · Ouverture auto après clôture du ${escapeHtml(formatDateDdMmYyyy(book.autoOpenedFromDate || ""))}` : ""}
         </p>
+        ${canDeleteBook ? `<button type="button" id="pdj-delete-daybook-btn" class="btn btn-outline" style="margin-top:12px;border-color:#d32f2f;color:#d32f2f;width:auto;min-height:40px;font-size:0.88rem">
+          Supprimer cette ouverture de journée
+        </button>` : ""}
       </div>`;
+    if (canDeleteBook) {
+      document.getElementById("pdj-delete-daybook-btn")?.addEventListener("click", () => {
+        if (!confirm(`Supprimer l'ouverture de la journée du ${formatDateDdMmYyyy(dStr)} ?\nAucune vente n'est enregistrée pour cette date. Cette action est irréversible.`)) return;
+        deleteDayBook(siteId, dStr);
+      });
+    }
     return;
   }
   const prevWasClosed = previousClosedJournalDate(dStr, siteId);
@@ -12925,6 +12965,19 @@ async function persistStatePatch(patch) {
   applyPersistStateResponseExtras(patch, _stockChecks);
 }
 
+async function refreshStateFromServer() {
+  try {
+    const fresh = await apiRequest(API.state, { cache: "no-store" });
+    if (fresh && typeof fresh === "object") {
+      state = mergeStateFromServerResponse(fresh, state, null);
+      if (!state.pdjWorkDateBySite || typeof state.pdjWorkDateBySite !== "object") state.pdjWorkDateBySite = {};
+      if (!state.nextId || typeof state.nextId !== "object") state.nextId = {};
+    }
+  } catch (error) {
+    console.warn("refreshStateFromServer failed", error);
+  }
+}
+
 function openCreditFacturesJourModal() {
   const dStr = pdjCalendarDate();
   const ventesJour = recordsForSite(state.ventes).filter((v) => {
@@ -15368,7 +15421,7 @@ async function closeAccountingDay() {
     `${cashBlock}${stockBlock}`,
   );
   const sidClose = currentSiteId();
-  const autoOpen = managerClose
+  const autoOpen = managerClose && !isPastDateCorrection
     ? autoOpenNextAccountingDayAfterClose(sidClose, dStr, closingCashFcfa, { actorLabel: sessionUser })
     : null;
   if (!autoOpen && managerClose) {
