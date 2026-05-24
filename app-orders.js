@@ -6371,6 +6371,12 @@ function autoOpenNextAccountingDayAfterClose(siteId, closedDateStr, closingCashF
       `Ouverture auto après clôture ${formatDateDdMmYyyy(closed)}`,
       `Journée ${formatDateDdMmYyyy(nextDate)} · ${fmt(openingAmount)} FCFA (reprise caisse fermeture)`,
     );
+  } else if (book) {
+    // Journée déjà ouverte avec caisse : rafraîchir uniquement le snapshot stock
+    // (reclôture d'une journée passée avec nouveaux comptages physiques)
+    book.openingStockById = snapshot;
+    book.autoOpenedFromDate = closed;
+    state.dayBooks = [book, ...(state.dayBooks || []).filter((b) => !(b.siteId === sid && b.date === nextDate))];
   }
 
   const pdjMap = { ...(state.pdjWorkDateBySite || {}) };
