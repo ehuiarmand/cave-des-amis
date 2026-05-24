@@ -15428,6 +15428,18 @@ async function closeAccountingDay() {
   const autoOpen = managerClose && !isPastDateCorrection
     ? autoOpenNextAccountingDayAfterClose(sidClose, dStr, closingCashFcfa, { actorLabel: sessionUser })
     : null;
+  if (isPastDateCorrection && managerClose) {
+    // Reclôture d'une date passée : rafraîchir uniquement le snapshot du lendemain
+    // si son dayBook existe déjà (ne pas créer de nouvelle ouverture).
+    const nextD = addCalendarDaysIso(dStr, 1);
+    const nextBook = dayBookFor(nextD, sidClose);
+    if (nextBook && !dayBookNeedsCashOpening(nextBook)) {
+      const snap = captureOpeningStockSnapshot();
+      nextBook.openingStockById = snap;
+      nextBook.autoOpenedFromDate = dStr;
+      state.dayBooks = [nextBook, ...(state.dayBooks || []).filter((b) => !(b.siteId === sidClose && b.date === nextD))];
+    }
+  }
   if (!autoOpen && managerClose) {
     const pdjMapClose = { ...(state.pdjWorkDateBySite || {}) };
     if (pdjMapClose[sidClose] === dStr) delete pdjMapClose[sidClose];
