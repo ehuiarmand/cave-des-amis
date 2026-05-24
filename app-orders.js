@@ -11633,7 +11633,16 @@ async function applyQtyCorrection(factureNum, originalVentes) {
     .map((v) => {
       const c = idMap.get(v.id);
       if (!c) return v;
-      return { ...v, qty: c.newQty, total: c.newQty * (Number(v.prix) || 0) };
+      const newNet = c.newQty * (Number(v.prix) || 0) - (Number(v.remise) || 0);
+      const updated = { ...v, qty: c.newQty, total: c.newQty * (Number(v.prix) || 0) };
+      if (Array.isArray(v.paiementDetails) && v.paiementDetails.length) {
+        const total = v.paiementDetails.reduce((s, d) => s + (Number(d.amount) || 0), 0);
+        updated.paiementDetails = v.paiementDetails.map((d) => ({
+          ...d,
+          amount: total > 0 ? Math.round((Number(d.amount) || 0) / total * newNet) : 0,
+        }));
+      }
+      return updated;
     })
     .filter((v) => {
       const c = idMap.get(v.id);
