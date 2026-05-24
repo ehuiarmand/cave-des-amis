@@ -669,10 +669,13 @@ def _wa_stock_check_message(site: dict[str, Any], check: dict[str, Any], event: 
     nom = str(site.get("nom") or site.get("name") or site.get("id") or "Maquis")
     date_str = str(check.get("date") or "")[:10]
     by = str(check.get("managerConfirmedBy") or check.get("closedBy") or "")
+    ca = int(check.get("caEncaisse") or 0)
+    nb = int(check.get("nbVentes") or 0)
+    ca_str = f"{ca:,}".replace(",", " ")
     if event == "fin_service":
-        return f"[PDJ] {nom} — Fin de service enregistrée pour le {date_str} (par {by})"
+        return f"[PDJ] {nom} — Fin de service {date_str} (par {by})\nCA encaissé : {ca_str} FCFA · {nb} vente(s)"
     if event == "cloture_journee":
-        return f"[PDJ] {nom} — Journée du {date_str} clôturée (par {by})"
+        return f"[PDJ] {nom} — Clôture du {date_str} (par {by})\nCA encaissé : {ca_str} FCFA · {nb} vente(s)"
     return f"[PDJ] {nom} — Événement {event} le {date_str}"
 
 
