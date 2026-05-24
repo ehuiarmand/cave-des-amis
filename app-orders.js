@@ -4067,8 +4067,10 @@ function pdjCalendarDate() {
     result = hasForced ? forced : workingDate();
   }
 
-  // Si la date résultante est clôturée et qu'un jour suivant est ouvert (≤ demain), avancer automatiquement
-  if (!isPdjBrowseConsultationOnly() && result && stockCheckForSiteDate(result, sid)) {
+  // Si la date résultante est clôturée et qu'un jour suivant est ouvert (≤ demain), avancer automatiquement.
+  // Exception : si une date a été explicitement forcée via pdjWorkDateBySite (superadmin "Appliquer"),
+  // respecter ce choix sans auto-avancer — le superadmin veut travailler sur cette date précise.
+  if (!isPdjBrowseConsultationOnly() && result && !hasForced && stockCheckForSiteDate(result, sid)) {
     const nextOpen = firstUnclosedJournalDate(sid);
     if (nextOpen && nextOpen <= tomorrow) return nextOpen;
   }
