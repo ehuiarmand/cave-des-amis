@@ -3539,7 +3539,12 @@ CREATE TABLE IF NOT EXISTS work_shifts (row_id BIGSERIAL PRIMARY KEY, item_id TE
             # - manager/admin : tout sauf sites/auth (gérés séparément)
             # - rôle inconnu  : aucune écriture de collection
             _role_str = str(session.get("role", "")).strip().lower()
-            _SERVEUSE_WRITE = frozenset({"ventes", "commandes", "dayBooks"})
+            # Encaissement d'une commande (finalizeOrder) met a jour stock + casiers :
+            # ces cles doivent etre autorisees en ecriture pour les serveuses.
+            _SERVEUSE_WRITE = frozenset({
+                "ventes", "commandes", "dayBooks",
+                "stock", "casiers", "casierMouvements", "staffAuditLog",
+            })
             _MANAGER_WRITE = frozenset({
                 "ventes", "stock", "commandes", "stockChecks", "dayBooks",
                 "purchaseOrders", "supplierPrices", "casiers", "casierMouvements",
