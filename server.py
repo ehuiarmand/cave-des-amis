@@ -2665,121 +2665,8 @@ CREATE TABLE IF NOT EXISTS work_shifts (row_id BIGSERIAL PRIMARY KEY, item_id TE
         except OSError:
             return 'W/"0-0"'
 
-    def _load(self) -> dict[str, Any]:
-        if self._pg_enabled:
-            pg_load_ok = True
-            try:
-                payload = self._pg_load()
-            except Exception as exc:
-                print(f"[postgres] Échec du chargement ({exc}), état par défaut.", flush=True)
-                print("[postgres] PROTECTION : aucune écriture ne sera faite sur PostgreSQL jusqu'au redémarrage.", flush=True)
-                payload = {}
-                pg_load_ok = False
-                self._pg_startup_failed = True
-            if payload.get("sites"):
-                _payload_before = json.dumps(payload, sort_keys=True, default=str)
-                payload = migrate_state(payload)
-                _was_migrated = json.dumps(payload, sort_keys=True, default=str) != _payload_before
-                merged = build_default_state()
-                merged.update({k: v for k, v in payload.items() if k in merged})
-                merged["auth"]["users"] = payload.get("auth", {}).get("users", merged["auth"]["users"])
-                merged["nextId"].update(payload.get("nextId", {}))
-                merged["sites"] = payload.get("sites", merged["sites"])
-                merged["activeSiteId"] = payload.get("activeSiteId", merged["activeSiteId"])
-                merged["ventes"] = payload.get("ventes", merged["ventes"])
-                merged["stock"] = payload.get("stock", merged["stock"])
-                merged["commandes"] = payload.get("commandes", merged.get("commandes", []))
-                merged["stockChecks"] = payload.get("stockChecks", merged.get("stockChecks", []))
-                merged["categories"] = payload.get("categories", merged.get("categories", DEFAULT_STATE["categories"]))
-                merged["charges"] = payload.get("charges", merged["charges"])
-                merged["dayBooks"] = payload.get("dayBooks", merged.get("dayBooks", []))
-                merged["purchaseOrders"] = payload.get("purchaseOrders", merged.get("purchaseOrders", []))
-                merged["supplierPrices"] = payload.get("supplierPrices", merged.get("supplierPrices", []))
-                merged["casiers"] = payload.get("casiers", merged.get("casiers", []))
-                merged["casierMouvements"] = payload.get("casierMouvements", merged.get("casierMouvements", []))
-                merged["creditRecoveries"] = payload.get("creditRecoveries", merged.get("creditRecoveries", []))
-                merged["consignes"] = payload.get("consignes", merged.get("consignes", []))
-                merged["staffAuditLog"] = payload.get("staffAuditLog", merged.get("staffAuditLog", []))
-                merged["workShifts"] = payload.get("workShifts", merged.get("workShifts", []))
-                merged["stockEntrees"] = payload.get("stockEntrees", merged.get("stockEntrees", []))
-                merged["stockLosses"] = payload.get("stockLosses", merged.get("stockLosses", []))
-                merged["pdjWorkDateBySite"] = payload.get("pdjWorkDateBySite", merged.get("pdjWorkDateBySite", {}))
-                for index, site in enumerate(merged["sites"], start=1):
-                    site.setdefault("prefixeFacture", f"SITE{index}")
-                    site.setdefault("dualZonePricing", True)
-                normalize_auth_users(merged)
-                merged["_meta"] = payload.get("_meta") or {"rev": 1, "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
-                if _was_migrated:
-                    print("[startup] Migration détectée → écriture PostgreSQL.", flush=True)
-                    self._write(merged)
-                return merged
-            else:
-                initial = build_default_state()
-                if pg_load_ok:
-                    # Première utilisation : PostgreSQL vide → initialiser normalement
-                    self._write(initial)
-                # Si pg_load_ok est False, on NE RIEN ÉCRIT en PostgreSQL
-                return initial
-
-        if self._sqlite_enabled:
-            raw = self._sqlite_get("state")
-            if raw:
-                try:
-                    payload = json.loads(raw)
-                except json.JSONDecodeError:
-                    payload = build_default_state()
-            else:
-                payload = build_default_state()
-                # Persist initial state (will set _meta)
-                self._write(payload)
-                return payload
-
-            payload = migrate_state(payload)
-            merged = build_default_state()
-            merged.update({k: v for k, v in payload.items() if k in merged})
-            merged["auth"]["users"] = payload.get("auth", {}).get("users", merged["auth"]["users"])
-            merged["nextId"].update(payload.get("nextId", {}))
-            merged["sites"] = payload.get("sites", merged["sites"])
-            merged["activeSiteId"] = payload.get("activeSiteId", merged["activeSiteId"])
-            merged["ventes"] = payload.get("ventes", merged["ventes"])
-            merged["stock"] = payload.get("stock", merged["stock"])
-            merged["commandes"] = payload.get("commandes", merged.get("commandes", []))
-            merged["stockChecks"] = payload.get("stockChecks", merged.get("stockChecks", []))
-            merged["categories"] = payload.get("categories", merged.get("categories", DEFAULT_STATE["categories"]))
-            merged["charges"] = payload.get("charges", merged["charges"])
-            merged["dayBooks"] = payload.get("dayBooks", merged.get("dayBooks", []))
-            merged["purchaseOrders"] = payload.get("purchaseOrders", merged.get("purchaseOrders", []))
-            merged["supplierPrices"] = payload.get("supplierPrices", merged.get("supplierPrices", []))
-            merged["casiers"] = payload.get("casiers", merged.get("casiers", []))
-            merged["casierMouvements"] = payload.get("casierMouvements", merged.get("casierMouvements", []))
-            merged["creditRecoveries"] = payload.get("creditRecoveries", merged.get("creditRecoveries", []))
-            merged["consignes"] = payload.get("consignes", merged.get("consignes", []))
-            merged["staffAuditLog"] = payload.get("staffAuditLog", merged.get("staffAuditLog", []))
-            merged["workShifts"] = payload.get("workShifts", merged.get("workShifts", []))
-            merged["stockEntrees"] = payload.get("stockEntrees", merged.get("stockEntrees", []))
-            merged["stockLosses"] = payload.get("stockLosses", merged.get("stockLosses", []))
-            merged["pdjWorkDateBySite"] = payload.get("pdjWorkDateBySite", merged.get("pdjWorkDateBySite", {}))
-            for index, site in enumerate(merged["sites"], start=1):
-                site.setdefault("prefixeFacture", f"SITE{index}")
-                site.setdefault("dualZonePricing", True)
-            normalize_auth_users(merged)
-            merged["_meta"] = payload.get("_meta") or {"rev": 1, "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
-            # Ensure DB has normalized payload
-            self._write(merged)
-            return merged
-
-        if not self.path.exists():
-            initial = build_default_state()
-            self._write(initial)
-            return initial
-        try:
-            payload = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            payload = build_default_state()
-            self._write(payload)
-            return payload
-
-        payload = migrate_state(payload)
+    @staticmethod
+    def _merge_payload(payload: dict) -> dict:
         merged = build_default_state()
         merged.update({k: v for k, v in payload.items() if k in merged})
         merged["auth"]["users"] = payload.get("auth", {}).get("users", merged["auth"]["users"])
@@ -2809,6 +2696,67 @@ CREATE TABLE IF NOT EXISTS work_shifts (row_id BIGSERIAL PRIMARY KEY, item_id TE
             site.setdefault("dualZonePricing", True)
         normalize_auth_users(merged)
         merged["_meta"] = payload.get("_meta") or {"rev": 1, "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+        return merged
+
+    def _load(self) -> dict[str, Any]:
+        if self._pg_enabled:
+            pg_load_ok = True
+            try:
+                payload = self._pg_load()
+            except Exception as exc:
+                print(f"[postgres] Échec du chargement ({exc}), état par défaut.", flush=True)
+                print("[postgres] PROTECTION : aucune écriture ne sera faite sur PostgreSQL jusqu'au redémarrage.", flush=True)
+                payload = {}
+                pg_load_ok = False
+                self._pg_startup_failed = True
+            if payload.get("sites"):
+                _payload_before = json.dumps(payload, sort_keys=True, default=str)
+                payload = migrate_state(payload)
+                _was_migrated = json.dumps(payload, sort_keys=True, default=str) != _payload_before
+                merged = self._merge_payload(payload)
+                if _was_migrated:
+                    print("[startup] Migration détectée → écriture PostgreSQL.", flush=True)
+                    self._write(merged)
+                return merged
+            else:
+                initial = build_default_state()
+                if pg_load_ok:
+                    # Première utilisation : PostgreSQL vide → initialiser normalement
+                    self._write(initial)
+                # Si pg_load_ok est False, on NE RIEN ÉCRIT en PostgreSQL
+                return initial
+
+        if self._sqlite_enabled:
+            raw = self._sqlite_get("state")
+            if raw:
+                try:
+                    payload = json.loads(raw)
+                except json.JSONDecodeError:
+                    payload = build_default_state()
+            else:
+                payload = build_default_state()
+                # Persist initial state (will set _meta)
+                self._write(payload)
+                return payload
+
+            payload = migrate_state(payload)
+            merged = self._merge_payload(payload)
+            self._write(merged)
+            return merged
+
+        if not self.path.exists():
+            initial = build_default_state()
+            self._write(initial)
+            return initial
+        try:
+            payload = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            payload = build_default_state()
+            self._write(payload)
+            return payload
+
+        payload = migrate_state(payload)
+        merged = self._merge_payload(payload)
         self._write(merged)
         return merged
 

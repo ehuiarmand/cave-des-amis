@@ -1001,10 +1001,6 @@ function creditTotals(sourceState = state) {
   return { issued, paid };
 }
 
-function fmt(value) {
-  return new Intl.NumberFormat("fr-FR").format(Math.round(Number(value) || 0));
-}
-
 /** Parse un entier affiché avec fmt() / fr-FR (espaces insécables, virgules). */
 function parseFormattedIntegerFr(text) {
   const raw = String(text ?? "")
@@ -1152,10 +1148,6 @@ function workingDate() {
   return today();
 }
 
-function pad2(n) {
-  return String(n).padStart(2, "0");
-}
-
 /**
  * Horodatages JSON (soldAt, createdAt, paidAt…) : avec Z ou décalage explicite → instant correct.
  * Sans fuseau (ex. anciennes données) : composantes lues en UTC (comme toISOString() / serveur gmtime en Z),
@@ -1216,13 +1208,6 @@ function shiftIsoDatetimeLeadingCalendarDay(str, deltaDays) {
   const head = s.slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(head)) return s;
   return addCalendarDaysIso(head, deltaDays) + s.slice(10);
-}
-
-/** yyyy-mm-dd → dd-mm-yyyy (affichage uniquement ; les données restent ISO). */
-function isoDateToDdMmYyyy(iso) {
-  const s = String(iso ?? "").trim().slice(0, 10);
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
-  return m ? `${m[3]}-${m[2]}-${m[1]}` : (s || "—");
 }
 
 /** Affiche jj-mm-aaaa (Date, chaîne ISO datetime, ou yyyy-mm-dd). */
@@ -1979,15 +1964,6 @@ function categoryList() {
   return CATEGORIES.slice();
 }
 
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
 async function apiRequest(url, options = {}) {
   const { cache, ...rest } = options;
   const method = String(rest.method || "GET").toUpperCase();
@@ -2514,12 +2490,24 @@ function setAuthVisible(isAuthenticated) {
   document.getElementById("app-shell").classList.toggle("hidden", !isAuthenticated);
 }
 
+let _siteCache = { stateRef: null, activeSiteId: undefined, siteId: null, site: null };
+
+function _refreshSiteCache() {
+  if (_siteCache.stateRef === state && _siteCache.activeSiteId === state?.activeSiteId) return;
+  _siteCache.stateRef = state;
+  _siteCache.activeSiteId = state?.activeSiteId;
+  _siteCache.siteId = state?.activeSiteId || state?.sites?.[0]?.id || null;
+  _siteCache.site = (state?.sites || []).find((s) => s.id === _siteCache.siteId) || state?.sites?.[0] || null;
+}
+
 function currentSiteId() {
-  return state?.activeSiteId || state?.sites?.[0]?.id || null;
+  _refreshSiteCache();
+  return _siteCache.siteId;
 }
 
 function currentSite() {
-  return (state?.sites || []).find((site) => site.id === currentSiteId()) || state?.sites?.[0] || null;
+  _refreshSiteCache();
+  return _siteCache.site;
 }
 
 function multiSiteActive() {
