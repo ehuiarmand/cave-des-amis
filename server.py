@@ -2543,7 +2543,7 @@ CREATE TABLE IF NOT EXISTS work_shifts (row_id BIGSERIAL PRIMARY KEY, item_id TE
         finally:
             conn.close()
 
-    def _pg_write(self, payload: dict[str, Any]) -> None:
+    def _pg_write(self, payload: dict[str, Any], changed_keys: set | None = None) -> None:
         if self._pg_startup_failed:
             raise RuntimeError(
                 "[postgres] ÉCRITURE BLOQUÉE : PostgreSQL était inaccessible au démarrage. "
@@ -2598,7 +2598,10 @@ CREATE TABLE IF NOT EXISTS work_shifts (row_id BIGSERIAL PRIMARY KEY, item_id TE
                         cur.execute("DELETE FROM users WHERE username = %s", (uname,))
 
                     # --- Listes : DELETE + INSERT dans la transaction ---
+                    # changed_keys fourni = patch partiel : ne traiter que les tables modifiées.
                     for key, (table, id_type) in _PG_TABLES.items():
+                        if changed_keys is not None and key not in changed_keys:
+                            continue
                         items = payload.get(key, [])
                         cur.execute(f"DELETE FROM {table}")
                         if not items:
@@ -2761,7 +2764,7 @@ CREATE TABLE IF NOT EXISTS work_shifts (row_id BIGSERIAL PRIMARY KEY, item_id TE
         self._write(merged)
         return merged
 
-    def _write(self, payload: dict[str, Any]) -> None:
+    def _write(self, payload: dict[str, Any], changed_keys: set | None = None) -> None:
         BACKUP_DIR.mkdir(parents=True, exist_ok=True)
         # Update meta
         self._rev = int(self._rev or 0) + 1
@@ -2772,7 +2775,7 @@ CREATE TABLE IF NOT EXISTS work_shifts (row_id BIGSERIAL PRIMARY KEY, item_id TE
 
         if self._pg_enabled:
             try:
-                self._pg_write(payload)
+                self._pg_write(payload, changed_keys=changed_keys)
             except Exception as _pg_exc:
                 import traceback as _tb
                 print(f"[postgres] ERREUR ECRITURE: {type(_pg_exc).__name__}: {_pg_exc}", flush=True)
@@ -3516,7 +3519,7 @@ CREATE TABLE IF NOT EXISTS work_shifts (row_id BIGSERIAL PRIMARY KEY, item_id TE
                 if current["activeSiteId"] not in site_ids and site_ids:
                     current["activeSiteId"] = site_ids[0]
 
-                self._write(current)
+                self._write(current, changed_keys=set(payload.keys()))
                 _sites_by_id_g = {str(s.get("id", "")): s for s in (current.get("sites") or []) if isinstance(s, dict)}
                 _auth_g = current.get("auth", {}).get("users", [])
                 if "stockChecks" in payload:
@@ -3664,7 +3667,7 @@ CREATE TABLE IF NOT EXISTS work_shifts (row_id BIGSERIAL PRIMARY KEY, item_id TE
             if current["activeSiteId"] not in site_ids and site_ids:
                 current["activeSiteId"] = site_ids[0]
 
-            self._write(current)
+            self._write(current, changed_keys=set(payload.keys()))
             _sites_by_id = {str(s.get("id", "")): s for s in (current.get("sites") or []) if isinstance(s, dict)}
             _auth_u = current.get("auth", {}).get("users", [])
             print(f"[PUT scoped] payload keys={list(payload.keys())[:10]} sites_by_id={list(_sites_by_id.keys())}", flush=True)
