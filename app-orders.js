@@ -11066,7 +11066,7 @@ const PERMISSIONS_DEF = [
 const DEFAULT_ROLE_PERMISSIONS = {
   superadmin: { ventes:true, stock:true, caisse:true, charges:true, catalogue:true, rapports:true, utilisateurs:true, parametres:true },
   admin:      { ventes:true, stock:true, caisse:true, charges:true, catalogue:true, rapports:true, utilisateurs:true, parametres:true },
-  manager:    { ventes:true, stock:true, caisse:true, charges:true, catalogue:true, rapports:true, utilisateurs:false, parametres:false },
+  manager:    { ventes:true, stock:true, caisse:true, charges:true, catalogue:true, rapports:true, utilisateurs:false, parametres:true },
   serveuse:   { ventes:true, stock:false, caisse:false, charges:false, catalogue:false, rapports:false, utilisateurs:false, parametres:false },
 };
 

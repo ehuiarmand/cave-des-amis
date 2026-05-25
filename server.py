@@ -619,11 +619,9 @@ def _whatsapp_send(to_e164: str, body: str) -> None:
     phone_id = os.environ.get("WHATSAPP_PHONE_NUMBER_ID", "").strip()
     token = os.environ.get("WHATSAPP_ACCESS_TOKEN", "").strip()
     if not phone_id:
-        print("[WA] ERREUR : WHATSAPP_PHONE_NUMBER_ID non defini. Demarrer via lancer.bat.", flush=True)
-        return
+        raise ValueError("WHATSAPP_PHONE_NUMBER_ID non defini. Demarrer via lancer.bat.")
     if not token:
-        print("[WA] ERREUR : WHATSAPP_ACCESS_TOKEN non defini. Demarrer via lancer.bat.", flush=True)
-        return
+        raise ValueError("WHATSAPP_ACCESS_TOKEN non defini. Demarrer via lancer.bat.")
     to_clean = _normalize_international_phone(to_e164.strip())
     if not to_clean:
         raise ValueError("Numéro WhatsApp invalide (format international +225…).")
