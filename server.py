@@ -3531,6 +3531,7 @@ CREATE TABLE IF NOT EXISTS work_shifts (row_id BIGSERIAL PRIMARY KEY, item_id TE
                             "role": role,
                             "allowedSiteIds": allowed,
                             "twoFactorEnabled": existing.get("twoFactorEnabled", False),
+                            "wa2faEnabled": bool(user_data.get("wa2faEnabled", existing.get("wa2faEnabled", False))),
                             "displayName": dn_sup,
                         }
                         if wa_sup:
