@@ -17607,28 +17607,32 @@ async function syncCasiersManquants(opts = {}) {
   if (!state.nextId) state.nextId = {};
   if (!state.nextId.casier) state.nextId.casier = 1;
   const eligible = recordsForSite(state.stock).filter((item) => lotType(item) !== "unite");
-  let created = 0;
+  let changed = 0;
   const now = new Date().toISOString();
   eligible.forEach((item) => {
     const cap = Math.max(1, caseSize(item));
     const stockBtl = Math.max(0, stockActuel(item));
-    if (stockBtl <= 0) return;
     const articleKey = String(item.article || "").toLowerCase().trim();
-    const btlInCasiers = (state.casiers).filter((c) =>
+    const btlInCasiers = state.casiers.filter((c) =>
       rowMatchesSite(c, siteId, multiSiteActive()) &&
       String(c.article || "").toLowerCase().trim() === articleKey
     ).reduce((s, c) => s + Math.max(0, Number(c.quantiteActuelle) || 0), 0);
-    const manque = stockBtl - btlInCasiers;
-    if (manque <= 0) return;
-    const fullCount = Math.floor(manque / cap);
-    const remainder = manque % cap;
+    if (btlInCasiers === stockBtl) return;
+    // Réconciliation : supprimer les casiers de cet article et recréer depuis le stock
+    state.casiers = state.casiers.filter((c) =>
+      !(rowMatchesSite(c, siteId, multiSiteActive()) &&
+        String(c.article || "").toLowerCase().trim() === articleKey)
+    );
+    changed++;
+    if (stockBtl <= 0) return;
+    const fullCount = Math.floor(stockBtl / cap);
+    const remainder = stockBtl % cap;
     for (let i = 0; i < fullCount; i++) {
       const c = { id: state.nextId.casier++, siteId, code: nextCasierCode(), article: item.article,
         capacite: cap, quantiteActuelle: cap, bouteillesVides: 0,
         emplacement: "Réserve", statut: "plein", createdAt: now, createdBy: sessionUser || "-", autoSynced: true };
       recomputeCasierStatus(c);
       state.casiers.push(c);
-      created++;
     }
     if (remainder > 0) {
       const c = { id: state.nextId.casier++, siteId, code: nextCasierCode(), article: item.article,
@@ -17636,26 +17640,21 @@ async function syncCasiersManquants(opts = {}) {
         emplacement: "Réserve", statut: "partiel", createdAt: now, createdBy: sessionUser || "-", autoSynced: true };
       recomputeCasierStatus(c);
       state.casiers.push(c);
-      created++;
     }
   });
-  if (created > 0) {
+  if (changed > 0) {
     lsSaveCasiers();
-    recordStaffAudit("create", "casier_sync_manquants",
-      `Sync manquants: ${created} casier(s)`,
-      `Casiers ajoutés pour couvrir stock non tracé.`
-    );
     try {
       await persistStatePatch({ casiers: state.casiers, nextId: state.nextId });
     } catch (e) { lsSaveCasiers(); }
     if (!opts.silent) {
       renderCasiers();
-      showToast(`${fmt(created)} casier(s) ajouté(s) pour couvrir le stock non tracé.`);
+      showToast(`Casiers synchronisés (${changed} article(s) ajusté(s)).`);
     }
   } else if (!opts.silent) {
     showToast("Les casiers sont déjà à jour avec le stock.");
   }
-  return created;
+  return changed;
 }
 
 async function syncCasiersFromStockEtVentes() {
