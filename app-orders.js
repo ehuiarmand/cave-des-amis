@@ -18071,16 +18071,22 @@ function renderCasierPhysique() {
   setText("casier-phys-kpi-vide", fmt(kpis.vide));
   setText("casier-phys-kpi-btl-vides", fmt(kpis.btlVides));
 
-  // Grouper par brasserie > format (capacité) — exclure les articles sans brasserie
+  // Grouper par brasserie > format (capacité + taille bouteille)
+  // B12 50/65cl et B12 100cl sont des formats distincts (bouteilles non interchangeables)
+  const _clFromArticle = (art) => { const m = String(art || "").match(/\b(\d+)\s*(?:cl)?\s*$/i); return m ? Number(m[1]) : null; };
+  const _clBucket = (art) => { const cl = _clFromArticle(art); return (cl !== null && cl >= 90) ? "100cl" : "std"; };
+  const _clLabel = (art) => _clBucket(art) === "100cl" ? "100 cl" : "50-65 cl";
   const byBr = {};
   filtered.forEach((c) => {
     const stockIt = stockItemForArticle(c.article);
     const rawBr = normalizeBrasserieName(stockIt?.brasserie || "");
     if (!rawBr) return; // ignorer les articles non rattachés à une brasserie
     const cap = Math.max(1, Number(c.capacite) || 24);
+    const bucket = _clBucket(c.article);
+    const grpKey = `${cap}|${bucket}`;
     if (!byBr[rawBr]) byBr[rawBr] = {};
-    if (!byBr[rawBr][cap]) byBr[rawBr][cap] = { cap, pleins: 0, partiels: 0, vides: 0, btlPleines: 0, btlVides: 0, byArticle: {} };
-    const g = byBr[rawBr][cap];
+    if (!byBr[rawBr][grpKey]) byBr[rawBr][grpKey] = { cap, clLabel: _clLabel(c.article), pleins: 0, partiels: 0, vides: 0, btlPleines: 0, btlVides: 0, byArticle: {} };
+    const g = byBr[rawBr][grpKey];
     const art = c.article || "—";
     if (!g.byArticle[art]) g.byArticle[art] = { article: art, pleins: 0, partiels: 0, vides: 0, btlPleines: 0, btlVides: 0 };
     const ag = g.byArticle[art];
@@ -18102,8 +18108,11 @@ function renderCasierPhysique() {
   } else {
     let html = "";
     Object.entries(byBr).sort(([a], [b]) => a.localeCompare(b, "fr")).forEach(([br, groups]) => {
-      // trier par capacité décroissante (B24 avant B12)
-      const entries = Object.entries(groups).sort(([a], [b]) => Number(b) - Number(a));
+      // trier par capacité décroissante puis format (B24 avant B12, std avant 100cl)
+      const entries = Object.entries(groups).sort(([a, ga], [b, gb]) => {
+        if (gb.cap !== ga.cap) return gb.cap - ga.cap;
+        return (ga.clLabel || "").localeCompare(gb.clLabel || "", "fr");
+      });
       const brTot = entries.reduce((t, [, g]) => {
         t.pleins += g.pleins; t.partiels += g.partiels; t.vides += g.vides;
         t.btlPleines += g.btlPleines; t.btlVides += g.btlVides; return t;
@@ -18160,7 +18169,7 @@ function renderCasierPhysique() {
                 </tr>`;
                 }).join("");
                 return `<tr style="background:#fff">
-                  <td style="text-align:center"><span style="background:#e3f2fd;color:#1565c0;padding:2px 9px;border-radius:5px;font-size:0.8rem;font-weight:700">B${g.cap}</span></td>
+                  <td style="text-align:center"><span style="background:#e3f2fd;color:#1565c0;padding:2px 9px;border-radius:5px;font-size:0.8rem;font-weight:700">B${g.cap}</span>${g.clLabel ? `<span style="font-size:0.72rem;color:#546e7a;margin-left:5px">${escapeHtml(g.clLabel)}</span>` : ""}</td>
                   <td style="text-align:right;font-weight:700;color:#2e7d32">${fmt(g.pleins)}</td>
                   <td style="text-align:right;font-weight:700;color:#f57c00">${fmt(g.partiels)}</td>
                   <td style="text-align:right;font-weight:700;color:#e53935">${fmt(g.vides)}</td>
