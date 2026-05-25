@@ -5157,10 +5157,11 @@ function renderCasiers() {
       const stockIt = stockItemForArticle(c.article);
       const br = normalizeBrasserieName(stockIt?.brasserie || c.article) || "Sans brasserie";
       const cap = Math.max(1, Number(c.capacite) || 24);
-      if (!byBr[br]) byBr[br] = { ...mkGrp(), byCap: {} };
+      const artKey = `${cap}|${String(c.article || "").toLowerCase().trim()}`;
+      if (!byBr[br]) byBr[br] = { ...mkGrp(), byArt: {} };
       const g = byBr[br];
-      if (!g.byCap[cap]) g.byCap[cap] = mkGrp();
-      const gc = g.byCap[cap];
+      if (!g.byArt[artKey]) g.byArt[artKey] = { ...mkGrp(), cap, article: c.article || "—" };
+      const gc = g.byArt[artKey];
       const st = String(c.statut || "vide").toLowerCase();
       if (st === "plein") { g.plein++; gc.plein++; }
       else if (st === "partiel") { g.partiel++; gc.partiel++; }
@@ -5203,7 +5204,7 @@ function renderCasiers() {
           <th style="text-align:right;color:#e65100">Btl vides</th>
         </tr></thead>
         <tbody>${Object.entries(byBr).sort(([a], [b]) => a.localeCompare(b, "fr")).map(([br, g]) => {
-          const capRows = Object.entries(g.byCap).sort(([a], [b]) => Number(b) - Number(a));
+          const artRows = Object.entries(g.byArt).sort(([, a], [, b]) => b.cap - a.cap || (a.article || "").localeCompare(b.article || "", "fr"));
           return `<tr style="background:#eaf2ff">
             <td><strong style="color:#1565c0">${escapeHtml(br)}</strong></td>
             <td style="text-align:right;font-weight:700;color:#2e7d32">${fmt(g.plein)}</td>
@@ -5211,8 +5212,8 @@ function renderCasiers() {
             <td style="text-align:right;font-weight:700;color:#e53935">${fmt(g.vide)}</td>
             <td style="text-align:right;font-weight:700;color:#1976d2">${fmt(g.btlPleines)}</td>
             <td style="text-align:right;font-weight:700;${g.btlVides > 0 ? "color:#e65100" : "color:#9e9e9e"}">${fmt(g.btlVides)}</td>
-          </tr>${capRows.map(([cap, gc]) => `<tr style="background:#fafbff">
-            <td style="padding-left:22px;font-size:0.8rem"><span style="color:#90a4ae">↳</span> <strong style="color:#455a64">B${cap}</strong></td>
+          </tr>${artRows.map(([, gc]) => `<tr style="background:#fafbff">
+            <td style="padding-left:22px;font-size:0.8rem"><span style="color:#90a4ae">↳</span> <strong style="color:#455a64">B${gc.cap}</strong> <span style="font-size:0.72rem;color:#546e7a;margin-left:4px">${escapeHtml(gc.article)}</span></td>
             <td style="text-align:right;font-size:0.8rem;font-weight:600;color:#2e7d32">${fmt(gc.plein)}</td>
             <td style="text-align:right;font-size:0.8rem;font-weight:600;color:#f57c00">${fmt(gc.partiel)}</td>
             <td style="text-align:right;font-size:0.8rem;font-weight:600;color:#e53935">${fmt(gc.vide)}</td>
