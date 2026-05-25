@@ -17897,17 +17897,19 @@ async function deleteCasier(casierId) {
   return true;
 }
 
-async function retourVidesGroupeBrasserie(br, cap, nbCasiers) {
+async function retourVidesGroupeBrasserie(br, cap, nbCasiers, filterArticle = "") {
   if (!canMoveCasier()) { showToast("Connexion requise."); return 0; }
   const matchingVides = casiersForSite().filter((c) => {
     const stockIt = stockItemForArticle(c.article);
     const cBr = normalizeBrasserieName(stockIt?.brasserie || "");
     return cBr === br &&
       Math.max(1, Number(c.capacite) || 1) === cap &&
+      (!filterArticle || (c.article || "") === filterArticle) &&
       (Number(c.quantiteActuelle) || 0) === 0 &&
       (Number(c.bouteillesVides) || 0) > 0;
   }).slice(0, nbCasiers);
-  return _retourVidesLot(matchingVides, cap, `${br} B${cap}`);
+  const label = filterArticle ? `${br} B${cap} · ${filterArticle}` : `${br} B${cap}`;
+  return _retourVidesLot(matchingVides, cap, label);
 }
 
 async function _retourVidesLot(matchingVides, cap, label) {
@@ -18071,33 +18073,29 @@ function renderCasierPhysique() {
   setText("casier-phys-kpi-vide", fmt(kpis.vide));
   setText("casier-phys-kpi-btl-vides", fmt(kpis.btlVides));
 
-  // Grouper par brasserie > format (capacité + taille bouteille)
-  // B12 50/65cl et B12 100cl sont des formats distincts (bouteilles non interchangeables)
-  const _clFromArticle = (art) => { const m = String(art || "").match(/\b(\d+)\s*(?:cl)?\s*$/i); return m ? Number(m[1]) : null; };
-  const _clBucket = (art) => { const cl = _clFromArticle(art); return (cl !== null && cl >= 90) ? "100cl" : "std"; };
-  const _clLabel = (art) => _clBucket(art) === "100cl" ? "100 cl" : "50-65 cl";
+  // Grouper par brasserie > article (chaque article = une ligne, sépare naturellement B12 50/65cl et B12 100cl)
+  const _clFromArticle = (art) => { const m = String(art || "").match(/\b(\d+)\s*cl\b/i) || String(art || "").match(/\b(\d+)\s*$/); return m ? Number(m[1]) : null; };
+  const _clBucket = (art) => { const cl = _clFromArticle(art); if (cl === null) return "std"; if (cl >= 90) return "100cl"; if (cl >= 45 && cl <= 80) return "50-65cl"; return `${cl}cl`; };
+  const _clLabel = (art) => { const b = _clBucket(art); if (b === "100cl") return "100 cl"; if (b === "50-65cl") return "50-65 cl"; const cl = _clFromArticle(art); return cl !== null ? `${cl} cl` : ""; };
   const byBr = {};
   filtered.forEach((c) => {
     const stockIt = stockItemForArticle(c.article);
     const rawBr = normalizeBrasserieName(stockIt?.brasserie || "");
-    if (!rawBr) return; // ignorer les articles non rattachés à une brasserie
+    if (!rawBr) return;
     const cap = Math.max(1, Number(c.capacite) || 24);
-    const bucket = _clBucket(c.article);
-    const grpKey = `${cap}|${bucket}`;
+    const artKey = String(c.article || "").toLowerCase().trim();
+    const grpKey = `${cap}|${artKey}`;
     if (!byBr[rawBr]) byBr[rawBr] = {};
-    if (!byBr[rawBr][grpKey]) byBr[rawBr][grpKey] = { cap, clLabel: _clLabel(c.article), pleins: 0, partiels: 0, vides: 0, btlPleines: 0, btlVides: 0, byArticle: {} };
+    if (!byBr[rawBr][grpKey]) byBr[rawBr][grpKey] = { cap, article: c.article || "—", clLabel: _clLabel(c.article), pleins: 0, partiels: 0, vides: 0, btlPleines: 0, btlVides: 0 };
     const g = byBr[rawBr][grpKey];
-    const art = c.article || "—";
-    if (!g.byArticle[art]) g.byArticle[art] = { article: art, pleins: 0, partiels: 0, vides: 0, btlPleines: 0, btlVides: 0 };
-    const ag = g.byArticle[art];
     const st = String(c.statut || "vide").toLowerCase();
-    if (st === "plein") { g.pleins++; ag.pleins++; }
-    else if (st === "partiel") { g.partiels++; ag.partiels++; }
-    else { g.vides++; ag.vides++; }
+    if (st === "plein") g.pleins++;
+    else if (st === "partiel") g.partiels++;
+    else g.vides++;
     const btlP = Math.max(0, Number(c.quantiteActuelle) || 0);
     const btlV = Math.max(0, Number(c.bouteillesVides) || 0);
-    g.btlPleines += btlP; ag.btlPleines += btlP;
-    g.btlVides += btlV;   ag.btlVides += btlV;
+    g.btlPleines += btlP;
+    g.btlVides += btlV;
   });
 
   if (!Object.keys(byBr).length) {
@@ -18108,10 +18106,10 @@ function renderCasierPhysique() {
   } else {
     let html = "";
     Object.entries(byBr).sort(([a], [b]) => a.localeCompare(b, "fr")).forEach(([br, groups]) => {
-      // trier par capacité décroissante puis format (B24 avant B12, std avant 100cl)
-      const entries = Object.entries(groups).sort(([a, ga], [b, gb]) => {
+      // trier par capacité décroissante puis par nom d'article (B24 avant B12, articles alphabétiques)
+      const entries = Object.entries(groups).sort(([, ga], [, gb]) => {
         if (gb.cap !== ga.cap) return gb.cap - ga.cap;
-        return (ga.clLabel || "").localeCompare(gb.clLabel || "", "fr");
+        return (ga.article || "").localeCompare(gb.article || "", "fr");
       });
       const brTot = entries.reduce((t, [, g]) => {
         t.pleins += g.pleins; t.partiels += g.partiels; t.vides += g.vides;
@@ -18146,30 +18144,13 @@ function renderCasierPhysique() {
                 const fullVides = Math.floor(g.btlVides / g.cap);
                 const enCoursFmt = g.btlVides % g.cap;
                 const retourBtn = fullVides >= 1
-                  ? `<button type="button" class="mini-btn" data-casier-grp-retour-br="${escapeHtml(br)}" data-casier-grp-retour-cap="${g.cap}" style="background:rgba(230,81,0,0.12);color:#e65100;font-weight:700">↩ Retourner ${fmt(fullVides)}</button>`
+                  ? `<button type="button" class="mini-btn" data-casier-grp-retour-br="${escapeHtml(br)}" data-casier-grp-retour-cap="${g.cap}" data-casier-grp-retour-article="${escapeHtml(g.article)}" style="background:rgba(230,81,0,0.12);color:#e65100;font-weight:700">↩ Retourner ${fmt(fullVides)}</button>`
                   : enCoursFmt > 0 ? `<span style="color:#9e9e9e;font-size:0.75rem">${fmt(enCoursFmt)} btl en cours</span>` : "";
-                const artRows = Object.entries(g.byArticle).sort(([a], [b]) => a.localeCompare(b, "fr")).map(([, ag]) => {
-                  const retournables = Math.floor(ag.btlVides / g.cap);
-                  const enCours = ag.btlVides % g.cap;
-                  const retCell = retournables > 0
-                    ? `<span style="color:#e65100;font-weight:700">${fmt(retournables)}</span>`
-                    : `<span style="color:#9e9e9e">0</span>`;
-                  const btlVidesCell = ag.btlVides > 0
-                    ? `<span style="color:#e65100">${fmt(ag.btlVides)}</span>${enCours > 0 ? `<span style="color:#9e9e9e;font-size:0.7rem"> (${fmt(enCours)} en cours)</span>` : ""}`
-                    : `<span style="color:#9e9e9e">0</span>`;
-                  return `<tr style="background:#f5f8ff">
-                  <td style="padding-left:28px;font-size:0.78rem;color:#37474f"><span style="color:#90a4ae;margin-right:4px">↳</span>${escapeHtml(ag.article)}</td>
-                  <td style="text-align:right;font-size:0.78rem;color:#2e7d32">${fmt(ag.pleins)}</td>
-                  <td style="text-align:right;font-size:0.78rem;color:#f57c00">${fmt(ag.partiels)}</td>
-                  <td style="text-align:right;font-size:0.78rem;color:#e53935">${fmt(ag.vides)}</td>
-                  <td style="text-align:right;font-size:0.78rem">${retCell}</td>
-                  <td style="text-align:right;font-size:0.78rem;color:#1976d2">${fmt(ag.btlPleines)}</td>
-                  <td style="text-align:right;font-size:0.78rem">${btlVidesCell}</td>
-                  <td></td>
-                </tr>`;
-                }).join("");
                 return `<tr style="background:#fff">
-                  <td style="text-align:center"><span style="background:#e3f2fd;color:#1565c0;padding:2px 9px;border-radius:5px;font-size:0.8rem;font-weight:700">B${g.cap}</span>${g.clLabel ? `<span style="font-size:0.72rem;color:#546e7a;margin-left:5px">${escapeHtml(g.clLabel)}</span>` : ""}</td>
+                  <td style="text-align:center">
+                    <span style="background:#e3f2fd;color:#1565c0;padding:2px 9px;border-radius:5px;font-size:0.8rem;font-weight:700">B${g.cap}</span>${g.clLabel ? `<span style="font-size:0.72rem;color:#546e7a;margin-left:5px">${escapeHtml(g.clLabel)}</span>` : ""}
+                    <div style="font-size:0.74rem;color:#546e7a;margin-top:2px">${escapeHtml(g.article)}</div>
+                  </td>
                   <td style="text-align:right;font-weight:700;color:#2e7d32">${fmt(g.pleins)}</td>
                   <td style="text-align:right;font-weight:700;color:#f57c00">${fmt(g.partiels)}</td>
                   <td style="text-align:right;font-weight:700;color:#e53935">${fmt(g.vides)}</td>
@@ -18177,7 +18158,7 @@ function renderCasierPhysique() {
                   <td style="text-align:right;font-weight:700;color:#1976d2">${fmt(g.btlPleines)}</td>
                   <td style="text-align:right;font-weight:700;${g.btlVides > 0 ? "color:#e65100" : "color:#9e9e9e"}">${fmt(g.btlVides)}</td>
                   <td style="white-space:nowrap;text-align:right">${retourBtn}</td>
-                </tr>${artRows}`;
+                </tr>`;
               }).join("")}
             </tbody>
           </table>
@@ -19068,21 +19049,24 @@ function attachEvents() {
     if (grpRetourBtn) {
       const br = grpRetourBtn.dataset.casierGrpRetourBr;
       const cap = Number(grpRetourBtn.dataset.casierGrpRetourCap) || 24;
+      const filterArticle = grpRetourBtn.dataset.casierGrpRetourArticle || "";
       const maxCasiers = casiersForSite().filter((c) => {
         const stockIt = stockItemForArticle(c.article);
         const cBr = normalizeBrasserieName(stockIt?.brasserie || "");
         return cBr === br &&
           Math.max(1, Number(c.capacite) || 1) === cap &&
+          (!filterArticle || (c.article || "") === filterArticle) &&
           Math.max(0, Number(c.bouteillesVides) || 0) >= cap;
       }).length;
       if (maxCasiers < 1) { showToast("Pas de casier complet de vides à retourner."); return; }
+      const label = filterArticle ? `${br} · B${cap} · ${filterArticle}` : `${br} · B${cap}`;
       const raw = window.prompt(
-        `Combien de casiers vides à retourner au fournisseur ?\n${br} · B${cap}\n(max ${fmt(maxCasiers)} casier(s))`,
+        `Combien de casiers vides à retourner au fournisseur ?\n${label}\n(max ${fmt(maxCasiers)} casier(s))`,
         String(maxCasiers)
       );
       const nb = Math.max(0, Math.min(maxCasiers, Math.floor(Number(raw) || 0)));
       if (!nb) return;
-      retourVidesGroupeBrasserie(br, cap, nb)
+      retourVidesGroupeBrasserie(br, cap, nb, filterArticle)
         .then((done) => { if (done) { renderCasierPhysique(); renderDashboard(); showToast(`${fmt(done)} casier(s) vide(s) retourné(s) au fournisseur.`); } })
         .catch(handleApiError);
       return;
