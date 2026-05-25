@@ -7900,7 +7900,7 @@ function renderDashboardProductRank(ventesSite) {
 }
 
 function renderDashboardCasierKpis(stockSiteList) {
-  const all = casiersConsignesForSite();
+  const all = casiersConsignesForSite().filter((c) => String(c.statut || "").toLowerCase() !== "retourne");
   const k = { total: all.length, plein: 0, partiel: 0, vide: 0 };
   all.forEach((c) => {
     const st = String(c.statut || "vide").toLowerCase();
@@ -18011,6 +18011,10 @@ async function retourVidesCasier(casierId, qty) {
     createdAt: new Date().toISOString(),
   });
   recordStaffAudit("create", "casier_retour_vide", `Retour ${casier.code} : ${fmt(nbCasiers)} casier(s) vide(s)`, `${fmt(nbCasiers)} casier(s) × ${fmt(cap)} btl = ${fmt(q)} btl vide(s) retournée(s) fournisseur`);
+  // Casier complètement rendu (vide) : supprimer de l'inventaire (reparti chez le fournisseur)
+  if ((Number(casier.bouteillesVides) || 0) === 0 && (Number(casier.quantiteActuelle) || 0) === 0) {
+    state.casiers = state.casiers.filter((c) => c.id !== casier.id);
+  }
   await persistStatePatch({ casiers: state.casiers, casierMouvements: state.casierMouvements, nextId: state.nextId });
   return true;
 }
@@ -18051,8 +18055,9 @@ function renderCasierPhysique() {
     return true;
   });
   // KPIs
-  const kpis = { total: all.length, plein: 0, partiel: 0, vide: 0, btlVides: 0 };
-  all.forEach((c) => {
+  const actifs = all.filter((c) => String(c.statut || "").toLowerCase() !== "retourne");
+  const kpis = { total: actifs.length, plein: 0, partiel: 0, vide: 0, btlVides: 0 };
+  actifs.forEach((c) => {
     const st = String(c.statut || "vide").toLowerCase();
     if (st === "plein") kpis.plein++;
     else if (st === "partiel") kpis.partiel++;
