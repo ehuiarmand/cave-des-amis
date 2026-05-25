@@ -615,7 +615,7 @@ def _twilio_send_sms(to_e164: str, body: str) -> None:
 
 # --- WhatsApp Cloud API (Meta) ---
 
-def _whatsapp_send(to_e164: str, body: str) -> None:
+def _whatsapp_send(to_e164: str, body: str, *, force_text: bool = False) -> None:
     phone_id = os.environ.get("WHATSAPP_PHONE_NUMBER_ID", "").strip()
     token = os.environ.get("WHATSAPP_ACCESS_TOKEN", "").strip()
     if not phone_id:
@@ -626,7 +626,7 @@ def _whatsapp_send(to_e164: str, body: str) -> None:
     if not to_clean:
         raise ValueError("Numéro WhatsApp invalide (format international +225…).")
     template_name = os.environ.get("WHATSAPP_TEMPLATE_NAME", "").strip()
-    if template_name:
+    if template_name and not force_text:
         lang = os.environ.get("WHATSAPP_TEMPLATE_LANG", "fr").strip() or "fr"
         wa_payload: dict[str, Any] = {
             "messaging_product": "whatsapp",
@@ -4304,6 +4304,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     _whatsapp_send(
                         wa_user_data["waPhone"],
                         f"[Cave des Amis] Votre code de connexion : *{otp}*\nValable 15 minutes. Ne le partagez pas.",
+                        force_text=True,
                     )
                 except Exception as ex:
                     print(f"[WA 2FA] Erreur envoi OTP: {ex}", flush=True)
