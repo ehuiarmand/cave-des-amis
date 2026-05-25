@@ -17606,7 +17606,7 @@ async function syncCasiersManquants(opts = {}) {
   state.casiers = state.casiers || [];
   if (!state.nextId) state.nextId = {};
   if (!state.nextId.casier) state.nextId.casier = 1;
-  const eligible = recordsForSite(state.stock).filter((item) => lotType(item) !== "unite");
+  const eligible = recordsForSite(state.stock).filter((item) => lotType(item) === "casier");
   const now = new Date().toISOString();
 
   // Calcul de ce que les casiers devraient contenir
