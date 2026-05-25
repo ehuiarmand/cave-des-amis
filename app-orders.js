@@ -11890,9 +11890,16 @@ async function saveMyUserProfile() {
   };
   recordStaffAudit("update", "profil_utilisateur", `Profil ${me.username}`, displayName ? `Nom affiche : ${displayName}` : "Mise a jour");
   await persistState({ auth: { users: [payload], partial: true } });
+  // Patch local pour garantir que wa2faEnabled/waPhone sont visibles même si le serveur
+  // ne les renvoie pas encore dans public_state_for_session (ex. avant déploiement).
+  const savedIdx = (state.auth?.users || []).findIndex((u) => String(u.username || "").toLowerCase() === sn.toLowerCase());
+  if (savedIdx >= 0) {
+    state.auth.users[savedIdx] = { ...state.auth.users[savedIdx], wa2faEnabled, waPhone: waPhone || state.auth.users[savedIdx].waPhone || "" };
+  }
   document.getElementById("ua-password").value = "";
   document.getElementById("ua-password-confirm").value = "";
   renderTopbar();
+  syncUserAccountPanel();
   showToast(pw1 ? "Profil enregistre. Si la session se ferme, reconnectez-vous avec le nouveau mot de passe." : "Profil enregistre.");
 }
 
