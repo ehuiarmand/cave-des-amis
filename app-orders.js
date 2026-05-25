@@ -13822,9 +13822,11 @@ function purchaseReceiptNeedsSnapshot(originalLines, receivedLines) {
 }
 
 async function applyPurchaseReceipt(po, linesReceived, opts = {}) {
+  if (po.status === "Reçue") return false;
+  po.status = "Reçue";
   const rangerCasiers = opts.rangerCasiers !== false;
   const receivedTotal = Math.round(linesReceived.reduce((sum, l) => sum + (Number(l.amount) || 0), 0));
-  if (!linesReceived.length || receivedTotal <= 0) return false;
+  if (!linesReceived.length || receivedTotal <= 0) { po.status = "En attente"; return false; }
 
   if (purchaseReceiptNeedsSnapshot(po.lines, linesReceived)) {
     po.linesOrderedSnapshot = JSON.parse(JSON.stringify(po.lines || []));
