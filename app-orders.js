@@ -11385,6 +11385,10 @@ async function addUser() {
       : user)
     : [...users, { username, password, role, allowedSiteIds, waPhone, wa2faEnabled, customRoleId, permissions }];
   await persistState({ auth: { users: newUsers } });
+  const patchIdx = (state.auth?.users || []).findIndex((u) => u.username === username);
+  if (patchIdx >= 0) {
+    state.auth.users[patchIdx] = { ...state.auth.users[patchIdx], wa2faEnabled, waPhone };
+  }
   const saved = (state.auth.users || []).find((user) => user.username === username);
   if (!saved || saved.role !== role || JSON.stringify([...(saved.allowedSiteIds || [])].sort()) !== JSON.stringify([...allowedSiteIds].sort())) {
     showToast("La modification n'a pas ete sauvegardee par le serveur.");
