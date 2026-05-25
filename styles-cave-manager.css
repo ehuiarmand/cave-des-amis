@@ -169,6 +169,33 @@ body {
   border: 1px solid var(--line) !important;
   color: var(--mm-text) !important;
 }
+.top-journal-label {
+  color: var(--muted) !important;
+  text-shadow: none !important;
+}
+.top-journal-date {
+  color: var(--mm-text) !important;
+  text-shadow: none !important;
+  font-family: var(--cm-mono) !important;
+}
+.top-journal-diff {
+  color: var(--muted) !important;
+  text-shadow: none !important;
+}
+.top-backup-chip {
+  background: var(--mm-bg) !important;
+  border: 1px solid var(--line) !important;
+  color: var(--mm-text) !important;
+}
+.top-backup-chip:hover {
+  background: var(--mm-surface) !important;
+  border-color: var(--mm-primary) !important;
+}
+.topbar .icon-btn {
+  background: var(--mm-bg) !important;
+  border: 1px solid var(--line) !important;
+  color: var(--mm-text) !important;
+}
 
 /* ── 5. Sidebar ────────────────────────────────────────────── */
 .sidebar {
