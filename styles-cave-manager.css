@@ -1,0 +1,371 @@
+/* ============================================================
+   CAVE MANAGER — Habillage warm / éditorial
+   ------------------------------------------------------------
+   Comment l'utiliser :
+   1. Copiez ce fichier dans le même dossier que votre styles.css
+      (à la racine de "gestion cave/")
+   2. Dans votre index.html, ajoutez CETTE ligne juste APRÈS
+      la ligne de votre styles.css existante :
+
+        <link rel="stylesheet" href="./styles.css?v=46">
+        <link rel="stylesheet" href="./styles-cave-manager.css">
+
+   3. Dans le <head>, remplacez la ligne Roboto par les polices
+      Cave Manager :
+
+        <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+   C'est tout. Aucune ligne de JS, de Python ou de HTML à
+   modifier. Le thème est non-destructif : pour revenir au
+   look Material bleu, supprimez juste la ligne de l'étape 2.
+
+   Pour passer en mode nuit, ajoutez data-cm-theme="dark" sur
+   l'élément <body> :
+
+        <body data-cm-theme="dark">
+
+   ============================================================ */
+
+/* ── 1. Tokens : on remappe les variables que votre app utilise déjà ── */
+:root {
+  /* Palette warm — cream paper + ambre */
+  --mm-primary:       #B57321;   /* ambre, remplace le bleu */
+  --mm-primary-dark:  #8E5917;
+  --mm-primary-darker:#5C3A0F;
+  --mm-on-primary:    #FBF6EA;
+
+  --mm-bg:            #EFE7D6;   /* fond cream */
+  --mm-surface:       #FBF6EA;   /* papier */
+  --mm-text:          #1C1814;   /* encre */
+  --mm-text-secondary:#756A57;   /* texte secondaire */
+
+  --gold:             #B57321;
+  --green:            #3F6E4A;
+  --red:              #8A2B2B;
+
+  --panel:            var(--mm-surface);
+  --line:             rgba(28, 24, 20, 0.10);
+  --muted:            var(--mm-text-secondary);
+  --shadow:           0 1px 0 rgba(28, 24, 20, 0.04),
+                      0 8px 24px -16px rgba(28, 24, 20, 0.20);
+
+  /* Pour la barre du bas mobile */
+  --mm-mobile-nav-bg:     #FBF6EA;
+  --mm-mobile-nav-border: rgba(28, 24, 20, 0.10);
+  --mm-mobile-nav-pill:   #F4EDDC;
+  --mm-mobile-nav-text:   #1C1814;
+  --mm-mobile-nav-badge:  #B57321;
+
+  /* Polices Cave Manager */
+  --cm-serif: "Instrument Serif", Georgia, serif;
+  --cm-sans:  "IBM Plex Sans", "Roboto", system-ui, sans-serif;
+  --cm-mono:  "IBM Plex Mono", ui-monospace, "SF Mono", monospace;
+
+  /* Rayons + ombres */
+  --radius-lg: 14px;
+  --radius-md: 12px;
+}
+
+/* ── Mode nuit ──────────────────────────────────────────────── */
+[data-cm-theme="dark"] {
+  --mm-bg:            #0E0B08;
+  --mm-surface:       #181410;
+  --mm-text:          #F2EAD8;
+  --mm-text-secondary:#8F8472;
+  --line:             rgba(242, 234, 216, 0.10);
+  --panel:            #181410;
+  --mm-primary:       #D9A55B;
+  --mm-primary-dark:  #B58441;
+  --mm-on-primary:    #181410;
+  --gold:             #D9A55B;
+  --green:            #7DA77E;
+  --red:              #C4736E;
+  --shadow:           0 1px 0 rgba(0,0,0,0.30),
+                      0 12px 30px -20px rgba(0,0,0,0.60);
+  --mm-mobile-nav-bg:     #181410;
+  --mm-mobile-nav-border: rgba(242, 234, 216, 0.10);
+  --mm-mobile-nav-pill:   #221C16;
+  --mm-mobile-nav-text:   #F2EAD8;
+}
+
+/* ── 2. Police par défaut ───────────────────────────────────── */
+body {
+  font-family: var(--cm-sans);
+  -webkit-font-smoothing: antialiased;
+  background: var(--mm-bg);
+  color: var(--mm-text);
+}
+
+/* Titres : Instrument Serif (italique élégant possible avec <em>) */
+.topbar h2, .topbar-context h3,
+.hero-card h3, .hero-card h2,
+.section-head h3, .section-head h2,
+.spotlight-value, .modal h3,
+.kpi-value, .pdj-val,
+.mm-auth-app-title, .sidebar-logo,
+.sidebar-brand h2 {
+  font-family: var(--cm-serif) !important;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+}
+
+.kpi-value, .pdj-val, .spotlight-value {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Eyebrow plus typo — petite typo en capitales */
+.eyebrow {
+  font-size: 0.68rem;
+  letter-spacing: 0.20em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* ── 3. App background : texture papier subtile ─────────────── */
+.app-bg {
+  background-image:
+    radial-gradient(circle at 1px 1px, rgba(28, 24, 20, 0.04) 1px, transparent 0) !important;
+  background-size: 4px 4px !important;
+  opacity: 1 !important;
+}
+[data-cm-theme="dark"] .app-bg {
+  background-image:
+    radial-gradient(circle at 1px 1px, rgba(242, 234, 216, 0.04) 1px, transparent 0) !important;
+}
+
+/* ── 4. Topbar : on enlève le bandeau bleu, on passe en papier ── */
+.topbar {
+  background: var(--mm-surface) !important;
+  color: var(--mm-text) !important;
+  border-bottom: 1px solid var(--line) !important;
+}
+.topbar-context h3,
+.topbar h2,
+.topbar .eyebrow,
+.topbar .hero-copy {
+  color: var(--mm-text) !important;
+}
+.topbar .eyebrow,
+.topbar .hero-copy {
+  color: var(--muted) !important;
+}
+.topbar-live-clock-time {
+  color: var(--mm-text) !important;
+  text-shadow: none !important;
+  font-family: var(--cm-mono) !important;
+  font-weight: 500 !important;
+  font-size: 0.95rem !important;
+  letter-spacing: 0.02em !important;
+}
+.topbar-live-clock-zone {
+  color: var(--muted) !important;
+}
+.topbar-auto-cloture-countdown {
+  color: var(--gold) !important;
+  text-shadow: none !important;
+}
+.site-switcher {
+  background: var(--mm-bg) !important;
+  border: 1px solid var(--line) !important;
+  color: var(--mm-text) !important;
+}
+
+/* ── 5. Sidebar ────────────────────────────────────────────── */
+.sidebar {
+  background: var(--mm-surface);
+  border-right: 1px solid var(--line);
+}
+.sidebar-logo,
+.sidebar-brand h2 {
+  font-size: 1.5rem;
+  letter-spacing: -0.02em;
+}
+
+.nav-btn {
+  border-radius: 10px;
+  font-weight: 400;
+}
+.nav-btn:hover {
+  background: var(--mm-bg);
+  color: var(--mm-text);
+}
+.nav-btn.active {
+  background: var(--mm-primary);
+  color: var(--mm-on-primary);
+  border-color: var(--mm-primary);
+  font-weight: 500;
+}
+.nav-btn.active .nav-icon { color: var(--mm-on-primary); opacity: 1; }
+
+.sidebar-session {
+  border: 1px solid var(--line);
+  background: var(--mm-bg);
+}
+
+/* ── 6. Cards & panneaux ───────────────────────────────────── */
+.card,
+.hero-card,
+.modal {
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--line);
+  background: var(--mm-surface);
+  box-shadow: var(--shadow);
+}
+.kpi {
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--line);
+  background: var(--mm-surface);
+  box-shadow: var(--shadow);
+}
+
+/* ── 7. Boutons ────────────────────────────────────────────── */
+.btn {
+  border-radius: 10px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  font-family: inherit;
+  transition: transform .12s ease, background .12s ease, border-color .12s ease;
+}
+.btn-primary {
+  background: var(--mm-primary);
+  color: var(--mm-on-primary);
+  box-shadow: none;
+}
+.btn-primary:hover {
+  background: var(--mm-primary-dark);
+  transform: translateY(-1px);
+}
+.btn-outline {
+  background: transparent;
+  border: 1px solid rgba(28, 24, 20, 0.22);
+  color: var(--mm-text);
+}
+.btn-outline:hover {
+  background: var(--mm-bg);
+  border-color: rgba(28, 24, 20, 0.35);
+}
+.btn-danger {
+  background: var(--red);
+  color: #FBF6EA;
+  border: none;
+}
+
+.mini-btn,
+.icon-btn {
+  border-radius: 8px;
+  font-family: inherit;
+}
+
+/* ── 8. Inputs ─────────────────────────────────────────────── */
+.auth-form input,
+.form-group input,
+.form-group select,
+.form-group textarea {
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--mm-bg);
+  color: var(--mm-text);
+  font-family: inherit;
+}
+.auth-form input:focus,
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus {
+  border-color: var(--mm-primary);
+  box-shadow: 0 0 0 3px rgba(181, 115, 33, 0.18);
+  background: var(--mm-surface);
+}
+
+/* ── 9. Page Auth (login) — split screen warm ──────────────── */
+.mm-auth-screen {
+  background: linear-gradient(165deg, var(--mm-primary) 0%, var(--mm-primary-dark) 60%, #4A2E0B 100%) !important;
+}
+.mm-auth-app-title {
+  font-family: var(--cm-serif) !important;
+  font-size: 2.2rem !important;
+  letter-spacing: -0.02em !important;
+  font-weight: 400 !important;
+}
+.auth-logo,
+.mm-auth-logo {
+  background: var(--mm-surface);
+  color: var(--mm-primary-dark);
+  border-radius: 28px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.20);
+  font-family: var(--cm-serif);
+}
+.mm-login-submit.btn-primary {
+  border-radius: 10px;
+  letter-spacing: 0.04em;
+}
+
+/* ── 10. Badges ────────────────────────────────────────────── */
+.badge,
+.badge-amber {
+  border-radius: 999px;
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  font-weight: 500;
+}
+.badge-amber {
+  background: rgba(181, 115, 33, 0.15);
+  color: var(--mm-primary-dark);
+  border: 1px solid rgba(181, 115, 33, 0.30);
+}
+
+/* ── 11. Tabs ──────────────────────────────────────────────── */
+.tab {
+  border-radius: 8px;
+  font-family: inherit;
+  font-weight: 400;
+  color: var(--muted);
+}
+.tab.active {
+  background: var(--mm-primary);
+  color: var(--mm-on-primary);
+  font-weight: 500;
+}
+
+/* ── 12. Tables ────────────────────────────────────────────── */
+.stock-table th {
+  font-size: 0.7rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+  border-bottom: 1px solid rgba(28, 24, 20, 0.18);
+}
+.stock-table td {
+  border-bottom: 1px solid var(--line);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 13. PDJ — couleurs des KPI ────────────────────────────── */
+.pdj-val.amber { color: var(--gold); }
+.pdj-val.red   { color: var(--red); }
+
+/* ── 14. Barre nav mobile ──────────────────────────────────── */
+@media (max-width: 520px) {
+  .topbar { padding: 14px 18px; }
+  .card { border-radius: var(--radius-lg); }
+}
+
+/* ── 15. Détails finaux ────────────────────────────────────── */
+.bar-name { color: var(--muted); }
+hr, .divider { border-color: var(--line); }
+
+/* Quelques touches "papier" sur les cartes principales : accent ambre sur le haut */
+.hero-card,
+.pdj-card,
+.spotlight-card {
+  border-top: 3px solid var(--mm-primary);
+}
+
+/* Numbers en monospace tabular dans les tableaux et KPIs */
+.kpi-value,
+.pdj-val,
+.spotlight-value,
+.stock-table td.num,
+.stock-table td[data-num] {
+  font-variant-numeric: tabular-nums;
+}
