@@ -5166,7 +5166,7 @@ function setStockSubTab(tab) {
     if (isAchats) renderPurchaseOrders();
     else if (isCreanciers) renderCreanciers();
     else if (isMouvements) renderStockMovements();
-    else if (isCasiers) renderCasiers();
+    else if (isCasiers) { renderCasiers(); syncCasiersManquants({ silent: true }).then((n) => { if (n > 0) renderCasiers(); }).catch(() => {}); }
   }
   syncFabLabelForStockPage();
 }
@@ -5315,8 +5315,11 @@ function renderCasiers() {
     <button type="button" class="purge-casiers-btn" style="background:#e53935;color:#fff;border:none;padding:7px 16px;border-radius:8px;font-size:0.82rem;cursor:pointer;font-weight:600;letter-spacing:0.01em">
       🗑 Purger casiers vides retournés
     </button>
+    <button type="button" class="sync-casiers-manquants-btn" style="background:#2e7d32;color:#fff;border:none;padding:7px 16px;border-radius:8px;font-size:0.82rem;cursor:pointer;font-weight:600;letter-spacing:0.01em">
+      + Compléter casiers manquants
+    </button>
     <button type="button" class="sync-casiers-btn" style="background:#1565c0;color:#fff;border:none;padding:7px 16px;border-radius:8px;font-size:0.82rem;cursor:pointer;font-weight:600;letter-spacing:0.01em">
-      ⟳ Recréer casiers depuis stock actuel
+      ⟳ Recréer tout depuis stock
     </button>
   </div>`;
   Object.entries(byBrasserie).sort(([a], [b]) => a.localeCompare(b, "fr")).forEach(([brasserie, byCaseSize]) => {
@@ -17597,6 +17600,64 @@ async function purgerCasiersVides() {
   showToast(`${phantoms.length} casier(s) vide(s) supprimé(s).`);
 }
 
+async function syncCasiersManquants(opts = {}) {
+  if (!opts.silent && !canAnyAdmin()) { showToast("Réservé aux administrateurs."); return 0; }
+  const siteId = currentSiteId();
+  state.casiers = state.casiers || [];
+  if (!state.nextId) state.nextId = {};
+  if (!state.nextId.casier) state.nextId.casier = 1;
+  const eligible = recordsForSite(state.stock).filter((item) => lotType(item) !== "unite");
+  let created = 0;
+  const now = new Date().toISOString();
+  eligible.forEach((item) => {
+    const cap = Math.max(1, caseSize(item));
+    const stockBtl = Math.max(0, stockActuel(item));
+    if (stockBtl <= 0) return;
+    const articleKey = String(item.article || "").toLowerCase().trim();
+    const btlInCasiers = (state.casiers).filter((c) =>
+      rowMatchesSite(c, siteId, multiSiteActive()) &&
+      String(c.article || "").toLowerCase().trim() === articleKey
+    ).reduce((s, c) => s + Math.max(0, Number(c.quantiteActuelle) || 0), 0);
+    const manque = stockBtl - btlInCasiers;
+    if (manque <= 0) return;
+    const fullCount = Math.floor(manque / cap);
+    const remainder = manque % cap;
+    for (let i = 0; i < fullCount; i++) {
+      const c = { id: state.nextId.casier++, siteId, code: nextCasierCode(), article: item.article,
+        capacite: cap, quantiteActuelle: cap, bouteillesVides: 0,
+        emplacement: "Réserve", statut: "plein", createdAt: now, createdBy: sessionUser || "-", autoSynced: true };
+      recomputeCasierStatus(c);
+      state.casiers.push(c);
+      created++;
+    }
+    if (remainder > 0) {
+      const c = { id: state.nextId.casier++, siteId, code: nextCasierCode(), article: item.article,
+        capacite: cap, quantiteActuelle: remainder, bouteillesVides: 0,
+        emplacement: "Réserve", statut: "partiel", createdAt: now, createdBy: sessionUser || "-", autoSynced: true };
+      recomputeCasierStatus(c);
+      state.casiers.push(c);
+      created++;
+    }
+  });
+  if (created > 0) {
+    lsSaveCasiers();
+    recordStaffAudit("create", "casier_sync_manquants",
+      `Sync manquants: ${created} casier(s)`,
+      `Casiers ajoutés pour couvrir stock non tracé.`
+    );
+    try {
+      await persistStatePatch({ casiers: state.casiers, nextId: state.nextId });
+    } catch (e) { lsSaveCasiers(); }
+    if (!opts.silent) {
+      renderCasiers();
+      showToast(`${fmt(created)} casier(s) ajouté(s) pour couvrir le stock non tracé.`);
+    }
+  } else if (!opts.silent) {
+    showToast("Les casiers sont déjà à jour avec le stock.");
+  }
+  return created;
+}
+
 async function syncCasiersFromStockEtVentes() {
   if (!canAnyAdmin()) { showToast("Réservé aux administrateurs."); return; }
   const siteId = currentSiteId();
@@ -19093,6 +19154,10 @@ function attachEvents() {
   document.getElementById("stock-card-casiers")?.addEventListener("click", (e) => {
     if (e.target.closest(".purge-casiers-btn")) {
       purgerCasiersVides().catch(handleApiError);
+      return;
+    }
+    if (e.target.closest(".sync-casiers-manquants-btn")) {
+      syncCasiersManquants().catch(handleApiError);
       return;
     }
     if (e.target.closest(".sync-casiers-btn")) {
