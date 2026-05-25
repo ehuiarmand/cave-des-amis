@@ -1463,6 +1463,30 @@ textarea { font: inherit; }
   margin-bottom: 4px;
 }
 
+.mobile-more-session-info {
+  margin: 4px 0 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.75);
+  letter-spacing: 0.01em;
+}
+
+.topbar-session-chip {
+  display: none;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--mm-on-primary, #fff);
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 5px;
+  padding: 2px 9px;
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+  white-space: nowrap;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .mobile-more-panel.mm-sheet-dark .mobile-more-title {
   font-family: "Roboto Flex", Roboto, system-ui, sans-serif;
   font-weight: 700;
@@ -2385,6 +2409,7 @@ textarea { font: inherit; }
   .main-wrapper { width: 100%; }
   .main-shell { padding: 16px 14px 110px; }
   .topbar { padding: 14px 16px; position: static; }
+  .topbar-session-chip { display: inline-block; }
 
   .bottom-nav {
     display: flex;
@@ -3155,6 +3180,19 @@ textarea { font: inherit; }
   border: 1px solid rgba(114, 215, 169, 0.55);
   color: #1b5e20;
   font-weight: 800;
+}
+
+.mini-btn.btn-urgent-credit {
+  background: rgba(255, 59, 48, 0.12);
+  border: 1px solid rgba(255, 59, 48, 0.45);
+  color: #c62828;
+  font-weight: 800;
+  animation: pulse-urgent 2s ease-in-out infinite;
+}
+
+@keyframes pulse-urgent {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
 }
 
 @media (max-width: 900px) {

@@ -986,6 +986,34 @@ function creditFirstOpenedLabelByDebtor(sourceState = state) {
   return labels;
 }
 
+/** Âge en jours calendaires depuis la première vente à crédit, par débiteur. */
+function creditAgeInDaysByDebtor(sourceState = state) {
+  const ventes = recordsForSite(sourceState?.ventes || []);
+  const best = {};
+  ventes.forEach((v) => {
+    const net = calcNet(v);
+    const details = v.paiementDetails?.length ? v.paiementDetails : [{ method: v.paiement || "", amount: net }];
+    const debtorName = debtorDisplayKey(v.debiteur || v.client || "Client inconnu");
+    let creditAmount = 0;
+    details.forEach((d) => { if (isCreditClientMethod(d.method)) creditAmount += Number(d.amount) || 0; });
+    if (!creditAmount && isAReglerPaiement(v.paiement)) creditAmount = net;
+    if (creditAmount <= 0) return;
+    const sold = String(v.soldAt || v.createdAt || "").trim();
+    let ts;
+    if (sold) { const d = parseFlexibleDateTime(sold); if (!Number.isNaN(d.getTime())) ts = d.getTime(); }
+    if (ts == null) {
+      const day = String(v.date || "").trim().slice(0, 10);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(day)) ts = new Date(day + "T00:00:00").getTime();
+    }
+    if (ts == null || !Number.isFinite(ts)) return;
+    if (!best[debtorName] || ts < best[debtorName]) best[debtorName] = ts;
+  });
+  const now = Date.now();
+  const ages = {};
+  Object.keys(best).forEach((k) => { ages[k] = Math.floor((now - best[k]) / 86400000); });
+  return ages;
+}
+
 function creditTotals(sourceState = state) {
   const issued = recordsForSite(sourceState?.ventes || []).reduce((sum, v) => {
     const net = calcNet(v);
@@ -4965,7 +4993,12 @@ function renderTopbar() {
       journalDiffEl?.classList.add("hidden");
     }
   }
-  document.getElementById("session-user").textContent = sessionUserDisplayLabel() || "utilisateur";
+  const _displayLabel = sessionUserDisplayLabel() || "utilisateur";
+  document.getElementById("session-user").textContent = _displayLabel;
+  const _chip = document.getElementById("topbar-session-chip");
+  if (_chip) _chip.textContent = _displayLabel;
+  const _moreInfo = document.getElementById("mobile-more-session-info");
+  if (_moreInfo) _moreInfo.textContent = _displayLabel;
   const eff = String(sessionUser || "").trim().toLowerCase() === "admin" ? "superadmin" : currentRole;
   const roleLabel = eff === "superadmin" && canGlobalSuperAdmin()
     ? "super administrateur"
@@ -13075,17 +13108,24 @@ function renderCreditRecovery() {
     return;
   }
 
+  const agesByDebtor = creditAgeInDaysByDebtor();
   const rowsHtml = entries.map(([name, amount]) => {
     const installments = byDebtor[name] || [];
+    const age = agesByDebtor[name] || 0;
+    const isUrgent = age > 3;
+    const urgentBadge = isUrgent
+      ? `<span style="display:inline-block;margin-left:7px;background:#ff3b30;color:#fff;font-size:0.68rem;font-weight:700;padding:1px 6px;border-radius:4px;letter-spacing:0.03em;vertical-align:middle">⚠ ${age}j</span>`
+      : "";
+    const rowBg = isUrgent ? "background:#fff5f5;" : "";
     const headRow = `
-            <tr class="credit-debtor-summary">
-              <td><strong>${escapeHtml(name)}</strong></td>
+            <tr class="credit-debtor-summary" style="${rowBg}">
+              <td><strong>${escapeHtml(name)}</strong>${urgentBadge}</td>
               <td class="muted" style="font-size:0.9rem">${escapeHtml(issuerByDebtor[name] || "—")}</td>
               <td class="muted" style="font-size:0.9rem;white-space:nowrap">${creditOpenedByDebtor[name]
                 ? `<button type="button" class="credit-moment-btn" data-credit-open-detail="${escapeHtml(name)}" title="Voir toutes les ventes à crédit pour ce client">${escapeHtml(creditOpenedByDebtor[name])}</button>`
                 : "—"}</td>
               <td style="text-align:right"><strong style="color:#ff8e82">${fmt(amount)} FCFA</strong></td>
-              <td><button type="button" class="mini-btn" data-credit-fill="${escapeHtml(name)}">Encaisser</button></td>
+              <td><button type="button" class="mini-btn${isUrgent ? " btn-urgent-credit" : ""}" data-credit-fill="${escapeHtml(name)}">Encaisser</button></td>
             </tr>`;
     const instRows = installments.length
       ? [`<tr class="credit-installment-row"><td colspan="5" class="credit-installment-label">Échéances enregistrées (${installments.length})</td></tr>`,
