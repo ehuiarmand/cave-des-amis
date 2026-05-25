@@ -311,6 +311,38 @@ def verify_totp(secret_b32: str, user_code: str) -> bool:
 _pre_auth_tokens: dict[str, dict[str, Any]] = {}
 _pre_auth_lock = threading.Lock()
 
+# ---------------------------------------------------------------------------
+# WhatsApp OTP store (15-minute TTL, consommé une seule fois)
+# ---------------------------------------------------------------------------
+
+_wa_otp_store: dict[str, tuple[str, float]] = {}  # username → (hashed_otp, expires_ts)
+_wa_otp_lock = threading.Lock()
+
+
+def _wa_otp_generate(username: str) -> str:
+    """Génère un OTP 6 chiffres, le stocke hashé, retourne le code en clair."""
+    otp = str(secrets.randbelow(900000) + 100000)  # 100000–999999
+    hashed = hashlib.sha256(otp.encode()).hexdigest()
+    with _wa_otp_lock:
+        _wa_otp_store[username] = (hashed, time.time() + 900)  # TTL 15 min
+    return otp
+
+
+def _wa_otp_verify(username: str, otp: str) -> bool:
+    """Vérifie le code OTP, retourne True et supprime l'entrée si valide."""
+    with _wa_otp_lock:
+        entry = _wa_otp_store.get(username)
+        if not entry:
+            return False
+        hashed, expires = entry
+        if time.time() > expires:
+            del _wa_otp_store[username]
+            return False
+        ok = secrets.compare_digest(hashed, hashlib.sha256(otp.encode()).hexdigest())
+        if ok:
+            del _wa_otp_store[username]
+        return ok
+
 
 def create_pre_auth_token(username: str) -> str:
     token = secrets.token_urlsafe(32)
@@ -2070,6 +2102,7 @@ def merge_auth_users_scoped(
                 "role": new_role,
                 "allowedSiteIds": nu_allowed,
                 "twoFactorEnabled": False,
+                "wa2faEnabled": bool(pu.get("wa2faEnabled", False)),
                 "displayName": dn_new,
             }
             if wa_new:
@@ -2119,6 +2152,7 @@ def merge_auth_users_scoped(
             "role": new_role,
             "allowedSiteIds": nu_allowed,
             "twoFactorEnabled": bool(exist.get("twoFactorEnabled", False)),
+            "wa2faEnabled": bool(pu.get("wa2faEnabled", exist.get("wa2faEnabled", False))),
             "displayName": dn,
         }
         if wa_upd:
@@ -2889,6 +2923,8 @@ CREATE TABLE IF NOT EXISTS work_shifts (row_id BIGSERIAL PRIMARY KEY, item_id TE
                             "allowedSiteIds": u.get("allowedSiteIds", []),
                             "twoFactorEnabled": bool(u.get("twoFactorEnabled", False)),
                             "displayName": str(u.get("displayName", "") or "").strip()[:120],
+                            "waPhone": str(u.get("waPhone") or "").strip(),
+                            "wa2faEnabled": bool(u.get("wa2faEnabled", False)),
                         }
                         for u in s["auth"]["users"]
                     ],
@@ -2928,6 +2964,8 @@ CREATE TABLE IF NOT EXISTS work_shifts (row_id BIGSERIAL PRIMARY KEY, item_id TE
                     "allowedSiteIds": u.get("allowedSiteIds", []),
                     "twoFactorEnabled": bool(u.get("twoFactorEnabled", False)),
                     "displayName": str(u.get("displayName", "") or "").strip()[:120],
+                    "waPhone": str(u.get("waPhone") or "").strip(),
+                    "wa2faEnabled": bool(u.get("wa2faEnabled", False)),
                 }
                 for u in self._state["auth"]["users"]
                 if user_visible_in_public_state(u, session, site_ids)
@@ -4258,6 +4296,27 @@ class AppHandler(BaseHTTPRequestHandler):
                 return
             login_rate_limit_success(ip, canon)
             audit_log("login_success", {"ip": ip, "username": canon})
+            # WhatsApp 2FA — prioritaire sur le TOTP si activé
+            with store._lock:
+                wa_user_data = next((u for u in store._state["auth"]["users"] if u["username"] == canon), None)
+            wa2fa_active = bool(wa_user_data and wa_user_data.get("wa2faEnabled") and wa_user_data.get("waPhone"))
+            if wa2fa_active:
+                otp = _wa_otp_generate(canon)
+                try:
+                    _whatsapp_send(
+                        wa_user_data["waPhone"],
+                        f"[Cave des Amis] Votre code de connexion : *{otp}*\nValable 15 minutes. Ne le partagez pas.",
+                    )
+                except Exception as ex:
+                    print(f"[WA 2FA] Erreur envoi OTP: {ex}", flush=True)
+                    self.send_json(
+                        HTTPStatus.SERVICE_UNAVAILABLE,
+                        {"error": "Impossible d'envoyer le code WhatsApp. Verifiez la configuration."},
+                        cache_control="no-store",
+                    )
+                    return
+                self.send_json(HTTPStatus.OK, {"require2fa": "whatsapp", "username": canon})
+                return
             if has_2fa:
                 pre_auth = create_pre_auth_token(canon)
                 self.send_json(HTTPStatus.OK, {"needsTwoFactor": True, "preAuthToken": pre_auth})
@@ -4333,6 +4392,68 @@ class AppHandler(BaseHTTPRequestHandler):
                     **session_timing_fields(sess_view),
                 },
                 cookie=token,
+            )
+            return
+
+        if post_path == "/api/2fa/wa-verify":
+            body = self.read_json() or {}
+            uname = str(body.get("username", "")).strip().lower()
+            otp = str(body.get("code", "")).strip()
+            if not uname or not otp:
+                self.send_json(HTTPStatus.BAD_REQUEST, {"error": "Identifiant ou code manquant."})
+                return
+            with store._lock:
+                wv_users = store._state.get("auth", {}).get("users", [])
+                wv_user_row = next(
+                    (u for u in wv_users if str(u.get("username", "")).strip().lower() == uname),
+                    None,
+                )
+            if not wv_user_row:
+                self.send_json(HTTPStatus.UNAUTHORIZED, {"error": "Acces refuse."})
+                return
+            if not _wa_otp_verify(uname, otp):
+                self.send_json(HTTPStatus.UNAUTHORIZED, {"error": "Code invalide ou expire."})
+                return
+            # Code correct — créer la session (même logique que /api/2fa/verify)
+            wv_username = str(wv_user_row.get("username", ""))
+            with store._lock:
+                wv_all_site_ids = [s["id"] for s in store._state["sites"]]
+                wv_allowed = [
+                    sid for sid in wv_user_row.get("allowedSiteIds", wv_all_site_ids)
+                    if sid in wv_all_site_ids
+                ] or wv_all_site_ids[:1]
+                wv_role = str(wv_user_row.get("role", "serveuse"))
+                if wv_username.strip().lower() == "admin":
+                    wv_role = "superadmin"
+                    wv_allowed = list(wv_all_site_ids)
+                    prev_sites = [str(x) for x in (wv_user_row.get("allowedSiteIds") or [])]
+                    if wv_user_row.get("role") != "superadmin" or prev_sites != [str(x) for x in wv_all_site_ids]:
+                        wv_user_row["role"] = "superadmin"
+                        wv_user_row["allowedSiteIds"] = list(wv_all_site_ids)
+                        store._write(store._state)
+                elif wv_role == "superadmin":
+                    wv_allowed = [
+                        sid for sid in wv_user_row.get("allowedSiteIds", wv_all_site_ids)
+                        if sid in wv_all_site_ids
+                    ] or wv_all_site_ids[:1]
+                wv_gs = compute_global_superadmin(wv_username, wv_role, wv_allowed, wv_all_site_ids)
+            wv_aids = store.all_site_ids()
+            wv_token = sessions.create(wv_username, wv_role, wv_allowed, global_superadmin=wv_gs, all_site_ids=wv_aids)
+            wv_sess_view = sessions.get(wv_token) or {}
+            wv_bs = resolve_backup_session(wv_sess_view, store)
+            audit_log("login_wa2fa_success", {"username": wv_username})
+            self.send_json(
+                HTTPStatus.OK,
+                {
+                    "authenticated": True,
+                    "username": wv_username,
+                    "role": wv_bs.get("role", wv_role),
+                    "allowedSiteIds": list(wv_bs.get("allowedSiteIds") or wv_allowed),
+                    "globalSuperadmin": bool(wv_bs.get("globalSuperadmin")),
+                    "maquisBackupAllowed": session_can_manage_maquis_backups(wv_bs, all_site_ids=wv_aids),
+                    **session_timing_fields(wv_sess_view),
+                },
+                cookie=wv_token,
             )
             return
 

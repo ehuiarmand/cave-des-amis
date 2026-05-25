@@ -752,6 +752,7 @@ let suppressOrderDetailBackdropUntil = 0;
 /** Cle site + jour PDJ : derniere valeur poussee dans v-date / orders-filter-date-* (evite d'ecraser le filtre a chaque sync). */
 let ventesDomPdjStamp = "";
 let pendingPreAuthToken = null;
+let pendingWaUsername = null;
 let pendingReceivePurchaseId = null;
 let purchaseDraftLines = [];
 /** Après fermeture du modal « nouveau casier » sans enregistrer, on annule la reprise commande achat. */
@@ -11014,6 +11015,8 @@ function editUser(username) {
   document.getElementById("new-user-password").placeholder = "Laisser vide pour garder l'ancien";
   const pWaUserEdit = document.getElementById("new-user-wa-phone");
   if (pWaUserEdit) pWaUserEdit.value = user.waPhone || "";
+  const pWa2faUserEdit = document.getElementById("new-user-wa2fa");
+  if (pWa2faUserEdit) pWa2faUserEdit.checked = user.wa2faEnabled || false;
   document.getElementById("add-user-btn").textContent = "Enregistrer les modifications";
   const formCard = document.getElementById("user-form-card");
   if (formCard) { formCard.style.display = ""; formCard.scrollIntoView({ behavior: "smooth", block: "nearest" }); }
@@ -11371,15 +11374,16 @@ async function addUser() {
     allowedSiteIds = [...new Set([...selectedSiteIds, ...hiddenSiteIds])];
   }
   const waPhone = (document.getElementById("new-user-wa-phone")?.value || "").trim();
+  const wa2faEnabled = document.getElementById("new-user-wa2fa")?.checked || false;
   const customRoleId = (document.getElementById("new-user-custom-role")?.value || "").trim();
   const permChecks = document.querySelectorAll("[data-perm]");
   const permissions = {};
   permChecks.forEach((cb) => { permissions[cb.dataset.perm] = cb.checked; });
   const newUsers = editUsername
     ? users.map((user) => user.username === editUsername
-      ? { ...user, username, ...(password ? { password } : {}), role, allowedSiteIds, waPhone, customRoleId, permissions }
+      ? { ...user, username, ...(password ? { password } : {}), role, allowedSiteIds, waPhone, wa2faEnabled, customRoleId, permissions }
       : user)
-    : [...users, { username, password, role, allowedSiteIds, waPhone, customRoleId, permissions }];
+    : [...users, { username, password, role, allowedSiteIds, waPhone, wa2faEnabled, customRoleId, permissions }];
   await persistState({ auth: { users: newUsers } });
   const saved = (state.auth.users || []).find((user) => user.username === username);
   if (!saved || saved.role !== role || JSON.stringify([...(saved.allowedSiteIds || [])].sort()) !== JSON.stringify([...allowedSiteIds].sort())) {
@@ -11833,6 +11837,8 @@ function syncUserAccountPanel() {
   if (pwc) pwc.value = "";
   const waPhoneEl = document.getElementById("ua-wa-phone");
   if (waPhoneEl) waPhoneEl.value = String(me?.waPhone || "").trim();
+  const waFa2El = document.getElementById("ua-wa2fa");
+  if (waFa2El) waFa2El.checked = me?.wa2faEnabled || false;
   const twoFaHost = document.getElementById("ua-2fa-actions");
   if (twoFaHost && me) {
     twoFaHost.innerHTML = me.twoFactorEnabled
@@ -11860,6 +11866,7 @@ async function saveMyUserProfile() {
   }
   const displayName = String(document.getElementById("ua-display-name")?.value || "").trim().slice(0, 120);
   const waPhone = String(document.getElementById("ua-wa-phone")?.value || "").trim();
+  const wa2faEnabled = document.getElementById("ua-wa2fa")?.checked || false;
   const pw1 = String(document.getElementById("ua-password")?.value || "");
   const pw2 = String(document.getElementById("ua-password-confirm")?.value || "");
   if (pw1 || pw2) {
@@ -11878,6 +11885,7 @@ async function saveMyUserProfile() {
     allowedSiteIds: [...(me.allowedSiteIds || [])],
     displayName,
     waPhone,
+    wa2faEnabled,
     ...(pw1 ? { password: pw1 } : {}),
   };
   recordStaffAudit("update", "profil_utilisateur", `Profil ${me.username}`, displayName ? `Nom affiche : ${displayName}` : "Mise a jour");
@@ -18584,9 +18592,26 @@ async function disableTwoFactor(username) {
 async function handleLoginSubmit(event) {
   event.preventDefault();
   const totpSection = document.getElementById("totp-section");
+  const waOtpSection = document.getElementById("wa-otp-section");
   const errorEl = document.getElementById("login-error");
   try {
-    if (pendingPreAuthToken) {
+    if (pendingWaUsername) {
+      // Vérification code OTP WhatsApp
+      const code = document.getElementById("login-wa-otp").value.trim();
+      const session = await apiRequest("/api/2fa/wa-verify", {
+        method: "POST",
+        body: JSON.stringify({ username: pendingWaUsername, code }),
+      });
+      pendingWaUsername = null;
+      waOtpSection.classList.add("hidden");
+      document.getElementById("login-wa-otp").value = "";
+      document.querySelector("#login-form button[type=submit]").textContent = "Ouvrir le tableau de bord";
+      applySessionFieldsFromApi(session);
+      errorEl.textContent = "";
+      setAuthVisible(true);
+      await bootstrapAuthenticatedApp();
+      showToast("Connexion réussie.");
+    } else if (pendingPreAuthToken) {
       const code = document.getElementById("login-totp").value.trim();
       const session = await apiRequest(API.twoFaVerify, {
         method: "POST",
@@ -18605,7 +18630,13 @@ async function handleLoginSubmit(event) {
       const username = document.getElementById("login-username").value.trim();
       const password = document.getElementById("login-password").value;
       const result = await apiRequest(API.login, { method: "POST", body: JSON.stringify({ username, password }) });
-      if (result.needsTwoFactor) {
+      if (result.require2fa === "whatsapp") {
+        pendingWaUsername = result.username;
+        waOtpSection.classList.remove("hidden");
+        document.getElementById("login-wa-otp").focus();
+        document.querySelector("#login-form button[type=submit]").textContent = "Verifier le code WhatsApp";
+        errorEl.textContent = "";
+      } else if (result.needsTwoFactor) {
         pendingPreAuthToken = result.preAuthToken;
         totpSection.classList.remove("hidden");
         document.getElementById("login-totp").focus();
@@ -18650,10 +18681,13 @@ async function logout() {
   pdjBrowseConsultationOnly = false;
   pendingFinalizeOrderId = null;
   pendingPreAuthToken = null;
+  pendingWaUsername = null;
   qrAlertCount = 0;
   knownQrOrderIds = new Set();
   document.getElementById("totp-section").classList.add("hidden");
   document.getElementById("login-totp").value = "";
+  document.getElementById("wa-otp-section")?.classList.add("hidden");
+  document.getElementById("login-wa-otp") && (document.getElementById("login-wa-otp").value = "");
   document.querySelector("#login-form button[type=submit]").textContent = "Ouvrir le tableau de bord";
   setAuthVisible(false);
   showToast("Session fermee.");

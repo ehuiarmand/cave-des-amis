@@ -39,6 +39,12 @@
           <input id="login-totp" name="totp" type="text" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="one-time-code">
         </div>
 
+        <div id="wa-otp-section" class="hidden">
+          <label for="login-wa-otp">Code WhatsApp reçu (6 chiffres)</label>
+          <input id="login-wa-otp" name="wa_otp" type="text" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="one-time-code">
+          <p class="muted" style="font-size:0.8rem;margin-top:4px">Un code valable 15 minutes vous a été envoyé par WhatsApp.</p>
+        </div>
+
         <button type="submit" class="btn btn-primary mm-login-submit">SE CONNECTER</button>
 
         <p id="login-error" class="auth-error" aria-live="polite"></p>
@@ -1369,6 +1375,10 @@
                 <label for="ua-wa-phone">Téléphone WhatsApp</label>
                 <input id="ua-wa-phone" type="tel" placeholder="+2250700000000" autocomplete="tel">
                 <p class="muted" style="font-size:0.78rem;margin:4px 0 0;line-height:1.35">Format international : +225… · Utilisé pour les notifications (commandes, clôture, alertes stock).</p>
+                <label class="checkbox-label" style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:0.88rem;margin-top:8px">
+                  <input id="ua-wa2fa" type="checkbox" style="width:auto">
+                  <span>Recevoir un code WhatsApp à la connexion (2FA)</span>
+                </label>
               </div>
               <div class="form-group">
                 <label for="ua-password">Nouveau mot de passe</label>
@@ -1610,6 +1620,10 @@
                 <label for="new-user-wa-phone">Téléphone WhatsApp</label>
                 <input id="new-user-wa-phone" type="tel" placeholder="+2250701020304" autocomplete="tel">
                 <p class="muted" style="font-size:0.78rem;margin-top:4px;line-height:1.35">Notifications : commandes QR (serveuse), clôtures et alertes (gérant).</p>
+                <label class="checkbox-label" style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:0.88rem;margin-top:8px">
+                  <input id="new-user-wa2fa" type="checkbox" style="width:auto">
+                  <span>Authentification par code WhatsApp (à la place de l'app Authenticator)</span>
+                </label>
               </div>
             </div>
             <div id="new-user-sites-section" class="form-group" style="margin-top:12px">
@@ -2779,6 +2793,6 @@
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="./utils-shared.js?v=1"></script>
-  <script src="./app-orders.js?v=331"></script>
+  <script src="./app-orders.js?v=332"></script>
 </body>
 </html>
