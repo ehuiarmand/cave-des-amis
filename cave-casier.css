@@ -1,0 +1,118 @@
+/* ============================================================
+   <cave-casier> — styles
+   À charger avec <link rel="stylesheet" href="cave-casier.css">
+   Utilise les mêmes tokens que styles-cave-manager.css
+   ============================================================ */
+
+cave-casier {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--mm-bg, #EFE7D6);
+  border: 1px solid var(--line, rgba(28, 24, 20, 0.10));
+  border-radius: 12px;
+  padding: 14px;
+  font-family: "IBM Plex Sans", system-ui, sans-serif;
+  color: var(--mm-text, #1C1814);
+  position: relative;
+}
+cave-casier[data-statut="plein"]   { border-left: 3px solid #3F6E4A; }
+cave-casier[data-statut="partiel"] { border-left: 3px solid #B57321; }
+cave-casier[data-statut="vide"]    { border-left: 3px solid rgba(28, 24, 20, 0.22); background: var(--mm-surface, #FBF6EA); }
+
+cave-casier .cv-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+cave-casier .cv-code {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+cave-casier .cv-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  border: 1px solid transparent;
+}
+cave-casier .cv-badge[data-statut="plein"] {
+  color: #3F6E4A;
+  background: rgba(63, 110, 74, 0.10);
+  border-color: rgba(63, 110, 74, 0.25);
+}
+cave-casier .cv-badge[data-statut="partiel"] {
+  color: #B57321;
+  background: rgba(181, 115, 33, 0.10);
+  border-color: rgba(181, 115, 33, 0.25);
+}
+cave-casier .cv-badge[data-statut="vide"] {
+  color: var(--muted, #756A57);
+  background: var(--mm-surface, #FBF6EA);
+  border-color: var(--line, rgba(28, 24, 20, 0.10));
+}
+cave-casier .cv-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+cave-casier .cv-article {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-size: 17px;
+  letter-spacing: -0.01em;
+  line-height: 1;
+}
+
+cave-casier .cv-visual {
+  display: grid;
+  gap: 3px;
+  padding: 8px;
+  background: var(--mm-surface, #FBF6EA);
+  border-radius: 8px;
+  border: 1px solid var(--line, rgba(28, 24, 20, 0.10));
+}
+
+cave-casier .cv-bottle {
+  height: 12px;
+  border-radius: 2px 2px 1px 1px;
+  background: var(--line, rgba(28, 24, 20, 0.10));
+  transition: background 200ms ease;
+}
+cave-casier .cv-bottle[data-filled="true"] {
+  background: linear-gradient(180deg,
+    color-mix(in oklab, #B57321 80%, #1C1814 20%) 0%,
+    #B57321 100%);
+}
+cave-casier[data-statut="vide"] .cv-bottle {
+  background: var(--line, rgba(28, 24, 20, 0.10));
+}
+
+cave-casier .cv-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+}
+cave-casier .cv-mono {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+cave-casier .cv-loc {
+  color: var(--muted, #756A57);
+  font-size: 11px;
+}
+
+/* Grille parent recommandée */
+.cave-casiers-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 14px;
+}

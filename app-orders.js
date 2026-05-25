@@ -5178,19 +5178,6 @@ function setCasierFilter(f) {
   renderCasiers();
 }
 
-function _makeCasierBottleGrid(casier) {
-  const cap = Math.max(1, Number(casier.capacite) || 24);
-  const filled = Math.max(0, Number(casier.quantiteActuelle) || 0);
-  const cols = cap <= 12 ? 4 : 8;
-  const cellPct = `calc(${(100 / cols).toFixed(2)}% - 3px)`;
-  let cells = "";
-  for (let i = 0; i < cap; i++) {
-    const bg = i < filled ? "var(--mm-primary,#B57321)" : "rgba(28,24,20,0.10)";
-    cells += `<span style="width:${cellPct};aspect-ratio:1;border-radius:2px;background:${bg};display:inline-block"></span>`;
-  }
-  return `<div style="display:flex;flex-wrap:wrap;gap:3px;margin:10px 0 6px">${cells}</div>`;
-}
-
 function _renderPhysicalCasiersSection(allCasiers) {
   if (!allCasiers.length) return "";
   const f = _casierPhysicalFilter || "tous";
@@ -5210,31 +5197,11 @@ function _renderPhysicalCasiersSection(allCasiers) {
       : `${base};background:transparent;color:var(--muted,#756A57);border-color:var(--line,rgba(28,24,20,0.12))`;
     return `<button type="button" style="${style}" onclick="setCasierFilter('${key}')">${label} <strong>${cnt[key]}</strong></button>`;
   };
-  const badgeCss = (s) => {
-    if (s === "plein") return "background:#dcfce7;color:#166534";
-    if (s === "partiel") return "background:#fff7ed;color:#9a3412;border:1px solid #fed7aa";
-    return "background:var(--mm-bg,#EFE7D6);color:var(--muted,#756A57);border:1px solid var(--line)";
-  };
-  const cards = [...filtered].sort((a, b) => String(a.code || "").localeCompare(String(b.code || ""), "fr")).map((c) => {
-    const cap = Math.max(1, Number(c.capacite) || 24);
-    const filled = Math.max(0, Number(c.quantiteActuelle) || 0);
-    const s = (c.statut || "vide").toLowerCase();
-    const topBorder = s === "plein" ? "border-top:3px solid var(--mm-primary,#B57321)" : s === "partiel" ? "border-top:3px solid #f97316" : "";
-    return `<div style="background:var(--mm-surface,#FBF6EA);border:1px solid var(--line,rgba(28,24,20,0.10));border-radius:14px;padding:14px 16px;${topBorder}">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-        <strong style="font-size:0.92rem">${escapeHtml(c.code || "—")}</strong>
-        <span style="padding:2px 8px;border-radius:20px;font-size:0.7rem;font-weight:600;${badgeCss(s)}">&#8226; ${escapeHtml(s)}</span>
-      </div>
-      <div style="font-size:0.8rem;color:var(--muted,#756A57)">${escapeHtml(c.article || "—")}</div>
-      ${_makeCasierBottleGrid(c)}
-      <div style="display:flex;justify-content:space-between;font-size:0.8rem;margin-top:2px">
-        <strong style="color:var(--mm-text,#1C1814)">${filled}/${cap}</strong>
-        <span style="color:var(--muted,#756A57)">${escapeHtml(c.emplacement || "—")}</span>
-      </div>
-    </div>`;
-  }).join("");
+  const cards = [...filtered].sort((a, b) => String(a.code || "").localeCompare(String(b.code || ""), "fr")).map((c) =>
+    `<cave-casier code="${escapeHtml(c.code || "")}" article="${escapeHtml(c.article || "")}" capacite="${Number(c.capacite) || 24}" qte="${Math.max(0, Number(c.quantiteActuelle) || 0)}" emplacement="${escapeHtml(c.emplacement || "")}" statut="${escapeHtml((c.statut || "vide").toLowerCase())}"></cave-casier>`
+  ).join("");
   const grid = filtered.length
-    ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:14px">${cards}</div>`
+    ? `<div class="cave-casiers-grid">${cards}</div>`
     : `<p style="text-align:center;color:var(--muted,#756A57);padding:20px">Aucun casier dans cette catégorie.</p>`;
   return `<div style="margin-bottom:28px">
     <p style="font-size:0.68rem;letter-spacing:0.18em;text-transform:uppercase;color:var(--muted,#756A57);margin:0 0 2px">INVENTAIRE PHYSIQUE</p>

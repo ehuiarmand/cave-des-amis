@@ -1,0 +1,607 @@
+/* ============================================================
+   Cave Manager — styles extras
+   Couvre : badge, checklist, receipt, list, order-pad
+   ============================================================ */
+
+/* ─────────────────────────────────────────────────────────
+   <cave-badge>
+   ───────────────────────────────────────────────────────── */
+cave-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  border: 1px solid transparent;
+  white-space: nowrap;
+  font-family: "IBM Plex Sans", system-ui, sans-serif;
+  line-height: 1.4;
+}
+cave-badge .cv-bdot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+cave-badge[data-tone="neutral"]    { color: #1C1814; background: #F4EDDC; border-color: rgba(28,24,20,0.10); }
+cave-badge[data-tone="amber"]      { color: #B57321; background: rgba(181,115,33,0.12); border-color: rgba(181,115,33,0.25); }
+cave-badge[data-tone="forest"]     { color: #3F6E4A; background: rgba(63,110,74,0.12);  border-color: rgba(63,110,74,0.25); }
+cave-badge[data-tone="terracotta"] { color: #A24B2E; background: rgba(162,75,46,0.12);  border-color: rgba(162,75,46,0.25); }
+cave-badge[data-tone="claret"]     { color: #8A2B2B; background: rgba(138,43,43,0.12);  border-color: rgba(138,43,43,0.25); }
+cave-badge[data-tone="ink"]        { color: #FBF6EA; background: #1C1814; border-color: #1C1814; }
+
+/* ─────────────────────────────────────────────────────────
+   <cave-checklist>
+   ───────────────────────────────────────────────────────── */
+cave-checklist { display: block; font-family: "IBM Plex Sans", system-ui, sans-serif; }
+cave-checklist .cv-checklist { display: flex; flex-direction: column; }
+cave-checklist .cv-chk-row {
+  display: grid;
+  grid-template-columns: 22px 1fr auto;
+  gap: 14px;
+  align-items: start;
+  padding: 14px 4px;
+  border-bottom: 1px solid rgba(28,24,20,0.10);
+  cursor: pointer;
+}
+cave-checklist .cv-chk-row:last-child { border-bottom: none; }
+cave-checklist .cv-chk-row input[type="checkbox"] {
+  width: 18px; height: 18px;
+  margin-top: 2px;
+  accent-color: #B57321;
+  cursor: pointer;
+}
+cave-checklist .cv-chk-title { font-size: 14px; font-weight: 500; color: #1C1814; }
+cave-checklist .cv-chk-sub {
+  font-size: 12px;
+  color: #756A57;
+  margin-top: 4px;
+  line-height: 1.4;
+}
+cave-checklist .cv-chk-status {
+  padding-top: 2px;
+  display: inline-flex;
+  align-items: center;
+}
+cave-checklist .cv-chk-status-pending,
+cave-checklist .cv-chk-status-done {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  border: 1px solid;
+}
+cave-checklist .cv-chk-status-pending {
+  color: #756A57;
+  background: #F4EDDC;
+  border-color: rgba(28,24,20,0.10);
+}
+cave-checklist .cv-chk-status-done {
+  color: #3F6E4A;
+  background: rgba(63,110,74,0.12);
+  border-color: rgba(63,110,74,0.25);
+}
+cave-checklist .cv-chk-status-done::before {
+  content: '';
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+cave-checklist .cv-chk-row[data-checked="true"] .cv-chk-status-pending { display: none; }
+cave-checklist .cv-chk-row[data-checked="false"] .cv-chk-status-done { display: none; }
+
+/* ─────────────────────────────────────────────────────────
+   <cave-receipt>
+   ───────────────────────────────────────────────────────── */
+cave-receipt { display: block; font-family: "IBM Plex Sans", system-ui, sans-serif; }
+cave-receipt .cv-receipt-body > *:first-child {
+  margin-bottom: 14px;
+}
+cave-receipt h3, cave-receipt .cv-rcp-title {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-weight: 400;
+  font-size: 22px;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+  margin: 0;
+}
+cave-receipt .cv-rcp-eyebrow {
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: #756A57;
+  margin-bottom: 4px;
+}
+cave-receipt hr {
+  border: none;
+  border-top: 1px solid rgba(28,24,20,0.10);
+  margin: 12px 0;
+}
+cave-receipt-line { display: block; }
+cave-receipt .cv-rcp-line {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+  font-size: 13px;
+}
+cave-receipt .cv-rcp-line .cv-rcp-lbl { color: #756A57; }
+cave-receipt .cv-rcp-line .cv-rcp-val {
+  font-family: "IBM Plex Mono", monospace;
+  font-variant-numeric: tabular-nums;
+  color: #1C1814;
+}
+cave-receipt .cv-rcp-line.is-bold {
+  padding: 10px 0 6px;
+}
+cave-receipt .cv-rcp-line.is-bold .cv-rcp-lbl {
+  color: #1C1814;
+  font-weight: 500;
+}
+cave-receipt .cv-rcp-line.is-bold .cv-rcp-val {
+  font-size: 15px;
+  font-weight: 500;
+}
+cave-receipt .cv-receipt-stamp-row {
+  margin-top: 16px;
+  text-align: center;
+}
+.cv-stamp {
+  display: inline-block;
+  padding: 4px 12px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.20em;
+  text-transform: uppercase;
+  border: 1.5px solid;
+  border-radius: 4px;
+  transform: rotate(-4deg);
+  opacity: 0.88;
+}
+.cv-stamp[data-tone="claret"]     { color: #8A2B2B; border-color: #8A2B2B; }
+.cv-stamp[data-tone="forest"]     { color: #3F6E4A; border-color: #3F6E4A; }
+.cv-stamp[data-tone="amber"]      { color: #B57321; border-color: #B57321; }
+.cv-stamp[data-tone="terracotta"] { color: #A24B2E; border-color: #A24B2E; }
+.cv-stamp[data-tone="ink"]        { color: #1C1814; border-color: #1C1814; }
+
+/* ─────────────────────────────────────────────────────────
+   <cave-list>
+   ───────────────────────────────────────────────────────── */
+cave-list { display: block; font-family: "IBM Plex Sans", system-ui, sans-serif; }
+cave-list .cv-list { display: flex; flex-direction: column; }
+cave-list .cv-list-row {
+  display: grid;
+  gap: 16px;
+  align-items: center;
+  padding: 12px 4px;
+  border-bottom: 1px solid rgba(28,24,20,0.10);
+  font-size: 13px;
+  color: #1C1814;
+}
+cave-list .cv-list-row:last-child { border-bottom: none; }
+cave-list .cv-list-row:not(.cv-list-head):hover { background: #F4EDDC; }
+cave-list .cv-list-head {
+  border-bottom: 1px solid rgba(28,24,20,0.22);
+  padding-top: 0;
+  padding-bottom: 8px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: #756A57;
+}
+cave-list .cv-c-num    { text-align: right; font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; }
+cave-list .cv-c-mono   { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
+cave-list .cv-c-strong { font-weight: 500; }
+cave-list .cv-c-muted  { color: #756A57; }
+cave-list .cv-list-empty {
+  padding: 32px;
+  text-align: center;
+  color: #756A57;
+  font-size: 13px;
+  font-style: italic;
+}
+
+/* ─────────────────────────────────────────────────────────
+   <cave-order-pad>
+   ───────────────────────────────────────────────────────── */
+cave-order-pad {
+  display: block;
+  font-family: "IBM Plex Sans", system-ui, sans-serif;
+  color: #1C1814;
+}
+cave-order-pad .cv-op {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 18px;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  cave-order-pad .cv-op { grid-template-columns: 1fr; }
+}
+
+/* Catalog side */
+cave-order-pad .cv-op-catalog {
+  background: #FBF6EA;
+  border: 1px solid rgba(28,24,20,0.10);
+  border-radius: 14px;
+  padding: 18px;
+  box-shadow: 0 1px 0 rgba(28,24,20,0.04), 0 8px 24px -16px rgba(28,24,20,0.20);
+}
+cave-order-pad .cv-op-bar {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+cave-order-pad .cv-search {
+  flex: 1;
+  min-width: 200px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  background: #F4EDDC;
+  border: 1px solid rgba(28,24,20,0.10);
+  border-radius: 10px;
+}
+cave-order-pad .cv-search-icon { color: #756A57; font-size: 16px; }
+cave-order-pad .cv-search input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  padding: 10px 0;
+  font-family: inherit;
+  font-size: 13px;
+  color: #1C1814;
+  outline: none;
+}
+cave-order-pad .cv-pill-group {
+  display: flex;
+  gap: 0;
+  background: #F4EDDC;
+  border-radius: 10px;
+  padding: 3px;
+}
+cave-order-pad .cv-pill {
+  font-family: inherit;
+  border: none;
+  background: transparent;
+  padding: 7px 13px;
+  font-size: 13px;
+  border-radius: 8px;
+  cursor: pointer;
+  color: #756A57;
+}
+cave-order-pad .cv-pill.is-active {
+  background: #FBF6EA;
+  color: #1C1814;
+  box-shadow: 0 1px 0 rgba(28,24,20,0.04), 0 8px 24px -16px rgba(28,24,20,0.20);
+}
+
+cave-order-pad .cv-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid rgba(28,24,20,0.10);
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+cave-order-pad .cv-tab {
+  font-family: inherit;
+  border: none;
+  background: transparent;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: #756A57;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+cave-order-pad .cv-tab:hover { color: #1C1814; }
+cave-order-pad .cv-tab.is-active {
+  color: #1C1814;
+  border-bottom-color: #B57321;
+}
+cave-order-pad .cv-tab-count {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #F4EDDC;
+  color: #756A57;
+}
+cave-order-pad .cv-tab.is-active .cv-tab-count {
+  background: rgba(181,115,33,0.15);
+  color: #B57321;
+}
+
+cave-order-pad .cv-catalog-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+cave-order-pad .cv-prod {
+  display: grid;
+  grid-template-columns: 40px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid rgba(28,24,20,0.10);
+  border-radius: 12px;
+  background: #FBF6EA;
+  font-family: inherit;
+  cursor: pointer;
+  position: relative;
+  text-align: left;
+  transition: border-color 120ms ease, transform 120ms ease;
+}
+cave-order-pad .cv-prod:hover {
+  border-color: #B57321;
+  transform: translateY(-1px);
+}
+cave-order-pad .cv-prod-icon {
+  width: 40px; height: 40px;
+  border-radius: 10px;
+  background: #F4EDDC;
+  display: grid; place-items: center;
+  font-size: 20px;
+}
+cave-order-pad .cv-prod-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+cave-order-pad .cv-prod-name {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.2;
+  color: #1C1814;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+cave-order-pad .cv-prod-meta {
+  font-size: 11px;
+  color: #756A57;
+  margin-top: 2px;
+}
+cave-order-pad .cv-prod-add {
+  width: 26px; height: 26px;
+  border-radius: 8px;
+  background: #F4EDDC;
+  color: #1C1814;
+  display: grid; place-items: center;
+  font-size: 18px;
+  opacity: 0.55;
+  transition: all 120ms ease;
+}
+cave-order-pad .cv-prod:hover .cv-prod-add {
+  background: #B57321;
+  color: #FBF6EA;
+  opacity: 1;
+}
+cave-order-pad .cv-prod-alert {
+  position: absolute;
+  top: 8px; right: 8px;
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  background: #8A2B2B;
+  color: #FBF6EA;
+  display: grid; place-items: center;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* Cart side */
+cave-order-pad .cv-op-cart {
+  background: #FBF6EA;
+  border: 1px solid rgba(28,24,20,0.10);
+  border-radius: 14px;
+  padding: 18px;
+  box-shadow: 0 1px 0 rgba(28,24,20,0.04), 0 8px 24px -16px rgba(28,24,20,0.20);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  position: sticky;
+  top: 16px;
+}
+cave-order-pad .cv-cart-head { display: flex; justify-content: space-between; }
+cave-order-pad .cv-eyebrow {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.20em;
+  color: #756A57;
+  margin: 0 0 4px;
+}
+cave-order-pad .cv-cart-title {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-size: 24px;
+  letter-spacing: -0.01em;
+  font-weight: 400;
+  margin: 0;
+  line-height: 1.1;
+}
+cave-order-pad .cv-cart-sub {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: #756A57;
+}
+
+cave-order-pad .cv-cart-lines {
+  display: flex; flex-direction: column; gap: 8px;
+  max-height: 360px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+cave-order-pad .cv-cart-line {
+  display: grid;
+  grid-template-columns: 28px 1fr auto auto 22px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border-radius: 10px;
+  background: #F4EDDC;
+}
+cave-order-pad .cv-cart-emoji {
+  width: 28px; height: 28px;
+  display: grid; place-items: center;
+  font-size: 16px;
+  background: #FBF6EA;
+  border-radius: 8px;
+}
+cave-order-pad .cv-cart-info { display: flex; flex-direction: column; min-width: 0; }
+cave-order-pad .cv-cart-name {
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+cave-order-pad .cv-cart-unit { font-size: 11px; color: #756A57; font-family: "IBM Plex Mono", monospace; }
+cave-order-pad .cv-qty {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: #FBF6EA;
+  border-radius: 8px;
+  padding: 2px;
+}
+cave-order-pad .cv-qty button {
+  font-family: inherit;
+  background: transparent;
+  border: none;
+  width: 22px; height: 22px;
+  display: grid; place-items: center;
+  border-radius: 6px;
+  cursor: pointer;
+  color: #1C1814;
+  font-size: 14px;
+}
+cave-order-pad .cv-qty button:hover { background: #F4EDDC; }
+cave-order-pad .cv-qty span { min-width: 22px; text-align: center; font-size: 12px; font-family: "IBM Plex Mono", monospace; }
+cave-order-pad .cv-cart-amt {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+cave-order-pad .cv-cart-x {
+  background: transparent;
+  border: none;
+  width: 22px; height: 22px;
+  border-radius: 6px;
+  display: grid; place-items: center;
+  cursor: pointer;
+  color: #756A57;
+  font-size: 16px;
+}
+cave-order-pad .cv-cart-x:hover { background: #8A2B2B; color: #FBF6EA; }
+
+cave-order-pad .cv-cart-empty {
+  text-align: center;
+  padding: 32px 20px;
+  color: #756A57;
+}
+cave-order-pad .cv-cart-empty-mark {
+  width: 48px; height: 48px;
+  border: 1.5px dashed rgba(28,24,20,0.22);
+  border-radius: 12px;
+  margin: 0 auto 12px;
+}
+cave-order-pad .cv-cart-empty h4 {
+  color: #1C1814;
+  font-size: 15px;
+  font-family: inherit;
+  font-weight: 500;
+  margin: 0;
+}
+cave-order-pad .cv-cart-empty p {
+  font-size: 12px;
+  margin: 4px 0 0;
+}
+
+cave-order-pad .cv-cart-totals {
+  border-top: 1px solid rgba(28,24,20,0.10);
+  padding-top: 12px;
+}
+cave-order-pad .cv-cart-total-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 6px 0;
+}
+cave-order-pad .cv-cart-total-row span { font-size: 13px; }
+cave-order-pad .cv-cart-total-row strong {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 18px;
+  font-weight: 500;
+}
+
+cave-order-pad .cv-cart-pay { border-top: 1px solid rgba(28,24,20,0.10); padding-top: 12px; }
+cave-order-pad .cv-pay-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-top: 8px;
+}
+cave-order-pad .cv-pay {
+  font-family: inherit;
+  background: #FBF6EA;
+  border: 1px solid rgba(28,24,20,0.10);
+  border-radius: 8px;
+  padding: 9px;
+  font-size: 12px;
+  cursor: pointer;
+  color: #1C1814;
+  text-align: center;
+  transition: all 120ms ease;
+}
+cave-order-pad .cv-pay:hover { background: #F4EDDC; }
+cave-order-pad .cv-pay.is-active {
+  background: #1C1814;
+  color: #FBF6EA;
+  border-color: #1C1814;
+}
+
+cave-order-pad .cv-cart-cta-row { display: flex; gap: 8px; }
+cave-order-pad .cv-btn {
+  flex: 1;
+  font-family: inherit;
+  border-radius: 10px;
+  padding: 12px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: transform 120ms ease, background 120ms ease;
+}
+cave-order-pad .cv-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+cave-order-pad .cv-btn-outline {
+  background: transparent;
+  border: 1px solid rgba(28,24,20,0.22);
+  color: #1C1814;
+}
+cave-order-pad .cv-btn-outline:hover { background: #F4EDDC; }
+cave-order-pad .cv-btn-primary {
+  background: #B57321;
+  color: #FBF6EA;
+  border: 1px solid #B57321;
+}
+cave-order-pad .cv-btn-primary:hover:not(:disabled) {
+  background: #8E5917;
+  transform: translateY(-1px);
+}
+
+.cv-empty {
+  padding: 32px;
+  text-align: center;
+  color: #756A57;
+  font-size: 13px;
+  font-style: italic;
+}

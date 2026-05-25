@@ -1,0 +1,222 @@
+/* ============================================================
+   Cave Manager — styles des composants vanilla
+   À charger avec <link rel="stylesheet" href="cave-components.css">
+   ============================================================ */
+
+/* ─────────────────────────────────────────────────────────────
+   <cave-kpi-hero>
+   ───────────────────────────────────────────────────────────── */
+cave-kpi-hero {
+  display: block;
+  font-family: "IBM Plex Sans", system-ui, sans-serif;
+}
+cave-kpi-hero .cv-kpi-hero {
+  background: #1C1814;
+  color: #FBF6EA;
+  border-radius: 14px;
+  padding: 22px 24px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: 0 1px 0 rgba(28,24,20,0.04),
+              0 8px 24px -16px rgba(28,24,20,0.30);
+}
+cave-kpi-hero .cv-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: rgba(251,246,234,0.65);
+}
+cave-kpi-hero .cv-value {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-size: 54px;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+cave-kpi-hero .cv-sub {
+  font-size: 13px;
+  color: rgba(251,246,234,0.65);
+  margin-top: 2px;
+}
+cave-kpi-hero .cv-delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12px;
+  margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+}
+cave-kpi-hero .cv-delta.pos { color: #B5D6A3; }
+cave-kpi-hero .cv-delta.neg { color: #E6A48F; }
+cave-kpi-hero .cv-delta-arrow { font-size: 14px; }
+cave-kpi-hero .cv-delta-label {
+  color: rgba(251,246,234,0.50);
+  margin-left: 4px;
+}
+cave-kpi-hero .cv-progress { margin-top: 14px; }
+cave-kpi-hero .cv-progress-track {
+  height: 6px;
+  border-radius: 99px;
+  background: rgba(251,246,234,0.16);
+  overflow: hidden;
+}
+cave-kpi-hero .cv-progress-fill {
+  height: 100%;
+  background: #D9A55B;
+  border-radius: 99px;
+  transition: width 600ms cubic-bezier(.2,.8,.2,1);
+}
+cave-kpi-hero .cv-progress-label {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  color: rgba(251,246,234,0.65);
+  margin-top: 6px;
+}
+
+/* Variante claire si on préfère carte papier */
+cave-kpi-hero[data-variant="paper"] .cv-kpi-hero {
+  background: #FBF6EA;
+  color: #1C1814;
+  border: 1px solid rgba(28,24,20,0.10);
+}
+cave-kpi-hero[data-variant="paper"] .cv-label,
+cave-kpi-hero[data-variant="paper"] .cv-sub,
+cave-kpi-hero[data-variant="paper"] .cv-progress-label,
+cave-kpi-hero[data-variant="paper"] .cv-delta-label {
+  color: #756A57;
+}
+cave-kpi-hero[data-variant="paper"] .cv-delta.pos { color: #3F6E4A; }
+cave-kpi-hero[data-variant="paper"] .cv-delta.neg { color: #8A2B2B; }
+cave-kpi-hero[data-variant="paper"] .cv-progress-track {
+  background: rgba(28,24,20,0.08);
+}
+cave-kpi-hero[data-variant="paper"] .cv-progress-fill {
+  background: #B57321;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   <cave-bar-chart>
+   ───────────────────────────────────────────────────────────── */
+cave-bar-chart { display: block; }
+cave-bar-chart .cv-bar-chart {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 6px;
+  align-items: end;
+  padding: 10px 4px 0;
+}
+cave-bar-chart .cv-bar-col {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: stretch;
+  position: relative;
+  height: 100%;
+}
+cave-bar-chart .cv-bar {
+  background: linear-gradient(180deg, #B57321 0%, #8E5917 100%);
+  border-radius: 4px 4px 0 0;
+  min-height: 2px;
+  transition: height 600ms cubic-bezier(.2,.8,.2,1), background 120ms ease;
+}
+cave-bar-chart .cv-bar-col:hover .cv-bar {
+  background: #1C1814;
+}
+cave-bar-chart .cv-bar-label {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  text-align: center;
+  margin-top: 6px;
+  color: #756A57;
+}
+cave-bar-chart .cv-bar-tooltip {
+  position: absolute;
+  top: -26px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1C1814;
+  color: #FBF6EA;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  padding: 3px 7px;
+  border-radius: 4px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+cave-bar-chart .cv-bar-col:hover .cv-bar-tooltip { opacity: 1; }
+
+/* ─────────────────────────────────────────────────────────────
+   <cave-payment-bar>
+   ───────────────────────────────────────────────────────────── */
+cave-payment-bar { display: block; font-family: "IBM Plex Sans", system-ui, sans-serif; }
+cave-payment-bar .cv-paybar {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+cave-payment-bar .cv-paybar-track {
+  height: 14px;
+  border-radius: 99px;
+  background: rgba(28,24,20,0.08);
+  overflow: hidden;
+  display: flex;
+}
+cave-payment-bar .cv-seg { height: 100%; transition: width 400ms ease; }
+cave-payment-bar .cv-seg[data-color="amber"]      { background: #B57321; }
+cave-payment-bar .cv-seg[data-color="forest"]     { background: #3F6E4A; }
+cave-payment-bar .cv-seg[data-color="terracotta"] { background: #A24B2E; }
+cave-payment-bar .cv-seg[data-color="ink"]        { background: #1C1814; }
+cave-payment-bar .cv-seg[data-color="claret"]     { background: #8A2B2B; }
+
+cave-payment-bar .cv-paybar-legend {
+  list-style: none;
+  margin: 0; padding: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 24px;
+}
+cave-payment-bar .cv-paybar-legend li {
+  display: grid;
+  grid-template-columns: 12px 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: #1C1814;
+}
+cave-payment-bar .cv-swatch {
+  width: 10px; height: 10px;
+  border-radius: 3px;
+}
+cave-payment-bar .cv-swatch[data-color="amber"]      { background: #B57321; }
+cave-payment-bar .cv-swatch[data-color="forest"]     { background: #3F6E4A; }
+cave-payment-bar .cv-swatch[data-color="terracotta"] { background: #A24B2E; }
+cave-payment-bar .cv-swatch[data-color="ink"]        { background: #1C1814; }
+cave-payment-bar .cv-swatch[data-color="claret"]     { background: #8A2B2B; }
+cave-payment-bar .cv-mode { color: #1C1814; }
+cave-payment-bar .cv-amt {
+  font-family: "IBM Plex Mono", monospace;
+  font-variant-numeric: tabular-nums;
+}
+cave-payment-bar .cv-pct {
+  font-family: "IBM Plex Mono", monospace;
+  color: #756A57;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 600px) {
+  cave-payment-bar .cv-paybar-legend { grid-template-columns: 1fr; }
+}
+
+/* Empty fallback partagé */
+.cv-empty {
+  padding: 32px;
+  text-align: center;
+  color: #756A57;
+  font-size: 13px;
+  font-style: italic;
+}
