@@ -15562,6 +15562,31 @@ async function saveCharge() {
   }
 }
 
+async function testWhatsappNotification() {
+  const feedback = document.getElementById("wa-test-feedback");
+  const btn = document.getElementById("wa-test-btn");
+  const rawPhones = (document.getElementById("p-wa-phones")?.value || "").trim();
+  const phone = rawPhones.split(",")[0].trim();
+  if (!phone) {
+    if (feedback) { feedback.textContent = "Renseignez au moins un numéro WhatsApp ci-dessus."; feedback.style.color = "#e53935"; }
+    return;
+  }
+  if (btn) { btn.disabled = true; btn.textContent = "Envoi…"; }
+  if (feedback) { feedback.textContent = ""; feedback.style.color = ""; }
+  try {
+    const res = await apiRequest("/api/wa-test", { method: "POST", body: JSON.stringify({ phone }) });
+    if (res?.ok) {
+      if (feedback) { feedback.textContent = `✅ Message envoyé à ${res.to || phone}`; feedback.style.color = "#2e7d32"; }
+    } else {
+      if (feedback) { feedback.textContent = `Erreur : ${res?.error || "réponse inattendue"}` ; feedback.style.color = "#e53935"; }
+    }
+  } catch (err) {
+    if (feedback) { feedback.textContent = `Erreur : ${err?.message || err}`; feedback.style.color = "#e53935"; }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "Envoyer un message test"; }
+  }
+}
+
 async function saveParams() {
   const site = currentSite();
   if (!site) { showToast("Erreur : maquis introuvable. Rechargez la page."); return; }
@@ -19319,6 +19344,7 @@ document.getElementById("fab-btn").addEventListener("click", () => {
   document.getElementById("s-price-location-value").addEventListener("input", commitStockPriceInput);
   document.getElementById("save-charge-btn").addEventListener("click", () => saveCharge().catch(handleApiError));
   document.getElementById("save-params-btn").addEventListener("click", () => saveParams().catch(handleApiError));
+  document.getElementById("wa-test-btn")?.addEventListener("click", () => testWhatsappNotification().catch(handleApiError));
   document.getElementById("save-user-profile-btn")?.addEventListener("click", () => saveMyUserProfile().catch(handleApiError));
   document.getElementById("print-sales-history-btn").addEventListener("click", printSalesHistory);
   document.getElementById("print-srv-hist-btn")?.addEventListener("click", printServeuseSalesHistory);

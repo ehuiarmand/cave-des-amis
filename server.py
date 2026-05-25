@@ -4503,6 +4503,25 @@ class AppHandler(BaseHTTPRequestHandler):
             self.send_json(HTTPStatus.OK, payload)
             return
 
+        if post_path == "/api/wa-test":
+            session = self.require_session()
+            if session is None:
+                return
+            if not self.require_csrf(session):
+                return
+            body = self.read_json() or {}
+            phone = str(body.get("phone", "")).strip()
+            if not phone:
+                self.send_json(HTTPStatus.BAD_REQUEST, {"error": "Numéro de téléphone requis."})
+                return
+            try:
+                _whatsapp_send(phone, "[Cave des Amis] ✅ Test de notification WhatsApp réussi. Le bot est opérationnel.")
+                audit_log("wa_test", {"ip": self.client_ip(), "username": str(session.get("username", "")), "to": phone})
+                self.send_json(HTTPStatus.OK, {"ok": True, "to": phone})
+            except Exception as ex:
+                self.send_json(HTTPStatus.BAD_REQUEST, {"error": str(ex)})
+            return
+
         if post_path.startswith("/api"):
             self.send_json(HTTPStatus.NOT_FOUND, {"error": "Route API introuvable. Verifiez que la derniere version du serveur est deployee."})
             return
