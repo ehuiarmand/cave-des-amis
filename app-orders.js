@@ -17607,26 +17607,39 @@ async function syncCasiersManquants(opts = {}) {
   if (!state.nextId) state.nextId = {};
   if (!state.nextId.casier) state.nextId.casier = 1;
   const eligible = recordsForSite(state.stock).filter((item) => lotType(item) !== "unite");
-  let changed = 0;
   const now = new Date().toISOString();
+
+  // Calcul de ce que les casiers devraient contenir
+  const target = new Map();
   eligible.forEach((item) => {
-    const cap = Math.max(1, caseSize(item));
-    const stockBtl = Math.max(0, stockActuel(item));
-    const articleKey = String(item.article || "").toLowerCase().trim();
-    const btlInCasiers = state.casiers.filter((c) =>
-      rowMatchesSite(c, siteId, multiSiteActive()) &&
-      String(c.article || "").toLowerCase().trim() === articleKey
-    ).reduce((s, c) => s + Math.max(0, Number(c.quantiteActuelle) || 0), 0);
-    if (btlInCasiers === stockBtl) return;
-    // Réconciliation : supprimer les casiers de cet article et recréer depuis le stock
-    state.casiers = state.casiers.filter((c) =>
-      !(rowMatchesSite(c, siteId, multiSiteActive()) &&
-        String(c.article || "").toLowerCase().trim() === articleKey)
-    );
-    changed++;
-    if (stockBtl <= 0) return;
-    const fullCount = Math.floor(stockBtl / cap);
-    const remainder = stockBtl % cap;
+    const btl = Math.max(0, stockActuel(item));
+    if (btl > 0) target.set(String(item.article || "").toLowerCase().trim(), { item, btl, cap: Math.max(1, caseSize(item)) });
+  });
+
+  // Calcul de ce que les casiers contiennent actuellement pour ce site
+  const current = new Map();
+  state.casiers.filter((c) => rowMatchesSite(c, siteId, multiSiteActive())).forEach((c) => {
+    const k = String(c.article || "").toLowerCase().trim();
+    current.set(k, (current.get(k) || 0) + Math.max(0, Number(c.quantiteActuelle) || 0));
+  });
+
+  // Vérifie si tout est déjà synchronisé
+  let inSync = target.size === current.size;
+  if (inSync) {
+    for (const [k, { btl }] of target) {
+      if ((current.get(k) || 0) !== btl) { inSync = false; break; }
+    }
+  }
+  if (inSync) {
+    if (!opts.silent) showToast("Les casiers sont déjà à jour avec le stock.");
+    return 0;
+  }
+
+  // Supprime TOUS les casiers du site et recrée depuis le stock
+  state.casiers = state.casiers.filter((c) => !rowMatchesSite(c, siteId, multiSiteActive()));
+  target.forEach(({ item, btl, cap }) => {
+    const fullCount = Math.floor(btl / cap);
+    const remainder = btl % cap;
     for (let i = 0; i < fullCount; i++) {
       const c = { id: state.nextId.casier++, siteId, code: nextCasierCode(), article: item.article,
         capacite: cap, quantiteActuelle: cap, bouteillesVides: 0,
@@ -17642,19 +17655,15 @@ async function syncCasiersManquants(opts = {}) {
       state.casiers.push(c);
     }
   });
-  if (changed > 0) {
-    lsSaveCasiers();
-    try {
-      await persistStatePatch({ casiers: state.casiers, nextId: state.nextId });
-    } catch (e) { lsSaveCasiers(); }
-    if (!opts.silent) {
-      renderCasiers();
-      showToast(`Casiers synchronisés (${changed} article(s) ajusté(s)).`);
-    }
-  } else if (!opts.silent) {
-    showToast("Les casiers sont déjà à jour avec le stock.");
+  lsSaveCasiers();
+  try {
+    await persistStatePatch({ casiers: state.casiers, nextId: state.nextId });
+  } catch (e) { lsSaveCasiers(); }
+  if (!opts.silent) {
+    renderCasiers();
+    showToast("Casiers synchronisés avec le stock.");
   }
-  return changed;
+  return 1;
 }
 
 async function syncCasiersFromStockEtVentes() {
