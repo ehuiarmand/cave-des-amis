@@ -5234,15 +5234,15 @@ def main() -> None:
         raise OSError(message)
 
     _start_auto_cloture_thread()
-    print(f"Maquis Manager server running on http://127.0.0.1:{bound_port}")
-    print(f"Storage mode: {STORAGE_MODE}")
-    print(f"Sauvegardes automatiques dans {BACKUP_DIR} (garder jusqu'a {BACKUP_KEEP_COUNT} fichiers par type)")
+    print(f"Maquis Manager server running on http://127.0.0.1:{bound_port}", flush=True)
+    print(f"Storage mode: {STORAGE_MODE}", flush=True)
+    print(f"Sauvegardes automatiques dans {BACKUP_DIR} (garder jusqu'a {BACKUP_KEEP_COUNT} fichiers par type)", flush=True)
     _wa_phone_id = os.environ.get("WHATSAPP_PHONE_NUMBER_ID", "").strip()
     _wa_token = os.environ.get("WHATSAPP_ACCESS_TOKEN", "").strip()
     if _wa_phone_id and _wa_token:
-        print(f"\033[92mWhatsApp: ACTIF (Phone ID={_wa_phone_id})\033[0m")
+        print(f"WhatsApp: ACTIF (Phone ID={_wa_phone_id})", flush=True)
     else:
-        print("\033[93mWhatsApp: NON CONFIGURE - demarrer via lancer.bat pour activer les notifications\033[0m")
+        print("WhatsApp: NON CONFIGURE - demarrer via lancer.bat pour activer les notifications", flush=True)
     try:
         hostname = socket.gethostname()
         lan_ip = socket.gethostbyname(hostname)
