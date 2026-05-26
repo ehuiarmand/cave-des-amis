@@ -11832,15 +11832,20 @@ function loadParamsForm() {
   if (pSmsQr) pSmsQr.value = site?.smsQrAlert || "";
   const pWaPhones = document.getElementById("p-wa-phones");
   if (pWaPhones) pWaPhones.value = site?.waNotifyPhones || "";
-  const waEvents = Array.isArray(site?.waEvents) ? site.waEvents : [];
+  // Préserver l'état UI si le site côté serveur n'a pas encore de champ `waEvents`
   const pWaEvCommande = document.getElementById("p-wa-ev-commande");
-  if (pWaEvCommande) pWaEvCommande.checked = waEvents.includes("commande_qr");
   const pWaEvFinService = document.getElementById("p-wa-ev-fin-service");
-  if (pWaEvFinService) pWaEvFinService.checked = waEvents.includes("fin_service");
   const pWaEvCloture = document.getElementById("p-wa-ev-cloture");
-  if (pWaEvCloture) pWaEvCloture.checked = waEvents.includes("cloture_journee");
   const pWaEvStock = document.getElementById("p-wa-ev-stock");
-  if (pWaEvStock) pWaEvStock.checked = waEvents.includes("alerte_stock");
+  if (Object.prototype.hasOwnProperty.call(site || {}, "waEvents")) {
+    const waEvents = Array.isArray(site?.waEvents) ? site.waEvents : [];
+    if (pWaEvCommande) pWaEvCommande.checked = waEvents.includes("commande_qr");
+    if (pWaEvFinService) pWaEvFinService.checked = waEvents.includes("fin_service");
+    if (pWaEvCloture) pWaEvCloture.checked = waEvents.includes("cloture_journee");
+    if (pWaEvStock) pWaEvStock.checked = waEvents.includes("alerte_stock");
+  } else {
+    // site sans propriété waEvents connue : ne pas toucher les cases (préserver choix utilisateur)
+  }
   const pSingleEnabled = document.getElementById("p-single-br-enabled");
   const pSingleName = document.getElementById("p-single-br-name");
   if (pSingleEnabled) pSingleEnabled.checked = Boolean(site?.singleBreweryOnly);
@@ -15694,7 +15699,8 @@ async function saveParams() {
   try {
     await persistState({ sites: updatedSites, categories: cleanCategories });
     try { populateCategorySelects(); } catch (e) { console.error(e); }
-    try { loadParamsForm(); } catch (e) { console.error(e); }
+    // Ne pas forcer un rechargement immédiat du formulaire : laisser la fusion d'état
+    // côté client/server mettre à jour `state` puis rafraîchir l'UI de manière contrôlée.
     try { renderTopbar(); renderSiteSwitcher(); renderHero(); } catch (e) { console.error(e); }
     // Recalcule le timer si l'heure de cloture automatique a change
     try { startAutoClotureSchedule(); } catch (e) { console.error(e); }
@@ -17607,6 +17613,7 @@ async function syncCasiersManquants(opts = {}) {
   if (!state.nextId) state.nextId = {};
   if (!state.nextId.casier) state.nextId.casier = 1;
   const eligible = recordsForSite(state.stock).filter((item) => lotType(item) === "casier");
+  if (!eligible.length) return 0; // stock pas encore chargé — ne rien effacer
   const now = new Date().toISOString();
 
   // Calcul de ce que les casiers devraient contenir
