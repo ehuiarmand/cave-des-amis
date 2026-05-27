@@ -5279,10 +5279,10 @@ def _server_auto_close_site(site_id: str, d_str: str) -> None:
                 if v.get("article") == item.get("article")
             )
             entrees_today = sum(
-                float(line.get("qty") or 0)
+                round(float(line.get("cases") or 0) * float(line.get("caseSize") or 0))
                 for po in po_recues_jour
                 for line in (po.get("lines") or [])
-                if str(line.get("article", "")) == str(item.get("article", ""))
+                if str(line.get("article", "")).lower() == str(item.get("article", "")).lower()
             )
             expected_remaining = max(0.0, stock_at_open + entrees_today - sorties_today)
             counted = frigo + reserve

@@ -7456,8 +7456,8 @@ function todayEntreesFromPOForArticle(article, dateStr, openedAt) {
     })
     .reduce((sum, po) =>
       sum + (po.lines || [])
-        .filter((l) => l.article === article)
-        .reduce((s, l) => s + (Number(l.qty) || 0), 0), 0);
+        .filter((l) => String(l.article || "").toLowerCase() === String(article || "").toLowerCase())
+        .reduce((s, l) => s + Math.round((Number(l.cases) || 0) * (Number(l.caseSize) || 0)), 0), 0);
 }
 
 /** Résumé lecture seule d'une fiche de clôture (serveuse ou gérant hors correction administrateur). */
