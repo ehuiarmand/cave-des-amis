@@ -331,16 +331,40 @@ textarea { font: inherit; }
   color: var(--mm-text);
 }
 
+.sidebar-nav-wrap {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+.sidebar-nav-wrap::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 36px;
+  background: linear-gradient(to bottom, transparent, var(--mm-surface));
+  pointer-events: none;
+  border-radius: 0 0 4px 4px;
+}
+
 .sidebar-nav {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  flex: 1;
-  min-height: 0;
+  height: 100%;
   overflow-y: auto;
-  scrollbar-width: none;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+  padding-right: 2px;
+  padding-bottom: 24px;
 }
-.sidebar-nav::-webkit-scrollbar { display: none; }
+.sidebar-nav::-webkit-scrollbar { width: 3px; }
+.sidebar-nav::-webkit-scrollbar-track { background: transparent; }
+.sidebar-nav::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 3px;
+}
 
 .sidebar-session {
   display: flex;
