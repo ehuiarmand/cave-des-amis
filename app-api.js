@@ -180,11 +180,11 @@ function renderHero() {
     params: "Pilotez votre espace de travail et votre acces.",
   };
   const copies = {
-    home: "Les donnees sont chargees depuis le serveur et protegees par une session active.",
-    ventes: "Ajoutez une vente, filtrez par categorie et gardez un historique propre.",
-    stock: "Le stock est centralise cote serveur, avec alertes visibles pour l'equipe.",
-    charges: "Les depenses sont enregistrees dans l'API pour eviter les pertes de donnees locales.",
-    params: "Changez le profil du bar et les identifiants admin depuis un seul ecran.",
+    home: "Les données sont chargées depuis le serveur et protégées par une session active.",
+    ventes: "Ajoutez une vente, filtrez par catégorie et gardez un historique propre.",
+    stock: "Le stock est centralisé côté serveur, avec alertes visibles pour l'équipe.",
+    charges: "Les dépenses sont enregistrées dans l'API pour éviter les pertes de données locales.",
+    params: "Changez le profil du bar et les identifiants admin depuis un seul écran.",
   };
   document.getElementById("hero-title").textContent = titles[currentPage];
   document.getElementById("hero-copy").textContent = copies[currentPage];
@@ -489,7 +489,7 @@ async function saveParams() {
   sessionUser = username;
   renderTopbar();
   renderHero();
-  showToast("Parametres sauvegardes.");
+  showToast("Paramètres sauvegardés.");
 }
 
 function exportData() {

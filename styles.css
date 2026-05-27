@@ -3331,3 +3331,68 @@ textarea { font: inherit; }
     margin: 8px 0;
   }
 }
+
+/* ── Modale re-auth (confirmation de mot de passe) ── */
+.reauth-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  padding: 20px;
+  backdrop-filter: blur(2px);
+}
+.reauth-dialog {
+  background: var(--mm-surface);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  box-shadow: 0 24px 64px rgba(0,0,0,0.28);
+  padding: 28px 28px 24px;
+  width: min(420px, 100%);
+}
+.reauth-title {
+  margin: 0 0 6px;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--mm-text);
+}
+.reauth-desc {
+  margin: 0 0 18px;
+  font-size: 0.88rem;
+  color: var(--mm-text-secondary, #666);
+}
+.reauth-field label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--mm-text-secondary, #666);
+  margin-bottom: 6px;
+}
+.reauth-field input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--mm-bg);
+  color: var(--mm-text);
+  font-size: 1rem;
+}
+.reauth-field input:focus {
+  outline: none;
+  border-color: var(--mm-primary, #B57321);
+  box-shadow: 0 0 0 3px rgba(181,115,33,0.18);
+}
+.reauth-error {
+  margin-top: 8px;
+  font-size: 0.82rem;
+  color: var(--red, #c0392b);
+}
+.reauth-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 20px;
+}

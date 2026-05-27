@@ -2023,6 +2023,57 @@ async function apiRequest(url, options = {}) {
   return payload;
 }
 
+async function requireReauth() {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "reauth-overlay";
+    overlay.innerHTML = `
+      <div class="reauth-dialog">
+        <h3 class="reauth-title">Confirmer l'identité</h3>
+        <p class="reauth-desc">Cette action est irréversible. Entrez votre mot de passe pour continuer.</p>
+        <div class="reauth-field">
+          <label for="reauth-pw">Mot de passe</label>
+          <input id="reauth-pw" type="password" autocomplete="current-password" placeholder="••••••••">
+        </div>
+        <div class="reauth-error" id="reauth-error" style="display:none"></div>
+        <div class="reauth-actions">
+          <button class="btn btn-outline" id="reauth-cancel">Annuler</button>
+          <button class="btn btn-danger" id="reauth-confirm">Confirmer</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const pwInput = overlay.querySelector("#reauth-pw");
+    const errEl   = overlay.querySelector("#reauth-error");
+    const confirmBtn = overlay.querySelector("#reauth-confirm");
+    const cancelBtn  = overlay.querySelector("#reauth-cancel");
+    requestAnimationFrame(() => pwInput.focus());
+
+    async function attempt() {
+      const password = pwInput.value;
+      if (!password) { errEl.textContent = "Mot de passe requis."; errEl.style.display = ""; return; }
+      confirmBtn.disabled = true;
+      confirmBtn.textContent = "Vérification…";
+      try {
+        const resp = await apiRequest("/api/reauth", { method: "POST", body: JSON.stringify({ password }) });
+        overlay.remove();
+        resolve(resp.reauthToken);
+      } catch (err) {
+        errEl.textContent = err.message || "Mot de passe incorrect.";
+        errEl.style.display = "";
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = "Confirmer";
+        pwInput.value = "";
+        pwInput.focus();
+      }
+    }
+
+    confirmBtn.addEventListener("click", attempt);
+    pwInput.addEventListener("keydown", (e) => { if (e.key === "Enter") attempt(); });
+    cancelBtn.addEventListener("click", () => { overlay.remove(); resolve(null); });
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) { overlay.remove(); resolve(null); } });
+  });
+}
+
 function showToast(message) {
   const toast = document.getElementById("toast");
   toast.textContent = message;
@@ -5010,7 +5061,7 @@ function renderTopbar() {
         : (eff || "utilisateur");
   const badge = document.getElementById("role-badge");
   badge.textContent = roleLabel;
-  badge.title = `Compte : ${sessionUserDisplayLabel() || "—"} (${sessionUser || "—"}). Role effectif : ${roleLabel}. Les actions sensibles sont verifiees cote serveur selon ce role et les maquis autorises.`;
+  badge.title = `Compte : ${sessionUserDisplayLabel() || "—"} (${sessionUser || "—"}). Rôle effectif : ${roleLabel}. Les actions sensibles sont vérifiées côté serveur selon ce rôle et les maquis autorisés.`;
   syncSiteSwitcherDetailTitle();
 }
 
@@ -7836,8 +7887,8 @@ function renderDashboard() {
   renderBreakdown("charges-cat-chart", chargesByCat, chargesTotal, "Aucune charge enregistree.");
   renderHome2FAAlert();
   const stockAlertRuleHtml = stockAlertInclusiveSeuil(site)
-    ? `<p class="muted" style="font-size:0.78rem;margin:0 0 10px;line-height:1.35">Regle alertes pour ce maquis : le stock (bouteilles) est signale lorsqu'il est <strong>inferieur ou egal</strong> au seuil minimum de l'article (option activee dans Parametres &gt; Profil).</p>`
-    : `<p class="muted" style="font-size:0.78rem;margin:0 0 10px;line-height:1.35">Regle alertes pour ce maquis : le stock (bouteilles) est signale lorsqu'il est <strong>strictement inferieur</strong> au seuil minimum. Cochez « Alerter des le seuil atteint » dans Parametres &gt; Profil pour alerter des que le stock atteint le seuil (egalite incluse).</p>`;
+    ? `<p class="muted" style="font-size:0.78rem;margin:0 0 10px;line-height:1.35">Règle alertes pour ce maquis : le stock (bouteilles) est signalé lorsqu'il est <strong>inférieur ou égal</strong> au seuil minimum de l'article (option activée dans Paramètres &gt; Profil).</p>`
+    : `<p class="muted" style="font-size:0.78rem;margin:0 0 10px;line-height:1.35">Règle alertes pour ce maquis : le stock (bouteilles) est signalé lorsqu'il est <strong>strictement inférieur</strong> au seuil minimum. Cochez « Alerter dès le seuil atteint » dans Paramètres &gt; Profil pour alerter dès que le stock atteint le seuil (égalité incluse).</p>`;
   const alerts = stockAlertItemsForDashboard();
   document.getElementById("stock-alerts").innerHTML = stockAlertRuleHtml + (alerts.length
     ? `<div class="stock-alerts-toolbar">
@@ -10552,7 +10603,7 @@ async function confirmSupplement() {
   const paid = inputs.reduce((s, i) => s + i.amount, 0);
   if (!inputs.length) { showToast("Renseignez au moins un montant."); return; }
   if (Math.round(paid) !== Math.round(diff)) {
-    showToast(`Le total saisi (${fmt(paid)} FCFA) doit etre egal a ${fmt(diff)} FCFA.`);
+    showToast(`Le total saisi (${fmt(paid)} FCFA) doit être égal à ${fmt(diff)} FCFA.`);
     return;
   }
   const creditName = document.getElementById("supp-credit-name").value.trim();
@@ -11089,7 +11140,7 @@ function roleLabel(role, username = "") {
   if (String(username || "").trim().toLowerCase() === "admin") return "Super administrateur";
   if (role === "superadmin") return "Super administrateur";
   if (role === "admin") return "Administrateur de maquis";
-  if (role === "manager") return "Gerant";
+  if (role === "manager") return "Gérant";
   return "Serveuse";
 }
 
@@ -13028,10 +13079,13 @@ async function persistState(overrides = {}) {
   const body = buildStatePutBody(overrides);
   const isFullSave = !Object.keys(overrides || {}).length;
   const patchedKeys = isFullSave ? null : patchedKeysFromPutBody(body);
+  const opId = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const incoming = await apiRequest(API.state, {
     method: "PUT",
     body: JSON.stringify(body),
+    headers: { "X-Op-Id": opId },
   });
+  if (incoming?.idempotent) return;
   state = mergeStateFromServerResponse(incoming, prev, patchedKeys);
   applyPersistStateResponseExtras(overrides, _stockChecks);
 }
@@ -13056,10 +13110,13 @@ async function persistStatePatch(patch) {
     patch.activeSiteId !== undefined ? patch : { activeSiteId: state.activeSiteId, ...patch },
   );
   const patchedKeys = patchedKeysFromPutBody(body);
+  const opId = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const incoming = await apiRequest(API.state, {
     method: "PUT",
     body: JSON.stringify(body),
+    headers: { "X-Op-Id": opId },
   });
+  if (incoming?.idempotent) return;
   state = mergeStateFromServerResponse(incoming, prev, patchedKeys);
   if (patchedKeys.has("commandes")) {
     pruneFinalizedCommandesFromState();
@@ -14380,7 +14437,7 @@ function readPaymentMix(total) {
     return { error: "Renseignez au moins un montant de paiement." };
   }
   if (Math.round(paidTotal) !== Math.round(total)) {
-    return { error: `Le total saisi (${fmt(paidTotal)} FCFA) doit etre egal a ${fmt(total)} FCFA.` };
+    return { error: `Le total saisi (${fmt(paidTotal)} FCFA) doit être égal à ${fmt(total)} FCFA.` };
   }
   if (details.some((item) => isCreditClientMethod(item.method)) && !creditName) {
     return { error: "Le nom du debiteur est obligatoire pour un credit client." };
@@ -15704,7 +15761,7 @@ async function saveParams() {
     try { renderTopbar(); renderSiteSwitcher(); renderHero(); } catch (e) { console.error(e); }
     // Recalcule le timer si l'heure de cloture automatique a change
     try { startAutoClotureSchedule(); } catch (e) { console.error(e); }
-    showToast("Parametres sauvegardes.");
+    showToast("Paramètres sauvegardés.");
   } finally {
     if (paramsBtn) { paramsBtn.disabled = false; paramsBtn.textContent = prevParamsText; }
   }
@@ -19691,8 +19748,10 @@ document.getElementById("fab-btn").addEventListener("click", () => {
       return;
     }
     if (!window.confirm("Reinitialiser toutes les donnees de l'application ?")) return;
+    const reauthToken = await requireReauth();
+    if (!reauthToken) return;
     try {
-      state = await apiRequest(API.reset, { method: "POST", body: JSON.stringify({}) });
+      state = await apiRequest(API.reset, { method: "POST", body: JSON.stringify({ reauthToken }) });
       activeOrderId = null;
       await bootstrapAuthenticatedApp({ skipCasierLsRestore: true });
       lsSaveCasiers();
@@ -19721,10 +19780,12 @@ document.getElementById("fab-btn").addEventListener("click", () => {
       + "Les parametres maquis dans la liste (nom, ville...) sont toujours conserves.";
     if (!window.confirm(msg)) return;
     if (!window.confirm("Confirmation finale : suppression irreversible pour ce maquis ?")) return;
+    const reauthToken = await requireReauth();
+    if (!reauthToken) return;
     try {
       let compatPut = false;
       try {
-        await apiRequest(API.purgeMaquis, { method: "POST", body: JSON.stringify({ siteId, keepStockCatalog: keepCat }) });
+        await apiRequest(API.purgeMaquis, { method: "POST", body: JSON.stringify({ siteId, keepStockCatalog: keepCat, reauthToken }) });
       } catch (first) {
         const st = first?.status;
         const apiMsg = typeof first?.message === "string" ? first.message : "";

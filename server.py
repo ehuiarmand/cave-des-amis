@@ -155,6 +155,57 @@ def validate_state_put_payload(payload: Any) -> None:
         if isinstance(rows, list) and len(rows) > MAX_STATE_LIST_ROWS:
             raise ValueError(f"Trop de lignes dans « {key} » (max {MAX_STATE_LIST_ROWS}).")
 
+    # Sanitisation silencieuse des bornes numériques.
+    # On clamp (pas de rejet) pour ne jamais bloquer un save avec des données existantes.
+    for v in (payload.get("ventes") or []):
+        if not isinstance(v, dict):
+            continue
+        qty = v.get("qty")
+        if qty is not None:
+            try:
+                clamped = max(0, float(qty))
+                if clamped != qty:
+                    audit_log("data_anomaly", {"type": "vente_qty_negative", "id": v.get("id"), "val": qty})
+                    v["qty"] = clamped
+            except (TypeError, ValueError):
+                v["qty"] = 0
+        prix = v.get("prix")
+        if prix is not None:
+            try:
+                clamped = max(0, float(prix))
+                if clamped != prix:
+                    audit_log("data_anomaly", {"type": "vente_prix_negative", "id": v.get("id"), "val": prix})
+                    v["prix"] = clamped
+            except (TypeError, ValueError):
+                v["prix"] = 0
+
+    for c in (payload.get("charges") or []):
+        if not isinstance(c, dict):
+            continue
+        montant = c.get("montant")
+        if montant is not None:
+            try:
+                clamped = max(0, float(montant))
+                if clamped != montant:
+                    audit_log("data_anomaly", {"type": "charge_montant_negative", "id": c.get("id"), "val": montant})
+                    c["montant"] = clamped
+            except (TypeError, ValueError):
+                c["montant"] = 0
+
+    for s in (payload.get("stock") or []):
+        if not isinstance(s, dict):
+            continue
+        for field in ("init", "entrees", "sorties", "frigo", "reserve"):
+            val = s.get(field)
+            if val is not None:
+                try:
+                    clamped = max(0, float(val))
+                    if clamped != val:
+                        audit_log("data_anomaly", {"type": f"stock_{field}_negative", "article": s.get("article"), "val": val})
+                        s[field] = clamped
+                except (TypeError, ValueError):
+                    s[field] = 0
+
 # Libellé « émetteur » dans les applis OTP (QR 2FA) : indépendant du nom du maquis dans les paramètres.
 TOTP_APP_LABEL = (
     _env_first(
@@ -357,6 +408,63 @@ def consume_pre_auth_token(token: str) -> str | None:
     if data and data["expiresAt"] > time.time():
         return data["username"]
     return None
+
+
+# ---------------------------------------------------------------------------
+# Dédup des PUT /api/state — anti-double-soumission (ex : retry réseau)
+# Clé : X-Op-Id fourni par le client (UUID), TTL 5 minutes.
+# ---------------------------------------------------------------------------
+
+_state_put_dedup: dict[str, int] = {}   # opId → timestamp Unix
+_state_put_dedup_lock = threading.Lock()
+
+
+def _state_put_check_dedup(op_id: str) -> bool:
+    """Retourne True si l'opId a déjà été traité dans la fenêtre de 5 min."""
+    if not op_id:
+        return False
+    now = int(time.time())
+    with _state_put_dedup_lock:
+        expired = [k for k, t in _state_put_dedup.items() if now - t >= 300]
+        for k in expired:
+            del _state_put_dedup[k]
+        if op_id in _state_put_dedup:
+            return True
+        _state_put_dedup[op_id] = now
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Reauth tokens — protège les opérations destructrices (reset, purge)
+# TTL 3 minutes, lié à la session courante, consommé une seule fois.
+# ---------------------------------------------------------------------------
+
+_reauth_tokens: dict[str, dict[str, Any]] = {}
+_reauth_lock = threading.Lock()
+
+
+def create_reauth_token(username: str, session_token: str) -> str:
+    tok = secrets.token_urlsafe(32)
+    with _reauth_lock:
+        _reauth_tokens[tok] = {
+            "username": username,
+            "sessionToken": session_token,
+            "expiresAt": int(time.time()) + 180,  # 3 minutes
+        }
+    return tok
+
+
+def consume_reauth_token(token: str, session_token: str) -> bool:
+    with _reauth_lock:
+        data = _reauth_tokens.pop(token, None)
+    if not data:
+        return False
+    if data["expiresAt"] < time.time():
+        return False
+    try:
+        return hmac.compare_digest(data["sessionToken"], session_token)
+    except (TypeError, ValueError):
+        return data["sessionToken"] == session_token
 
 
 _audit_lock = threading.Lock()
@@ -619,9 +727,13 @@ def _whatsapp_send(to_e164: str, body: str, *, force_text: bool = False) -> None
     phone_id = os.environ.get("WHATSAPP_PHONE_NUMBER_ID", "").strip()
     token = os.environ.get("WHATSAPP_ACCESS_TOKEN", "").strip()
     if not phone_id:
-        raise ValueError("WHATSAPP_PHONE_NUMBER_ID non defini. Demarrer via lancer.bat.")
+        print("[WA] SKIPPED: WHATSAPP_PHONE_NUMBER_ID not defined", flush=True)
+        audit_log("wa_not_configured", {"reason": "no_phone_id"})
+        return False
     if not token:
-        raise ValueError("WHATSAPP_ACCESS_TOKEN non defini. Demarrer via lancer.bat.")
+        print("[WA] SKIPPED: WHATSAPP_ACCESS_TOKEN not defined", flush=True)
+        audit_log("wa_not_configured", {"reason": "no_access_token"})
+        return False
     to_clean = _normalize_international_phone(to_e164.strip())
     if not to_clean:
         raise ValueError("Numéro WhatsApp invalide (format international +225…).")
@@ -657,11 +769,23 @@ def _whatsapp_send(to_e164: str, body: str, *, force_text: bool = False) -> None
     )
     try:
         resp = urlopen(req, timeout=18)  # nosec — Meta HTTPS
-        print(f"[WA] OK envoye a {to_clean} (HTTP {resp.status})", flush=True)
+        status = getattr(resp, 'status', None) or getattr(resp, 'getcode', lambda: None)()
+        print(f"[WA] OK envoye a {to_clean} (HTTP {status})", flush=True)
+        audit_log("wa_sent", {"to": to_clean, "http_status": status})
+        return True
     except HTTPError as e:
         body_err = e.read().decode("utf-8", errors="replace")
         print(f"[WA] ERREUR HTTP {e.code} pour {to_clean}: {body_err}", flush=True)
-        raise
+        audit_log("wa_send_error", {"to": to_clean, "http_code": e.code, "body": body_err})
+        return False
+    except URLError as e:
+        print(f"[WA] ERREUR RESEAU pour {to_clean}: {e}", flush=True)
+        audit_log("wa_send_error", {"to": to_clean, "error": str(e)})
+        return False
+    except OSError as e:
+        print(f"[WA] ERREUR systeme pour {to_clean}: {e}", flush=True)
+        audit_log("wa_send_error", {"to": to_clean, "error": str(e)})
+        return False
 
 
 def _wa_phones_for_site(site: dict[str, Any], event: str) -> list[str]:
@@ -883,7 +1007,7 @@ def _generate_cloture_pdf(
 
     closed_by = _safe_pdf_str(str(check.get("managerConfirmedBy") or check.get("closedBy") or ""))
     role_raw = str(check.get("closedByRole") or "").lower()
-    role_labels = {"serveuse": "Serveuse", "manager": "Gerant", "admin": "Admin", "superadmin": "Super Admin"}
+    role_labels = {"serveuse": "Serveuse", "manager": "Gérant", "admin": "Admin", "superadmin": "Super Admin"}
     closed_by_role = role_labels.get(role_raw, role_raw)
     created_at = str(check.get("managerConfirmedAt") or check.get("createdAt") or "")
     heure = created_at[11:16] if len(created_at) > 15 else ""
@@ -1531,7 +1655,7 @@ def validate_work_shift_row(
         raise ValueError(f"Seules les serveuses et gerantes peuvent etre planifiees (compte « {un} » : {u_role}).")
     u_sites = {str(x) for x in (user.get("allowedSiteIds") or []) if str(x) in site_ids}
     if sid not in u_sites:
-        raise ValueError(f"« {un} » n'est pas affecte au maquis {sid}. Cochez ce maquis dans Parametres → Acces.")
+        raise ValueError(f"« {un} » n'est pas affecté au maquis {sid}. Cochez ce maquis dans Paramètres → Accès.")
     sess_role = str(session.get("role", "")).strip().lower()
     if sess_role == "manager" and u_role not in ("serveuse", "manager"):
         raise ValueError("Modification non autorisee.")
@@ -3010,8 +3134,18 @@ CREATE TABLE IF NOT EXISTS work_shifts (row_id BIGSERIAL PRIMARY KEY, item_id TE
                     payload["adminBackups"] = json.loads(json.dumps(self.list_backups_for_session(bs)))
             return payload
 
-    def changes(self, *, since: str, site_id: str | None = None, session: dict[str, Any] | None = None) -> dict[str, Any]:
+    def changes(
+        self,
+        *,
+        since: str,
+        site_id: str | None = None,
+        session: dict[str, Any] | None = None,
+        limit: int = 500,
+        offset: int = 0,
+    ) -> dict[str, Any]:
         """Return incremental changes since an ISO timestamp (UTC)."""
+        limit = max(1, min(int(limit), 2000))
+        offset = max(0, int(offset))
         with self._lock:
             since_raw = str(since or "").strip()
             if not since_raw:
@@ -3022,7 +3156,7 @@ CREATE TABLE IF NOT EXISTS work_shifts (row_id BIGSERIAL PRIMARY KEY, item_id TE
                 allowed_sites = session_allowed_sites(session, site_ids_all)
                 if not allowed_sites and site_ids_all:
                     allowed_sites = {site_ids_all[0]}
-            commandes = []
+            commandes_all = []
             for order in self._state.get("commandes", []) or []:
                 osid = str(order.get("siteId") or "")
                 if allowed_sites is not None and osid not in allowed_sites:
@@ -3034,7 +3168,9 @@ CREATE TABLE IF NOT EXISTS work_shifts (row_id BIGSERIAL PRIMARY KEY, item_id TE
                     continue
                 updated = str(order.get("updatedAt") or order.get("createdAt") or "")
                 if updated and updated > since_raw:
-                    commandes.append(order)
+                    commandes_all.append(order)
+            total = len(commandes_all)
+            commandes = commandes_all[offset: offset + limit]
             pdj_out: dict[str, str] = {}
             if session is not None:
                 site_ids = [str(s["id"]) for s in self._state.get("sites", []) if s.get("id")]
@@ -3066,6 +3202,7 @@ CREATE TABLE IF NOT EXISTS work_shifts (row_id BIGSERIAL PRIMARY KEY, item_id TE
                 "meta": self.meta(),
                 "since": since_raw,
                 "pdjWorkDateBySite": json.loads(json.dumps(pdj_out)),
+                "pagination": {"total": total, "limit": limit, "offset": offset},
                 "changes": {
                     "commandes": json.loads(json.dumps(commandes)),
                 },
@@ -3479,7 +3616,21 @@ CREATE TABLE IF NOT EXISTS work_shifts (row_id BIGSERIAL PRIMARY KEY, item_id TE
                     if "stock" in payload else {}
                 )
                 for _key in _GLOBAL_PATCH_KEYS:
-                    if _key in payload:
+                    if _key not in payload:
+                        continue
+                    if _key == "casiers":
+                        sanitized = []
+                        for row in (payload["casiers"] or []):
+                            if not isinstance(row, dict):
+                                continue
+                            cap = max(1, int(row.get("capacite") or 24))
+                            qte = int(row.get("quantiteActuelle") or 0)
+                            row = dict(row)
+                            row["quantiteActuelle"] = max(0, min(qte, cap))
+                            row["capacite"] = cap
+                            sanitized.append(row)
+                        current["casiers"] = sanitized
+                    else:
                         current[_key] = payload[_key]
                 if "pdjWorkDateBySite" in payload:
                     current["pdjWorkDateBySite"] = _sanitize_pdj_work_date_map(
@@ -4112,10 +4263,18 @@ class AppHandler(BaseHTTPRequestHandler):
                 return
             since = str((query.get("since") or [""])[0]).strip()
             site_id = str((query.get("siteId") or [""])[0]).strip() or None
+            try:
+                limit = int((query.get("limit") or ["500"])[0])
+            except (ValueError, TypeError):
+                limit = 500
+            try:
+                offset = int((query.get("offset") or ["0"])[0])
+            except (ValueError, TypeError):
+                offset = 0
             if site_id and not session_is_superadmin(session, all_site_ids=store.all_site_ids()) and site_id not in (session.get("allowedSiteIds") or []):
-                self.send_json(HTTPStatus.FORBIDDEN, {"error": "Maquis non autorise pour cette session."})
+                self.send_json(HTTPStatus.FORBIDDEN, {"error": "Maquis non autorisé pour cette session."})
                 return
-            self.send_json(HTTPStatus.OK, store.changes(since=since, site_id=site_id, session=session), cache_control="no-store")
+            self.send_json(HTTPStatus.OK, store.changes(since=since, site_id=site_id, session=session, limit=limit, offset=offset), cache_control="no-store")
             return
         if get_path == "/api/state":
             session = self.require_session()
@@ -4301,17 +4460,23 @@ class AppHandler(BaseHTTPRequestHandler):
             wa2fa_active = bool(wa_user_data and wa_user_data.get("wa2faEnabled") and wa_user_data.get("waPhone"))
             if wa2fa_active:
                 otp = _wa_otp_generate(canon)
+                sent = False
                 try:
-                    _whatsapp_send(
+                    sent = _whatsapp_send(
                         wa_user_data["waPhone"],
                         f"[Cave des Amis] Votre code de connexion : *{otp}*\nValable 15 minutes. Ne le partagez pas.",
                         force_text=True,
                     )
                 except Exception as ex:
-                    print(f"[WA 2FA] Erreur envoi OTP: {ex}", flush=True)
+                    # En cas d'exception inattendue, on loggue et on marque comme non envoyé
+                    print(f"[WA 2FA] Exception envoi OTP: {ex}", flush=True)
+                    audit_log("wa_send_error", {"to": wa_user_data.get("waPhone"), "error": str(ex), "context": "login_otp"})
+                    sent = False
+                if not sent:
+                    print(f"[WA 2FA] OTP non envoye pour {canon}", flush=True)
                     self.send_json(
                         HTTPStatus.SERVICE_UNAVAILABLE,
-                        {"error": "Impossible d'envoyer le code WhatsApp. Verifiez la configuration."},
+                        {"error": "Impossible d'envoyer le code WhatsApp. Verifiez la configuration ou consultez les logs."},
                         cache_control="no-store",
                     )
                     return
@@ -4578,6 +4743,27 @@ class AppHandler(BaseHTTPRequestHandler):
             self.send_json(HTTPStatus.OK, {"authenticated": False}, clear_cookie=True)
             return
 
+        if post_path == "/api/reauth":
+            session = self.require_session()
+            if session is None:
+                return
+            if not self.require_csrf(session):
+                return
+            body = self.read_json() or {}
+            password = str(body.get("password", "")).strip()
+            if not password:
+                self.send_json(HTTPStatus.BAD_REQUEST, {"error": "Mot de passe requis."})
+                return
+            user = store.verify_credentials(str(session.get("username", "")), password)
+            if user is None:
+                audit_log("reauth_failed", {"ip": self.client_ip(), "username": str(session.get("username", ""))})
+                self.send_json(HTTPStatus.UNAUTHORIZED, {"error": "Mot de passe incorrect."})
+                return
+            reauth_tok = create_reauth_token(str(session.get("username", "")), self.session_token())
+            audit_log("reauth_ok", {"ip": self.client_ip(), "username": str(session.get("username", ""))})
+            self.send_json(HTTPStatus.OK, {"reauthToken": reauth_tok})
+            return
+
         if post_path == "/api/reset":
             session = self.require_session()
             if session is None:
@@ -4586,6 +4772,11 @@ class AppHandler(BaseHTTPRequestHandler):
                 return
             if not session_is_superadmin(session, all_site_ids=store.all_site_ids()):
                 self.send_json(HTTPStatus.FORBIDDEN, {"error": "Seul le super administrateur peut reinitialiser l'application."})
+                return
+            body = self.read_json() or {}
+            reauth_tok = str(body.get("reauthToken", "")).strip()
+            if not consume_reauth_token(reauth_tok, self.session_token()):
+                self.send_json(HTTPStatus.FORBIDDEN, {"error": "Confirmation du mot de passe requise. Veuillez re-authentifier."})
                 return
             payload = store.reset()
             audit_log(
@@ -4604,9 +4795,13 @@ class AppHandler(BaseHTTPRequestHandler):
             if not session_is_superadmin(session, all_site_ids=store.all_site_ids()):
                 self.send_json(HTTPStatus.FORBIDDEN, {"error": "Seul le super administrateur peut purger un maquis."})
                 return
-            body = self.read_json()
-            target = str((body or {}).get("siteId", "")).strip()
-            keep_cat = bool((body or {}).get("keepStockCatalog"))
+            body = self.read_json() or {}
+            reauth_tok = str(body.get("reauthToken", "")).strip()
+            if not consume_reauth_token(reauth_tok, self.session_token()):
+                self.send_json(HTTPStatus.FORBIDDEN, {"error": "Confirmation du mot de passe requise. Veuillez re-authentifier."})
+                return
+            target = str(body.get("siteId", "")).strip()
+            keep_cat = bool(body.get("keepStockCatalog"))
             try:
                 payload = store.purge_maquis_data(target, keep_stock_catalog=keep_cat)
             except ValueError as error:
@@ -4665,6 +4860,10 @@ class AppHandler(BaseHTTPRequestHandler):
                 return
             if not self.require_csrf(session):
                 print("[PUT] CSRF invalide → rejet", flush=True)
+                return
+            op_id = str(self.headers.get("X-Op-Id") or "").strip()
+            if _state_put_check_dedup(op_id):
+                self.send_json(HTTPStatus.OK, {"meta": store.meta(), "idempotent": True})
                 return
             payload = self.read_json()
             print(f"[PUT] payload recu, cles={sorted((payload or {}).keys())[:12]}", flush=True)

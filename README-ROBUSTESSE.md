@@ -25,9 +25,24 @@ $env:MAQUIS_MANAGER_STORAGE="sqlite"
 python server.py
 ```
 
-Le fichier est `app.sqlite3` (avec sauvegardes dans `backups/`).
+## 4) Notifications WhatsApp
 
-## 4) Sauvegarde OneDrive
+Le serveur prend en charge l’envoi d’alertes WhatsApp via l’API WhatsApp Cloud (Meta). Configurez ces variables d’environnement avant de lancer l’application :
+
+```powershell
+$env:WHATSAPP_PHONE_NUMBER_ID="<ID de votre numéro WhatsApp Cloud>"
+$env:WHATSAPP_ACCESS_TOKEN="<votre jeton d'accès Graph API>"
+$env:WHATSAPP_TEMPLATE_NAME="<optionnel>"
+$env:WHATSAPP_TEMPLATE_LANG="fr"
+```
+
+Ensuite, ajoutez dans la configuration du site (`data.json` ou votre export de maquis) :
+
+- `waNotifyPhones` : numéro(s) WhatsApp du maquis
+- `waEvents` : inclure `commande_qr` pour les alertes de commandes QR
+
+Et pour les serveuses en service, renseignez `waPhone` dans leur compte et planifiez leurs `workShifts`.
+## 5) Sauvegarde OneDrive
 
 Le script `backup_onedrive.ps1` copie les fichiers importants dans OneDrive et garde les **30** dernières sauvegardes.
 

@@ -484,7 +484,7 @@ function saveParams() {
   renderTopbar();
   renderAuthState();
   renderHero();
-  showToast("Parametres sauvegardes.");
+  showToast("Paramètres sauvegardés.");
 }
 
 function exportData() {
