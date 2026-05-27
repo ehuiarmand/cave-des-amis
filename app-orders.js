@@ -7444,6 +7444,19 @@ function todaySortiesBottlesForArticle(article, saleDateStr = pdjCalendarDate())
     .reduce((sum, v) => sum + lineBottleQty(v, stockItem), 0);
 }
 
+function todayLossesForArticle(article, dateStr, openedAt) {
+  const articleLow = String(article || "").toLowerCase();
+  return (state.stockLosses || [])
+    .filter((l) => {
+      if (String(l.siteId || "") !== String(currentSiteId())) return false;
+      if (String(l.article || "").toLowerCase() !== articleLow) return false;
+      if ((l.date || "").slice(0, 10) === dateStr) return true;
+      if (openedAt && l.createdAt && l.createdAt >= openedAt) return true;
+      return false;
+    })
+    .reduce((sum, l) => sum + (Number(l.qty) || 0), 0);
+}
+
 function todayEntreesFromPOForArticle(article, dateStr, openedAt) {
   return purchaseOrdersForSite()
     .filter((po) => {
@@ -7639,7 +7652,8 @@ function renderDailyStockCheck() {
       const stockAtOpen = stockOpeningFromDayBook(item, dayBook) ?? stockActuel(item);
       const sortiesToday = todaySortiesBottlesForArticle(item.article, dStr);
       const entreesToday = todayEntreesFromPOForArticle(item.article, dStr, dayBook?.openedAt);
-      const remaining = Math.max(0, stockAtOpen + entreesToday - sortiesToday);
+      const lossesToday = todayLossesForArticle(item.article, dStr, dayBook?.openedAt);
+      const remaining = Math.max(0, stockAtOpen + entreesToday - sortiesToday - lossesToday);
       const frigoVal = stockFrigo(item);
       const reserveVal = stockReserve(item);
       const gap = (frigoVal + reserveVal) - remaining;
@@ -7730,7 +7744,8 @@ function renderDailyStockCheck() {
       ?? stockActuel(item);
     const sortiesToday = todaySortiesBottlesForArticle(item.article, dStr);
     const entreesToday = todayEntreesFromPOForArticle(item.article, dStr, dayBook?.openedAt);
-    const remaining = Math.max(0, stockAtOpen + entreesToday - sortiesToday); // restant théorique
+    const lossesToday = todayLossesForArticle(item.article, dStr, dayBook?.openedAt);
+    const remaining = Math.max(0, stockAtOpen + entreesToday - sortiesToday - lossesToday); // restant théorique
     const seedCi = seedFromClose ? (seedFromClose.items || []).find((ci) => Number(ci.id) === Number(item.id)) : null;
     const idn = Number(item.id);
     let frigoVal = seedCi != null ? Math.max(0, Number(seedCi.frigo) || 0) : stockFrigo(item);
@@ -12521,7 +12536,8 @@ async function performAutoClotureBackground(dStr) {
     const stockAtOpen = stockOpeningFromDayBook(item, dayBook) ?? existingCloseItem?.stockAvant ?? stockActuel(item);
     const sortiesToday = todaySortiesBottlesForArticle(item.article, dStr);
     const entreesToday = todayEntreesFromPOForArticle(item.article, dStr, dayBook?.openedAt);
-    const expectedRemaining = Math.max(0, stockAtOpen + entreesToday - sortiesToday);
+    const lossesToday = todayLossesForArticle(item.article, dStr, dayBook?.openedAt);
+    const expectedRemaining = Math.max(0, stockAtOpen + entreesToday - sortiesToday - lossesToday);
     const counted = frigo + reserve;
     return {
       id: item.id,
@@ -12530,6 +12546,7 @@ async function performAutoClotureBackground(dStr) {
       stockAvant: stockAtOpen,
       entreesToday,
       sortiesToday,
+      lossesToday,
       expected: expectedRemaining,
       frigo,
       reserve,
