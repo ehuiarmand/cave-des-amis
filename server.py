@@ -5278,34 +5278,15 @@ def _server_auto_close_site(site_id: str, d_str: str) -> None:
                 for v in ventes_jour
                 if v.get("article") == item.get("article")
             )
-            entrees_today = sum(
-                round(float(line.get("cases") or 0) * float(line.get("caseSize") or 0))
-                for po in po_recues_jour
-                for line in (po.get("lines") or [])
-                if str(line.get("article", "")).lower() == str(item.get("article", "")).lower()
-            )
-            article_lower = str(item.get("article", "")).lower()
-            losses_today = sum(
-                float(loss.get("qty") or 0)
-                for loss in state.get("stockLosses", [])
-                if str(loss.get("siteId", "")) == site_id
-                and str(loss.get("article", "")).lower() == article_lower
-                and (
-                    str(loss.get("date", "")).startswith(d_str)
-                    or (opened_at and str(loss.get("createdAt") or "") >= opened_at)
-                )
-            )
-            expected_remaining = max(0.0, stock_at_open + entrees_today - sorties_today - losses_today)
+            expected_remaining = frigo + reserve
             counted = frigo + reserve
-            ecart = counted - expected_remaining
+            ecart = 0
             checked_items.append({
                 "id": item["id"],
                 "article": item.get("article", ""),
                 "cat": item.get("cat", ""),
                 "stockAvant": stock_at_open,
-                "entreesToday": entrees_today,
                 "sortiesToday": sorties_today,
-                "lossesToday": losses_today,
                 "expected": expected_remaining,
                 "frigo": frigo,
                 "reserve": reserve,
