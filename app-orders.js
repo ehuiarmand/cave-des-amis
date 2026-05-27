@@ -7446,7 +7446,11 @@ function todaySortiesBottlesForArticle(article, saleDateStr = pdjCalendarDate())
 
 function todayEntreesFromPOForArticle(article, dateStr) {
   return purchaseOrdersForSite()
-    .filter((po) => po.status === "Reçue" && (po.date || "").slice(0, 10) === dateStr)
+    .filter((po) => {
+      if (po.status !== "Reçue") return false;
+      const effectiveDate = (po.receivedAt || po.date || "").slice(0, 10);
+      return effectiveDate === dateStr;
+    })
     .reduce((sum, po) =>
       sum + (po.lines || [])
         .filter((l) => l.article === article)

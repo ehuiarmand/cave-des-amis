@@ -5192,7 +5192,7 @@ def _server_auto_close_site(site_id: str, d_str: str) -> None:
         po_recues_jour = [
             po for po in state.get("purchaseOrders", [])
             if str(po.get("siteId", "")) == site_id
-            and str(po.get("date", "")).startswith(d_str)
+            and str(po.get("receivedAt") or po.get("date", "")).startswith(d_str)
             and str(po.get("status", "")) == "Reçue"
         ]
 
