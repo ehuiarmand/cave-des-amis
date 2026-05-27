@@ -7741,6 +7741,8 @@ function renderDailyStockCheck() {
   else if (Object.prototype.hasOwnProperty.call(pdjClosingCashDraftBySiteDate, closingDraftKey)) {
     closingValForInput = pdjClosingCashDraftBySiteDate[closingDraftKey];
   } else if (closingSeed != null) closingValForInput = String(closingSeed);
+  if (!closingValForInput && isGerantRole()) closingValForInput = String(Math.round(expectedEspeces));
+  const gerantView = isGerantRole();
   const rows = items.map((item) => {
     const closedCheckItem = closed ? (closed.items || []).find((ci) => Number(ci.id) === Number(item.id)) : null;
     const stockAtOpen = stockOpeningFromDayBook(item, dayBook)
@@ -7756,15 +7758,22 @@ function renderDailyStockCheck() {
     if (domReserve.has(idn)) reserveVal = Math.max(0, Number(domReserve.get(idn)) || 0);
     const remaining = stockFrigo(item) + stockReserve(item);
     const gap = (frigoVal + reserveVal) - remaining;
+    const frigoCell = gerantView
+      ? `<td style="text-align:right">${fmt(stockFrigo(item))}</td>`
+      : `<td><input class="stock-check-input" type="number" min="0" data-check-frigo="${item.id}" value="${frigoVal}"></td>`;
+    const reserveCell = gerantView
+      ? `<td style="text-align:right">${fmt(stockReserve(item))}</td>`
+      : `<td><input class="stock-check-input" type="number" min="0" data-check-reserve="${item.id}" value="${reserveVal}"></td>`;
+    const gapCell = gerantView
+      ? `<td style="text-align:right;color:#72d7a9">OK</td>`
+      : `<td style="text-align:right;color:${gap === 0 ? "#72d7a9" : "#ff8e82"}">${gap === 0 ? "OK" : fmt(gap)}</td>`;
     return `<tr>
         <td>${escapeHtml(item.article)}</td>
         <td style="text-align:right;color:#1976d2">${fmt(stockAtOpen)}</td>
         <td style="text-align:right;color:#72d7a9">${entreesToday > 0 ? "+" + fmt(entreesToday) : "—"}</td>
         <td style="text-align:right;color:#ff8e82">${sortiesToday > 0 ? fmt(sortiesToday) : "—"}</td>
         <td style="text-align:right">${fmt(remaining)}</td>
-        <td><input class="stock-check-input" type="number" min="0" data-check-frigo="${item.id}" value="${frigoVal}"></td>
-        <td><input class="stock-check-input" type="number" min="0" data-check-reserve="${item.id}" value="${reserveVal}"></td>
-        <td style="text-align:right;color:${gap === 0 ? "#72d7a9" : "#ff8e82"}">${gap === 0 ? "OK" : fmt(gap)}</td>
+        ${frigoCell}${reserveCell}${gapCell}
       </tr>`;
   }).join("");
   const correctionBanner = seedFromClose
@@ -7816,8 +7825,9 @@ function renderDailyStockCheck() {
         </div>
       </div>
       <p class="muted" style="margin-bottom:10px;font-size:0.88rem">
-        Saisissez le stock physique réel (frigo + réserve). L'écart s'affiche en direct.
-        Les écarts peuvent être enregistrés dans le stock (gérant ou administrateur) ; une confirmation vous sera demandée si besoin.
+        ${gerantView
+    ? "Stock théorique calculé d'après les ventes et entrées enregistrées dans le catalogue. Écart toujours nul pour la clôture gérant."
+    : "Saisissez le stock physique réel (frigo + réserve). L'écart s'affiche en direct. Les écarts peuvent être enregistrés dans le stock (administrateur) ; une confirmation vous sera demandée si besoin."}
       </p>
       <div class="stock-table-wrap"><table class="stock-table">
         <thead><tr>
@@ -7826,8 +7836,8 @@ function renderDailyStockCheck() {
           <th style="text-align:right;color:#72d7a9">Entrées jour</th>
           <th class="th-blue" style="text-align:right">Sorties jour</th>
           <th style="text-align:right">Théorique</th>
-          <th style="text-align:right">Frigo (saisir)</th>
-          <th style="text-align:right">Réserve (saisir)</th>
+          <th style="text-align:right">${gerantView ? "Frigo" : "Frigo (saisir)"}</th>
+          <th style="text-align:right">${gerantView ? "Réserve" : "Réserve (saisir)"}</th>
           <th style="text-align:right">Écart</th>
         </tr></thead>
         <tbody>${rows}</tbody>
@@ -15513,10 +15523,11 @@ async function closeAccountingDay() {
 
   const existingCloseCheck = stockCheckForSiteDate(dStr, currentSiteId());
   const checkedItems = items.map((item) => {
-    const frigo = isFinDeService
+    const usesCatalogStock = isFinDeService || isGerantRole();
+    const frigo = usesCatalogStock
       ? Math.max(0, stockFrigo(item))
       : Math.max(0, Number(document.querySelector(`[data-check-frigo="${item.id}"]`)?.value) || 0);
-    const reserve = isFinDeService
+    const reserve = usesCatalogStock
       ? Math.max(0, stockReserve(item))
       : Math.max(0, Number(document.querySelector(`[data-check-reserve="${item.id}"]`)?.value) || 0);
     const existingCloseItem = existingCloseCheck ? (existingCloseCheck.items || []).find((ci) => Number(ci.id) === Number(item.id)) : null;
@@ -19702,7 +19713,7 @@ document.getElementById("fab-btn").addEventListener("click", () => {
     }
     const dWork = pdjCalendarDate();
     const items = recordsForSite(state.stock);
-    const hasInputs = items.length && !!document.querySelector(`[data-check-frigo="${items[0].id}"]`);
+    const hasInputs = isGerantRole() || (items.length && !!document.querySelector(`[data-check-frigo="${items[0].id}"]`));
     if (!hasInputs && stockCheckForSiteDate(dWork, currentSiteId())) {
       // Journee deja cloturee mais en mode lecture : repasser en mode saisie
       const closed = stockCheckForSiteDate(dWork, currentSiteId());
