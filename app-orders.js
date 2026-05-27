@@ -8584,6 +8584,7 @@ function renderSalesHistory() {
           }).join("")}
         </div>
         <div class="order-actions">
+          ${canAnyAdmin() ? `<button type="button" class="mini-btn" data-change-date-invoice="${escapeHtml(invoice.factureNumber)}" title="Changer la date comptable">Changer date</button>` : ""}
           <button type="button" class="mini-btn" data-print-invoice="${escapeHtml(invoice.factureNumber)}">Imprimer facture</button>
         </div>
       </article>`;
@@ -10637,6 +10638,35 @@ async function confirmReplaceVente(newArticleName) {
     if (currentPage === "home") renderDashboard();
     showToast(`"${prevArticle}" ×${originalQty} → "${vente.article}" ×${newQty} · Stock ajuste.`);
   }
+}
+
+async function changeInvoiceDate(factureNumber) {
+  if (!canAnyAdmin()) { showToast("Réservé aux administrateurs."); return; }
+  const siteId = currentSiteId();
+  const ventes = (state.ventes || []).filter((v) => v.factureNumber === factureNumber && (v.siteId || siteId) === siteId);
+  if (!ventes.length) { showToast("Facture introuvable."); return; }
+  const currentDate = String(ventes[0].date || "").slice(0, 10);
+  const newDateRaw = window.prompt(`Nouvelle date comptable pour ${factureNumber}\n(format JJ-MM-AAAA) :`, formatDateDdMmYyyy(currentDate));
+  if (!newDateRaw) return;
+  const parts = newDateRaw.trim().split(/[-\/]/);
+  let newDate;
+  if (parts.length === 3 && parts[2].length === 4) {
+    newDate = `${parts[2]}-${parts[1].padStart(2, "0")}-${parts[0].padStart(2, "0")}`;
+  } else if (parts.length === 3 && parts[0].length === 4) {
+    newDate = newDateRaw.trim();
+  } else {
+    showToast("Format invalide. Utilisez JJ-MM-AAAA.");
+    return;
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(newDate)) { showToast("Date invalide."); return; }
+  if (newDate === currentDate) { showToast("Date inchangée."); return; }
+  if (stockCheckForSiteDate(newDate, siteId) && !window.confirm(`La journée du ${formatDateDdMmYyyy(newDate)} est déjà clôturée.\nContinuer quand même ?`)) return;
+  ventes.forEach((v) => { v.date = newDate; });
+  recordStaffAudit("update", "vente", `Date comptable modifiée · ${factureNumber}`, `${formatDateDdMmYyyy(currentDate)} → ${formatDateDdMmYyyy(newDate)}`);
+  await persistState({ ventes: state.ventes, staffAuditLog: state.staffAuditLog });
+  renderSalesHistory();
+  renderPointDuJour();
+  showToast(`${factureNumber} déplacée au ${formatDateDdMmYyyy(newDate)}.`);
 }
 
 function openSupplementModal(diff, article, client, factureNumber) {
@@ -19558,6 +19588,12 @@ function attachEvents() {
     } finally {
       if (item.isConnected) { item.disabled = false; item.innerHTML = prevHtml; }
     }
+  });
+  // Bouton Changer date facture (admin)
+  document.getElementById("ventes-list")?.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-change-date-invoice]");
+    if (!btn) return;
+    changeInvoiceDate(btn.dataset.changeDateInvoice).catch(handleApiError);
   });
   // Bouton Remplacer sur vente encaissee (delegue depuis ventes-list)
   document.getElementById("ventes-list")?.addEventListener("click", (e) => {
