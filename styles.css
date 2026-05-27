@@ -313,16 +313,14 @@ textarea { font: inherit; }
   display: flex;
   flex-direction: column;
   gap: 28px;
-  padding: 28px 14px;
+  padding: 28px 14px 14px;
   background: var(--mm-surface);
   border-right: 1px solid var(--line);
   position: sticky;
   top: 0;
   height: 100vh;
-  overflow-y: auto;
-  scrollbar-width: none;
+  overflow-y: hidden;
 }
-.sidebar::-webkit-scrollbar { display: none; }
 
 .sidebar-brand { padding: 0 6px; }
 .sidebar-logo {
@@ -338,7 +336,11 @@ textarea { font: inherit; }
   flex-direction: column;
   gap: 8px;
   flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: none;
 }
+.sidebar-nav::-webkit-scrollbar { display: none; }
 
 .sidebar-session {
   display: flex;
