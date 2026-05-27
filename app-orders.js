@@ -7479,10 +7479,12 @@ function htmlPdjClosedStockCheckReadOnly(closed, roleNoteHtml) {
   const rows = checkItems.map((ci) => {
     const ecartColor = ci.ecart === 0 ? "#72d7a9" : "#ff8e82";
     const ecartLabel = ci.ecart === 0 ? "OK" : (ci.ecart > 0 ? `+${fmt(ci.ecart)}` : fmt(ci.ecart));
+    const ciEntrees = Number(ci.entreesToday) || 0;
     return `<tr>
         <td>${escapeHtml(ci.article)}</td>
         <td style="text-align:right;color:#1976d2">${fmt(ci.stockAvant ?? ci.expected ?? 0)}</td>
-        <td style="text-align:right;color:#ff8e82">${fmt(ci.sortiesToday ?? 0)}</td>
+        <td style="text-align:right;color:#72d7a9">${ciEntrees > 0 ? "+" + fmt(ciEntrees) : "—"}</td>
+        <td style="text-align:right;color:#ff8e82">${(ci.sortiesToday ?? 0) > 0 ? fmt(ci.sortiesToday) : "—"}</td>
         <td style="text-align:right">${fmt(ci.expected ?? 0)}</td>
         <td style="text-align:right">${fmt(ci.frigo ?? 0)}</td>
         <td style="text-align:right">${fmt(ci.reserve ?? 0)}</td>
@@ -7517,6 +7519,7 @@ function htmlPdjClosedStockCheckReadOnly(closed, roleNoteHtml) {
         <thead><tr>
           <th>Article</th>
           <th class="th-orange" style="text-align:right">Stk Ouverture</th>
+          <th style="text-align:right;color:#72d7a9">Entrées jour</th>
           <th class="th-blue" style="text-align:right">Sorties jour</th>
           <th style="text-align:right">Théorique</th>
           <th style="text-align:right">Frigo</th>
@@ -7650,6 +7653,7 @@ function renderDailyStockCheck() {
     const ventesJourRo = recordsForSite(state.ventes).filter((v) => v.date.slice(0, 10) === dStr);
     const rowsOpen = items.map((item) => {
       const stockAtOpen = stockOpeningFromDayBook(item, dayBook) ?? stockActuel(item);
+      const entreesToday = todayEntreesFromPOForArticle(item.article, dStr, dayBook?.openedAt);
       const sortiesToday = todaySortiesBottlesForArticle(item.article, dStr);
       const frigoVal = stockFrigo(item);
       const reserveVal = stockReserve(item);
@@ -7658,7 +7662,8 @@ function renderDailyStockCheck() {
       return `<tr>
         <td>${escapeHtml(item.article)}</td>
         <td style="text-align:right;color:#1976d2">${fmt(stockAtOpen)}</td>
-        <td style="text-align:right;color:#ff8e82">${fmt(sortiesToday)}</td>
+        <td style="text-align:right;color:#72d7a9">${entreesToday > 0 ? "+" + fmt(entreesToday) : "—"}</td>
+        <td style="text-align:right;color:#ff8e82">${sortiesToday > 0 ? fmt(sortiesToday) : "—"}</td>
         <td style="text-align:right">${fmt(remaining)}</td>
         <td style="text-align:right">${fmt(frigoVal)}</td>
         <td style="text-align:right">${fmt(reserveVal)}</td>
@@ -7673,7 +7678,8 @@ function renderDailyStockCheck() {
       <div class="stock-table-wrap"><table class="stock-table">
         <thead><tr>
           <th>Article</th>
-          <th class="th-orange" style="text-align:right">Stk (ref.)</th>
+          <th class="th-orange" style="text-align:right">Stk Ouverture</th>
+          <th style="text-align:right;color:#72d7a9">Entrées jour</th>
           <th class="th-blue" style="text-align:right">Sorties jour</th>
           <th style="text-align:right">Théorique</th>
           <th style="text-align:right">Frigo</th>
@@ -7740,6 +7746,7 @@ function renderDailyStockCheck() {
     const stockAtOpen = stockOpeningFromDayBook(item, dayBook)
       ?? closedCheckItem?.stockAvant
       ?? stockActuel(item);
+    const entreesToday = todayEntreesFromPOForArticle(item.article, dStr, dayBook?.openedAt);
     const sortiesToday = todaySortiesBottlesForArticle(item.article, dStr);
     const seedCi = seedFromClose ? (seedFromClose.items || []).find((ci) => Number(ci.id) === Number(item.id)) : null;
     const idn = Number(item.id);
@@ -7752,7 +7759,8 @@ function renderDailyStockCheck() {
     return `<tr>
         <td>${escapeHtml(item.article)}</td>
         <td style="text-align:right;color:#1976d2">${fmt(stockAtOpen)}</td>
-        <td style="text-align:right;color:#ff8e82">${fmt(sortiesToday)}</td>
+        <td style="text-align:right;color:#72d7a9">${entreesToday > 0 ? "+" + fmt(entreesToday) : "—"}</td>
+        <td style="text-align:right;color:#ff8e82">${sortiesToday > 0 ? fmt(sortiesToday) : "—"}</td>
         <td style="text-align:right">${fmt(remaining)}</td>
         <td><input class="stock-check-input" type="number" min="0" data-check-frigo="${item.id}" value="${frigoVal}"></td>
         <td><input class="stock-check-input" type="number" min="0" data-check-reserve="${item.id}" value="${reserveVal}"></td>
@@ -7815,6 +7823,7 @@ function renderDailyStockCheck() {
         <thead><tr>
           <th>Article</th>
           <th class="th-orange" style="text-align:right">Stk Ouverture</th>
+          <th style="text-align:right;color:#72d7a9">Entrées jour</th>
           <th class="th-blue" style="text-align:right">Sorties jour</th>
           <th style="text-align:right">Théorique</th>
           <th style="text-align:right">Frigo (saisir)</th>
@@ -12531,6 +12540,7 @@ async function performAutoClotureBackground(dStr) {
     const existingCloseItem = existingCloseCheck ? (existingCloseCheck.items || []).find((ci) => Number(ci.id) === Number(item.id)) : null;
     const stockAtOpen = stockOpeningFromDayBook(item, dayBook) ?? existingCloseItem?.stockAvant ?? stockActuel(item);
     const sortiesToday = todaySortiesBottlesForArticle(item.article, dStr);
+    const entreesToday = todayEntreesFromPOForArticle(item.article, dStr, dayBook?.openedAt);
     const expectedRemaining = frigo + reserve;
     const counted = frigo + reserve;
     return {
@@ -12538,6 +12548,7 @@ async function performAutoClotureBackground(dStr) {
       article: item.article,
       cat: item.cat || "",
       stockAvant: stockAtOpen,
+      entreesToday,
       sortiesToday,
       expected: expectedRemaining,
       frigo,
