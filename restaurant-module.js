@@ -182,7 +182,6 @@ function rstRenderMenuPage() {
     </div>
     <div class="rst-cat-filters">${filterBtns}</div>
     ${cardsHtml}
-    ${rstPlatModal()}
   `;
 }
 
@@ -269,7 +268,7 @@ let _rstEditingPlatId = null;
 function rstOpenPlatModal(id) {
   _rstEditingPlatId = id;
   const modal = document.getElementById("rst-modal-plat");
-  if (!modal) { rstRenderMenuPage(); setTimeout(() => rstOpenPlatModal(id), 80); return; }
+  if (!modal) { console.error("[restaurant-module] Modal rst-modal-plat introuvable"); return; }
 
   document.getElementById("rst-modal-plat-title").textContent = id ? "Modifier le plat" : "Nouveau plat";
   document.getElementById("rst-p-edit-id").value = id ?? "";
@@ -292,16 +291,12 @@ function rstOpenPlatModal(id) {
     rstRenderIngrList([]);
   }
 
-  modal.classList.remove("hidden");
-  modal.setAttribute("aria-hidden", "false");
+  openModal("rst-modal-plat");
   document.getElementById("rst-p-nom").focus();
 }
 
 function rstClosePlatModal() {
-  const modal = document.getElementById("rst-modal-plat");
-  if (!modal) return;
-  modal.classList.add("hidden");
-  modal.setAttribute("aria-hidden", "true");
+  closeModal("rst-modal-plat");
 }
 
 function rstRenderIngrList(ingredients) {
@@ -470,7 +465,6 @@ function rstRenderStockPage() {
         <span style="color:#bf360c"> ${alertes.map((i) => escapeHtml(i.nom)).join(", ")}</span>
       </div>` : ""}
     ${tableHtml}
-    ${rstIngrModal()}
   `;
 }
 
@@ -494,7 +488,7 @@ function rstIngrRow(item, canEdit) {
 
 function rstIngrModal() {
   return `
-  <div id="rst-modal-ingr" class="modal-overlay hidden" aria-hidden="true">
+  <div id="rst-modal-ingr" class="modal-overlay" aria-hidden="true">
     <div class="modal">
       <div class="modal-handle"></div>
       <div class="section-head">
@@ -546,7 +540,7 @@ let _rstEditingIngrId = null;
 function rstOpenIngrModal(id) {
   _rstEditingIngrId = id;
   const modal = document.getElementById("rst-modal-ingr");
-  if (!modal) { rstRenderStockPage(); setTimeout(() => rstOpenIngrModal(id), 80); return; }
+  if (!modal) { console.error("[restaurant-module] Modal rst-modal-ingr introuvable"); return; }
 
   document.getElementById("rst-modal-ingr-title").textContent = id ? "Modifier l'ingrédient" : "Nouvel ingrédient";
   document.getElementById("rst-i-edit-id").value = id ?? "";
@@ -564,16 +558,12 @@ function rstOpenIngrModal(id) {
       .forEach((id) => { const el = document.getElementById(id); if (el) el.value = ""; });
   }
 
-  modal.classList.remove("hidden");
-  modal.setAttribute("aria-hidden", "false");
+  openModal("rst-modal-ingr");
   document.getElementById("rst-i-nom").focus();
 }
 
 function rstCloseIngrModal() {
-  const modal = document.getElementById("rst-modal-ingr");
-  if (!modal) return;
-  modal.classList.add("hidden");
-  modal.setAttribute("aria-hidden", "true");
+  closeModal("rst-modal-ingr");
 }
 
 async function rstSaveIngr() {
@@ -924,6 +914,15 @@ async function rstDeductIngredients(foodItems) {
 // ── 10. INIT AU CHARGEMENT ───────────────────────────────────
 
 document.addEventListener("DOMContentLoaded", function () {
+  // Injecter les modaux restaurant au niveau body pour éviter le piège position:fixed
+  // (les sections .page peuvent avoir des transforms CSS qui piègent les éléments fixed)
+  if (!document.getElementById("rst-modal-plat")) {
+    const container = document.createElement("div");
+    container.id = "rst-modals-container";
+    container.innerHTML = rstPlatModal() + rstIngrModal();
+    document.body.appendChild(container);
+  }
+
   // Réinitialiser le panier food quand le modal saisie rapide se ferme
   document.addEventListener("click", function (e) {
     if (e.target?.dataset?.close === "modal-saisie-rapide" ||

@@ -122,6 +122,7 @@ STATE_PUT_LIST_KEYS = (
     "ventes", "stock", "commandes", "stockChecks", "stockEntrees", "stockLosses",
     "dayBooks", "purchaseOrders", "supplierPrices", "casiers", "casierMouvements",
     "creditRecoveries", "consignes", "charges", "staffAuditLog", "workShifts",
+    "restaurantMenu", "ingredientStock",
 )
 # Mapping clé JSON → (table PostgreSQL, type d'id)
 # type : "int" = item.id entier, "text" = item.id texte, "date_site" = clé date+siteId
@@ -142,6 +143,8 @@ _PG_TABLES: dict[str, tuple[str, str]] = {
     "charges":          ("charges",          "int"),
     "staffAuditLog":    ("staff_audit_log",  "text"),
     "workShifts":       ("work_shifts",      "text"),
+    "restaurantMenu":   ("restaurant_menu",  "int"),
+    "ingredientStock":  ("ingredient_stock", "int"),
 }
 _PG_SKIP_SETTINGS = set(STATE_PUT_LIST_KEYS) | {"auth", "sites", "categories", "_meta"}
 MAX_STATE_LIST_ROWS = 50_000
@@ -561,6 +564,8 @@ DEFAULT_STATE: dict[str, Any] = {
     ],
     "commandes": [],
     "stockChecks": [],
+    "restaurantMenu": [],
+    "ingredientStock": [],
     "dayBooks": [],
     "purchaseOrders": [],
     "supplierPrices": [],
@@ -2669,6 +2674,8 @@ CREATE TABLE IF NOT EXISTS consignes (row_id BIGSERIAL PRIMARY KEY, item_id INTE
 CREATE TABLE IF NOT EXISTS charges (row_id BIGSERIAL PRIMARY KEY, item_id INTEGER, site_id TEXT, data JSONB NOT NULL);
 CREATE TABLE IF NOT EXISTS staff_audit_log (row_id BIGSERIAL PRIMARY KEY, item_id TEXT, site_id TEXT, data JSONB NOT NULL);
 CREATE TABLE IF NOT EXISTS work_shifts (row_id BIGSERIAL PRIMARY KEY, item_id TEXT, site_id TEXT, data JSONB NOT NULL);
+CREATE TABLE IF NOT EXISTS restaurant_menu (row_id BIGSERIAL PRIMARY KEY, item_id INTEGER, site_id TEXT, data JSONB NOT NULL);
+CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_id INTEGER, site_id TEXT, data JSONB NOT NULL);
 """
         with conn.cursor() as cur:
             cur.execute(sql)
@@ -3037,6 +3044,8 @@ CREATE TABLE IF NOT EXISTS work_shifts (row_id BIGSERIAL PRIMARY KEY, item_id TE
                 "nextId": copy.deepcopy(s["nextId"]),
                 "staffAuditLog": copy.deepcopy(s.get("staffAuditLog", [])),
                 "workShifts": copy.deepcopy(s.get("workShifts", [])),
+                "restaurantMenu": copy.deepcopy(s.get("restaurantMenu", [])),
+                "ingredientStock": copy.deepcopy(s.get("ingredientStock", [])),
                 "auth": {
                     "users": [
                         {
@@ -3124,6 +3133,8 @@ CREATE TABLE IF NOT EXISTS work_shifts (row_id BIGSERIAL PRIMARY KEY, item_id TE
                     site_ids,
                     allowed,
                 ),
+                "restaurantMenu": filter_site_rows(self._state.get("restaurantMenu", [])),
+                "ingredientStock": filter_site_rows(self._state.get("ingredientStock", [])),
                 "auth": {"users": users_out},
             }
             bs = resolve_backup_session(session, self)
@@ -3605,7 +3616,7 @@ CREATE TABLE IF NOT EXISTS work_shifts (row_id BIGSERIAL PRIMARY KEY, item_id TE
                     "ventes", "stock", "commandes", "stockChecks", "dayBooks",
                     "purchaseOrders", "supplierPrices", "casiers", "casierMouvements",
                     "creditRecoveries", "consignes", "charges", "staffAuditLog",
-                    "stockEntrees", "stockLosses",
+                    "stockEntrees", "stockLosses", "restaurantMenu", "ingredientStock",
                 ]
                 _old_sc_snap_g: dict[str, dict[str, Any]] = (
                     {str(r.get("id", "")): copy.deepcopy(r) for r in (current.get("stockChecks") or []) if isinstance(r, dict) and r.get("id")}
