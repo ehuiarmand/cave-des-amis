@@ -14,6 +14,7 @@
   <link rel="stylesheet" href="./cave-casier.css">
   <link rel="stylesheet" href="./cave-components.css">
   <link rel="stylesheet" href="./cave-extras.css">
+  <link rel="stylesheet" href="./restaurant.css">
 </head>
 <body>
   <div class="app-bg"></div>
@@ -102,6 +103,15 @@
         <button class="nav-btn" data-page="params" type="button">
           <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 4.754a3.246 3.246 0 1 0 0 6.492 3.246 3.246 0 0 0 0-6.492zM5.754 8a2.246 2.246 0 1 1 4.492 0 2.246 2.246 0 0 1-4.492 0z"/><path d="M9.796 1.343c-.527-1.79-3.065-1.79-3.592 0l-.094.319a.873.873 0 0 1-1.255.52l-.292-.16c-1.64-.892-3.433.902-2.54 2.541l.159.292a.873.873 0 0 1-.52 1.255l-.319.094c-1.79.527-1.79 3.065 0 3.592l.319.094a.873.873 0 0 1 .52 1.255l-.16.292c-.892 1.64.901 3.434 2.541 2.54l.292-.159a.873.873 0 0 1 1.255.52l.094.319c.527 1.79 3.065 1.79 3.592 0l.094-.319a.873.873 0 0 1 1.255-.52l.292.16c1.64.892 3.433-.902 2.54-2.541l-.159-.292a.873.873 0 0 1 .52-1.255l.319-.094c1.79-.527 1.79-3.065 0-3.592l-.319-.094a.873.873 0 0 1-.52-1.255l.16-.292c.892-1.64-.901-3.433-2.541-2.54l-.292.159a.873.873 0 0 1-1.255-.52l-.094-.319z"/></svg>
           <span>Paramètres</span>
+        </button>
+        <!-- ── MODULE RESTAURANT (visible si site.hasRestaurant) ── -->
+        <button class="nav-btn restaurant-module-nav hidden" data-page="menu-cuisine" type="button">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M3 2a.5.5 0 0 1 .5.5v5a.5.5 0 0 1-1 0v-5A.5.5 0 0 1 3 2zm2 0a.5.5 0 0 1 .5.5v5a.5.5 0 0 1-1 0v-5A.5.5 0 0 1 5 2zM1 9a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v.5a.5.5 0 0 1-.5.5H5v3.5a.5.5 0 0 1-1 0V10H1.5A.5.5 0 0 1 1 9.5V9zm10-7a3 3 0 0 1 3 3v1.5a.5.5 0 0 1-.5.5H10.5v5.5a.5.5 0 0 1-1 0V6.5h-.5a.5.5 0 0 1 0-1H10V5a3 3 0 0 1 1-2.236V2.5a.5.5 0 0 1 1 0z"/></svg>
+          <span>Menu</span>
+        </button>
+        <button class="nav-btn restaurant-module-nav hidden" data-page="stock-cuisine" type="button">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1 2.5A1.5 1.5 0 0 1 2.5 1h3A1.5 1.5 0 0 1 7 2.5v3A1.5 1.5 0 0 1 5.5 7h-3A1.5 1.5 0 0 1 1 5.5v-3zm8 0A1.5 1.5 0 0 1 10.5 1h3A1.5 1.5 0 0 1 15 2.5v3A1.5 1.5 0 0 1 13.5 7h-3A1.5 1.5 0 0 1 9 5.5v-3zm-8 8A1.5 1.5 0 0 1 2.5 9h3A1.5 1.5 0 0 1 7 10.5v3A1.5 1.5 0 0 1 5.5 15h-3A1.5 1.5 0 0 1 1 13.5v-3zm8 0A1.5 1.5 0 0 1 10.5 9h3a1.5 1.5 0 0 1 1.5 1.5v3a1.5 1.5 0 0 1-1.5 1.5h-3A1.5 1.5 0 0 1 9 13.5v-3z"/></svg>
+          <span>Ingrédients</span>
         </button>
       </nav>
 
@@ -1507,6 +1517,13 @@
               </div>
               <div class="form-group" style="grid-column:1/-1">
                 <label class="checkbox-label" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer">
+                  <input id="p-has-restaurant" type="checkbox" style="margin-top:3px;width:auto">
+                  <span>Cet établissement a un restaurant (module cuisine activé)</span>
+                </label>
+                <p class="muted" style="font-size:0.82rem;margin:6px 0 0 28px">Active la gestion du menu cuisine, du stock ingrédients et la saisie de plats dans les commandes.</p>
+              </div>
+              <div class="form-group" style="grid-column:1/-1">
+                <label class="checkbox-label" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer">
                   <input id="p-dual-zone-pricing" type="checkbox" checked style="margin-top:3px;width:auto">
                   <span>Tarifs differents selon la zone (cave / terrasse)</span>
                 </label>
@@ -1778,6 +1795,21 @@
         </div>
 
       </section>
+
+      <!-- ══════════════════════════════════════════
+           MODULE RESTAURANT — pages additives
+           Visibles uniquement si site.hasRestaurant
+      ══════════════════════════════════════════ -->
+      <section id="page-menu-cuisine" class="page" aria-label="Menu cuisine">
+        <!-- Contenu rendu dynamiquement par rstRenderMenuPage() -->
+        <div style="padding:24px;color:#9e9e9e">Chargement du menu cuisine…</div>
+      </section>
+
+      <section id="page-stock-cuisine" class="page" aria-label="Stock ingrédients">
+        <!-- Contenu rendu dynamiquement par rstRenderStockPage() -->
+        <div style="padding:24px;color:#9e9e9e">Chargement du stock ingrédients…</div>
+      </section>
+
       </main>
     </div><!-- end main-wrapper -->
 
@@ -2802,5 +2834,6 @@
   <script src="./cave-extras.js"></script>
   <script src="./cave-order-pad.js"></script>
   <script src="./app-orders.js?v=342"></script>
+  <script src="./restaurant-module.js"></script>
 </body>
 </html>

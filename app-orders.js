@@ -11903,6 +11903,8 @@ function loadParamsForm() {
   if (pSingleName) {
     populateBrasserieFournisseurSelect(pSingleName, { mode: "catalog", preservedValue: site?.singleBreweryName || "" });
   }
+  const pHasRestaurant = document.getElementById("p-has-restaurant");
+  if (pHasRestaurant) pHasRestaurant.checked = Boolean(site?.hasRestaurant);
   const dualZonePricingEl = document.getElementById("p-dual-zone-pricing");
   if (dualZonePricingEl) dualZonePricingEl.checked = siteUsesDualZonePricing(site);
   const pStockAlertInclusive = document.getElementById("p-stock-alert-inclusive-seuil");
@@ -15734,6 +15736,7 @@ async function saveParams() {
     objectifCA: Number(document.getElementById("p-obj").value) || 500000,
     seuilStock: Number(document.getElementById("p-seuil").value) || 5,
     prefixeFacture: (document.getElementById("p-prefixe").value.trim() || item.prefixeFacture || "FAC").toUpperCase(),
+    hasRestaurant: Boolean(document.getElementById("p-has-restaurant")?.checked),
     dualZonePricing: dualPricingChecked,
     smsQrAlert: (document.getElementById("p-sms-qr")?.value || "").trim(),
     waNotifyPhones: (document.getElementById("p-wa-phones")?.value || "").trim(),
