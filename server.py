@@ -5189,19 +5189,30 @@ def _server_auto_close_site(site_id: str, d_str: str) -> None:
         ventes_jour = [v for v in state.get("ventes", [])
                        if str(v.get("siteId", "")) == site_id
                        and str(v.get("date", "")).startswith(d_str)]
-        po_recues_jour = [
-            po for po in state.get("purchaseOrders", [])
-            if str(po.get("siteId", "")) == site_id
-            and str(po.get("receivedAt") or po.get("date", "")).startswith(d_str)
-            and str(po.get("status", "")) == "Reçue"
-        ]
-
         # Ne pas clôturer automatiquement un jour sans ventes et sans caisse ouverte
         day_books = state.get("dayBooks", [])
-        day_book_exists = any(
-            str(b.get("siteId", "")) == site_id and str(b.get("date", "")).startswith(d_str)
-            for b in day_books
+        day_book = next(
+            (b for b in day_books if str(b.get("siteId", "")) == site_id and str(b.get("date", "")).startswith(d_str)),
+            None,
         )
+        day_book_exists = day_book is not None
+        opened_at = str(day_book.get("openedAt") or "") if day_book else ""
+
+        def _po_in_accounting_day(po: dict) -> bool:
+            if str(po.get("status", "")) != "Reçue":
+                return False
+            effective = str(po.get("receivedAt") or po.get("date", ""))
+            if effective.startswith(d_str):
+                return True
+            # Journée comptable multi-jour : PO reçu après l'ouverture de caisse
+            if opened_at and effective >= opened_at:
+                return True
+            return False
+
+        po_recues_jour = [
+            po for po in state.get("purchaseOrders", [])
+            if str(po.get("siteId", "")) == site_id and _po_in_accounting_day(po)
+        ]
         if not ventes_jour and not day_book_exists:
             print(f"[auto-cloture] Site {site_id} {d_str}: aucune vente ni caisse ouverte — clôture ignorée.", flush=True)
             return

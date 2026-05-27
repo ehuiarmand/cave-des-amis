@@ -7444,12 +7444,15 @@ function todaySortiesBottlesForArticle(article, saleDateStr = pdjCalendarDate())
     .reduce((sum, v) => sum + lineBottleQty(v, stockItem), 0);
 }
 
-function todayEntreesFromPOForArticle(article, dateStr) {
+function todayEntreesFromPOForArticle(article, dateStr, openedAt) {
   return purchaseOrdersForSite()
     .filter((po) => {
       if (po.status !== "Reçue") return false;
       const effectiveDate = (po.receivedAt || po.date || "").slice(0, 10);
-      return effectiveDate === dateStr;
+      if (effectiveDate === dateStr) return true;
+      // Journée comptable multi-jour : inclure POs reçus après l'ouverture de caisse
+      if (openedAt && po.receivedAt && po.receivedAt >= openedAt) return true;
+      return false;
     })
     .reduce((sum, po) =>
       sum + (po.lines || [])
@@ -7635,7 +7638,7 @@ function renderDailyStockCheck() {
     const rowsOpen = items.map((item) => {
       const stockAtOpen = stockOpeningFromDayBook(item, dayBook) ?? stockActuel(item);
       const sortiesToday = todaySortiesBottlesForArticle(item.article, dStr);
-      const entreesToday = todayEntreesFromPOForArticle(item.article, dStr);
+      const entreesToday = todayEntreesFromPOForArticle(item.article, dStr, dayBook?.openedAt);
       const remaining = Math.max(0, stockAtOpen + entreesToday - sortiesToday);
       const frigoVal = stockFrigo(item);
       const reserveVal = stockReserve(item);
@@ -7726,7 +7729,7 @@ function renderDailyStockCheck() {
       ?? closedCheckItem?.stockAvant
       ?? stockActuel(item);
     const sortiesToday = todaySortiesBottlesForArticle(item.article, dStr);
-    const entreesToday = todayEntreesFromPOForArticle(item.article, dStr);
+    const entreesToday = todayEntreesFromPOForArticle(item.article, dStr, dayBook?.openedAt);
     const remaining = Math.max(0, stockAtOpen + entreesToday - sortiesToday); // restant théorique
     const seedCi = seedFromClose ? (seedFromClose.items || []).find((ci) => Number(ci.id) === Number(item.id)) : null;
     const idn = Number(item.id);
@@ -12517,7 +12520,7 @@ async function performAutoClotureBackground(dStr) {
     const existingCloseItem = existingCloseCheck ? (existingCloseCheck.items || []).find((ci) => Number(ci.id) === Number(item.id)) : null;
     const stockAtOpen = stockOpeningFromDayBook(item, dayBook) ?? existingCloseItem?.stockAvant ?? stockActuel(item);
     const sortiesToday = todaySortiesBottlesForArticle(item.article, dStr);
-    const entreesToday = todayEntreesFromPOForArticle(item.article, dStr);
+    const entreesToday = todayEntreesFromPOForArticle(item.article, dStr, dayBook?.openedAt);
     const expectedRemaining = Math.max(0, stockAtOpen + entreesToday - sortiesToday);
     const counted = frigo + reserve;
     return {
