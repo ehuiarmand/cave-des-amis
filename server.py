@@ -5189,6 +5189,12 @@ def _server_auto_close_site(site_id: str, d_str: str) -> None:
         ventes_jour = [v for v in state.get("ventes", [])
                        if str(v.get("siteId", "")) == site_id
                        and str(v.get("date", "")).startswith(d_str)]
+        po_recues_jour = [
+            po for po in state.get("purchaseOrders", [])
+            if str(po.get("siteId", "")) == site_id
+            and str(po.get("date", "")).startswith(d_str)
+            and str(po.get("status", "")) == "Reçue"
+        ]
 
         # Ne pas clôturer automatiquement un jour sans ventes et sans caisse ouverte
         day_books = state.get("dayBooks", [])
@@ -5261,7 +5267,13 @@ def _server_auto_close_site(site_id: str, d_str: str) -> None:
                 for v in ventes_jour
                 if v.get("article") == item.get("article")
             )
-            expected_remaining = max(0.0, stock_at_open - sorties_today)
+            entrees_today = sum(
+                float(line.get("qty") or 0)
+                for po in po_recues_jour
+                for line in (po.get("lines") or [])
+                if str(line.get("article", "")) == str(item.get("article", ""))
+            )
+            expected_remaining = max(0.0, stock_at_open + entrees_today - sorties_today)
             counted = frigo + reserve
             ecart = counted - expected_remaining
             checked_items.append({
@@ -5269,6 +5281,7 @@ def _server_auto_close_site(site_id: str, d_str: str) -> None:
                 "article": item.get("article", ""),
                 "cat": item.get("cat", ""),
                 "stockAvant": stock_at_open,
+                "entreesToday": entrees_today,
                 "sortiesToday": sorties_today,
                 "expected": expected_remaining,
                 "frigo": frigo,
