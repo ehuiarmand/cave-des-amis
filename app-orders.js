@@ -10528,6 +10528,8 @@ function renderReplaceVentePicker(query, vente) {
 
 // Donnees en attente d'un supplement d'encaissement (remplacement article prix superieur)
 let _pendingSupplement = null;
+// Snapshot stock pour annulation du modal supplément
+let _pendingSupplementStockSnapshot = null;
 
 async function confirmReplaceVente(newArticleName) {
   const article = String(newArticleName || "").trim();
@@ -10588,10 +10590,21 @@ async function confirmReplaceVente(newArticleName) {
     + `${qtyLine}\nStock restitué : ${prevArticle} +${oldBottles} btl\nStock débité : ${newProduct.article} -${newBottles} btl`
     + prixLine,
   )) return;
+  // Snapshot avant modification (pour annulation via modal supplément)
+  _pendingSupplementStockSnapshot = {
+    oldItem: oldStockItem || null,
+    oldFrigo: oldStockItem ? (Number(oldStockItem.frigo) || 0) : 0,
+    oldReserve: oldStockItem ? (Number(oldStockItem.reserve) || 0) : 0,
+    oldSorties: oldStockItem ? (Number(oldStockItem.sorties) || 0) : 0,
+    newItem: newStockItem,
+    newFrigo: Number(newStockItem.frigo) || 0,
+    newReserve: Number(newStockItem.reserve) || 0,
+    newSorties: Number(newStockItem.sorties) || 0,
+  };
   // Restituer le stock de l'ancien article (quantite originale)
   if (oldStockItem) {
     oldStockItem.sorties = Math.max(0, (Number(oldStockItem.sorties) || 0) - oldBottles);
-    oldStockItem.frigo = (Number(oldStockItem.frigo) || 0) + oldBottles;
+    oldStockItem.reserve = (Number(oldStockItem.reserve) || 0) + oldBottles;
   }
   // Consommer le stock du nouvel article (nouvelle quantite)
   newStockItem.sorties = (Number(newStockItem.sorties) || 0) + newBottles;
@@ -10616,8 +10629,10 @@ async function confirmReplaceVente(newArticleName) {
     _pendingSupplement = { vente, diff };
     openSupplementModal(diff, newProduct.article, vente.client, vente.factureNumber);
   } else {
+    _pendingSupplementStockSnapshot = null;
     await persistState({ ventes: state.ventes, stock: state.stock, staffAuditLog: state.staffAuditLog });
     renderSalesHistory();
+    renderPointDuJour();
     if (currentPage === "stock") renderStock();
     if (currentPage === "home") renderDashboard();
     showToast(`"${prevArticle}" ×${originalQty} → "${vente.article}" ×${newQty} · Stock ajuste.`);
@@ -10695,7 +10710,9 @@ async function confirmSupplement() {
   try {
     await persistState({ ventes: state.ventes, stock: state.stock, staffAuditLog: state.staffAuditLog, nextId: state.nextId });
     _pendingSupplement = null;
+    _pendingSupplementStockSnapshot = null;
     closeModal("modal-supplement");
+    renderPointDuJour();
     renderSalesHistory();
     if (currentPage === "stock") renderStock();
     if (currentPage === "home") renderDashboard();
@@ -16795,7 +16812,15 @@ function closeModal(id) {
     const qw = document.getElementById("replace-qty-wrap");
     if (qw) qw.style.display = "none";
   }
-  if (id === "modal-supplement") { _pendingSupplement = null; }
+  if (id === "modal-supplement") {
+    _pendingSupplement = null;
+    if (_pendingSupplementStockSnapshot) {
+      const s = _pendingSupplementStockSnapshot;
+      if (s.oldItem) { s.oldItem.frigo = s.oldFrigo; s.oldItem.reserve = s.oldReserve; s.oldItem.sorties = s.oldSorties; }
+      s.newItem.frigo = s.newFrigo; s.newItem.reserve = s.newReserve; s.newItem.sorties = s.newSorties;
+      _pendingSupplementStockSnapshot = null;
+    }
+  }
 }
 
 async function removeOrderLine(orderId, lineId) {
@@ -16836,11 +16861,23 @@ async function deleteFinalSale(id) {
     return;
   }
   const vente = state.ventes.find((item) => item.id === id);
+  if (vente) {
+    const siteId = vente.siteId || currentSiteId();
+    const stockItem = stockItemForArticle(vente.article, siteId);
+    if (stockItem) {
+      const bottles = lineBottleQty(vente, stockItem);
+      if (bottles > 0) {
+        stockItem.sorties = Math.max(0, (Number(stockItem.sorties) || 0) - bottles);
+        stockItem.reserve = (Number(stockItem.reserve) || 0) + bottles;
+      }
+    }
+  }
   recordStaffAudit("delete", "vente", `Vente supprimee ${vente?.factureNumber ? vente.factureNumber : "#" + id}`, vente ? `${vente.article} · ${fmt(calcNet(vente))} FCFA · ${vente.paiement || ""}` : "");
   state.ventes = state.ventes.filter((item) => item.id !== id);
-  await persistState();
+  await persistState({ ventes: state.ventes, stock: state.stock, staffAuditLog: state.staffAuditLog });
   renderDashboard();
   renderSalesHistory();
+  renderPointDuJour();
   showToast("Vente supprimee.");
 }
 
