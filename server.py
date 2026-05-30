@@ -39,10 +39,15 @@ except ImportError:
 
 BASE_DIR = Path(__file__).resolve().parent
 DEBUG_LOG_FILE = BASE_DIR / "debug-dee456.log"
+# Journal de debug désactivé par défaut (évite la croissance illimitée du fichier
+# et la fuite de données de session en production). Activable via variable d'env.
+DEBUG_SESSION_LOG_ENABLED = os.environ.get("MAQUIS_MANAGER_DEBUG_LOG", "") == "1"
 
 
 def _dbg_session(msg: str, hypothesis_id: str, data: dict[str, Any]) -> None:
     # #region agent log
+    if not DEBUG_SESSION_LOG_ENABLED:
+        return
     try:
         line = json.dumps(
             {
@@ -63,6 +68,39 @@ def _dbg_session(msg: str, hypothesis_id: str, data: dict[str, Any]) -> None:
 
 
 DATA_FILE = BASE_DIR / "data.json"
+
+# Sécurité — fichiers statiques servables publiquement.
+# Liste blanche stricte d'extensions ; tout le reste (data.json, *.sqlite3, *.env,
+# *.log, *.jsonl, *.py, *.sql, sauvegardes, exports) renvoie 404. Quelques fichiers
+# .json publics légitimes (manifest) sont autorisés nommément.
+ALLOWED_STATIC_SUFFIXES = {
+    ".html", ".js", ".mjs", ".css", ".map",
+    ".svg", ".png", ".ico", ".webp", ".jpg", ".jpeg", ".gif",
+    ".woff", ".woff2", ".ttf", ".eot",
+    ".webmanifest", ".txt",
+}
+ALLOWED_STATIC_NAMES = {"manifest.json", "site.webmanifest"}
+PROTECTED_STATIC_DIRS = {"backups", ".git", "__pycache__", "app_securisee", "scripts"}
+
+# Taille maximale d'un corps de requête JSON (anti-DoS mémoire). Large pour ne pas
+# bloquer un PUT /api/state légitime, mais borné pour refuser les Content-Length absurdes.
+MAX_BODY_BYTES = 64 * 1024 * 1024
+
+
+def _is_servable_static(target: Path) -> bool:
+    """Autorise uniquement les assets front (liste blanche), jamais les données/secrets/code."""
+    try:
+        rel_parts = target.relative_to(BASE_DIR).parts
+    except ValueError:
+        return False
+    if any(part.lower() in PROTECTED_STATIC_DIRS for part in rel_parts[:-1]):
+        return False
+    name = target.name.lower()
+    if name in ALLOWED_STATIC_NAMES:
+        return True
+    if name.startswith("data.json") or name.startswith("maquis_manager_"):
+        return False
+    return target.suffix.lower() in ALLOWED_STATIC_SUFFIXES
 BACKUP_DIR = BASE_DIR / "backups"
 AUDIT_LOG_FILE = BASE_DIR / "audit.log.jsonl"
 SQLITE_FILE = BASE_DIR / "app.sqlite3"
@@ -369,8 +407,9 @@ _pre_auth_lock = threading.Lock()
 # WhatsApp OTP store (15-minute TTL, consommé une seule fois)
 # ---------------------------------------------------------------------------
 
-_wa_otp_store: dict[str, tuple[str, float]] = {}  # username → (hashed_otp, expires_ts)
+_wa_otp_store: dict[str, dict[str, Any]] = {}  # username → {hash, expires, attempts}
 _wa_otp_lock = threading.Lock()
+_WA_OTP_MAX_ATTEMPTS = 5  # anti-brute-force : au-delà, le code est invalidé
 
 
 def _wa_otp_generate(username: str) -> str:
@@ -378,23 +417,28 @@ def _wa_otp_generate(username: str) -> str:
     otp = str(secrets.randbelow(900000) + 100000)  # 100000–999999
     hashed = hashlib.sha256(otp.encode()).hexdigest()
     with _wa_otp_lock:
-        _wa_otp_store[username] = (hashed, time.time() + 900)  # TTL 15 min
+        _wa_otp_store[username] = {"hash": hashed, "expires": time.time() + 900, "attempts": 0}  # TTL 15 min
     return otp
 
 
 def _wa_otp_verify(username: str, otp: str) -> bool:
-    """Vérifie le code OTP, retourne True et supprime l'entrée si valide."""
+    """Vérifie le code OTP. Invalide l'entrée après trop d'essais (anti-brute-force)."""
     with _wa_otp_lock:
         entry = _wa_otp_store.get(username)
         if not entry:
             return False
-        hashed, expires = entry
-        if time.time() > expires:
+        if time.time() > entry["expires"]:
             del _wa_otp_store[username]
             return False
-        ok = secrets.compare_digest(hashed, hashlib.sha256(otp.encode()).hexdigest())
+        if entry.get("attempts", 0) >= _WA_OTP_MAX_ATTEMPTS:
+            # Trop de tentatives : on brûle le code, l'utilisateur doit en redemander un.
+            del _wa_otp_store[username]
+            return False
+        ok = secrets.compare_digest(entry["hash"], hashlib.sha256(otp.encode()).hexdigest())
         if ok:
             del _wa_otp_store[username]
+        else:
+            entry["attempts"] = entry.get("attempts", 0) + 1
         return ok
 
 
@@ -2358,17 +2402,9 @@ def normalize_auth_users(payload: dict[str, Any]) -> None:
             if site_ids:
                 user["allowedSiteIds"] = list(site_ids)
     by_lower = {str(u.get("username", "")).strip().lower(): u for u in users}
-    if "tanoh" not in by_lower and site_ids:
-        users.append(
-            {
-                "username": "tanoh",
-                "passwordHash": hash_password("tanoh123"),
-                "role": "superadmin",
-                "allowedSiteIds": list(site_ids),
-                "twoFactorEnabled": False,
-            }
-        )
-    elif "tanoh" in by_lower:
+    # Sécurité : on ne recrée PLUS automatiquement « tanoh » avec un mot de passe trivial
+    # (backdoor). Le compte n'est maintenu en superadmin que s'il existe déjà.
+    if "tanoh" in by_lower:
         tu = by_lower["tanoh"]
         tu["role"] = "superadmin"
         if site_ids:
@@ -2983,8 +3019,15 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
             return
 
         tmp_path = self.path.with_suffix(self.path.suffix + ".tmp")
-        # Atomic-ish write: write tmp then replace.
-        tmp_path.write_text(body, encoding="utf-8")
+        # Écriture durable : écrire le tmp, forcer fsync (données réellement sur disque),
+        # puis remplacer atomiquement. Évite un data.json tronqué/vide après coupure de courant.
+        with open(tmp_path, "w", encoding="utf-8") as _f:
+            _f.write(body)
+            _f.flush()
+            try:
+                os.fsync(_f.fileno())
+            except OSError:
+                pass
         try:
             tmp_path.replace(self.path)
         finally:
@@ -4889,7 +4932,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 import traceback as _tb2
                 print(f"[PUT] ERREUR INTERNE: {type(error).__name__}: {error}", flush=True)
                 _tb2.print_exc()
-                self.send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": f"Erreur serveur interne: {error}"})
+                self.send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "La modification n'a pas pu être enregistrée (erreur interne). Réessayez."})
                 return
             audit_log(
                 "state_put",
@@ -4918,6 +4961,10 @@ class AppHandler(BaseHTTPRequestHandler):
         target = (BASE_DIR / route.lstrip("/")).resolve()
         if BASE_DIR not in target.parents and target != BASE_DIR / "index.html":
             self.send_error(HTTPStatus.FORBIDDEN)
+            return
+        # Sécurité : ne jamais servir les données/secrets/code (liste blanche d'assets).
+        if not _is_servable_static(target):
+            self.send_error(HTTPStatus.NOT_FOUND)
             return
         if not target.exists() or not target.is_file():
             self.send_error(HTTPStatus.NOT_FOUND)
@@ -5012,13 +5059,19 @@ class AppHandler(BaseHTTPRequestHandler):
         return morsel.value if morsel else None
 
     def read_json(self) -> dict[str, Any]:
-        length = int(self.headers.get("Content-Length", "0") or "0")
-        raw = self.rfile.read(length) if length > 0 else b"{}"
+        # Content-Length invalide / absent / négatif / hors borne → corps vide (pas de crash, pas de DoS).
+        try:
+            length = int(self.headers.get("Content-Length", "0") or "0")
+        except (TypeError, ValueError):
+            return {}
+        if length <= 0 or length > MAX_BODY_BYTES:
+            return {}
+        raw = self.rfile.read(length)
         if not raw:
             return {}
         try:
             return json.loads(raw.decode("utf-8"))
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, UnicodeDecodeError):
             return {}
 
     def send_json(
