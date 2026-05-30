@@ -3374,6 +3374,13 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
         location: str = "Intérieur",
         items: list[dict[str, Any]],
     ) -> dict[str, Any]:
+        # Bornes anti-abus : entrée publique non authentifiée (limiter le nombre de lignes
+        # et la longueur des champs texte pour éviter charges/stockage abusifs).
+        items = items[:50] if isinstance(items, list) else []
+        client = str(client or "")[:80]
+        table_label = str(table_label or "")[:80]
+        note = str(note or "")[:500]
+        location = str(location or "Intérieur")[:40]
         with self._lock:
             site = next((item for item in self._state["sites"] if item.get("id") == site_id), None)
             if not site:
