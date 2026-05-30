@@ -3013,7 +3013,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
             self._sqlite_set("state", body)
             # Lightweight rolling backups (copy the DB file).
             try:
-                stamp = time.strftime("%Y%m%d-%H%M%S")
+                stamp = time.strftime("%Y%m%d-%H%M%S") + f"-{int((time.time() % 1) * 1000):03d}"
                 backup_path = BACKUP_DIR / f"app-{stamp}.sqlite3"
                 if self._sqlite_path.exists():
                     backup_path.write_bytes(self._sqlite_path.read_bytes())
@@ -3049,7 +3049,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
 
         # Lightweight rolling backups (keep last 10 snapshots).
         try:
-            stamp = time.strftime("%Y%m%d-%H%M%S")
+            stamp = time.strftime("%Y%m%d-%H%M%S") + f"-{int((time.time() % 1) * 1000):03d}"
             backup_path = BACKUP_DIR / f"data-{stamp}.json"
             backup_path.write_text(body, encoding="utf-8")
             backups = sorted(BACKUP_DIR.glob("data-*.json"), key=lambda p: p.name, reverse=True)
@@ -4229,6 +4229,9 @@ def invalidate_sessions_on_auth_changes(
 
 class AppHandler(BaseHTTPRequestHandler):
     server_version = "MaquisManagerServer/1.0"
+    # Anti-Slowloris : une connexion qui n'envoie/recoit rien pendant ce delai est coupee,
+    # ce qui libere le thread (sinon un client lent peut immobiliser une connexion indefiniment).
+    timeout = 30
 
     def _request_is_https(self) -> bool:
         proto = (self.headers.get("X-Forwarded-Proto") or "").strip().lower()
@@ -5489,11 +5492,39 @@ def _auto_cloture_check() -> None:
         print(f"[auto-cloture] Erreur inattendue : {exc}", flush=True)
 
 
+def _purge_expired_inmemory() -> None:
+    """Purge périodique des structures en mémoire à TTL (anti-croissance lente, SRV-13)."""
+    now = time.time()
+    try:
+        with _pre_auth_lock:
+            for k in [k for k, d in _pre_auth_tokens.items() if not isinstance(d, dict) or d.get("expiresAt", 0) <= now]:
+                _pre_auth_tokens.pop(k, None)
+        with _reauth_lock:
+            for k in [k for k, d in _reauth_tokens.items() if not isinstance(d, dict) or d.get("expiresAt", 0) <= now]:
+                _reauth_tokens.pop(k, None)
+        with _wa_otp_lock:
+            for k in [k for k, d in _wa_otp_store.items() if not isinstance(d, dict) or d.get("expires", 0) <= now]:
+                _wa_otp_store.pop(k, None)
+        with _public_order_rl_lock:
+            for ip in list(_public_order_rl.keys()):
+                hits = [t for t in _public_order_rl.get(ip, []) if now - t < _PUBLIC_ORDER_WINDOW]
+                if hits:
+                    _public_order_rl[ip] = hits
+                else:
+                    _public_order_rl.pop(ip, None)
+        with _state_put_dedup_lock:
+            for k in [k for k, t in _state_put_dedup.items() if now - t >= 300]:
+                _state_put_dedup.pop(k, None)
+    except Exception:
+        pass
+
+
 def _start_auto_cloture_thread() -> None:
     def loop() -> None:
         while True:
             time.sleep(60)
             _auto_cloture_check()
+            _purge_expired_inmemory()
     threading.Thread(target=loop, daemon=True, name="auto-cloture").start()
     print("[auto-cloture] Planificateur de clôture automatique démarré.", flush=True)
 
