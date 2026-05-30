@@ -185,7 +185,10 @@ _PG_TABLES: dict[str, tuple[str, str]] = {
     "ingredientStock":  ("ingredient_stock", "int"),
 }
 _PG_SKIP_SETTINGS = set(STATE_PUT_LIST_KEYS) | {"auth", "sites", "categories", "_meta"}
-MAX_STATE_LIST_ROWS = 50_000
+# Plafond par collection. Relevé pour ne pas bloquer la sauvegarde après plusieurs années
+# d'activité (le vrai correctif long terme = archivage + sauvegardes incrémentales, cf. audit).
+# Le corps de requête reste borné par MAX_BODY_BYTES (anti-DoS).
+MAX_STATE_LIST_ROWS = 150_000
 
 
 def validate_state_put_payload(payload: Any) -> None:
@@ -5046,11 +5049,11 @@ class AppHandler(BaseHTTPRequestHandler):
         return sessions.get(token)
 
     def require_csrf(self, session: dict[str, Any]) -> bool:
+        # Fail-closed : une session validee possede toujours un csrfToken (backfill cote serveur).
+        # Si le jeton attendu est absent, on refuse (au lieu d'autoriser) pour ne pas creer de trou CSRF.
         expected = str(session.get("csrfToken") or "").strip()
-        if not expected:
-            return True
         provided = (self.headers.get("X-CSRF-Token") or "").strip()
-        if provided and hmac.compare_digest(provided, expected):
+        if expected and provided and hmac.compare_digest(provided, expected):
             return True
         audit_log(
             "csrf_rejected",
