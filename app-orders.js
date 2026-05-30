@@ -1764,6 +1764,20 @@ function consumePhysicalStock(item, bottles) {
   }
 }
 
+/**
+ * Inverse de consumePhysicalStock : restitue des bouteilles au stock physique.
+ * La restitution est créditée en réserve (un retour/annulation réapprovisionne
+ * la réserve, pas le frigo) — symétrique et centralisé pour rester cohérent
+ * partout (suppression de vente, remplacement, correction de quantité).
+ */
+function restorePhysicalStock(item, bottles) {
+  if (!item) return;
+  normalizePhysicalStock(item);
+  const add = Math.max(0, Number(bottles) || 0);
+  if (add <= 0) return;
+  item.reserve = stockReserve(item) + add;
+}
+
 function availableStock(item) {
   if (!item) return 0;
   return stockActuel(item);
@@ -7438,9 +7452,10 @@ function journalEncaisseBlockTitle(order) {
 }
 
 function todaySortiesBottlesForArticle(article, saleDateStr = pdjCalendarDate()) {
-  const stockItem = recordsForSite(state.stock).find((s) => s.article === article);
+  const target = String(article || "").toLowerCase();
+  const stockItem = recordsForSite(state.stock).find((s) => String(s.article || "").toLowerCase() === target);
   return recordsForSite(state.ventes)
-    .filter((v) => v.date.slice(0, 10) === saleDateStr && v.article === article)
+    .filter((v) => !v.noStock && String(v.date || "").slice(0, 10) === saleDateStr && String(v.article || "").toLowerCase() === target)
     .reduce((sum, v) => sum + lineBottleQty(v, stockItem), 0);
 }
 
@@ -8630,7 +8645,9 @@ function canDeletePaidSale() {
 }
 
 function orderType(order) {
-  return order.type || (String(order.location || "").startsWith("Ext") ? "sur-place" : "sur-place");
+  // "Intérieur"/"Extérieur" sont des zones d'assise (toutes deux sur-place).
+  // Le mode "à emporter" n'existe que si order.type le précise explicitement.
+  return order?.type || "sur-place";
 }
 
 function orderTotal(order) {
@@ -10591,7 +10608,8 @@ async function confirmReplaceVente(newArticleName) {
     + `${qtyLine}\nStock restitué : ${prevArticle} +${oldBottles} btl\nStock débité : ${newProduct.article} -${newBottles} btl`
     + prixLine,
   )) return;
-  // Snapshot avant modification (pour annulation via modal supplément)
+  // Snapshot avant modification (pour annulation via modal supplément) :
+  // stock ET état de la vente, afin de tout restaurer si l'utilisateur annule.
   _pendingSupplementStockSnapshot = {
     oldItem: oldStockItem || null,
     oldFrigo: oldStockItem ? (Number(oldStockItem.frigo) || 0) : 0,
@@ -10601,11 +10619,17 @@ async function confirmReplaceVente(newArticleName) {
     newFrigo: Number(newStockItem.frigo) || 0,
     newReserve: Number(newStockItem.reserve) || 0,
     newSorties: Number(newStockItem.sorties) || 0,
+    vente,
+    venteArticle: vente.article,
+    venteCat: vente.cat,
+    venteQty: vente.qty,
+    venteFormatQuantite: vente.formatQuantite,
+    ventePrix: vente.prix,
   };
   // Restituer le stock de l'ancien article (quantite originale)
   if (oldStockItem) {
     oldStockItem.sorties = Math.max(0, (Number(oldStockItem.sorties) || 0) - oldBottles);
-    oldStockItem.reserve = (Number(oldStockItem.reserve) || 0) + oldBottles;
+    restorePhysicalStock(oldStockItem, oldBottles);
   }
   // Consommer le stock du nouvel article (nouvelle quantite)
   newStockItem.sorties = (Number(newStockItem.sorties) || 0) + newBottles;
@@ -10727,6 +10751,8 @@ async function confirmSupplement() {
     server: vente.server || sessionUser || "",
     serveur: vente.serveur || sessionUser || "",
     note: "Supplément remplacement article",
+    // Ligne de montant seul (différence de prix) : ne représente pas une bouteille vendue.
+    noStock: true,
   };
   state.ventes = [suppVente, ...state.ventes];
   recordStaffAudit(
@@ -11941,18 +11967,32 @@ async function applyQtyCorrection(factureNum, originalVentes) {
     });
 
   changes.forEach(({ v, oldQty, newQty }) => {
+    if (v.noStock) return; // ligne de montant seul (supplément) : aucun impact stock
     const entry = (state.stock || []).find(
       (s) => s.siteId === siteId &&
              String(s.article || "").toLowerCase() === String(v.article || "").toLowerCase(),
     );
-    if (entry) entry.sorties = Math.max(0, (Number(entry.sorties) || 0) + (newQty - oldQty));
+    if (!entry) return;
+    // Convertir le delta de quantité (kits/unités) en bouteilles via le format de la ligne,
+    // puis répercuter sur le ledger sorties ET le stock physique (frigo/réserve) + casiers.
+    const pack = linePackSize(v, entry);
+    const deltaBottles = (newQty - oldQty) * pack;
+    if (deltaBottles === 0) return;
+    entry.sorties = Math.max(0, (Number(entry.sorties) || 0) + deltaBottles);
+    if (deltaBottles > 0) {
+      consumePhysicalStock(entry, deltaBottles);
+      drainArticleCasiers(entry.article, deltaBottles, { motif: "correction", commentaire: `Correction qté ${factureNum}` });
+    } else {
+      restorePhysicalStock(entry, -deltaBottles);
+      restoreArticleCasiers(entry.article, -deltaBottles, { motif: "correction", commentaire: `Correction qté ${factureNum}` });
+    }
   });
 
   const desc = changes.map((c) => `${c.v.article}: ${c.oldQty}→${c.newQty}`).join(", ");
   recordStaffAudit("update", "correction_quantite",
     `Correction qtés ${factureNum} : ${desc}`,
     `Motif : ${motif}`);
-  await persistState({ ventes: state.ventes, stock: state.stock, staffAuditLog: state.staffAuditLog, nextId: state.nextId });
+  await persistState({ ventes: state.ventes, stock: state.stock, casiers: state.casiers, casierMouvements: state.casierMouvements, staffAuditLog: state.staffAuditLog, nextId: state.nextId });
   showToast(`Quantités de ${factureNum} corrigées.`);
   const refreshed = (state.ventes || []).filter(
     (v) => String(v.factureNumber || "").trim() === factureNum && v.siteId === currentSiteId(),
@@ -12622,18 +12662,13 @@ async function performAutoClotureBackground(dStr) {
     if (!item) return;
     item.frigo = checked.frigo;
     item.reserve = checked.reserve;
+    // Ventes deja comptabilisees a l'encaissement : la cloture ne retouche pas sorties pour les ventes.
     if (prevClose) {
       const prev = (prevClose.items || []).find((pi) => pi.id === checked.id);
       if (prev) {
-        if (prev.sortiesToday > 0) item.sorties = Math.max(0, (Number(item.sorties) || 0) - prev.sortiesToday);
         if (prev.ecart > 0) item.entrees = Math.max(0, (Number(item.entrees) || 0) - prev.ecart);
         if (prev.ecart < 0) item.sorties = Math.max(0, (Number(item.sorties) || 0) - Math.abs(prev.ecart));
       }
-    }
-    if (checked.sortiesToday > 0) {
-      item.sorties = (Number(item.sorties) || 0) + checked.sortiesToday;
-      item.lastSortieAt = new Date().toISOString();
-      item.lastSortieBy = "auto-cloture";
     }
     if (checked.ecart > 0) item.entrees = (Number(item.entrees) || 0) + checked.ecart;
     if (checked.ecart < 0) item.sorties = (Number(item.sorties) || 0) + Math.abs(checked.ecart);
@@ -14603,8 +14638,12 @@ async function finalizeOrder(orderId = activeOrderId) {
   }
   for (const [article, bottles] of Object.entries(neededByArticle)) {
     const stockItem = stockItemForArticle(article, siteId);
-    if (!stockItem || availableStock(stockItem) < bottles) {
-      showToast(`Stock insuffisant pour ${article}. Disponible: ${fmt(availableStock(stockItem))} bouteille(s).`);
+    // Tenir compte du stock déjà réservé par les AUTRES commandes ouvertes (on exclut celle-ci)
+    // pour éviter que deux encaissements concurrents ne consomment le même stock.
+    const reservedByOthers = reservedBottlesForOpenOrders(article, oid, null, siteId);
+    const availableForOrder = stockItem ? Math.max(0, availableStock(stockItem) - reservedByOthers) : 0;
+    if (!stockItem || availableForOrder < bottles) {
+      showToast(`Stock insuffisant pour ${article}. Disponible: ${fmt(availableForOrder)} bouteille(s).`);
       return;
     }
   }
@@ -15619,22 +15658,17 @@ async function closeAccountingDay() {
     if (!item) return;
     item.frigo = checked.frigo;
     item.reserve = checked.reserve;
-    // Annuler la cloture precedente du jour pour eviter le double-comptage
+    // Annuler l'ecart physique de la cloture precedente du jour (re-cloture).
+    // Les ventes (sorties) NE sont PAS retouchees ici : elles sont deja comptabilisees
+    // a l'encaissement (consumePhysicalStock + sorties). Les re-ajouter doublerait le ledger.
     if (prevClose) {
       const prev = (prevClose.items || []).find((pi) => pi.id === checked.id);
       if (prev) {
-        if (prev.sortiesToday > 0) item.sorties = Math.max(0, (Number(item.sorties) || 0) - prev.sortiesToday);
         if (prev.ecart > 0) item.entrees = Math.max(0, (Number(item.entrees) || 0) - prev.ecart);
         if (prev.ecart < 0) item.sorties = Math.max(0, (Number(item.sorties) || 0) - Math.abs(prev.ecart));
       }
     }
-    // Déduire les ventes du jour du stock (réduit stockActuel correctement)
-    if (checked.sortiesToday > 0) {
-      item.sorties = (Number(item.sorties) || 0) + checked.sortiesToday;
-      item.lastSortieAt = new Date().toISOString();
-      item.lastSortieBy = sessionUser || "system";
-    }
-    // Écrire uniquement l'écart physique réel (gain ou perte hors ventes)
+    // Écrire uniquement l'écart physique réel (gain ou perte hors ventes).
     if (checked.ecart > 0) item.entrees = (Number(item.entrees) || 0) + checked.ecart;
     if (checked.ecart < 0) item.sorties = (Number(item.sorties) || 0) + Math.abs(checked.ecart);
   });
@@ -16848,11 +16882,22 @@ function closeModal(id) {
   }
   if (id === "modal-supplement") {
     _pendingSupplement = null;
+    // Annulation : restaurer le stock ET la vente modifiée en RAM (le remplacement
+    // n'a pas été encaissé). Sur succès, confirmSupplement a déjà mis le snapshot à null.
     if (_pendingSupplementStockSnapshot) {
       const s = _pendingSupplementStockSnapshot;
       if (s.oldItem) { s.oldItem.frigo = s.oldFrigo; s.oldItem.reserve = s.oldReserve; s.oldItem.sorties = s.oldSorties; }
       s.newItem.frigo = s.newFrigo; s.newItem.reserve = s.newReserve; s.newItem.sorties = s.newSorties;
+      if (s.vente) {
+        s.vente.article = s.venteArticle;
+        s.vente.cat = s.venteCat;
+        s.vente.qty = s.venteQty;
+        s.vente.formatQuantite = s.venteFormatQuantite;
+        s.vente.prix = s.ventePrix;
+      }
       _pendingSupplementStockSnapshot = null;
+      renderSalesHistory();
+      renderPointDuJour();
     }
   }
 }
@@ -16895,20 +16940,26 @@ async function deleteFinalSale(id) {
     return;
   }
   const vente = state.ventes.find((item) => item.id === id);
-  if (vente) {
+  if (vente && !vente.noStock) {
     const siteId = vente.siteId || currentSiteId();
     const stockItem = stockItemForArticle(vente.article, siteId);
     if (stockItem) {
       const bottles = lineBottleQty(vente, stockItem);
       if (bottles > 0) {
         stockItem.sorties = Math.max(0, (Number(stockItem.sorties) || 0) - bottles);
-        stockItem.reserve = (Number(stockItem.reserve) || 0) + bottles;
+        restorePhysicalStock(stockItem, bottles);
+        // Restituer aussi les casiers physiques drainés lors de l'encaissement.
+        restoreArticleCasiers(stockItem.article, bottles, {
+          motif: "annulation_vente",
+          commentaire: `Annulation facture ${vente.factureNumber || "#" + id}`,
+          factureNumber: vente.factureNumber || "",
+        });
       }
     }
   }
   recordStaffAudit("delete", "vente", `Vente supprimee ${vente?.factureNumber ? vente.factureNumber : "#" + id}`, vente ? `${vente.article} · ${fmt(calcNet(vente))} FCFA · ${vente.paiement || ""}` : "");
   state.ventes = state.ventes.filter((item) => item.id !== id);
-  await persistState({ ventes: state.ventes, stock: state.stock, staffAuditLog: state.staffAuditLog });
+  await persistState({ ventes: state.ventes, stock: state.stock, casiers: state.casiers, casierMouvements: state.casierMouvements, staffAuditLog: state.staffAuditLog, nextId: state.nextId });
   renderDashboard();
   renderSalesHistory();
   renderPointDuJour();
@@ -17643,6 +17694,64 @@ function drainArticleCasiers(article, bottles, opts = {}) {
   }
 }
 
+/**
+ * Inverse de drainArticleCasiers : remet des bouteilles dans les casiers de l'article
+ * (annulation / remplacement d'une vente). On consolide en remplissant d'abord les
+ * casiers les plus remplis sans dépasser leur capacité, et on journalise un mouvement
+ * "entree". Best-effort : si plus de place, le reliquat n'est pas réinjecté (symétrique
+ * au drain qui peut être partiel).
+ */
+function restoreArticleCasiers(article, bottles, opts = {}) {
+  if (!article || bottles <= 0) return;
+  const siteId = currentSiteId();
+  state.casiers = state.casiers || [];
+  state.casierMouvements = state.casierMouvements || [];
+  state.nextId = state.nextId || {};
+  if (!state.nextId.casierMouvement || Number.isNaN(Number(state.nextId.casierMouvement))) state.nextId.casierMouvement = 1;
+  const artNorm = String(article || "").toLowerCase();
+  const stockIt = stockItemForArticle(article);
+  const brasNorm = normalizeBrasserieName(stockIt?.brasserie).toLowerCase();
+  const matching = state.casiers
+    .filter((c) => {
+      if (c.siteId !== siteId) return false;
+      const cn = String(c.article || "").toLowerCase();
+      return cn === artNorm || (brasNorm && cn === brasNorm);
+    })
+    .sort((a, b) => (Number(b.quantiteActuelle) || 0) - (Number(a.quantiteActuelle) || 0));
+  let remaining = bottles;
+  const now = new Date().toISOString();
+  for (const c of matching) {
+    if (remaining <= 0) break;
+    const cap = Math.max(1, Number(c.capacite) || 24);
+    const cur = Math.max(0, Number(c.quantiteActuelle) || 0);
+    const room = cap - cur;
+    if (room <= 0) continue;
+    const put = Math.min(room, remaining);
+    c.quantiteActuelle = cur + put;
+    recomputeCasierStatus(c);
+    c.lastMoveAt = now;
+    c.lastMoveBy = sessionUser || "system";
+    state.casierMouvements.unshift({
+      id: state.nextId.casierMouvement++,
+      siteId,
+      casierId: c.id,
+      casierCode: c.code,
+      article: c.article,
+      type: "entree",
+      quantite: put,
+      source: "",
+      motif: opts.motif || "annulation_vente",
+      commentaire: opts.commentaire || "",
+      factureNumber: opts.factureNumber || "",
+      user: sessionUser || "system",
+      role: currentRole || "-",
+      date: today(),
+      createdAt: now,
+    });
+    remaining -= put;
+  }
+}
+
 function distributeVidesEnCasiers(article, cap, bottles, now, opts = {}) {
   if (!article || bottles <= 0) return;
   const siteId = currentSiteId();
@@ -18189,6 +18298,7 @@ async function casierSortie(casierId, qty, { motif = "autre", commentaire = "" }
   const motifKey = String(motif || "autre").trim().toLowerCase();
   let frigoPlan = null;
   let stockDeducted = false;
+  let stockNotLinked = false;
   if (motifKey === "frigo") {
     frigoPlan = buildCasierToFrigoStockPlan(casier, q);
     if (!frigoPlan.ok) {
@@ -18214,7 +18324,16 @@ async function casierSortie(casierId, qty, { motif = "autre", commentaire = "" }
         rem -= take;
       }
       stockDeducted = true;
+    } else {
+      // Aucun article catalogue lié : le casier est déduit mais le stock catalogue ne bouge pas.
+      // On le signale (toast + trace dans le mouvement) pour éviter une désynchronisation silencieuse.
+      stockNotLinked = true;
+      showToast(`Sortie casier enregistrée. Aucun article catalogue lié (${String(casier.article || "?")}) : le stock catalogue n'a pas été modifié.`);
     }
+  }
+  if (stockNotLinked) {
+    commentaire = [String(commentaire || ""), "stock catalogue non impacté (aucun article lié)"]
+      .filter(Boolean).join(" · ");
   }
   const before = JSON.parse(JSON.stringify(casier));
 
