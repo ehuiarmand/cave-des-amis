@@ -17692,6 +17692,9 @@ function drainArticleCasiers(article, bottles, opts = {}) {
     });
     remaining -= take;
   }
+  // Les bouteilles vides collectées pendant le drain peuvent compléter un casier :
+  // retour automatique au fournisseur, sans clic manuel sur « retourner le casier ».
+  autoReturnCompletedVideCasiers({ motif: "retour_auto" });
 }
 
 /**
@@ -17750,6 +17753,59 @@ function restoreArticleCasiers(article, bottles, opts = {}) {
     });
     remaining -= put;
   }
+}
+
+/**
+ * Retour automatique au fournisseur des casiers devenus PLEINS de bouteilles vides.
+ * Dès qu'un casier de collecte atteint sa capacité en bouteilles vides (et ne contient
+ * plus de bouteilles pleines), il est marqué "retourne" et journalisé sans aucune action
+ * manuelle. Reproduit le comportement du retour manuel (_retourVidesLot / retourVidesCasier) :
+ * on retourne des casiers complets, on décrémente les vides du multiple de la capacité, et
+ * le casier entièrement rendu est retiré de l'inventaire (reparti chez le fournisseur).
+ * Retourne le nombre de casiers complets retournés.
+ */
+function autoReturnCompletedVideCasiers(opts = {}) {
+  const siteId = currentSiteId();
+  state.casiers = state.casiers || [];
+  state.casierMouvements = state.casierMouvements || [];
+  state.nextId = state.nextId || {};
+  if (!state.nextId.casierMouvement || Number.isNaN(Number(state.nextId.casierMouvement))) state.nextId.casierMouvement = 1;
+  const now = new Date().toISOString();
+  const idsToDelete = [];
+  let returnedCount = 0;
+  for (const casier of state.casiers) {
+    if (casier.siteId !== siteId) continue;
+    const cap = Math.max(1, Number(casier.capacite) || 24);
+    const qty = Math.max(0, Number(casier.quantiteActuelle) || 0);
+    const vides = Math.max(0, Number(casier.bouteillesVides) || 0);
+    if (qty > 0) continue;       // contient encore des bouteilles pleines
+    if (vides < cap) continue;   // pas encore un casier complet de vides
+    const nbCasiers = Math.floor(vides / cap);
+    const returnedBottles = nbCasiers * cap;
+    casier.bouteillesVides = Math.max(0, vides - returnedBottles);
+    casier.statut = "retourne";
+    recomputeCasierStatus(casier);
+    casier.lastMoveAt = now;
+    casier.lastMoveBy = "auto";
+    state.casierMouvements.unshift({
+      id: state.nextId.casierMouvement++,
+      siteId, casierId: casier.id, casierCode: casier.code, article: casier.article,
+      type: "retour_vide", quantite: returnedBottles, nbCasiers,
+      source: "", motif: opts.motif || "retour_auto",
+      commentaire: `Retour automatique · ${nbCasiers} casier(s) de ${fmt(cap)} btl vides`,
+      user: "auto", role: currentRole || "-",
+      date: today(), createdAt: now,
+    });
+    returnedCount += nbCasiers;
+    // Casier entièrement rendu : retiré de l'inventaire (reparti chez le fournisseur).
+    if ((Number(casier.bouteillesVides) || 0) === 0 && (Number(casier.quantiteActuelle) || 0) === 0) {
+      idsToDelete.push(casier.id);
+    }
+  }
+  if (idsToDelete.length) {
+    state.casiers = state.casiers.filter((c) => !idsToDelete.includes(c.id));
+  }
+  return returnedCount;
 }
 
 function distributeVidesEnCasiers(article, cap, bottles, now, opts = {}) {
