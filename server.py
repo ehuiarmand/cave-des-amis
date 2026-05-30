@@ -305,21 +305,31 @@ def _merge_pdj_work_date_map_session(
     allowed_site_ids: set[str],
     all_site_ids: list[str],
 ) -> dict[str, str]:
-    """Met a jour pdjWorkDateBySite : part du serveur (tous maquis valides), puis patch des sites autorises."""
+    """Met a jour pdjWorkDateBySite. Pour les maquis AUTORISES, la map entrante fait autorite :
+    une cle presente fixe la date, une cle ABSENTE la supprime (date comptable = aujourd'hui).
+    Les maquis non autorises conservent la valeur serveur.
+
+    Sans cette autorite sur l'absence, une cloture par un gerant (session scopee) ne pourrait
+    jamais faire revenir la journee a aujourd'hui : la suppression de cle cote client (omission)
+    etait ignoree, et l'ancienne date restait figee jusqu'a intervention d'un superadmin."""
     cur = _sanitize_pdj_work_date_map(
         current_map if isinstance(current_map, dict) else {},
         list(all_site_ids),
     )
     if not isinstance(incoming, dict):
         return cur
+    allowed = {str(s).strip() for s in allowed_site_ids}
+    # 1) Retirer les dates des maquis autorises : la map entrante (complete cote client) les redefinit.
+    for sid in [s for s in list(cur.keys()) if s in allowed]:
+        cur.pop(sid, None)
+    # 2) Reappliquer depuis l'entrant (maquis autorises uniquement, dates valides <= aujourd'hui).
     tmax = _today_iso_local()
     for sid_raw, v in incoming.items():
         sid = str(sid_raw).strip()
-        if sid not in allowed_site_ids:
+        if sid not in allowed:
             continue
         if v is None or (isinstance(v, str) and not str(v).strip()):
-            cur.pop(sid, None)
-            continue
+            continue  # suppression explicite (deja retiree a l'etape 1)
         s = str(v).strip()[:10]
         if re.fullmatch(r"\d{4}-\d{2}-\d{2}", s) and s <= tmax:
             cur[sid] = s
