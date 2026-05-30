@@ -699,6 +699,7 @@
             <div class="tabs" style="margin-bottom:14px">
               <button type="button" class="tab manager-only" data-caisse-inner="historique" role="tab" aria-selected="false">Historique ventes</button>
               <button type="button" class="tab active" data-caisse-inner="recouvrement" role="tab" aria-selected="true">Recouvrement crédit</button>
+              <button type="button" class="tab" data-caisse-inner="avoirs" role="tab" aria-selected="false">Avoirs clients</button>
             </div>
 
             <div id="ventes-caisse-panel-historique" class="caisse-inner-panel hidden" role="tabpanel" data-caisse-panel="historique" aria-hidden="true">
@@ -799,6 +800,43 @@
               </div>
 
               <div id="credit-list" class="credit-list-below"></div>
+            </div>
+
+            <div id="ventes-caisse-panel-avoirs" class="caisse-inner-panel credit-recovery-panel hidden" role="tabpanel" data-caisse-panel="avoirs" aria-hidden="true">
+              <div class="section-head credit-recovery-head">
+                <div>
+                  <p class="eyebrow" style="margin-bottom:4px">Monnaie client</p>
+                  <h3>Avoirs clients</h3>
+                  <p class="muted" style="margin-top:6px">Gardez la monnaie d'un client (faute de petite coupure) et réutilisez-la plus tard. L'argent reste en caisse.</p>
+                </div>
+                <div class="credit-recovery-kpis">
+                  <div class="credit-recovery-kpi">
+                    <span class="muted" style="font-size:0.82rem">Total dû aux clients</span>
+                    <strong id="avoir-total" style="color:#ffd479">0 FCFA</strong>
+                  </div>
+                </div>
+              </div>
+
+              <div class="form-grid three-cols" style="margin-top:14px">
+                <div class="form-group">
+                  <label for="avoir-name">Client</label>
+                  <input id="avoir-name" type="text" placeholder="ex: M. KOFFI (affiché en majuscules)" list="avoir-names-list" autocomplete="name">
+                  <datalist id="avoir-names-list"></datalist>
+                </div>
+                <div class="form-group">
+                  <label for="avoir-amount">Monnaie gardée (FCFA)</label>
+                  <input id="avoir-amount" type="number" min="0" step="1" placeholder="ex: 200">
+                </div>
+                <div class="form-group">
+                  <label for="avoir-note">Note</label>
+                  <input id="avoir-note" type="text" placeholder="optionnel — ex: pas de monnaie">
+                </div>
+              </div>
+              <div class="credit-versement-actions">
+                <button id="avoir-save-btn" class="btn btn-primary credit-save-btn" type="button">Garder la monnaie</button>
+              </div>
+
+              <div id="avoir-list" class="credit-list-below"></div>
             </div>
           </div>
         </article>
@@ -2270,10 +2308,14 @@
             <label for="pay-credit">Credit</label>
             <input id="pay-credit" class="finalize-pay-input" type="number" min="0" placeholder="0" inputmode="numeric">
           </div>
+          <div class="form-group form-group--zero">
+            <label for="pay-avoir">Avoir client</label>
+            <input id="pay-avoir" class="finalize-pay-input" type="number" min="0" placeholder="0" inputmode="numeric">
+          </div>
         </div>
         <div class="form-group form-group--zero form-group--credit">
-          <label for="pay-credit-name">Debiteur (si credit)</label>
-          <input id="pay-credit-name" type="text" placeholder="Obligatoire si credit" autocomplete="name">
+          <label for="pay-credit-name">Debiteur (si credit ou avoir)</label>
+          <input id="pay-credit-name" type="text" placeholder="Obligatoire si credit ou avoir" autocomplete="name">
         </div>
         <div class="inline-card inline-card--tight finalize-preview-block">
           <div class="finalize-preview-line">
@@ -2835,7 +2877,7 @@
   <script src="./cave-components.js"></script>
   <script src="./cave-extras.js"></script>
   <script src="./cave-order-pad.js"></script>
-  <script src="./app-orders.js?v=345"></script>
+  <script src="./app-orders.js?v=346"></script>
   <script src="./restaurant-module.js"></script>
 </body>
 </html>

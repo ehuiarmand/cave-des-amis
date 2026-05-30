@@ -917,6 +917,57 @@ function creditOutstandingMap(sourceState = state) {
   return map;
 }
 
+/* ──────────────────────────────────────────────────────────────────────────
+ * Avoirs clients (monnaie gardée, réutilisable pour un paiement ultérieur).
+ * Émission = on garde la monnaie d'un client (l'espèce reste en caisse).
+ * Utilisation = le client règle une commande avec son avoir (paiement non-espèces).
+ * Solde par client = Σ émissions − Σ utilisations (>0 : le maquis doit au client).
+ * ────────────────────────────────────────────────────────────────────────── */
+const AVOIR_CLIENT_METHOD = "Avoir client";
+
+function isAvoirClientMethod(method) {
+  return normalizePaymentMethodKey(method) === normalizePaymentMethodKey(AVOIR_CLIENT_METHOD);
+}
+
+function clientAvoirsForSite(sourceState = state) {
+  const siteId = sourceState?.activeSiteId || currentSiteId();
+  const multiSite = ((sourceState?.sites || state?.sites || []).length > 1);
+  return (sourceState?.clientAvoirs || []).filter((a) => rowMatchesSite(a, siteId, multiSite));
+}
+
+/** Solde d'avoir par client. Positif = montant que le maquis doit (réutilisable). */
+function avoirBalanceByClient(sourceState = state) {
+  const map = {};
+  clientAvoirsForSite(sourceState).forEach((a) => {
+    const name = debtorDisplayKey(a.debiteur || a.client || "Client inconnu");
+    const montant = Number(a.montant) || 0;
+    if (String(a.type) === "utilisation") map[name] = (map[name] || 0) - montant;
+    else map[name] = (map[name] || 0) + montant;
+  });
+  Object.keys(map).forEach((k) => { if (Math.abs(map[k]) <= 0.001) delete map[k]; });
+  return map;
+}
+
+/** Avoir disponible (≥0) pour un client donné. */
+function avoirBalanceForClient(name, sourceState = state) {
+  const key = debtorDisplayKey(name);
+  return Math.max(0, Number(avoirBalanceByClient(sourceState)[key]) || 0);
+}
+
+/** Total des avoirs en attente (tous clients) — dette du maquis envers les clients. */
+function totalAvoirOutstanding(sourceState = state) {
+  return Object.values(avoirBalanceByClient(sourceState)).reduce((sum, n) => sum + Math.max(0, Number(n) || 0), 0);
+}
+
+/** Avoirs émis (monnaie gardée) sur une journée comptable : espèce restée en caisse → +théorique. */
+function especesAvoirsEmisForDate(dStr, sourceState = state) {
+  const day = String(dStr || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return 0;
+  return clientAvoirsForSite(sourceState)
+    .filter((a) => String(a.type) === "emission" && String(a.date || "").slice(0, 10) === day)
+    .reduce((sum, a) => sum + (Number(a.montant) || 0), 0);
+}
+
 /** Noms des comptes (serveur / gérant) ayant enregistré une vente avec crédit client, par débiteur. */
 function creditIssuerLabelsByDebtor(sourceState = state) {
   const ventes = recordsForSite(sourceState?.ventes || []);
@@ -5109,14 +5160,21 @@ function renderHero() {
 function syncCaisseInnerPanels() {
   const hist = document.getElementById("ventes-caisse-panel-historique");
   const rec = document.getElementById("ventes-caisse-panel-recouvrement");
+  const avoir = document.getElementById("ventes-caisse-panel-avoirs");
   if (!rec) return;
   const showHistorique = caisseInnerTab === "historique";
+  const showAvoirs = caisseInnerTab === "avoirs";
+  const showRecouvrement = !showHistorique && !showAvoirs;
   if (hist) {
     hist.classList.toggle("hidden", !showHistorique);
     hist.setAttribute("aria-hidden", showHistorique ? "false" : "true");
   }
-  rec.classList.toggle("hidden", showHistorique);
-  rec.setAttribute("aria-hidden", showHistorique ? "true" : "false");
+  rec.classList.toggle("hidden", !showRecouvrement);
+  rec.setAttribute("aria-hidden", showRecouvrement ? "false" : "true");
+  if (avoir) {
+    avoir.classList.toggle("hidden", !showAvoirs);
+    avoir.setAttribute("aria-hidden", showAvoirs ? "false" : "true");
+  }
   document.querySelectorAll("[data-caisse-inner]").forEach((btn) => {
     const inner = btn.dataset.caisseInner;
     const active = inner === caisseInnerTab;
@@ -5124,10 +5182,11 @@ function syncCaisseInnerPanels() {
     btn.setAttribute("aria-selected", active ? "true" : "false");
   });
   if (showHistorique) renderSalesHistory();
+  if (showAvoirs) renderClientAvoirs();
 }
 
 function setCaisseInnerTab(tab) {
-  if (tab !== "historique" && tab !== "recouvrement") return;
+  if (tab !== "historique" && tab !== "recouvrement" && tab !== "avoirs") return;
   if (tab === "historique" && isServeuseAccount()) {
     navigate("historique-ventes");
     return;
@@ -7730,8 +7789,8 @@ function renderDailyStockCheck() {
       : sum
   ), 0);
   const openingCash = Number(dayBook?.openingCashFcfa) || 0;
-  /** Théorique caisse = ouverture + ventes espèces + recouvrements crédit en espèces (charges non déduites). */
-  const expectedEspeces = openingCash + especesVentes + especesRecouvrement;
+  /** Théorique caisse = ouverture + ventes espèces + recouvrements crédit espèces + avoirs émis (monnaie gardée), charges non déduites. */
+  const expectedEspeces = openingCash + especesVentes + especesRecouvrement + especesAvoirsEmisForDate(dStr);
   const closingSeed = seedFromClose && typeof seedFromClose.closingCashFcfa === "number"
     ? Math.round(Number(seedFromClose.closingCashFcfa))
     : null;
@@ -9604,6 +9663,7 @@ function renderVentesPage() {
   renderSalesHistory();
   if (currentPage === "historique-ventes") renderServeuseSalesHistoryPage().catch(() => {});
   renderCreditRecovery();
+  renderClientAvoirs();
   renderConsignes();
   if (currentPage === "pdj") renderPointDuJour();
 }
@@ -12626,7 +12686,7 @@ async function performAutoClotureBackground(dStr) {
       ? sum + (Number(c.montant) || 0) : sum
   ), 0);
   const openingCash = Number(dayBook?.openingCashFcfa) || 0;
-  const expectedEspecesCash = openingCash + especesVentes + especesRecouvrement;
+  const expectedEspecesCash = openingCash + especesVentes + especesRecouvrement + especesAvoirsEmisForDate(dStr);
   const closingCashFcfa = expectedEspecesCash;
   const cashEcartEspeces = 0;
 
@@ -13564,6 +13624,151 @@ async function saveCreditRecovery() {
   }
   _creditRecoverySaveInFlight = false;
   if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = prevCreditText; }
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Avoirs clients — UI (émission « garder la monnaie » + affichage des soldes).
+ * ────────────────────────────────────────────────────────────────────────── */
+
+let _clientAvoirSaveInFlight = false;
+
+/** Émission d'un avoir : on garde la monnaie d'un client, l'espèce reste en caisse. */
+async function createClientAvoir(clientName, montant, note) {
+  const name = debtorDisplayKey(String(clientName || "").trim());
+  const amount = Math.round(Number(montant) || 0);
+  const noteClean = String(note || "").trim();
+  if (!String(clientName || "").trim()) { showToast("Le nom du client est obligatoire."); return; }
+  if (!Number.isInteger(amount) || amount <= 0) { showToast("Entrez un montant d'avoir valide (entier > 0)."); return; }
+  const siteId = currentSiteId();
+  if (!siteId) {
+    showToast("Maquis actif non défini : sélectionnez un maquis avant d'enregistrer un avoir.");
+    return;
+  }
+  if (!window.confirm(`Garder ${fmt(amount)} FCFA d'avoir pour ${name} ? L'argent reste en caisse.`)) return;
+  if (_clientAvoirSaveInFlight) { showToast("Enregistrement en cours…"); return; }
+
+  if (!Array.isArray(state.clientAvoirs)) state.clientAvoirs = [];
+  if (!state.nextId) state.nextId = {};
+  if (!state.nextId.clientAvoir || Number.isNaN(Number(state.nextId.clientAvoir))) state.nextId.clientAvoir = 1;
+
+  const saveBtn = document.getElementById("avoir-save-btn");
+  const prevText = saveBtn ? saveBtn.textContent : "";
+  _clientAvoirSaveInFlight = true;
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = "Enregistrement…"; }
+
+  const row = {
+    id: state.nextId.clientAvoir++,
+    siteId,
+    date: pdjCalendarDate(),
+    debiteur: name,
+    type: "emission",
+    montant: amount,
+    paiement: "Espèces",
+    note: noteClean,
+    user: sessionUser || "",
+    role: currentRole || "-",
+    createdAt: new Date().toISOString(),
+  };
+  state.clientAvoirs = [row, ...state.clientAvoirs];
+
+  try {
+    recordStaffAudit("create", "client_avoir", `Avoir gardé · ${name}`, `${fmt(amount)} FCFA${noteClean ? ` · ${noteClean}` : ""}`);
+    await persistState({ clientAvoirs: state.clientAvoirs, nextId: state.nextId });
+    const nameField = document.getElementById("avoir-name");
+    if (nameField) nameField.value = name;
+    const amountField = document.getElementById("avoir-amount");
+    if (amountField) amountField.value = "";
+    const noteField = document.getElementById("avoir-note");
+    if (noteField) noteField.value = "";
+    showToast(`Avoir de ${fmt(amount)} FCFA enregistré pour ${name}. L'argent reste en caisse.`);
+    renderClientAvoirs();
+    renderPointDuJour();
+  } catch (err) {
+    state.clientAvoirs = state.clientAvoirs.filter((a) => a.id !== row.id);
+    handleApiError(err);
+    showToast("L'avoir n'a pas été enregistré. Réessayez.");
+  } finally {
+    _clientAvoirSaveInFlight = false;
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = prevText; }
+  }
+}
+
+/** Affichage du panneau « Avoirs clients » : KPI total, soldes par client, historique récent. */
+function renderClientAvoirs() {
+  const list = document.getElementById("avoir-list");
+  if (!list) return;
+  const balances = avoirBalanceByClient();
+  const entries = Object.entries(balances)
+    .filter(([, v]) => Number(v) > 0)
+    .sort((a, b) => b[1] - a[1]);
+  const total = totalAvoirOutstanding();
+
+  const totalNode = document.getElementById("avoir-total");
+  if (totalNode) totalNode.textContent = `${fmt(total)} FCFA`;
+
+  const rows = clientAvoirsForSite();
+  const datalist = document.getElementById("avoir-names-list");
+  if (datalist) {
+    const names = [...new Set([
+      ...entries.map(([n]) => n),
+      ...rows.map((a) => debtorDisplayKey(a.debiteur)).filter(Boolean),
+    ])].sort((a, b) => a.localeCompare(b, "fr"));
+    datalist.innerHTML = names.map((n) => `<option value="${escapeHtml(n)}"></option>`).join("");
+  }
+
+  const balancesHtml = entries.length
+    ? `<div class="stock-table-wrap" style="margin-top:10px">
+        <p class="eyebrow" style="margin-bottom:8px">Soldes d'avoir disponibles</p>
+        <table class="stock-table" style="min-width:420px">
+          <thead><tr>
+            <th>Client</th>
+            <th style="text-align:right">Avoir disponible</th>
+          </tr></thead>
+          <tbody>${entries.map(([name, amount]) => `
+            <tr>
+              <td><strong>${escapeHtml(name)}</strong></td>
+              <td style="text-align:right"><strong style="color:#ffd479">${fmt(amount)} FCFA</strong></td>
+            </tr>`).join("")}
+          </tbody>
+        </table>
+      </div>`
+    : `<div class="muted" style="margin-top:10px;padding:12px;border:1px solid var(--border);border-radius:8px;font-size:0.92rem">
+        <strong>Aucun avoir client en cours</strong> — gardez la monnaie d'un client ci‑dessus pour créer un avoir réutilisable.
+      </div>`;
+
+  const recent = rows
+    .slice()
+    .sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")))
+    .slice(0, 30);
+  const historyHtml = recent.length
+    ? `<div class="stock-table-wrap" style="margin-top:18px">
+        <p class="eyebrow" style="margin-bottom:8px">Derniers mouvements d'avoir</p>
+        <table class="stock-table" style="min-width:520px">
+          <thead><tr>
+            <th>Date</th>
+            <th>Client</th>
+            <th>Type</th>
+            <th style="text-align:right">Montant</th>
+          </tr></thead>
+          <tbody>${recent.map((a) => {
+            const isUse = String(a.type) === "utilisation";
+            const typeLabel = isUse ? "Utilisation" : "Monnaie gardée";
+            const color = isUse ? "#ff8e82" : "#72d7a9";
+            const sign = isUse ? "−" : "+";
+            return `
+            <tr>
+              <td class="muted" style="white-space:nowrap">${escapeHtml(formatDateDdMmYyyy(String(a.date || "").slice(0, 10)))}</td>
+              <td>${escapeHtml(debtorDisplayKey(a.debiteur))}</td>
+              <td class="muted">${escapeHtml(typeLabel)}${a.note ? ` · ${escapeHtml(String(a.note))}` : ""}</td>
+              <td style="text-align:right;color:${color};font-weight:600">${sign}${fmt(Number(a.montant) || 0)} FCFA</td>
+            </tr>`;
+          }).join("")}
+          </tbody>
+        </table>
+      </div>`
+    : "";
+
+  list.innerHTML = balancesHtml + historyHtml;
 }
 
 function purchaseOrdersForSite() {
@@ -14568,7 +14773,8 @@ function readPaymentMix(total) {
     ["MTN MoMo", "pay-mtn"],
     ["Carte", "pay-card"],
     ["Crédit client", "pay-credit"],
-  ].map(([method, id]) => ({ method, amount: Number(document.getElementById(id).value) || 0 }))
+    ["Avoir client", "pay-avoir"],
+  ].map(([method, id]) => ({ method, amount: Number(document.getElementById(id)?.value) || 0 }))
     .filter((item) => item.amount > 0);
   const paidTotal = details.reduce((sum, item) => sum + item.amount, 0);
   if (!details.length) {
@@ -14579,6 +14785,18 @@ function readPaymentMix(total) {
   }
   if (details.some((item) => isCreditClientMethod(item.method)) && !creditName) {
     return { error: "Le nom du debiteur est obligatoire pour un credit client." };
+  }
+  const avoirUsed = details
+    .filter((item) => isAvoirClientMethod(item.method))
+    .reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+  if (avoirUsed > 0) {
+    if (!creditName) {
+      return { error: "Le nom du client est obligatoire pour utiliser un avoir." };
+    }
+    const available = avoirBalanceForClient(creditName);
+    if (avoirUsed > available) {
+      return { error: `Avoir insuffisant pour ${debtorDisplayKey(creditName)} : disponible ${fmt(available)} FCFA, demandé ${fmt(avoirUsed)} FCFA.` };
+    }
   }
   return { details, creditName };
 }
@@ -14684,6 +14902,7 @@ async function finalizeOrder(orderId = activeOrderId) {
     nextId: { ...(state.nextId || {}) },
     casiers: state.casiers,
     casierMouvements: state.casierMouvements,
+    clientAvoirs: state.clientAvoirs,
   };
 
   finalizeOrderInFlight.add(oid);
@@ -14748,6 +14967,33 @@ async function finalizeOrder(orderId = activeOrderId) {
     pendingFinalizeOrderId = null;
     recordStaffAudit("create", "encaissement", `Facture ${factureNumber} · ${order.client || "Client"}`, `Total ${fmt(orderTotal)} FCFA · ${paymentMethod}${paymentMix.creditName ? ` · debiteur ${paymentMix.creditName}` : ""}`);
 
+    // Utilisation d'un avoir client : le client règle tout ou partie avec sa monnaie gardée.
+    const avoirUsedRaw = paymentMix.details
+      .filter((d) => isAvoirClientMethod(d.method))
+      .reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
+    if (avoirUsedRaw > 0 && paymentMix.creditName) {
+      if (!Array.isArray(state.clientAvoirs)) state.clientAvoirs = [];
+      if (!state.nextId.clientAvoir || Number.isNaN(Number(state.nextId.clientAvoir))) state.nextId.clientAvoir = 1;
+      const avoirUsed = Math.min(Math.round(avoirUsedRaw), Math.round(avoirBalanceForClient(paymentMix.creditName)));
+      if (avoirUsed > 0) {
+        state.clientAvoirs = [{
+          id: state.nextId.clientAvoir++,
+          siteId: order.siteId || currentSiteId(),
+          date: pdjCalendarDate(),
+          debiteur: debtorDisplayKey(paymentMix.creditName),
+          type: "utilisation",
+          montant: avoirUsed,
+          paiement: "Espèces",
+          note: "",
+          factureNumber,
+          user: sessionUser || "",
+          role: currentRole || "-",
+          createdAt: new Date().toISOString(),
+        }, ...state.clientAvoirs];
+        recordStaffAudit("create", "client_avoir", `Avoir utilisé · ${debtorDisplayKey(paymentMix.creditName)}`, `${fmt(avoirUsed)} FCFA · facture ${factureNumber}`);
+      }
+    }
+
     pruneFinalizedCommandesFromState();
     await persistStatePatch({
       ventes: state.ventes,
@@ -14756,6 +15002,7 @@ async function finalizeOrder(orderId = activeOrderId) {
       nextId: state.nextId,
       casiers: state.casiers,
       casierMouvements: state.casierMouvements,
+      clientAvoirs: state.clientAvoirs,
     });
 
     closeModal("modal-vente");
@@ -14773,6 +15020,7 @@ async function finalizeOrder(orderId = activeOrderId) {
     state.nextId = rollback.nextId;
     state.casiers = rollback.casiers;
     state.casierMouvements = rollback.casierMouvements;
+    state.clientAvoirs = rollback.clientAvoirs;
     handleApiError(e);
     const net =
       !navigator.onLine
@@ -15494,8 +15742,8 @@ function closureCashSnapshot(dStr) {
   ), 0);
   const dayBook = dayBookFor(dStr, currentSiteId());
   const openingCash = Number(dayBook?.openingCashFcfa) || 0;
-  /** Même règle que l'écran PDJ : théorique = ouverture + ventes espèces + recouvrement crédit espèces. */
-  const expectedEspecesCash = openingCash + especesVentes + especesRecouvrement;
+  /** Même règle que l'écran PDJ : ouverture + ventes espèces + recouvrement crédit espèces + avoirs émis (monnaie gardée). */
+  const expectedEspecesCash = openingCash + especesVentes + especesRecouvrement + especesAvoirsEmisForDate(dStr);
   const closingRaw = document.getElementById("pdj-closing-cash")?.value;
   const closingCashFcfa = closingRaw === undefined || closingRaw === null || String(closingRaw).trim() === ""
     ? expectedEspecesCash
@@ -15586,8 +15834,8 @@ async function closeAccountingDay() {
       : sum
   ), 0);
   const openingCash = Number(dayBook?.openingCashFcfa) || 0;
-  /** Même règle que l'écran PDJ : théorique = ouverture + ventes espèces + recouvrement crédit espèces. */
-  const expectedEspecesCash = openingCash + especesVentes + especesRecouvrement;
+  /** Même règle que l'écran PDJ : ouverture + ventes espèces + recouvrement crédit espèces + avoirs émis (monnaie gardée). */
+  const expectedEspecesCash = openingCash + especesVentes + especesRecouvrement + especesAvoirsEmisForDate(dStr);
   const cashEcartEspeces = closingCashFcfa - expectedEspecesCash;
 
   const recapCloture = isFinDeService
@@ -19218,6 +19466,7 @@ async function bootstrapAuthenticatedApp(opts = {}) {
   const skipCasierLsRestore = Boolean(opts.skipCasierLsRestore);
   state = await apiRequest(API.state);
   if (!Array.isArray(state.creditRecoveries)) state.creditRecoveries = [];
+  if (!Array.isArray(state.clientAvoirs)) state.clientAvoirs = [];
   if (!Array.isArray(state.purchaseOrders)) state.purchaseOrders = [];
   if (!Array.isArray(state.supplierPrices)) state.supplierPrices = [];
   if (!state.pdjWorkDateBySite || typeof state.pdjWorkDateBySite !== "object") state.pdjWorkDateBySite = {};
@@ -19241,6 +19490,7 @@ async function bootstrapAuthenticatedApp(opts = {}) {
   if (!state.nextId.stockEntree || Number.isNaN(Number(state.nextId.stockEntree))) state.nextId.stockEntree = 100;
   if (!state.nextId.stockLoss || Number.isNaN(Number(state.nextId.stockLoss))) state.nextId.stockLoss = 100;
   if (!state.nextId.creditRecovery) state.nextId.creditRecovery = 100;
+  if (!state.nextId.clientAvoir || Number.isNaN(Number(state.nextId.clientAvoir))) state.nextId.clientAvoir = 1;
   if (!state.nextId.casier || Number.isNaN(Number(state.nextId.casier))) state.nextId.casier = 1;
   if (!state.nextId.casierMouvement || Number.isNaN(Number(state.nextId.casierMouvement))) state.nextId.casierMouvement = 1;
   if (!state.nextId.workShift || Number.isNaN(Number(state.nextId.workShift))) state.nextId.workShift = 100;
@@ -20632,6 +20882,15 @@ document.getElementById("fab-btn").addEventListener("click", () => {
   });
   const creditSaveBtn = document.getElementById("credit-save-btn");
   if (creditSaveBtn) creditSaveBtn.addEventListener("click", () => saveCreditRecovery().catch(handleApiError));
+  const avoirSaveBtn = document.getElementById("avoir-save-btn");
+  if (avoirSaveBtn) {
+    avoirSaveBtn.addEventListener("click", () => {
+      const name = document.getElementById("avoir-name")?.value || "";
+      const amount = document.getElementById("avoir-amount")?.value || "";
+      const note = document.getElementById("avoir-note")?.value || "";
+      createClientAvoir(name, amount, note).catch(handleApiError);
+    });
+  }
   const stockSearch = document.getElementById("stock-search");
   if (stockSearch) {
     stockSearch.addEventListener("input", () => {

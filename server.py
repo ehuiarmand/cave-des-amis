@@ -159,7 +159,7 @@ REQUIRE_2FA_FOR_PRIVILEGED = _env_first(
 STATE_PUT_LIST_KEYS = (
     "ventes", "stock", "commandes", "stockChecks", "stockEntrees", "stockLosses",
     "dayBooks", "purchaseOrders", "supplierPrices", "casiers", "casierMouvements",
-    "creditRecoveries", "consignes", "charges", "staffAuditLog", "workShifts",
+    "creditRecoveries", "clientAvoirs", "consignes", "charges", "staffAuditLog", "workShifts",
     "restaurantMenu", "ingredientStock",
 )
 # Mapping clé JSON → (table PostgreSQL, type d'id)
@@ -629,6 +629,7 @@ DEFAULT_STATE: dict[str, Any] = {
     "casiers": [],
     "casierMouvements": [],
     "creditRecoveries": [],
+    "clientAvoirs": [],
     "consignes": [],
     "categories": ["Bières", "Sodas & Jus", "Eaux", "Vins & Spiritueux", "Cocktails", "Snacks", "Autres"],
     "charges": [
@@ -1535,6 +1536,7 @@ def build_default_state() -> dict[str, Any]:
         "casiers": [],
         "casierMouvements": [],
         "creditRecoveries": [],
+        "clientAvoirs": [],
         "consignes": [],
         "categories": legacy.get("categories", DEFAULT_STATE["categories"]),
         "charges": [
@@ -1596,6 +1598,7 @@ def migrate_state(payload: dict[str, Any]) -> dict[str, Any]:
             "commandes": [{**item, "siteId": item.get("siteId", site_id)} for item in payload.get("commandes", [])],
             "stockChecks": [{**item, "siteId": item.get("siteId", site_id)} for item in payload.get("stockChecks", [])],
             "creditRecoveries": [{**item, "siteId": item.get("siteId", site_id)} for item in payload.get("creditRecoveries", [])],
+            "clientAvoirs": [{**item, "siteId": item.get("siteId", site_id)} for item in payload.get("clientAvoirs", [])],
             "consignes": [{**item, "siteId": item.get("siteId", site_id)} for item in payload.get("consignes", [])],
             "categories": payload.get("categories", default["categories"]),
             "charges": [{**item, "siteId": item.get("siteId", site_id)} for item in payload.get("charges", default["charges"])],
@@ -1646,6 +1649,7 @@ _SITE_SCOPED_ROW_KEYS: tuple[str, ...] = (
     "casiers",
     "casierMouvements",
     "creditRecoveries",
+    "clientAvoirs",
     "consignes",
     "charges",
     "staffAuditLog",
@@ -2904,6 +2908,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
         merged["casiers"] = payload.get("casiers", merged.get("casiers", []))
         merged["casierMouvements"] = payload.get("casierMouvements", merged.get("casierMouvements", []))
         merged["creditRecoveries"] = payload.get("creditRecoveries", merged.get("creditRecoveries", []))
+        merged["clientAvoirs"] = payload.get("clientAvoirs", merged.get("clientAvoirs", []))
         merged["consignes"] = payload.get("consignes", merged.get("consignes", []))
         merged["staffAuditLog"] = payload.get("staffAuditLog", merged.get("staffAuditLog", []))
         merged["workShifts"] = payload.get("workShifts", merged.get("workShifts", []))
@@ -3094,6 +3099,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                 "casiers": copy.deepcopy(s.get("casiers", [])),
                 "casierMouvements": copy.deepcopy(s.get("casierMouvements", [])),
                 "creditRecoveries": copy.deepcopy(s.get("creditRecoveries", [])),
+                "clientAvoirs": copy.deepcopy(s.get("clientAvoirs", [])),
                 "consignes": copy.deepcopy(s.get("consignes", [])),
                 "categories": copy.deepcopy(s.get("categories", DEFAULT_STATE["categories"])),
                 "charges": copy.deepcopy(s["charges"]),
@@ -3178,6 +3184,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                 "casiers": filter_site_rows(self._state.get("casiers", [])),
                 "casierMouvements": filter_site_rows(self._state.get("casierMouvements", [])),
                 "creditRecoveries": filter_site_rows(self._state.get("creditRecoveries", [])),
+                "clientAvoirs": filter_site_rows(self._state.get("clientAvoirs", [])),
                 "consignes": filter_site_rows(self._state.get("consignes", [])),
                 "categories": full["categories"],
                 "charges": filter_site_rows(self._state.get("charges", [])),
@@ -3300,6 +3307,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
             merged["casiers"] = payload.get("casiers", merged.get("casiers", []))
             merged["casierMouvements"] = payload.get("casierMouvements", merged.get("casierMouvements", []))
             merged["creditRecoveries"] = payload.get("creditRecoveries", merged.get("creditRecoveries", []))
+            merged["clientAvoirs"] = payload.get("clientAvoirs", merged.get("clientAvoirs", []))
             merged["consignes"] = payload.get("consignes", merged.get("consignes", []))
             merged["staffAuditLog"] = payload.get("staffAuditLog", merged.get("staffAuditLog", []))
             merged["stockEntrees"] = payload.get("stockEntrees", merged.get("stockEntrees", []))
@@ -3678,7 +3686,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                 _GLOBAL_PATCH_KEYS = [
                     "ventes", "stock", "commandes", "stockChecks", "dayBooks",
                     "purchaseOrders", "supplierPrices", "casiers", "casierMouvements",
-                    "creditRecoveries", "consignes", "charges", "staffAuditLog",
+                    "creditRecoveries", "clientAvoirs", "consignes", "charges", "staffAuditLog",
                     "stockEntrees", "stockLosses", "restaurantMenu", "ingredientStock",
                 ]
                 _old_sc_snap_g: dict[str, dict[str, Any]] = (
@@ -3809,11 +3817,12 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
             _SERVEUSE_WRITE = frozenset({
                 "ventes", "commandes", "dayBooks",
                 "stock", "casiers", "casierMouvements", "staffAuditLog",
+                "clientAvoirs",
             })
             _MANAGER_WRITE = frozenset({
                 "ventes", "stock", "commandes", "stockChecks", "dayBooks",
                 "purchaseOrders", "supplierPrices", "casiers", "casierMouvements",
-                "creditRecoveries", "consignes", "charges", "staffAuditLog",
+                "creditRecoveries", "clientAvoirs", "consignes", "charges", "staffAuditLog",
                 "stockEntrees", "stockLosses", "workShifts",
             })
             if _role_str == "serveuse":
@@ -3828,7 +3837,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
             _SCOPED_KEYS = [
                 "ventes", "stock", "commandes", "stockChecks", "dayBooks",
                 "purchaseOrders", "supplierPrices", "casiers", "casierMouvements",
-                "creditRecoveries", "consignes", "charges", "staffAuditLog",
+                "creditRecoveries", "clientAvoirs", "consignes", "charges", "staffAuditLog",
                 "stockEntrees", "stockLosses", "workShifts",
             ]
             # Retirer du payload les clés que le rôle ne peut pas écrire
@@ -5325,7 +5334,15 @@ def _server_auto_close_site(site_id: str, d_str: str) -> None:
             and str(r.get("paidAt") or r.get("date") or "").startswith(d_str)
             and "pèces" in str(r.get("paiement") or "")
         )
-        expected_especes = opening_cash + especes_ventes + especes_recouvrement
+        # Monnaie de clients gardée (avoir émis) : l'espèce reste physiquement en caisse → +théorique.
+        especes_avoirs = sum(
+            float(a.get("montant") or 0)
+            for a in state.get("clientAvoirs", [])
+            if str(a.get("siteId", "")) == site_id
+            and str(a.get("type") or "") == "emission"
+            and str(a.get("date") or "").startswith(d_str)
+        )
+        expected_especes = opening_cash + especes_ventes + especes_recouvrement + especes_avoirs
         closing_cash = expected_especes
 
         # Construire checkedItems avec valeurs théoriques
