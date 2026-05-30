@@ -12802,7 +12802,11 @@ async function syncStateSilently() {
     if (newFc && newFc.closedBy === sessionUser && (!prevFc || prevFc.at !== newFc.at)) {
       showToast(`Votre fin de service du ${isoDateToDdMmYyyy(newFc.date)} a été validée par ${newFc.confirmedBy || "le gérant"}. Bonne journée !`);
     }
-    state.pdjWorkDateBySite = { ...prevPdj, ...incPdj };
+    const newPdj = { ...prevPdj, ...incPdj };
+    // Si le serveur a supprimé la clé du site courant (nextDate = aujourd'hui), la supprimer côté client
+    const pollSid = String(currentSiteId() || "");
+    if (pollSid && !(pollSid in incPdj) && pollSid in prevPdj) delete newPdj[pollSid];
+    state.pdjWorkDateBySite = newPdj;
     applyPdjWorkDateToVentesAndOrderDom();
     syncPdjWorkDateInput();
   }
