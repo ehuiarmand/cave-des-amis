@@ -11961,6 +11961,7 @@ async function deleteSite(siteId) {
 // ─── Correction de facture ───────────────────────────────────────────────────
 
 const CORRECTION_AUDIT_ENTITIES = new Set(["correction_paiement", "correction_quantite"]);
+let _correctionApplyBusy = false;
 
 function correctionAuditTypeLabel(entity) {
   if (entity === "correction_paiement") return "Paiement";
@@ -11976,6 +11977,22 @@ function factureFromCorrectionAuditSummary(summary) {
 function motifFromCorrectionAuditDetail(detail) {
   const m = String(detail || "").match(/^Motif\s*:\s*(.+)$/im);
   return m ? m[1].trim() : "—";
+}
+
+/** Masque les doublons accidentels (double clic / listeners empilés). */
+function dedupeCorrectionAuditRows(rows) {
+  const kept = [];
+  rows.forEach((row) => {
+    const key = `${row.entity}|${row.summary}|${row.detail}|${row.actor}`;
+    const ts = Date.parse(row.at || "") || 0;
+    const dup = kept.find((prev) => {
+      if (`${prev.entity}|${prev.summary}|${prev.detail}|${prev.actor}` !== key) return false;
+      const prevTs = Date.parse(prev.at || "") || 0;
+      return Math.abs(ts - prevTs) < 8000;
+    });
+    if (!dup) kept.push(row);
+  });
+  return kept;
 }
 
 function renderCorrectionPanel() {
@@ -11996,9 +12013,11 @@ function renderCorrectionHistory() {
     return;
   }
   const siteId = currentSiteId();
-  const log = (Array.isArray(state.staffAuditLog) ? state.staffAuditLog : [])
-    .filter((row) => CORRECTION_AUDIT_ENTITIES.has(String(row.entity || "")))
-    .filter((row) => !siteId || String(row.siteId || "") === String(siteId));
+  const log = dedupeCorrectionAuditRows(
+    (Array.isArray(state.staffAuditLog) ? state.staffAuditLog : [])
+      .filter((row) => CORRECTION_AUDIT_ENTITIES.has(String(row.entity || "")))
+      .filter((row) => !siteId || String(row.siteId || "") === String(siteId)),
+  );
 
   window.__corrHistoryUi = window.__corrHistoryUi || { q: "", type: "all", page: 0, pageSize: 25 };
   const ui = window.__corrHistoryUi;
@@ -12169,13 +12188,20 @@ function renderCorrectionResult(factureNum, ventes) {
       <button id="corr-apply-qty-btn" class="btn btn-outline" type="button">Appliquer correction quantités</button>
     </div>`;
 
-  document.getElementById("corr-apply-pay-btn")?.addEventListener("click", () =>
-    applyPaymentCorrection(factureNum, ventes).catch(handleApiError));
-  document.getElementById("corr-apply-qty-btn")?.addEventListener("click", () =>
-    applyQtyCorrection(factureNum, ventes).catch(handleApiError));
+  const payBtn = document.getElementById("corr-apply-pay-btn");
+  const qtyBtn = document.getElementById("corr-apply-qty-btn");
+  if (payBtn) {
+    payBtn.onclick = () => applyPaymentCorrection(factureNum, ventes).catch(handleApiError);
+    payBtn.disabled = _correctionApplyBusy;
+  }
+  if (qtyBtn) {
+    qtyBtn.onclick = () => applyQtyCorrection(factureNum, ventes).catch(handleApiError);
+    qtyBtn.disabled = _correctionApplyBusy;
+  }
 }
 
 async function applyPaymentCorrection(factureNum, originalVentes) {
+  if (_correctionApplyBusy) return;
   const motif = String(document.getElementById("corr-motif")?.value || "").trim();
   if (!motif) { showToast("Le motif est obligatoire."); return; }
   const newMethod = document.getElementById("corr-pay-method")?.value;
@@ -12183,6 +12209,10 @@ async function applyPaymentCorrection(factureNum, originalVentes) {
   const oldMethod = paymentLabel(originalVentes[0]) || originalVentes[0].paiement || "?";
   if (newMethod === oldMethod) { showToast("Le mode de paiement est déjà " + newMethod); return; }
 
+  _correctionApplyBusy = true;
+  document.getElementById("corr-apply-pay-btn")?.setAttribute("disabled", "disabled");
+  document.getElementById("corr-apply-qty-btn")?.setAttribute("disabled", "disabled");
+  try {
   const ids = new Set(originalVentes.map((v) => v.id));
   state.ventes = (state.ventes || []).map((v) => {
     if (!ids.has(v.id)) return v;
@@ -12200,9 +12230,15 @@ async function applyPaymentCorrection(factureNum, originalVentes) {
   );
   renderCorrectionResult(factureNum, refreshed);
   renderCorrectionHistory();
+  } finally {
+    _correctionApplyBusy = false;
+    document.getElementById("corr-apply-pay-btn")?.removeAttribute("disabled");
+    document.getElementById("corr-apply-qty-btn")?.removeAttribute("disabled");
+  }
 }
 
 async function applyQtyCorrection(factureNum, originalVentes) {
+  if (_correctionApplyBusy) return;
   const motif = String(document.getElementById("corr-motif")?.value || "").trim();
   if (!motif) { showToast("Le motif est obligatoire."); return; }
 
@@ -12216,6 +12252,10 @@ async function applyQtyCorrection(factureNum, originalVentes) {
   });
   if (!changes.length) { showToast("Aucune quantité modifiée."); return; }
 
+  _correctionApplyBusy = true;
+  document.getElementById("corr-apply-pay-btn")?.setAttribute("disabled", "disabled");
+  document.getElementById("corr-apply-qty-btn")?.setAttribute("disabled", "disabled");
+  try {
   const siteId = currentSiteId();
   const idMap = new Map(changes.map((c) => [c.v.id, c]));
 
@@ -12276,6 +12316,11 @@ async function applyQtyCorrection(factureNum, originalVentes) {
   if (refreshed.length) renderCorrectionResult(factureNum, refreshed);
   else document.getElementById("corr-result").innerHTML = `<p class="muted" style="padding:10px 0">Toutes les lignes ont été retirées (quantité 0).</p>`;
   renderCorrectionHistory();
+  } finally {
+    _correctionApplyBusy = false;
+    document.getElementById("corr-apply-pay-btn")?.removeAttribute("disabled");
+    document.getElementById("corr-apply-qty-btn")?.removeAttribute("disabled");
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
