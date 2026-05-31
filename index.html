@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./styles.css?v=47">
+  <link rel="stylesheet" href="./styles.css?v=48">
   <link rel="stylesheet" href="./styles-cave-manager.css?v=2">
   <link rel="stylesheet" href="./cave-casier.css">
   <link rel="stylesheet" href="./cave-components.css">
@@ -978,9 +978,29 @@
               </select>
             </div>
           </div>
-          <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;align-items:center">
-            <button id="stock-move-print-btn" class="mini-btn" type="button" title="Imprimer le récapitulatif par article (stock début, ventes, stock fin)">Imprimer ventes par article</button>
-            <span class="muted" style="font-size:0.82rem">Récap. par article pour la période ci-dessus (stock début → ventes → stock fin).</span>
+          <div class="manager-only" id="stock-move-synth-toolbar" style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;align-items:center">
+            <button id="stock-move-print-btn" class="btn btn-primary" type="button" style="width:auto;font-size:0.88rem" title="Imprimer le récapitulatif par article (stock début, ventes, stock fin)">Imprimer ventes par article</button>
+            <span class="muted" style="font-size:0.82rem">Synthèse ci-dessous : stock début → ventes → stock fin pour chaque article.</span>
+          </div>
+          <div class="manager-only stock-table-wrap stock-inventaire-wrap" id="stock-move-article-summary-wrap" style="margin-top:14px">
+            <p class="eyebrow" style="margin:0 0 8px">Synthèse par article (période)</p>
+            <table class="stock-table stock-inventaire-table stock-move-synth-table">
+              <colgroup>
+                <col class="stock-inv-col-article">
+                <col class="stock-inv-col-num">
+                <col class="stock-inv-col-num">
+                <col class="stock-inv-col-num">
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>Article</th>
+                  <th class="th-orange stock-inv-th-num">Stock début</th>
+                  <th class="th-blue stock-inv-th-num">Ventes</th>
+                  <th class="stock-inv-th-num">Stock fin (th.)</th>
+                </tr>
+              </thead>
+              <tbody id="stock-move-article-list"></tbody>
+            </table>
           </div>
           <div id="stock-movement-summary" class="pdj-kpis" style="margin-top:14px"></div>
           <div class="stock-table-wrap" style="margin-top:14px">
@@ -2934,7 +2954,7 @@
   <script src="./cave-components.js"></script>
   <script src="./cave-extras.js"></script>
   <script src="./cave-order-pad.js"></script>
-  <script src="./app-orders.js?v=350"></script>
+  <script src="./app-orders.js?v=351"></script>
   <script src="./restaurant-module.js"></script>
 </body>
 </html>

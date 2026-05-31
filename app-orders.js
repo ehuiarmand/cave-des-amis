@@ -15824,9 +15824,10 @@ function printStockPeriodByArticle(startRaw, endRaw, { title = "Synthèse stock"
   const totVentes = rows.reduce((s, r) => s + r.ventes, 0);
   const ticketWindow = window.open("", "_blank", "width=900,height=800");
   if (!ticketWindow) {
-    showToast("Impossible d'ouvrir l'impression.");
+    showToast("Impression bloquée : autorisez les pop-ups pour ce site, puis réessayez.");
     return;
   }
+  const printScript = "<scr" + "ipt>window.onload=function(){window.print();}</scr" + "ipt>";
   ticketWindow.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>
     body{font-family:Arial,sans-serif;color:#111;padding:28px}header{display:flex;justify-content:space-between;gap:18px;border-bottom:2px solid #111;padding-bottom:14px;margin-bottom:18px}
     h1,h2,p{margin:0 0 8px}.meta{color:#555}.summary{display:flex;gap:24px;margin:12px 0 16px;font-size:14px}
@@ -15836,7 +15837,7 @@ function printStockPeriodByArticle(startRaw, endRaw, { title = "Synthèse stock"
   </style></head><body><header><div><h1>${escapeHtml(site?.nom || "Maquis")}</h1><p>${escapeHtml(site?.ville || "")}</p></div><div><h2>${escapeHtml(title)}</h2><p class="meta">Période : ${escapeHtml(period)}</p><p class="meta">Imprimé le ${escapeHtml(formatDateTimeDdMmYyyy(new Date()))}</p></div></header>
   <div class="summary"><span><strong>${fmt(rows.length)}</strong> article(s)</span><span>Total ventes : <strong>${fmt(totVentes)}</strong> btl</span></div>
   <table><thead><tr>${headCols}</tr></thead><tbody>${tableRows}</tbody></table>
-  <script>window.onload=function(){window.print();}</script></body></html>`);
+  ${printScript}</body></html>`);
   ticketWindow.document.close();
 }
 
@@ -15916,10 +15917,40 @@ function stockMovements() {
   return movements;
 }
 
+function renderStockMoveArticleSummary(startRaw, endRaw) {
+  const wrap = document.getElementById("stock-move-article-summary-wrap");
+  const list = document.getElementById("stock-move-article-list");
+  if (!wrap || !list) return;
+  if (!canManage()) {
+    wrap.classList.add("hidden-by-role");
+    return;
+  }
+  wrap.classList.remove("hidden-by-role");
+  let start = String(startRaw || "").slice(0, 10);
+  let end = String(endRaw || "").slice(0, 10);
+  if (!start && !end) {
+    end = today();
+    start = end.slice(0, 8) + "01";
+  }
+  if (!start) start = end;
+  if (!end) end = start;
+  if (start > end) { const t = start; start = end; end = t; }
+  const rows = stockInventoryReportRows(start, end);
+  list.innerHTML = rows.length
+    ? rows.map((r) => `<tr>
+      <td><strong>${escapeHtml(r.article)}</strong></td>
+      <td class="stock-inv-td-num" style="color:#1976d2">${fmt(r.stockDebut)}</td>
+      <td class="stock-inv-td-num" style="color:#ff8e82">${fmt(r.ventes)}</td>
+      <td class="stock-inv-td-num"><strong>${fmt(r.stockFin)}</strong></td>
+    </tr>`).join("")
+    : `<tr><td colspan="4" style="text-align:center;color:var(--muted);padding:24px">Aucun article dans le catalogue.</td></tr>`;
+}
+
 function renderStockMovements() {
   const start = document.getElementById("stock-move-start")?.value || "";
   const end = document.getElementById("stock-move-end")?.value || "";
   const type = document.getElementById("stock-move-type")?.value || "all";
+  renderStockMoveArticleSummary(start, end);
   const inPeriod = (item) => {
     const date = stockMovementDateValue(item);
     return (!start || date >= start) && (!end || date <= end);
