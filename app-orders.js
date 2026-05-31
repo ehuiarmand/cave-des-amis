@@ -15698,6 +15698,27 @@ function pertesForArticlePeriod(article, start, end) {
     .reduce((s, l) => s + (Number(l.qty) || 0), 0);
 }
 
+/** Écarts physiques en clôture PDJ (stockChecks.items[].ecart) sur la période. */
+function closureEcartBottlesForArticlePeriod(item, start, end) {
+  if (!item) return 0;
+  const siteId = item.siteId || currentSiteId();
+  const articleLow = String(item.article || "").toLowerCase();
+  const itemId = Number(item.id);
+  return (state.stockChecks || [])
+    .filter((sc) => sc.siteId === siteId && isoDateInRange(sc.date, start, end))
+    .reduce((sum, sc) => {
+      const ci = (sc.items || []).find((x) => Number(x.id) === itemId
+        || String(x.article || "").toLowerCase() === articleLow);
+      return sum + (Number(ci?.ecart) || 0);
+    }, 0);
+}
+
+function fmtEcartSigned(n) {
+  const v = Number(n) || 0;
+  if (v === 0) return fmt(0);
+  return (v > 0 ? "+" : "") + fmt(v);
+}
+
 function stockInventoryReportRows(start, end) {
   const rows = [];
   recordsForSite(state.stock)
@@ -15708,8 +15729,21 @@ function stockInventoryReportRows(start, end) {
       const achats = entreesBottlesForArticlePeriod(item.article, start, end);
       const ventes = ventesBottlesForArticlePeriod(item.article, start, end);
       const pertes = pertesForArticlePeriod(item.article, start, end);
+      const ecartsCloture = closureEcartBottlesForArticlePeriod(item, start, end);
       const stockFin = Math.max(0, stockDebut + achats - ventes - pertes);
-      rows.push({ article: item.article, stockDebut, achats, ventes, pertes, stockFin });
+      const stockFinReconcilie = Math.max(0, stockFin + ecartsCloture);
+      const stockActuelCatalogue = stockActuel(item);
+      rows.push({
+        article: item.article,
+        stockDebut,
+        achats,
+        ventes,
+        pertes,
+        ecartsCloture,
+        stockFin,
+        stockFinReconcilie,
+        stockActuelCatalogue,
+      });
     });
   return rows;
 }
@@ -15718,7 +15752,7 @@ function renderStockInventoryReport() {
   const list = document.getElementById("stock-inv-list");
   if (!list) return;
   if (!canManage()) {
-    list.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:32px;color:var(--muted)">Réservé au gérant ou à un administrateur.</td></tr>`;
+    list.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:32px;color:var(--muted)">Réservé au gérant ou à un administrateur.</td></tr>`;
     return;
   }
   let start = document.getElementById("stock-inv-start")?.value || "";
@@ -15738,24 +15772,32 @@ function renderStockInventoryReport() {
   const totAchats = rows.reduce((s, r) => s + r.achats, 0);
   const totVentes = rows.reduce((s, r) => s + r.ventes, 0);
   const totPertes = rows.reduce((s, r) => s + r.pertes, 0);
+  const totEcarts = rows.reduce((s, r) => s + r.ecartsCloture, 0);
   const summary = document.getElementById("stock-inv-summary");
   if (summary) {
     summary.innerHTML = `
       <div class="pdj-kpi"><span class="kpi-label">Articles</span><strong class="pdj-val amber">${fmt(rows.length)}</strong></div>
       <div class="pdj-kpi"><span class="kpi-label">Achats (btl)</span><strong class="pdj-val amber">${fmt(totAchats)}</strong></div>
       <div class="pdj-kpi"><span class="kpi-label">Ventes (btl)</span><strong class="pdj-val red">${fmt(totVentes)}</strong></div>
-      <div class="pdj-kpi"><span class="kpi-label">Pertes (btl)</span><strong class="pdj-val red">${fmt(totPertes)}</strong></div>`;
+      <div class="pdj-kpi"><span class="kpi-label">Pertes (btl)</span><strong class="pdj-val red">${fmt(totPertes)}</strong></div>
+      <div class="pdj-kpi"><span class="kpi-label">Écarts PDJ (btl)</span><strong class="pdj-val ${totEcarts < 0 ? "red" : "amber"}">${fmtEcartSigned(totEcarts)}</strong></div>`;
   }
   list.innerHTML = rows.length
-    ? rows.map((r) => `<tr>
+    ? rows.map((r) => {
+      const mismatch = r.stockFinReconcilie !== r.stockActuelCatalogue;
+      return `<tr class="${mismatch ? "stock-inv-row-mismatch" : ""}">
       <td><strong>${escapeHtml(r.article)}</strong></td>
       <td class="stock-inv-td-num" style="color:#1976d2">${fmt(r.stockDebut)}</td>
       <td class="stock-inv-td-num" style="color:#72d7a9">${r.achats > 0 ? "+" + fmt(r.achats) : fmt(0)}</td>
       <td class="stock-inv-td-num" style="color:#ff8e82">${fmt(r.ventes)}</td>
       <td class="stock-inv-td-num" style="color:#ff8e82">${fmt(r.pertes)}</td>
-      <td class="stock-inv-td-num"><strong>${fmt(r.stockFin)}</strong></td>
-    </tr>`).join("")
-    : `<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:32px">Aucun article dans le catalogue.</td></tr>`;
+      <td class="stock-inv-td-num">${fmtEcartSigned(r.ecartsCloture)}</td>
+      <td class="stock-inv-td-num">${fmt(r.stockFin)}</td>
+      <td class="stock-inv-td-num"><strong>${fmt(r.stockFinReconcilie)}</strong></td>
+      <td class="stock-inv-td-num" style="color:#1976d2"><strong>${fmt(r.stockActuelCatalogue)}</strong></td>
+    </tr>`;
+    }).join("")
+    : `<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:32px">Aucun article dans le catalogue.</td></tr>`;
 }
 
 function printStockInventoryReport() {
@@ -15778,63 +15820,77 @@ function stockMoveTypeFromUi() {
 }
 
 function stockMoveSynthColCount(moveType) {
-  return moveType === "all" ? 5 : 4;
+  if (moveType === "entree") return 6;
+  if (moveType === "sortie") return 7;
+  return 9;
 }
 
 function stockMoveSynthHeadHtml(moveType) {
+  const reconc = `<th class="stock-inv-th-num">Stk réconcilié</th><th class="stock-inv-th-num">Stk actuel</th>`;
   if (moveType === "entree") {
-    return `<th>Article</th><th class="th-orange stock-inv-th-num">Stock début</th><th class="stock-inv-th-num" style="color:#72d7a9">Entrées</th><th class="stock-inv-th-num">Stock fin (th.)</th>`;
+    return `<th>Article</th><th class="th-orange stock-inv-th-num">Stock début</th><th class="stock-inv-th-num" style="color:#72d7a9">Entrées</th><th class="stock-inv-th-num">Écarts PDJ</th>${reconc}`;
   }
   if (moveType === "sortie") {
-    return `<th>Article</th><th class="th-orange stock-inv-th-num">Stock début</th><th class="th-blue stock-inv-th-num">Ventes</th><th class="stock-inv-th-num">Stock fin (th.)</th>`;
+    return `<th>Article</th><th class="th-orange stock-inv-th-num">Stock début</th><th class="th-blue stock-inv-th-num">Ventes</th><th class="stock-inv-th-num" style="color:#ff8e82">Pertes</th><th class="stock-inv-th-num">Écarts PDJ</th>${reconc}`;
   }
-  return `<th>Article</th><th class="th-orange stock-inv-th-num">Stock début</th><th class="stock-inv-th-num" style="color:#72d7a9">Entrées</th><th class="th-blue stock-inv-th-num">Ventes</th><th class="stock-inv-th-num">Stock fin (th.)</th>`;
+  return `<th>Article</th><th class="th-orange stock-inv-th-num">Stock début</th><th class="stock-inv-th-num" style="color:#72d7a9">Entrées</th><th class="th-blue stock-inv-th-num">Ventes</th><th class="stock-inv-th-num" style="color:#ff8e82">Pertes</th><th class="stock-inv-th-num">Écarts PDJ</th><th class="stock-inv-th-num">Stk fin (th.)</th>${reconc}`;
 }
 
 function stockMoveSynthRowHtml(r, moveType) {
+  const mismatch = r.stockFinReconcilie !== r.stockActuelCatalogue;
+  const trClass = mismatch ? ' class="stock-inv-row-mismatch"' : "";
+  const reconcCells = `<td class="stock-inv-td-num"><strong>${fmt(r.stockFinReconcilie)}</strong></td><td class="stock-inv-td-num" style="color:#1976d2"><strong>${fmt(r.stockActuelCatalogue)}</strong></td>`;
   if (moveType === "entree") {
-    return `<tr>
+    return `<tr${trClass}>
       <td><strong>${escapeHtml(r.article)}</strong></td>
       <td class="stock-inv-td-num" style="color:#1976d2">${fmt(r.stockDebut)}</td>
       <td class="stock-inv-td-num" style="color:#72d7a9">${r.achats > 0 ? "+" + fmt(r.achats) : fmt(0)}</td>
-      <td class="stock-inv-td-num"><strong>${fmt(r.stockFin)}</strong></td>
+      <td class="stock-inv-td-num">${fmtEcartSigned(r.ecartsCloture)}</td>
+      ${reconcCells}
     </tr>`;
   }
   if (moveType === "sortie") {
-    return `<tr>
+    return `<tr${trClass}>
       <td><strong>${escapeHtml(r.article)}</strong></td>
       <td class="stock-inv-td-num" style="color:#1976d2">${fmt(r.stockDebut)}</td>
       <td class="stock-inv-td-num" style="color:#ff8e82">${fmt(r.ventes)}</td>
-      <td class="stock-inv-td-num"><strong>${fmt(r.stockFin)}</strong></td>
+      <td class="stock-inv-td-num" style="color:#ff8e82">${fmt(r.pertes)}</td>
+      <td class="stock-inv-td-num">${fmtEcartSigned(r.ecartsCloture)}</td>
+      ${reconcCells}
     </tr>`;
   }
-  return `<tr>
+  return `<tr${trClass}>
     <td><strong>${escapeHtml(r.article)}</strong></td>
     <td class="stock-inv-td-num" style="color:#1976d2">${fmt(r.stockDebut)}</td>
     <td class="stock-inv-td-num" style="color:#72d7a9">${r.achats > 0 ? "+" + fmt(r.achats) : fmt(0)}</td>
     <td class="stock-inv-td-num" style="color:#ff8e82">${fmt(r.ventes)}</td>
-    <td class="stock-inv-td-num"><strong>${fmt(r.stockFin)}</strong></td>
+    <td class="stock-inv-td-num" style="color:#ff8e82">${fmt(r.pertes)}</td>
+    <td class="stock-inv-td-num">${fmtEcartSigned(r.ecartsCloture)}</td>
+    <td class="stock-inv-td-num">${fmt(r.stockFin)}</td>
+    ${reconcCells}
   </tr>`;
 }
 
 function stockMoveSynthHeadPrintHtml(moveType) {
+  const reconc = "<th>Stk réconcilié</th><th>Stk actuel</th>";
   if (moveType === "entree") {
-    return "<th>Article</th><th>Stock début</th><th>Entrées</th><th>Stock fin (th.)</th>";
+    return `<th>Article</th><th>Stock début</th><th>Entrées</th><th>Écarts PDJ</th>${reconc}`;
   }
   if (moveType === "sortie") {
-    return "<th>Article</th><th>Stock début</th><th>Ventes</th><th>Stock fin (th.)</th>";
+    return `<th>Article</th><th>Stock début</th><th>Ventes</th><th>Pertes</th><th>Écarts PDJ</th>${reconc}`;
   }
-  return "<th>Article</th><th>Stock début</th><th>Entrées</th><th>Ventes</th><th>Stock fin (th.)</th>";
+  return `<th>Article</th><th>Stock début</th><th>Entrées</th><th>Ventes</th><th>Pertes</th><th>Écarts PDJ</th><th>Stk fin (th.)</th>${reconc}`;
 }
 
 function stockMoveSynthRowPrintHtml(r, moveType) {
+  const reconcCells = `<td><strong>${fmt(r.stockFinReconcilie)}</strong></td><td><strong>${fmt(r.stockActuelCatalogue)}</strong></td>`;
   if (moveType === "entree") {
-    return `<tr><td>${escapeHtml(r.article)}</td><td>${fmt(r.stockDebut)}</td><td>${r.achats > 0 ? "+" + fmt(r.achats) : fmt(0)}</td><td><strong>${fmt(r.stockFin)}</strong></td></tr>`;
+    return `<tr><td>${escapeHtml(r.article)}</td><td>${fmt(r.stockDebut)}</td><td>${r.achats > 0 ? "+" + fmt(r.achats) : fmt(0)}</td><td>${fmtEcartSigned(r.ecartsCloture)}</td>${reconcCells}</tr>`;
   }
   if (moveType === "sortie") {
-    return `<tr><td>${escapeHtml(r.article)}</td><td>${fmt(r.stockDebut)}</td><td>${fmt(r.ventes)}</td><td><strong>${fmt(r.stockFin)}</strong></td></tr>`;
+    return `<tr><td>${escapeHtml(r.article)}</td><td>${fmt(r.stockDebut)}</td><td>${fmt(r.ventes)}</td><td>${fmt(r.pertes)}</td><td>${fmtEcartSigned(r.ecartsCloture)}</td>${reconcCells}</tr>`;
   }
-  return `<tr><td>${escapeHtml(r.article)}</td><td>${fmt(r.stockDebut)}</td><td>${r.achats > 0 ? "+" + fmt(r.achats) : fmt(0)}</td><td>${fmt(r.ventes)}</td><td><strong>${fmt(r.stockFin)}</strong></td></tr>`;
+  return `<tr><td>${escapeHtml(r.article)}</td><td>${fmt(r.stockDebut)}</td><td>${r.achats > 0 ? "+" + fmt(r.achats) : fmt(0)}</td><td>${fmt(r.ventes)}</td><td>${fmt(r.pertes)}</td><td>${fmtEcartSigned(r.ecartsCloture)}</td><td>${fmt(r.stockFin)}</td>${reconcCells}</tr>`;
 }
 
 function stockMovePrintTitle(moveType) {
@@ -15889,22 +15945,30 @@ function printStockPeriodByArticle(startRaw, endRaw, { title = "Synthèse stock"
     tableRows = rows.map((r) => stockMoveSynthRowPrintHtml(r, mt)).join("");
     const totEntrees = rows.reduce((s, r) => s + r.achats, 0);
     const totVentes = rows.reduce((s, r) => s + r.ventes, 0);
+    const totPertes = rows.reduce((s, r) => s + r.pertes, 0);
+    const totEcarts = rows.reduce((s, r) => s + r.ecartsCloture, 0);
     const typeLabel = mt === "entree" ? "Entrées" : mt === "sortie" ? "Sorties (ventes)" : "Entrées & sorties";
     summaryHtml = `<span><strong>${fmt(rows.length)}</strong> article(s)</span><span>Type : <strong>${escapeHtml(typeLabel)}</strong></span>`;
     if (mt === "entree" || mt === "all") summaryHtml += `<span>Total entrées : <strong>${fmt(totEntrees)}</strong> btl</span>`;
     if (mt === "sortie" || mt === "all") summaryHtml += `<span>Total ventes : <strong>${fmt(totVentes)}</strong> btl</span>`;
+    if (mt === "sortie" || mt === "all") summaryHtml += `<span>Total pertes : <strong>${fmt(totPertes)}</strong> btl</span>`;
+    summaryHtml += `<span>Écarts PDJ : <strong>${fmtEcartSigned(totEcarts)}</strong> btl</span>`;
   } else if (full) {
-    headCols = "<th>Article</th><th>Stock début</th><th>Achats</th><th>Ventes</th><th>Pertes</th><th>Stock fin (th.)</th>";
+    headCols = "<th>Article</th><th>Stock début</th><th>Achats</th><th>Ventes</th><th>Pertes</th><th>Écarts PDJ</th><th>Stk fin (th.)</th><th>Stk réconcilié</th><th>Stk actuel</th>";
     tableRows = rows.map((r) => `<tr>
       <td>${escapeHtml(r.article)}</td>
       <td>${fmt(r.stockDebut)}</td>
       <td>${r.achats > 0 ? "+" + fmt(r.achats) : fmt(0)}</td>
       <td>${fmt(r.ventes)}</td>
       <td>${fmt(r.pertes)}</td>
-      <td><strong>${fmt(r.stockFin)}</strong></td>
+      <td>${fmtEcartSigned(r.ecartsCloture)}</td>
+      <td>${fmt(r.stockFin)}</td>
+      <td><strong>${fmt(r.stockFinReconcilie)}</strong></td>
+      <td><strong>${fmt(r.stockActuelCatalogue)}</strong></td>
     </tr>`).join("");
     const totVentes = rows.reduce((s, r) => s + r.ventes, 0);
-    summaryHtml = `<span><strong>${fmt(rows.length)}</strong> article(s)</span><span>Total ventes : <strong>${fmt(totVentes)}</strong> btl</span>`;
+    const totEcarts = rows.reduce((s, r) => s + r.ecartsCloture, 0);
+    summaryHtml = `<span><strong>${fmt(rows.length)}</strong> article(s)</span><span>Total ventes : <strong>${fmt(totVentes)}</strong> btl</span><span>Écarts PDJ : <strong>${fmtEcartSigned(totEcarts)}</strong> btl</span>`;
   } else {
     headCols = "<th>Article</th><th>Stock début</th><th>Ventes</th><th>Stock fin (th.)</th>";
     tableRows = rows.map((r) => `<tr>
@@ -15922,15 +15986,19 @@ function printStockPeriodByArticle(startRaw, endRaw, { title = "Synthèse stock"
     return;
   }
   const printScript = "<scr" + "ipt>window.onload=function(){window.print();}</scr" + "ipt>";
+  const footnote = end < today()
+    ? `<p class="meta" style="margin-top:14px;font-size:12px">Stk réconcilié = début + entrées − ventes − pertes + écarts PDJ. Stk actuel = catalogue au moment de l'impression (période terminée avant aujourd'hui).</p>`
+    : `<p class="meta" style="margin-top:14px;font-size:12px">Stk fin (th.) = début + entrées − ventes − pertes · Stk réconcilié inclut les écarts de clôture PDJ · Stk actuel = frigo + réserve catalogue.</p>`;
   ticketWindow.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>
     body{font-family:Arial,sans-serif;color:#111;padding:28px}header{display:flex;justify-content:space-between;gap:18px;border-bottom:2px solid #111;padding-bottom:14px;margin-bottom:18px}
-    h1,h2,p{margin:0 0 8px}.meta{color:#555}.summary{display:flex;gap:24px;margin:12px 0 16px;font-size:14px}
-    table{width:100%;border-collapse:collapse;margin-top:8px;font-size:13px}
-    th,td{border-bottom:1px solid #ddd;padding:8px 6px;text-align:left}th{background:#f2f2f2}
-    td:nth-child(n+2),th:nth-child(n+2){text-align:right}@media print{body{padding:0}table{font-size:11px}}
+    h1,h2,p{margin:0 0 8px}.meta{color:#555}.summary{display:flex;flex-wrap:wrap;gap:16px 24px;margin:12px 0 16px;font-size:14px}
+    table{width:100%;border-collapse:collapse;margin-top:8px;font-size:12px}
+    th,td{border-bottom:1px solid #ddd;padding:6px 4px;text-align:left}th{background:#f2f2f2;font-size:11px}
+    td:nth-child(n+2),th:nth-child(n+2){text-align:right}@media print{body{padding:0}table{font-size:10px}}
   </style></head><body><header><div><h1>${escapeHtml(site?.nom || "Maquis")}</h1><p>${escapeHtml(site?.ville || "")}</p></div><div><h2>${escapeHtml(title)}</h2><p class="meta">Période : ${escapeHtml(period)}</p><p class="meta">Imprimé le ${escapeHtml(formatDateTimeDdMmYyyy(new Date()))}</p></div></header>
   <div class="summary">${summaryHtml}</div>
   <table><thead><tr>${headCols}</tr></thead><tbody>${tableRows}</tbody></table>
+  ${footnote}
   ${printScript}</body></html>`);
   ticketWindow.document.close();
 }
@@ -16024,7 +16092,10 @@ function renderStockMoveArticleSummary(startRaw, endRaw, moveType = "all") {
   wrap.classList.remove("hidden-by-role");
   const mt = moveType === "entree" || moveType === "sortie" ? moveType : "all";
   const table = wrap.querySelector(".stock-move-synth-table");
-  if (table) table.classList.toggle("stock-move-synth-table--all", mt === "all");
+  if (table) {
+    table.classList.toggle("stock-move-synth-table--all", mt === "all");
+    table.classList.toggle("stock-inventaire-table--wide", true);
+  }
   if (headRow) headRow.innerHTML = stockMoveSynthHeadHtml(mt);
   if (colgroup) {
     const n = stockMoveSynthColCount(mt);

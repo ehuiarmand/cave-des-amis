@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./styles.css?v=49">
+  <link rel="stylesheet" href="./styles.css?v=50">
   <link rel="stylesheet" href="./styles-cave-manager.css?v=2">
   <link rel="stylesheet" href="./cave-casier.css">
   <link rel="stylesheet" href="./cave-components.css">
@@ -929,9 +929,12 @@
           <p id="stock-inv-period-label" class="muted" style="margin-top:12px;font-size:0.84rem"></p>
           <div id="stock-inv-summary" class="pdj-kpis" style="margin-top:14px"></div>
           <div class="stock-table-wrap stock-inventaire-wrap" style="margin-top:14px">
-            <table class="stock-table stock-inventaire-table">
+            <table class="stock-table stock-inventaire-table stock-inventaire-table--wide">
               <colgroup>
                 <col class="stock-inv-col-article">
+                <col class="stock-inv-col-num">
+                <col class="stock-inv-col-num">
+                <col class="stock-inv-col-num">
                 <col class="stock-inv-col-num">
                 <col class="stock-inv-col-num">
                 <col class="stock-inv-col-num">
@@ -945,7 +948,10 @@
                   <th class="stock-inv-th-num" style="color:#72d7a9">Achats</th>
                   <th class="th-blue stock-inv-th-num">Ventes</th>
                   <th class="stock-inv-th-num" style="color:#ff8e82">Pertes</th>
-                  <th class="stock-inv-th-num">Stock fin (th.)</th>
+                  <th class="stock-inv-th-num">Écarts PDJ</th>
+                  <th class="stock-inv-th-num">Stk fin (th.)</th>
+                  <th class="stock-inv-th-num">Stk réconcilié</th>
+                  <th class="stock-inv-th-num">Stk actuel</th>
                 </tr>
               </thead>
               <tbody id="stock-inv-list"></tbody>
@@ -980,7 +986,7 @@
           </div>
           <div class="manager-only" id="stock-move-synth-toolbar" style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;align-items:center">
             <button id="stock-move-print-btn" class="btn btn-primary" type="button" style="width:auto;font-size:0.88rem" title="Imprimer la synthèse par article selon le type choisi (entrées, sorties ou les deux)">Imprimer par article</button>
-            <span class="muted" style="font-size:0.82rem">Le type sélectionné ci-dessus filtre l'impression : Entrées, Sorties (ventes), ou les deux si « Tous ».</span>
+            <span class="muted" style="font-size:0.82rem">Inclut pertes, écarts PDJ et stock actuel catalogue. Lignes surlignées si réconcilié ≠ actuel.</span>
           </div>
           <div class="manager-only stock-table-wrap stock-inventaire-wrap" id="stock-move-article-summary-wrap" style="margin-top:14px">
             <p class="eyebrow" style="margin:0 0 8px">Synthèse par article (période · selon type)</p>
@@ -2954,7 +2960,7 @@
   <script src="./cave-components.js"></script>
   <script src="./cave-extras.js"></script>
   <script src="./cave-order-pad.js"></script>
-  <script src="./app-orders.js?v=352"></script>
+  <script src="./app-orders.js?v=353"></script>
   <script src="./restaurant-module.js"></script>
 </body>
 </html>

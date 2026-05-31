@@ -2337,15 +2337,17 @@ textarea { font: inherit; }
 
 .stock-table tbody tr:hover { background: rgba(33, 150, 243, 0.04); }
 
-/* Inventaire période — 6 colonnes, pas le min-width 1080px du catalogue */
+/* Inventaire période — colonnes étendues (écarts PDJ, stock actuel) */
 .stock-inventaire-table {
   min-width: 0;
   width: 100%;
   max-width: 100%;
   table-layout: fixed;
 }
-.stock-inventaire-table .stock-inv-col-article { width: 34%; }
-.stock-inventaire-table .stock-inv-col-num { width: 13.2%; }
+.stock-inventaire-table .stock-inv-col-article { width: 22%; }
+.stock-inventaire-table .stock-inv-col-num { width: 9.75%; }
+.stock-inventaire-table.stock-inventaire-table--wide { min-width: 920px; }
+.stock-inv-row-mismatch { background: rgba(255, 193, 7, 0.12) !important; }
 .stock-inventaire-table th,
 .stock-inventaire-table td {
   white-space: nowrap;
@@ -2363,10 +2365,9 @@ textarea { font: inherit; }
 .stock-inventaire-table td.stock-inv-td-num {
   text-align: right;
 }
-.stock-move-synth-table .stock-inv-col-article { width: 34%; }
-.stock-move-synth-table .stock-inv-col-num { width: 16.5%; }
-.stock-move-synth-table.stock-move-synth-table--all .stock-inv-col-article { width: 28%; }
-.stock-move-synth-table.stock-move-synth-table--all .stock-inv-col-num { width: 18%; }
+.stock-move-synth-table .stock-inv-col-article { width: 20%; }
+.stock-move-synth-table .stock-inv-col-num { width: 10%; }
+.stock-move-synth-table.stock-move-synth-table--all { min-width: 880px; }
 
 .stock-inventaire-wrap {
   overflow-x: auto;
