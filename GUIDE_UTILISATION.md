@@ -3,7 +3,7 @@
 Application web de gestion de maquis / bar : ventes, point du jour, stock, achats fournisseurs, casiers, charges, recouvrement, avoirs clients et paramètres **multi-maquis**.
 
 **Dans l'application** : menu **Guide** (barre latérale ou menu du bas sur mobile) → *Ouvrir le guide complet* ou *Impression PDF*.  
-**Hors ligne / PDF** : fichier `guide.html` à la racine du projet (ancres `#connexion`, `#stock-inventaire`, etc.).
+**Hors ligne / PDF** : fichier **`guide.pdf`** (téléchargement direct) ou `guide.html` (ancres `#connexion`, `#stock-inventaire`, etc.). Régénérer le PDF : `scripts/generate-guide-pdf.ps1`.
 
 ---
 
