@@ -6,133 +6,35 @@
   <meta name="color-scheme" content="light dark">
   <title>Guide d'utilisation — Maquis Manager</title>
   <style>
-    :root {
-      --ink: #1a130a;
-      --muted: #5c4d3d;
-      --line: #e8dfd0;
-      --accent: #b8860f;
-    }
+    :root { --ink: #1a130a; --muted: #5c4d3d; --line: #e8dfd0; --accent: #b8860f; }
     * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      font-family: "Segoe UI", system-ui, sans-serif;
-      font-size: 15px;
-      line-height: 1.55;
-      color: var(--ink);
-      background: #fdfbf7;
-      padding: 24px 18px 48px;
-    }
+    body { margin: 0; font-family: "Segoe UI", system-ui, sans-serif; font-size: 15px; line-height: 1.55; color: var(--ink); background: #fdfbf7; padding: 24px 18px 48px; }
     .wrap { max-width: 720px; margin: 0 auto; }
-    h1 {
-      font-size: 1.65rem;
-      margin: 0 0 8px;
-      border-bottom: 2px solid var(--accent);
-      padding-bottom: 12px;
-    }
+    h1 { font-size: 1.65rem; margin: 0 0 8px; border-bottom: 2px solid var(--accent); padding-bottom: 12px; }
     .lead { color: var(--muted); margin: 0 0 24px; }
-    .guide-search-wrap {
-      margin-bottom: 16px;
-    }
-    .guide-search-wrap input {
-      width: 100%;
-      font: inherit;
-      padding: 12px 14px;
-      border: 1px solid var(--line);
-      border-radius: 10px;
-    }
-    .guide-search-meta {
-      font-size: 0.85rem;
-      color: var(--muted);
-      margin: 8px 0 0;
-    }
-    .guide-hit {
-      background: #fff3bf;
-      outline: 2px solid #e6c200;
-      border-radius: 4px;
-    }
-    .toolbar.no-print {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      margin-bottom: 28px;
-      padding: 14px;
-      background: #fff;
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      box-shadow: 0 4px 14px rgba(0,0,0,.06);
-    }
-    .toolbar button {
-      font: inherit;
-      cursor: pointer;
-      padding: 10px 18px;
-      border-radius: 10px;
-      border: 1px solid var(--line);
-      background: linear-gradient(180deg, #fff, #faf6ef);
-      font-weight: 600;
-    }
-    .toolbar button.primary {
-      background: linear-gradient(180deg, #f0d78c, #d4a832);
-      border-color: #c49a28;
-      color: var(--ink);
-    }
-    h2 {
-      font-size: 1.2rem;
-      margin: 32px 0 12px;
-      scroll-margin-top: 16px;
-    }
-    h3 {
-      font-size: 1.05rem;
-      margin: 20px 0 8px;
-      scroll-margin-top: 14px;
-    }
+    .guide-search-wrap { margin-bottom: 16px; }
+    .guide-search-wrap input { width: 100%; font: inherit; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; }
+    .guide-search-meta { font-size: 0.85rem; color: var(--muted); margin: 8px 0 0; }
+    .guide-hit { background: #fff3bf; outline: 2px solid #e6c200; border-radius: 4px; }
+    .toolbar.no-print { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 28px; padding: 14px; background: #fff; border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 4px 14px rgba(0,0,0,.06); }
+    .toolbar button { font: inherit; cursor: pointer; padding: 10px 18px; border-radius: 10px; border: 1px solid var(--line); background: linear-gradient(180deg, #fff, #faf6ef); font-weight: 600; }
+    .toolbar button.primary { background: linear-gradient(180deg, #f0d78c, #d4a832); border-color: #c49a28; color: var(--ink); }
+    h2 { font-size: 1.2rem; margin: 32px 0 12px; scroll-margin-top: 16px; }
+    h3 { font-size: 1.05rem; margin: 20px 0 8px; scroll-margin-top: 14px; }
     p { margin: 0 0 12px; }
-    ul { margin: 0 0 14px; padding-left: 1.35rem; }
+    ul, ol { margin: 0 0 14px; padding-left: 1.35rem; }
     li { margin-bottom: 6px; }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      margin: 14px 0;
-      font-size: 0.92rem;
-    }
-    th, td {
-      border: 1px solid var(--line);
-      padding: 10px 12px;
-      text-align: left;
-      vertical-align: top;
-    }
+    table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 0.92rem; }
+    th, td { border: 1px solid var(--line); padding: 10px 12px; text-align: left; vertical-align: top; }
     th { background: #f5efe6; font-weight: 700; }
-    .toc {
-      background: #fff;
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      padding: 16px 20px 16px 36px;
-      margin-bottom: 28px;
-    }
+    .toc { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 16px 20px 16px 36px; margin-bottom: 28px; }
     .toc li { margin-bottom: 8px; }
     .toc a { color: #7a5a12; font-weight: 600; text-decoration: none; }
     .toc a:hover { text-decoration: underline; }
-    hr {
-      border: none;
-      border-top: 1px solid var(--line);
-      margin: 28px 0;
-    }
-    footer {
-      margin-top: 40px;
-      padding-top: 16px;
-      border-top: 1px dashed var(--line);
-      font-size: 0.85rem;
-      color: var(--muted);
-    }
-
-    @page {
-      margin: 18mm 16mm;
-    }
+    footer { margin-top: 40px; padding-top: 16px; border-top: 1px dashed var(--line); font-size: 0.85rem; color: var(--muted); }
+    @page { margin: 18mm 16mm; }
     @media print {
-      body {
-        padding: 0;
-        background: #fff;
-        font-size: 11pt;
-      }
+      body { padding: 0; background: #fff; font-size: 11pt; }
       .no-print { display: none !important; }
       h2 { page-break-after: avoid; }
       table, ul { page-break-inside: avoid; }
@@ -151,26 +53,32 @@
     <h1>Guide d'utilisation — Maquis Manager</h1>
     <div class="guide-search-wrap no-print">
       <label for="guide-search">Rechercher dans le guide</label>
-      <input id="guide-search" type="search" placeholder="Ex. : perte stock, clôture, recouvrement, 2FA…" autocomplete="off">
+      <input id="guide-search" type="search" placeholder="Ex. : inventaire, correction facture, avoir client, clôture, 2FA…" autocomplete="off">
       <p id="guide-search-meta" class="guide-search-meta" aria-live="polite"></p>
     </div>
-    <p class="lead">Application locale : ventes, stock, achats fournisseurs, casiers physiques, charges et paramètres multi-sites. Les ancres (<code>#consignes</code>, etc.) servent aux liens depuis la page <strong>Guide</strong> de l'application.</p>
+    <p class="lead">Gestion multi-maquis : ventes, point du jour, stock, achats, casiers, recouvrement, avoirs clients, charges et paramètres. Menu <strong>Guide</strong> dans l'app → liens vers les ancres ci-dessous.</p>
 
     <nav class="toc no-print" aria-label="Sommaire">
       <h2 style="margin-top:0">Sommaire</h2>
       <ol>
         <li><a href="#connexion">Première connexion</a></li>
         <li><a href="#navigation">Navigation générale</a></li>
-        <li><a href="#guide-app">Guide dans l'application</a></li>
         <li><a href="#tableau-de-bord">Tableau de bord</a></li>
         <li><a href="#point-du-jour">Point du jour</a></li>
         <li><a href="#pdj-cloture">Clôture et vérification stock</a></li>
         <li><a href="#ventes">Ventes</a></li>
+        <li><a href="#avoirs">Avoirs clients &amp; recouvrement</a></li>
+        <li><a href="#remplacement-article">Remplacer un article</a></li>
         <li><a href="#consignes">Consignes</a></li>
-        <li><a href="#stock">Stock</a></li>
+        <li><a href="#stock">Stock — catalogue &amp; achats</a></li>
+        <li><a href="#stock-inventaire">Inventaire période</a></li>
+        <li><a href="#stock-mouvements">Mouvements &amp; impression</a></li>
         <li><a href="#casiers">Gestion casiers</a></li>
         <li><a href="#charges">Charges</a></li>
+        <li><a href="#planning">Planning</a></li>
+        <li><a href="#historique-ventes">Historique ventes (serveuse)</a></li>
         <li><a href="#parametres">Paramètres</a></li>
+        <li><a href="#correction-facture">Correction de facture</a></li>
         <li><a href="#telephone">Téléphone</a></li>
         <li><a href="#bonnes-pratiques">Bonnes pratiques</a></li>
         <li><a href="#probleme">En cas de problème</a></li>
@@ -179,136 +87,148 @@
 
     <h2 id="connexion">1. Première connexion</h2>
     <ol>
-      <li>Ouvrez l'application dans le navigateur (souvent <code>http://127.0.0.1:8001</code> si le serveur tourne en local).</li>
-      <li>Saisissez <strong>nom d'utilisateur</strong> et <strong>mot de passe</strong>.</li>
-      <li>Si la <strong>2FA</strong> est activée, entrez le <strong>code à 6 chiffres</strong> (Google Authenticator, Authy, etc.).</li>
-      <li>Validez pour accéder au <strong>tableau de bord</strong>.</li>
+      <li>Ouvrez l'application (URL de production ou <code>http://127.0.0.1:8001</code> en local).</li>
+      <li><strong>Identifiant</strong> et <strong>mot de passe</strong>.</li>
+      <li><strong>2FA</strong> si activée : code OTP (6 chiffres) ou code <strong>WhatsApp</strong>.</li>
+      <li><strong>Renouvellement mensuel</strong> : au <strong>1<sup>er</sup> du mois</strong>, changez votre mot de passe si l'écran « Renouvellement mensuel » s'affiche. Un changement dans le mois en cours vous couvre jusqu'à la fin de ce mois.</li>
     </ol>
-    <p><strong>Déconnexion</strong> : bouton <strong>Déconnexion</strong> dans la barre latérale sur bureau ; sur mobile, selon l'écran, la zone session ou les <strong>Paramètres</strong>.</p>
+    <p><strong>Déconnexion</strong> : barre latérale (bureau) ou menu <strong>Plus</strong> / <strong>Paramètres</strong> (mobile).</p>
 
     <h2 id="navigation">2. Navigation générale</h2>
-    <p id="guide-app">Le menu <strong>Guide</strong> dans la barre latérale (ou le menu du bas sur mobile) ouvre une page sommaire dans l'application avec des liens vers ce document pour lecture ou impression PDF.</p>
+    <p id="guide-app">Le menu <strong>Guide</strong> dans l'application ouvre ce sommaire pour lecture ou PDF (<strong>Ctrl+P</strong>).</p>
     <table>
-      <thead>
-        <tr><th>Zone</th><th>Contenu principal</th></tr>
-      </thead>
+      <thead><tr><th>Zone</th><th>Contenu</th></tr></thead>
       <tbody>
-        <tr><td><strong>Tableau de bord</strong></td><td>Indicateurs, alertes stock, <strong>casiers physiques</strong> (parc), ventes / paiements</td></tr>
-        <tr><td><strong>Point du jour</strong></td><td>Synthèse journalière, vérification stock avant clôture</td></tr>
-        <tr><td><strong>Ventes</strong></td><td>Commandes, <strong>Caisse &amp; Paiement</strong>, <strong>Consignes</strong>, QR codes</td></tr>
-        <tr><td><strong>Stock</strong></td><td>Catalogue, mouvements, achats fournisseurs, créanciers, <strong>Gestion casiers</strong></td></tr>
-        <tr><td><strong>Charges</strong></td><td>Dépenses</td></tr>
-        <tr><td><strong>Guide</strong></td><td>Liens vers ce guide imprimable et PDF</td></tr>
-        <tr><td><strong>Paramètres</strong></td><td>Profil, catégories, accès, administration</td></tr>
+        <tr><td><strong>Tableau de bord</strong></td><td>CA, charges, bénéfice, alertes, casiers, export</td></tr>
+        <tr><td><strong>Point du jour</strong></td><td>Synthèse · Clôture · Ventes</td></tr>
+        <tr><td><strong>Ventes</strong></td><td>Commandes · Caisse &amp; Paiement · Consignes · QR</td></tr>
+        <tr><td><strong>Stock</strong></td><td>Catalogue · Inventaire · Mouvements · Achats · Créanciers · Casiers</td></tr>
+        <tr><td><strong>Charges</strong></td><td>Dépenses du mois</td></tr>
+        <tr><td><strong>Planning</strong></td><td>Mes horaires · Équipe</td></tr>
+        <tr><td><strong>Historique ventes</strong></td><td>Ventes du jour (serveuse)</td></tr>
+        <tr><td><strong>Paramètres</strong></td><td>Profil · Accès · Sauvegarde · Correction · Admin</td></tr>
       </tbody>
     </table>
-    <p>En haut à droite : <strong>sélecteur de site</strong> pour le multi-établissements. Sur <strong>téléphone</strong>, menu principal en <strong>barre du bas</strong>.</p>
-    <p><strong>Rôles</strong> (aperçu) : serveuse, gérant, manager, administrateur, super administrateur. Réouverture d'une journée clôturée, choix de la date de journée à traiter et certaines options d'administration sont réservés aux profils autorisés.</p>
+    <p><strong>Sélecteur de maquis</strong> en haut. <strong>Rôles</strong> : serveuse, gérant, manager, admin, super admin — menus masqués = droits insuffisants.</p>
 
     <h2 id="tableau-de-bord">3. Tableau de bord</h2>
     <ul>
-      <li>CA, charges, bénéfice indicatif, nombre de ventes ; graphiques par catégorie et par paiement.</li>
-      <li><strong>Casiers physiques</strong> : carte récapitulative du parc (total, pleins, partiels, vides) et <strong>suggestions</strong> pour le réapprovisionnement (aligné avec Stock &gt; Gestion casiers).</li>
-      <li><strong>Plus / moins vendues</strong> : classement par quantité (bouteilles) sur l'historique du site ; le bloc « moins vendues » apparaît surtout lorsque plusieurs références différentes ont été vendues au cumul.</li>
-      <li><strong>Alertes stock</strong> : articles au seuil ou en dessous.</li>
-      <li><strong>Proposer commande</strong> : ouvre Achats avec une ligne pré-remplie.</li>
-      <li><strong>Toutes les alertes</strong> : envoie tous les articles en alerte dans le brouillon commande.</li>
-      <li>Cochez des lignes puis <strong>Sélection cochée</strong> pour un sous-ensemble.</li>
-      <li><strong>Tout cocher / Tout décocher</strong> pour préparer la sélection.</li>
+      <li>CA, charges, <strong>bénéfice estimé</strong>, nombre de ventes ; graphiques catégorie / paiement.</li>
+      <li><strong>Imprimer le point</strong> : récap période.</li>
+      <li><strong>Casiers physiques</strong> et suggestions réappro.</li>
+      <li><strong>Plus / moins vendues</strong> (bouteilles).</li>
+      <li><strong>Alertes stock</strong> → proposer commande / brouillon achats.</li>
+      <li>Export Excel ventes + charges : Paramètres → Profil (période).</li>
     </ul>
 
     <h2 id="point-du-jour">4. Point du jour</h2>
-    <p>Vue pour la clôture ou le bilan quotidien : CA encaissé, « à régler », transactions, remises, paiements, détail des boissons vendues et détail des ventes sur la période affichée.</p>
-    <p>Sous <strong>Boissons vendues (par jour)</strong> : résumé plus / moins vendues ce jour (quantité en bouteilles), puis tableau détaillé trié par CA net. Si peu de références différentes dans la journée, le bloc « moins vendues » peut être masqué.</p>
+    <p>Onglets <strong>Synthèse</strong>, <strong>Clôture</strong>, <strong>Ventes</strong> pour la <strong>journée comptable</strong> (date PDJ en haut).</p>
+    <p>Synthèse : CA, remises, paiements, boissons vendues, détail ventes. Impression selon profil.</p>
 
-    <h3 id="pdj-cloture">Clôture, vérification stock et administrateurs</h3>
-    <ul>
-      <li><strong>Ouverture de caisse</strong> : si votre installation l'utilise, enregistrez l'ouverture du jour dans la zone prévue en haut de page.</li>
-      <li><strong>Vérifier avant clôture</strong> : lance la vérification de stock de fermeture ; <strong>Imprimer le rapport de clôture</strong> peut être proposé ensuite.</li>
-      <li><strong>Journées clôturées (réouverture)</strong> : réservé aux <strong>administrateurs</strong> — supprime la fiche de clôture et annule les écritures de stock associées. Les quantités frigo / réserve actuelles ne sont pas recalculées automatiquement : vérifiez le stock physique si besoin.</li>
-      <li><strong>Super administrateur</strong> : si un bloc « journée à traiter » avec une <strong>date</strong> apparaît, appliquez cette date pour corriger ou contrôler une journée précise, puis reclôturez selon votre procédure.</li>
-    </ul>
+    <h3 id="pdj-cloture">Clôture et vérification stock</h3>
+    <ol>
+      <li><strong>Ouverture caisse</strong> (si activée) + snapshot stock.</li>
+      <li><strong>Vérification stock</strong> : théorique = ouverture + <strong>achats du jour</strong> − ventes − pertes ; comparer au physique (frigo/réserve).</li>
+      <li><strong>Caisse clôture</strong> vs théorique (ventes espèces, recouvrements, avoirs émis…).</li>
+      <li><strong>Clôturer</strong> (gérant/admin) ou <strong>Fin de service</strong> (serveuse).</li>
+      <li><strong>Imprimer le rapport de clôture</strong>.</li>
+    </ol>
+    <p><strong>Admin</strong> : réouverture journée clôturée (stock physique non recalculé auto). <strong>Super admin</strong> : date « journée à traiter » pour corriger une date passée.</p>
 
     <h2 id="ventes">5. Ventes</h2>
-    <p>Quatre sous-onglets : <strong>Commandes</strong>, <strong>Caisse &amp; Paiement</strong>, <strong>Consignes</strong>, <strong>QR Codes</strong>.</p>
     <h3>Commandes</h3>
-    <p>Nouvelle commande ou reprise ; lignes avec article, format (bouteille, pack, casier, etc.), quantité, lieu Intérieur / Extérieur si les tarifs diffèrent. Stock frigo/réserve pris en compte. Validation, ticket, facture, annulations selon les droits.</p>
+    <p>Lignes article, format, quantité, Intérieur/Extérieur. Bouton <strong>+</strong> = nouvelle commande.</p>
     <h3>Caisse &amp; Paiement</h3>
-    <p><strong>Historique ventes</strong> : ventes finalisées sur une période (Du / Au), impression possible. <strong>Recouvrement crédits</strong> : tableau « Crédits en cours (reste à payer) », bouton <strong>Encaisser</strong>, enregistrement des versements. La section <strong>Historique des paiements</strong> liste tous les versements (y compris lorsqu'il n'y a plus de solde actif).</p>
-    <h3 id="consignes">Consignes</h3>
-    <p>Deux cas fréquents : <strong>Reliquat payé</strong> (facture payée, client n'a pas tout bu — quantité à honorer à une prochaine visite) et <strong>consigne bouteille</strong> (dépôt avec retour physique — décochez « Reliquat payé : le client reviendra boire… »).</p>
-    <p>Indicateurs : Bouteilles — retour, Reliquats à servir, Clôturées, Dépôt bouteille dû. <strong>+ Nouvelle consigne</strong> : client, date, facture concernée ; pour un mélange sur une facture, colonne <strong>Reliquat (btl)</strong> par ligne puis <strong>Enregistrer</strong>. Actions possibles : Bouteille rendue, Reliquat payé (prochaine visite), Reliquat servi, Remboursé / annulé, Suppr.</p>
-    <h3>QR codes</h3>
-    <p>Génération / impression pour tables ou espaces.</p>
-    <p>Le bouton flottant <strong>+</strong> sur Ventes ouvre l'éditeur de <strong>commande</strong> lorsque l'onglet Commandes est pertinent.</p>
+    <p><strong>Historique ventes</strong> (Du/Au, impression). Volets <strong>Recouvrement</strong>, <strong>Avoirs clients</strong>, bloc <strong>Remplacer un article</strong>.</p>
 
-    <h2 id="stock">6. Stock</h2>
+    <h3 id="avoirs">Avoirs clients &amp; recouvrement</h3>
+    <p><strong>Recouvrement</strong> : encaisser un crédit client (versement tracé). Espèces → théorique caisse du jour.</p>
+    <p><strong>Avoirs</strong> : monnaie gardée chez vous → solde client ; paiement futur en mode <strong>Avoir client</strong>.</p>
+
+    <h3 id="remplacement-article">Remplacer un article encaissé</h3>
+    <p>Factures de la journée comptable : choisir facture, <strong>Remplacer</strong> sur une ligne, confirmer. Stock et montant realignés ; supplément à encaisser si prix supérieur.</p>
+
+    <h3 id="consignes">Consignes</h3>
+    <p><strong>Reliquat payé</strong> ou <strong>consigne bouteille</strong> (décocher « Reliquat payé… »). Indicateurs et actions : rendu, servi, remboursé, suppr.</p>
+    <h3>QR Codes</h3>
+    <p>Impression Intérieur / Extérieur ; commandes scan.</p>
+
+    <h2 id="stock">6. Stock — catalogue &amp; achats</h2>
     <h3>Catalogue</h3>
-    <p>Articles, frigo, réserve, seuils, prix d'achat, formats de vente. Recherche, tableau compact/détaillé. Nouvel article ou modification via <strong>+</strong> (catalogue actif) ou actions ligne. Bouton <strong>Perte</strong> : sortie hors vente (casse, etc.) — ce n'est pas un onglet séparé.</p>
-    <h3>Mouvements</h3>
-    <p>Historique des entrées et mouvements.</p>
+    <p>Frigo, réserve, seuils, formats. <strong>Perte</strong> (confirmation), Excel import/export, <strong>Imprimer</strong>, filtres.</p>
     <h3>Achats fournisseurs</h3>
-    <p>Commande (fournisseur, date, paiement dont crédit fournisseur). Lignes : article au stock ; prix et btl/casier depuis le catalogue ; quantités en casiers suggérées. Si le parc l'exige : bouton <strong>Créer des casiers vides…</strong> pour créer rapidement un casier puis reprendre la commande. <strong>Réceptionner</strong> : fenêtre avec casiers livrés par ligne ; case <strong>Ranger dans des casiers physiques</strong> (cochée par défaut) — répartition sur casiers partiels ou nouveaux casiers ; stock catalogue et onglet Gestion casiers mis à jour ; charge « Approvisionnement ». Sur téléphone, le <strong>+</strong> sur Achats ouvre ce formulaire.</p>
+    <p>Commande → <strong>En attente</strong> → <strong>Réceptionner</strong> (quantités livrées, ranger casiers). <strong>Une charge</strong> Approvisionnement par réception. <strong>Créer casiers vides…</strong> si besoin.</p>
     <h3>Créanciers</h3>
-    <p>Dettes fournisseurs ; dépense en crédit fournisseur selon configuration.</p>
+    <p>Dettes fournisseurs ; crédit fournisseur.</p>
+
+    <h3 id="stock-inventaire">Inventaire (période)</h3>
+    <p>Onglet <strong>Inventaire</strong> (gérant/manager) : Du/Au, <strong>Afficher</strong>, <strong>Imprimer</strong>. Colonnes : stock début, achats, ventes, pertes, écarts inexpliqués, stk fin (th.), stk réconcilié, stk actuel (ligne jaune si écart).</p>
+
+    <h3 id="stock-mouvements">Mouvements</h3>
+    <p>Journal + filtre Type (Entrées/Sorties). <strong>Imprimer par article</strong> : synthèse selon le filtre.</p>
+
     <h3 id="casiers">Gestion casiers</h3>
-    <p>Parc de casiers physiques : codes, articles, capacités, statuts (vide, partiel, plein), mouvements. Cohérent avec le tableau de bord. Les casiers vides disponibles peuvent limiter certaines commandes fournisseur : utilisez la création rapide proposée si besoin.</p>
-    <h3>Excel</h3>
-    <p><strong>Exporter</strong> le stock du site. <strong>Importer</strong> : création/mise à jour ; colonnes Frigo, Réserve, Entrées, Sorties, Stock actuel si présentes.</p>
+    <p>Parc physique, statuts, mouvements, export CSV. Lié au tableau de bord et aux réceptions fournisseur.</p>
 
     <h2 id="charges">7. Charges</h2>
-    <p>Dépenses : date, libellé, catégorie, montant, paiement (dont crédit fournisseur). Le <strong>+</strong> sur la page Charges ouvre une nouvelle dépense.</p>
+    <p>Saisie manuelle (<strong>+</strong>) ou automatique à la <strong>réception fournisseur</strong>. <strong>Suppr.</strong> : admin avec confirmation.</p>
 
-    <h2 id="parametres">8. Paramètres</h2>
-    <ul>
-      <li><strong>Profil</strong> : nom du bar, objectif CA, seuil, préfixe factures, options (brasserie unique, tarifs zone, etc.).</li>
-      <li><strong>Catégories</strong> : catégories boissons (selon droits).</li>
-      <li><strong>Accès</strong> : utilisateurs, rôles, sites, 2FA.</li>
-      <li><strong>Administration</strong> : export JSON, sauvegardes, options avancées.</li>
-    </ul>
-    <p>Les menus masqués selon le <strong>rôle</strong> ne sont pas accessibles.</p>
+    <h2 id="planning">8. Planning</h2>
+    <p><strong>Mes horaires</strong> ; <strong>Équipe</strong> (gérant) : créneaux, rotation automatique. Jour de repos = ventes bloquées ce jour.</p>
 
-    <h2 id="telephone">9. Utilisation sur téléphone</h2>
+    <h2 id="historique-ventes">9. Historique ventes (serveuse)</h2>
+    <p>Ventes du jour pour le compte connecté ; impression période.</p>
+
+    <h2 id="parametres">10. Paramètres</h2>
     <ul>
-      <li>Navigation basse, boutons plus grands, listes empilées, modales défilables.</li>
-      <li>Tableaux larges : défiler <strong>horizontalement</strong> (stock, recouvrement).</li>
-      <li>Champs dimensionnés pour limiter le zoom intempestif.</li>
+      <li><strong>Profil</strong> : maquis, objectif CA, export Excel, mot de passe</li>
+      <li><strong>Catégories</strong> · <strong>Accès</strong> (utilisateurs, 2FA, WhatsApp)</li>
+      <li><strong>Sauvegarde</strong> · <strong>Administration</strong> (audit, secours)</li>
     </ul>
 
-    <h2 id="bonnes-pratiques">10. Bonnes pratiques</h2>
+    <h3 id="correction-facture">Correction de facture</h3>
+    <p>Onglet <strong>Correction</strong> : n° facture → corriger <strong>paiement</strong> ou <strong>quantités</strong> (motif obligatoire, sans annuler la facture). <strong>Historique des corrections</strong> en bas de page. Recalcule fiche PDJ clôturée si besoin.</p>
+
+    <h2 id="telephone">11. Téléphone</h2>
+    <ul>
+      <li>Barre du bas + menu <strong>Plus</strong>.</li>
+      <li>Tableaux : défilement horizontal.</li>
+      <li>Modales plein écran défilables.</li>
+    </ul>
+
+    <h2 id="bonnes-pratiques">12. Bonnes pratiques</h2>
     <ol>
-      <li>Tenir le <strong>stock</strong> à jour avant ventes et commandes.</li>
-      <li>Réceptionner avec les <strong>quantités livrées réelles</strong> et adapter <strong>Ranger dans des casiers physiques</strong> à votre processus cave.</li>
-      <li>Vérifier le <strong>site actif</strong> en multi-maquis.</li>
-      <li><strong>Exporter</strong> régulièrement (Excel ou JSON).</li>
-      <li>Garder le <strong>serveur</strong> actif ; données en JSON et/ou SQLite selon installation.</li>
+      <li>Catalogue stock à jour avant ventes et achats.</li>
+      <li>Réceptionner avec quantités réelles (une charge par réception).</li>
+      <li>Clôturer chaque journée (stock + caisse).</li>
+      <li>Vérifier le maquis actif en multi-sites.</li>
+      <li>Correction de facture plutôt que retouches manuelles après clôture.</li>
+      <li>Exporter / sauvegarder régulièrement.</li>
+      <li><strong>Ctrl+F5</strong> après mise à jour.</li>
     </ol>
 
-    <h2 id="probleme">11. En cas de problème</h2>
+    <h2 id="probleme">13. En cas de problème</h2>
     <ul>
       <li><strong>Session expirée</strong> : reconnectez-vous.</li>
-      <li><strong>Action refusée</strong> : rôle ou site.</li>
-      <li><strong>Import Excel</strong> : en-têtes alignés sur l'export ; article obligatoire ; prix achat requis pour les propositions commande.</li>
-      <li><strong>Casiers vides insuffisants</strong> : créez des casiers vides via le bouton proposé ou ajustez le brouillon de commande.</li>
-      <li>Après mise à jour des fichiers : <strong>Ctrl+F5</strong> pour recharger les scripts.</li>
+      <li><strong>Renouvellement mensuel</strong> : changez le mot de passe (1<sup>er</sup> du mois).</li>
+      <li><strong>2FA obligatoire</strong> : Paramètres → Accès.</li>
+      <li><strong>Charge doublon fournisseur</strong> : supprimer le doublon (admin) ; nouvelles réceptions protégées.</li>
+      <li><strong>Écart stock</strong> : Inventaire + clôture (achats du jour inclus).</li>
+      <li><strong>Import Excel</strong> : en-têtes identiques à l'export.</li>
+      <li><strong>Casiers vides</strong> : création rapide depuis l'achat.</li>
+      <li><strong>Scripts obsolètes</strong> : Ctrl+F5 ; redémarrer le serveur si <code>server.py</code> a changé.</li>
     </ul>
 
     <footer>
-      <p><strong>Maquis Manager</strong> — guide imprimable. Dans l'application, menu <strong>Guide</strong> (tous les rôles). Source Markdown : <code>GUIDE_UTILISATION.md</code>.</p>
+      <p><strong>Maquis Manager</strong> — guide imprimable. Menu <strong>Guide</strong> (tous rôles). Source : <code>GUIDE_UTILISATION.md</code>.</p>
     </footer>
   </div>
 
   <script>
-    document.getElementById("btn-print").addEventListener("click", function () {
-      window.print();
-    });
-    document.getElementById("btn-back").addEventListener("click", function () {
-      window.close();
-    });
+    document.getElementById("btn-print").addEventListener("click", function () { window.print(); });
+    document.getElementById("btn-back").addEventListener("click", function () { window.close(); });
     if (new URLSearchParams(location.search).get("print") === "1") {
-      window.addEventListener("load", function () {
-        setTimeout(function () { window.print(); }, 300);
-      });
+      window.addEventListener("load", function () { setTimeout(function () { window.print(); }, 300); });
     }
     (function () {
       var input = document.getElementById("guide-search");
@@ -316,29 +236,19 @@
       if (!input) return;
       var sections = Array.prototype.slice.call(document.querySelectorAll("h2, h3, p, li"));
       function clearHits() {
-        document.querySelectorAll(".guide-hit").forEach(function (el) {
-          el.classList.remove("guide-hit");
-        });
+        document.querySelectorAll(".guide-hit").forEach(function (el) { el.classList.remove("guide-hit"); });
       }
       input.addEventListener("input", function () {
         clearHits();
         var q = String(input.value || "").trim().toLowerCase();
-        if (!q) {
-          if (meta) meta.textContent = "";
-          return;
-        }
-        var hits = sections.filter(function (el) {
-          return el.textContent.toLowerCase().indexOf(q) !== -1;
-        });
+        if (!q) { if (meta) meta.textContent = ""; return; }
+        var hits = sections.filter(function (el) { return el.textContent.toLowerCase().indexOf(q) !== -1; });
         if (meta) {
           meta.textContent = hits.length
-            ? hits.length + " section(s) trouvee(s). Premiere : « " + hits[0].textContent.trim().slice(0, 80) + " »"
+            ? hits.length + " section(s). Première : « " + hits[0].textContent.trim().slice(0, 80) + " »"
             : "Aucun resultat pour « " + input.value + " »";
         }
-        if (hits[0]) {
-          hits[0].classList.add("guide-hit");
-          hits[0].scrollIntoView({ behavior: "smooth", block: "center" });
-        }
+        if (hits[0]) { hits[0].classList.add("guide-hit"); hits[0].scrollIntoView({ behavior: "smooth", block: "center" }); }
         hits.slice(1, 8).forEach(function (el) { el.classList.add("guide-hit"); });
       });
     })();

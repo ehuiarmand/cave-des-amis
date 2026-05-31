@@ -1,113 +1,141 @@
 # Guide d'utilisation — Maquis Manager
 
-Application web locale de gestion de bar : ventes, stock, achats fournisseurs, casiers physiques, charges et paramètres multi-sites.
+Application web de gestion de maquis / bar : ventes, point du jour, stock, achats fournisseurs, casiers, charges, recouvrement, avoirs clients et paramètres **multi-maquis**.
 
-**Version navigateur / PDF** : menu **Guide** dans la navigation principale (barre latérale ou menu du bas sur mobile), puis *Ouvrir le guide complet* ou *Ouvrir et proposer l'impression (PDF)* ; ou ouvrez directement le fichier `guide.html` à la racine du projet.
-
-La version détaillée imprimable est aussi la référence pour les **liens par section** (ancres `#connexion`, `#consignes`, etc.).
+**Dans l'application** : menu **Guide** (barre latérale ou menu du bas sur mobile) → *Ouvrir le guide complet* ou *Impression PDF*.  
+**Hors ligne / PDF** : fichier `guide.html` à la racine du projet (ancres `#connexion`, `#stock-inventaire`, etc.).
 
 ---
 
 ## 1. Première connexion
 
-1. Ouvrez l’application dans le navigateur (adresse fournie par votre installation, souvent `http://127.0.0.1:8001` si le serveur Python tourne sur la machine).
-2. Saisissez **nom d’utilisateur** et **mot de passe**.
-3. Si la **double authentification (2FA)** est activée pour votre compte, entrez aussi le **code à 6 chiffres** de votre application d’OTP (Google Authenticator, Authy, etc.).
-4. Validez pour accéder au **tableau de bord**.
+1. Ouvrez l'application dans le navigateur (adresse fournie par votre hébergeur, ex. `https://app.cave-des-amis.com`, ou `http://127.0.0.1:8001` en local).
+2. Saisissez **nom d'utilisateur** et **mot de passe**.
+3. **Double authentification (2FA)** si activée :
+   - **Code OTP** (Google Authenticator, Authy…) sur 6 chiffres, ou
+   - **Code WhatsApp** reçu sur le numéro enregistré sur votre compte.
+4. **Renouvellement mensuel du mot de passe** (si activé sur le serveur) : au **1er du mois**, un écran peut vous demander de saisir l'ancien mot de passe et un **nouveau** avant d'accéder à l'application. Un changement effectué **dans le mois en cours** vous couvre jusqu'à la fin de ce mois ; le 1er du mois suivant, un nouveau changement sera demandé.
+5. Validez pour accéder au **tableau de bord**.
 
-**Déconnexion** : bouton **Déconnexion** dans la barre latérale (ordinateur) ; sur téléphone, selon l’écran, la zone session ou les **Paramètres**.
+**Déconnexion** : bouton **Déconnexion** (barre latérale sur ordinateur ; sur mobile, menu **Plus** ou **Paramètres**).
 
 ---
 
 ## 2. Navigation générale
 
-<p id="guide-app">Le menu <strong>Guide</strong> ouvre une page sommaire dans l’application avec des liens vers chaque chapitre du présent document (fichier <code>guide.html</code>) pour lecture ou impression PDF.</p>
+Le menu **Guide** ouvre un sommaire avec liens vers ce document (`guide.html`) pour lecture ou impression PDF.
 
 | Zone | Contenu principal |
 |------|-------------------|
-| **Tableau de bord** | Indicateurs du jour, alertes stock, **casiers physiques** (parc), répartition ventes / paiements |
-| **Point du jour** | Synthèse journalière (CA, créances, remises, boissons vendues), vérification stock avant clôture |
-| **Ventes** | **Commandes**, **Caisse & Paiement** (historique ventes + recouvrement crédits), **Consignes**, **QR Codes** |
-| **Stock** | **Catalogue**, **Mouvements**, **Achats fournisseurs**, **Créanciers**, **Gestion casiers** |
-| **Charges** | Dépenses (loyer, achats, etc.) |
-| **Guide** | Liens vers ce guide imprimable et PDF |
-| **Paramètres** | Profil établissement, catégories, accès utilisateurs, administration |
+| **Tableau de bord** | CA, charges, bénéfice estimé, alertes stock, casiers, plus/moins vendues, export |
+| **Point du jour** | Synthèse · **Clôture** · Ventes (journée comptable) |
+| **Ventes** | Commandes · **Caisse & Paiement** · Consignes · QR Codes |
+| **Stock** | Catalogue · **Inventaire** · Mouvements · Achats · Créanciers · Casiers |
+| **Charges** | Dépenses du mois |
+| **Planning** | Mes horaires · Équipe (gérant) |
+| **Historique ventes** | Ventes du jour (profil serveuse, si activé) |
+| **Guide** | Liens vers le guide imprimable |
+| **Paramètres** | Profil · Catégories · Accès · Sauvegarde · **Correction** · Administration |
 
-En haut à droite : **sélecteur de site** si vous gérez plusieurs établissements — toutes les données affichées et saisies concernent le **site choisi**.
+En haut : **sélecteur de maquis** — toutes les données concernent le **site choisi**.
 
-Sur **téléphone**, la navigation principale est en **barre du bas** ; sur grand écran, elle est dans la **colonne à gauche**.
+Sur **téléphone** : navigation en **barre du bas** (+ menu **Plus** pour Guide, Charges, Paramètres, etc.).
 
-**Rôles** (aperçu) : **serveuse**, **gérant**, **manager**, **administrateur**, **super administrateur**. Certaines actions (réouverture d’une journée clôturée au point du jour, choix de la date de journée à traiter, options d’administration) sont réservées aux profils autorisés ; les menus ou boutons absents signifient que votre compte n’y a pas accès.
+**Rôles** (aperçu) : **serveuse**, **gérant**, **manager**, **administrateur**, **super administrateur**. Menus ou boutons absents = droits insuffisants pour votre compte.
 
 ---
 
 ## 3. Tableau de bord
 
-- Consultez le **chiffre d’affaires**, les **charges**, le **bénéfice** indicatif et le **nombre de ventes**.
-- Les graphiques résument les ventes par **catégorie** et par **mode de paiement**.
-- **Casiers physiques** : carte récapitulative du parc (**total**, **pleins**, **partiels**, **vides**) et **suggestions** pour le réapprovisionnement (cohérent avec l’onglet Stock **Gestion casiers**).
-- **Plus / moins vendues** : classement des boissons par **quantité (bouteilles)** sur **l’historique du site** — les plus vendues et (si au moins six références différentes ont été vendues au cumul) les moins vendues parmi les articles ayant eu au moins une vente.
-- **Alertes stock** : articles dont le stock réel est au niveau du seuil ou en dessous.
-  - **Proposer commande** : ouvre l’onglet Achats avec une ligne pré-remplie (quantité suggérée selon le seuil).
-  - **Toutes les alertes** : ajoute tous les articles en alerte au **brouillon** de commande fournisseur.
-  - Cochez des lignes puis **Sélection cochée** pour n’en prendre qu’une partie.
-  - **Tout cocher / Tout décocher** : préparer rapidement une sélection.
+- **CA**, **charges**, **bénéfice estimé** (marge brute − charges), **nombre de ventes** sur la période affichée.
+- Graphiques : ventes par **catégorie** et par **mode de paiement**.
+- **Imprimer le point** : récapitulatif CA / marge / charges pour la période.
+- **Casiers physiques** : total, pleins, partiels, vides + suggestions de réappro (lié à Stock → Gestion casiers).
+- **Plus / moins vendues** : classement en **bouteilles** sur l'historique du site.
+- **Alertes stock** : articles au seuil ou en dessous.
+  - **Proposer commande** / **Toutes les alertes** / **Sélection cochée** : alimentent le brouillon **Achats fournisseurs**.
+
+**Export** (Paramètres → Profil, section export) : ventes et charges en **Excel** sur une période (jour, semaine, mois ou dates personnalisées).
 
 ---
 
 ## 4. Point du jour
 
-Vue pensée pour la **clôture ou le bilan quotidien** : CA encaissé, montants « à régler », nombre de transactions, remises, répartition des paiements, détail des boissons vendues et **détail des ventes** sur la période affichée.
+Trois sous-onglets : **Synthèse**, **Clôture**, **Ventes**.
 
-Sous **Boissons vendues (par jour)** : résumé **plus / moins vendues** ce jour-là (quantité en bouteilles), puis tableau détaillé trié par **CA net**. Si peu de références différentes dans la journée, le bloc « moins vendues » peut être masqué pour éviter la redondance avec « plus vendues ».
+### Synthèse
 
-<h3 id="pdj-cloture">Vérification stock, clôture et administrateurs</h3>
+CA encaissé, montants à régler, transactions, remises, répartition des paiements, boissons vendues (plus/moins vendues du jour), détail des ventes.  
+**Imprimer le point du jour** disponible selon votre profil.
 
-- **Ouverture de caisse** : si votre installation l’utilise, la zone prévue en haut de page permet d’enregistrer l’ouverture du jour.
-- **Vérifier avant clôture** : lance la **vérification de stock** de fermeture (comparaison avec le physique) ; vous pouvez ensuite utiliser **Imprimer le rapport de cloture** lorsqu’il est proposé.
-- **Journées clôturées (réouverture)** : réservé aux **administrateurs** — permet de supprimer une fiche de clôture et d’annuler les écritures de stock associées à cette journée. Les quantités frigo / réserve actuelles ne sont pas recalculées automatiquement : vérifiez le stock physique si besoin.
-- **Super administrateur** : si un bloc **« journée à traiter »** avec une **date** apparaît, vous pouvez appliquer cette date pour corriger ou contrôler une journée précise (par exemple après réouverture), puis reclôturer selon votre procédure interne.
+### Clôture
+
+Procédure de **fin de journée comptable** :
+
+1. **Ouverture de caisse** (si activée) : montant d'ouverture + snapshot stock.
+2. **Vérification stock** : comparaison théorique (ouverture + **achats du jour** − ventes − pertes) vs frigo/réserve saisis ou catalogue (selon rôle).
+3. **Caisse de clôture** : montant espèces comptées vs **théorique** (ouverture + ventes espèces + recouvrements espèces + **avoirs émis** − charges espèces non déduites du théorique affiché — voir écran).
+4. **Clôturer la journée** (gérant / admin) ou **Fin de service** (serveuse : transmission au gérant).
+
+**Imprimer le rapport de clôture** après vérification.
+
+**Administrateurs** :
+- **Journées clôturées (réouverture)** : supprime la fiche et annule les écritures stock liées ; le physique frigo/réserve n'est pas recalculé automatiquement.
+- **Super admin** : bloc **journée à traiter** pour corriger une date passée puis reclôturer.
+
+### Ventes (PDJ)
+
+Liste des ventes de la **journée comptable** affichée (date PDJ en haut de page).
 
 ---
 
 ## 5. Ventes
 
-L’écran **Ventes** comporte quatre sous-onglets : **Commandes**, **Caisse & Paiement**, **Consignes**, **QR Codes**.
+Quatre sous-onglets : **Commandes**, **Caisse & Paiement**, **Consignes**, **QR Codes**.
 
 ### Commandes
 
-- Créez ou rouvrez une **commande** (bouton **Nouvelle commande** ou commande existante).
-- Ajoutez des **lignes** : article, format de vente (bouteille, pack, casier, etc.), quantité, lieu (**Intérieur** / **Extérieur** si les tarifs diffèrent).
-- Le stock disponible est pris en compte (frigo / réserve).
-- Actions possibles selon les droits : validation, impression ticket / facture, annulation de ligne ou de commande, etc.
+Créer ou rouvrir une commande ; lignes (article, format kit/bouteille/casier, quantité, Intérieur/Extérieur). Stock frigo/réserve pris en compte. Validation, ticket, facture, annulations selon droits.
+
+Le bouton flottant **+** ouvre une **nouvelle commande** lorsque l'onglet Commandes est actif.
 
 ### Caisse & Paiement
 
-Deux volets internes :
+Trois volets internes :
 
-- **Historique ventes** : ventes finalisées sur une période (**Du** / **Au**), impression de la période possible.
-- **Recouvrement crédits** : tableau **Crédits en cours (reste à payer)** avec bouton **Encaisser** par débiteur, saisie des **versements** (montant, mode de paiement, date/heure, note). Après **Enregistrer le versement**, chaque paiement apparaît aussi dans la section **Historique des paiements** (liste de tous les versements enregistrés, y compris lorsqu’il n’y a plus de solde actif).
+#### Historique ventes
 
-<h3 id="consignes">Consignes — suivi des reliquats</h3>
+Ventes finalisées (**Du** / **Au**), filtres, **Imprimer la période**. Colonnes **Table** et **Mode** selon configuration.
 
-L’onglet sert à deux situations fréquentes :
+#### Recouvrement crédit
 
-1. **Reliquat payé** : la facture est payée mais le client n’a pas tout bu — vous enregistrez ce qu’il laisse (**quantité** / **boisson**) pour qu’il revienne consommer plus tard.
-2. **Consigne bouteille** : **dépôt** avec **retour physique** de la bouteille (décochez **« Reliquat payé : le client reviendra boire… »** pour ce mode).
+Tableau **Crédits en cours (reste à payer)** → **Encaisser** (montant, mode, date/heure, note).  
+**Historique des paiements** : tous les versements enregistrés.  
+Le recouvrement en **espèces** alimente le théorique caisse du jour comptable.
 
-**Indicateurs** en haut : *Bouteilles — retour*, *Reliquats à servir*, *Clôturées*, *Dépôt bouteille dû*.
+#### Avoirs clients
 
-**Nouvelle consigne** : client, date, **Facture concernée** (liste des factures ou saisie manuelle). Pour un **mélange** sur une même facture, renseignez la colonne **Reliquat (btl)** par ligne d’article puis **Enregistrer** — une ligne de consigne est créée par article. Le bouton **+1** sur une ligne peut préremplir une unité.
+Quand le client laisse sa **monnaie** au maquis (pas de rendu immédiat) :
 
-Case à cocher **« Reliquat payé : le client reviendra boire ce qui reste… »** : laissez coché pour un reliquat à honorer à la prochaine visite ; décochez pour une consigne **bouteille** (dépôt / retour physique).
+- **Garder la monnaie** : client, montant, note → crée un **avoir**.
+- Solde par client = émissions − utilisations.
+- Lors d'un encaissement, mode de paiement **Avoir client** pour consommer le solde.
 
-Dans le tableau, selon le **statut**, des actions du type **Bouteille rendue**, **Reliquat payé (prochaine visite)**, **Reliquat servi**, **Remboursé / annulé**, **Suppr.** peuvent être proposées.
+#### Remplacer un article encaissé
 
-### QR codes
+Factures de la **journée comptable en cours** : sélectionner une facture, **Remplacer** sur une ligne → choix du nouvel article, quantité, confirmation.  
+Le **stock** et le **montant encaissé** sont realignés (supplément à encaisser si prix supérieur). Réservé aux profils autorisés.
 
-- Génération / impression de **QR** pour tables ou espaces (usage interne / externe selon votre configuration).
+### Consignes
 
-Le bouton **flottant « + »** sur la page Ventes ouvre en priorité l’éditeur de **commande** (sous-onglet Commandes).
+**Reliquat payé** (client reviendra boire) ou **consigne bouteille** (dépôt / retour physique — décocher « Reliquat payé… »).
+
+Indicateurs : *Bouteilles — retour*, *Reliquats à servir*, *Clôturées*, *Dépôt bouteille dû*.  
+Actions : Bouteille rendue, Reliquat servi, Remboursé, Suppr., etc.
+
+### QR Codes
+
+Génération / impression QR **Intérieur** / **Extérieur** ; commandes clients via scan.
 
 ---
 
@@ -115,91 +143,139 @@ Le bouton **flottant « + »** sur la page Ventes ouvre en priorité l’éditeu
 
 ### Catalogue
 
-- Liste des articles avec stocks **frigo**, **réserve**, seuils, prix d’achat, formats de vente, etc.
-- **Recherche** et mode tableau **compact / détaillé** selon les boutons prévus.
-- **Nouvel article** ou modification : via le **« + »** sur la page Stock lorsque l’onglet **Catalogue** est actif, ou les actions par ligne.
-- Bouton **Perte** : ouvre l’enregistrement d’une **sortie hors vente** (casse, casier cassé, etc.) — ce n’est pas un onglet séparé, l’action est dans le catalogue.
-- Lors de la saisie d’un article : catégorie, **bouteilles par casier**, seuil minimum, prix d’achat au casier, formats de vente (quantités et prix intérieur / extérieur), répartition frigo / réserve si vous utilisez cette séparation.
+Articles : frigo, réserve, seuils, prix achat, formats de vente. Recherche, filtres, vue compacte / complète.
+
+- **+** (FAB) : nouvel article (onglet Catalogue actif).
+- **Perte** : sortie hors vente (casse…) — **confirmation** obligatoire.
+- **Exporter / Importer Excel** : colonnes Frigo, Réserve, Entrées, Sorties, Stock actuel si présentes.
+- **Imprimer** : état du stock catalogue.
+
+### Inventaire (gérant / manager)
+
+Synthèse sur une **période** (Du / Au) pour **tout le catalogue** :
+
+| Colonne | Signification |
+|---------|----------------|
+| Stock début | Stock à l'ouverture de la période |
+| Achats | Entrées (commandes fournisseur reçues, etc.) |
+| Ventes | Sorties ventes |
+| Pertes | Sorties pertes |
+| Écarts inexpliqués | Écarts PDJ recalculés |
+| Stk fin (th.) | Début + achats − ventes − pertes |
+| Stk réconcilié | Fin théorique + écarts clôture |
+| Stk actuel | Frigo + réserve catalogue (lignes en jaune si écart avec réconcilié) |
+
+**Afficher** puis **Imprimer**.
 
 ### Mouvements
 
-- Historique des **entrées** et mouvements liés au stock.
+Journal des mouvements sur une période. Filtre **Type** : Tous / Entrées / Sorties.
+
+**Imprimer par article** : synthèse par article (début, entrées, sorties, fin) selon le filtre type. Tableau synthèse visible à l'écran (profils manager).
 
 ### Achats fournisseurs
 
-- **Nouvelle commande fournisseur** : fournisseur, date, mode de paiement (dont **Crédit fournisseur** si activé).
-- Ajout de lignes : l’article doit exister dans le stock du site ; le **prix au casier** et le format **btl/casier** viennent du catalogue ; les quantités en **casiers** sont suggérées selon le niveau de stock et le seuil (modifiable avant validation).
-- Pour certaines lignes (lots type casier avec consigne), le logiciel peut exiger des **casiers vides** du parc : un bouton **Créer des casiers vides…** (mis en évidence) ouvre la création rapide d’un casier physique, puis vous pouvez **reprendre** la commande.
-- **Enregistrer la commande** : la commande reste **En attente** jusqu’à réception.
-- **Réceptionner** : fenêtre **Réception commande fournisseur** — indiquez les **casiers réellement livrés** par ligne (peut différer de la commande). Option **Ranger dans des casiers physiques** (cochée par défaut) : répartition automatique sur des casiers **partiels** existants, sinon création de **nouveaux casiers** pour les lots type casier ; le **stock catalogue** et l’onglet **Gestion casiers** sont mis à jour en cohérence. Le stock et une **charge** « Approvisionnement » reflètent le montant réceptionné.
-- Actions possibles sur une commande en attente : **annuler**, **retirer une ligne**.
-- Sur téléphone, le **« + »** sur l’onglet **Achats fournisseurs** ouvre le formulaire de **commande fournisseur** (et non la création d’article).
+1. **Nouvelle commande** : fournisseur, date, paiement (dont **Crédit fournisseur**).
+2. Lignes depuis le catalogue ; quantités en **casiers** suggérées selon stock/seuil.
+3. **Casiers vides** : bouton **Créer des casiers vides…** si le parc est insuffisant.
+4. **Enregistrer** → statut **En attente**.
+5. **Réceptionner** : quantités **réellement livrées** par ligne ; option **Ranger dans des casiers physiques** (défaut coché). Crée **une seule charge** « Approvisionnement » liée à la commande (pas de doublon si double clic).
 
-### Créanciers (dettes fournisseurs)
+Actions : **Annuler**, retirer une ligne. Sur mobile, **+** ouvre le formulaire d'achat.
 
-- Suivi des montants dus aux fournisseurs ; possibilité d’enregistrer une **dépense** avec paiement **Crédit fournisseur** selon votre flux.
+### Créanciers
 
-<h3 id="casiers">Gestion casiers</h3>
+Dettes fournisseurs ; charges en **Crédit fournisseur**.
 
-- Vue du **parc de casiers physiques** : codes, articles, capacités, quantités, **statuts** (vide, partiel, plein), emplacements, mouvements.
-- Cohérent avec la carte **Casiers physiques** du tableau de bord (compteurs et suggestions).
-- Lors des **commandes fournisseur**, les casiers **vides** disponibles (hors réservation sur un brouillon) limitent parfois les quantités : utilisez **Créer des casiers vides…** depuis l’écran d’achat si le logiciel vous y invite.
+### Gestion casiers
 
-### Excel
-
-- **Exporter** : fichier Excel du stock du site courant (colonnes alignées avec l’import).
-- **Importer** : mise à jour ou création d’articles à partir du fichier ; les colonnes **Frigo**, **Réserve**, **Entrées**, **Sorties**, **Stock actuel** sont prises en compte quand elles sont présentes, en complément des champs catalogue.
+Parc physique : codes, articles, capacités, statuts (vide, partiel, plein), mouvements, export CSV.
 
 ---
 
 ## 7. Charges
 
-- Enregistrez les **dépenses** : date, libellé, catégorie, montant, mode de paiement.
-- Les charges alimentent le tableau de bord (charges vs CA) et peuvent inclure des paiements **Crédit fournisseur**.
+Dépenses : date, libellé, catégorie, montant, paiement.
 
-Le bouton **« + »** sur la page Charges ouvre rapidement une nouvelle dépense.
-
----
-
-## 8. Paramètres
-
-Sous-onglets typiques (selon votre rôle) :
-
-- **Profil** : nom du bar, objectif de CA, seuil stock par défaut, préfixe factures, options (vente limitée à une brasserie, tarifs zone cave / terrasse, etc.).
-- **Catégories** : liste des catégories boissons (profils autorisés).
-- **Accès** : utilisateurs, rôles, sites autorisés, **2FA**.
-- **Administration** : export JSON, sauvegardes, options avancées — à manipuler avec précaution.
-
-Les éléments masqués selon le **rôle** ne sont pas accessibles.
+- Saisie manuelle via **+** sur la page Charges.
+- **Automatique** à la **réception** d'une commande fournisseur (catégorie Approvisionnement).
+- Alimentent le tableau de bord et le PDJ.
+- **Suppr.** : administrateurs uniquement — **confirmation** avant suppression.
 
 ---
 
-## 9. Utilisation sur téléphone
+## 8. Planning
 
-- Interface adaptée : navigation basse d’écran, boutons plus grands, listes empilées, modales en grand format défilable.
-- Les **tableaux larges** (stock, historiques, recouvrement) se parcourent **horizontalement** : faites défiler avec le doigt.
-- Les champs de saisie utilisent une taille lisible pour limiter les zoom intempestifs.
-
----
-
-## 10. Bonnes pratiques
-
-1. **Commencer par le stock** : articles et prix à jour avant les ventes et les commandes fournisseur.
-2. **Réceptionner les achats** avec les **quantités livrées réelles** et la case **Ranger dans des casiers physiques** adaptée à votre processus réel de cave.
-3. **Choisir le bon site** avant de saisir ventes ou stock multi-établissements.
-4. **Exporter régulièrement** le stock (Excel ou JSON depuis les paramètres) selon votre politique de sauvegarde.
-5. Maintenir le **serveur** (`server.py`) actif sur la machine qui héberge les données ; les données sont enregistrées côté serveur (fichier JSON et/ou SQLite selon configuration).
+- **Mes horaires** : créneaux de la serveuse / gérante connectée (plage Du / Au en haut).
+- **Équipe** (gérant) : planifier serveuses et gérantes ; **Générer une rotation** (jours travaillés / repos, heures début/fin).
+- Jour de **repos** planifié : la serveuse ne peut pas vendre ce jour-là (message explicite).
 
 ---
 
-## 11. En cas de problème
+## 9. Historique ventes (serveuse)
 
-- **Session expirée** : reconnectez-vous.
-- **Action refusée** : vérifiez votre **rôle** ou le **site** sélectionné.
-- **Import Excel** : respectez les **intitulés de colonnes** du fichier exporté ; une ligne sans nom d’article est ignorée ; sans **prix d’achat** catalogue, une ligne de commande fournisseur peut être ignorée.
-- **Casiers vides insuffisants** (message lors de l’enregistrement d’une commande fournisseur) : créez des **casiers vides** via le bouton proposé, ou réduisez les quantités / le brouillon sur les lignes concernées.
-- Après mise à jour des fichiers de l’application, faites un **rechargement forcé** du navigateur (Ctrl+F5) pour prendre la dernière version des scripts.
+Ventes de la **journée** pour le compte connecté : filtres, totaux, **Imprimer la période**. Visible selon profil (menu dédié sur mobile).
 
 ---
 
-*Document rédigé pour **Maquis Manager** (projet « gestion cave »). Les libellés exacts des boutons peuvent légèrement varier selon les évolutions du logiciel.*
+## 10. Paramètres
+
+| Onglet | Contenu |
+|--------|---------|
+| **Profil** | Nom du maquis, objectif CA, seuil stock, préfixe factures, WhatsApp, export Excel période, mot de passe personnel |
+| **Catégories** | Catégories boissons |
+| **Accès** | Utilisateurs, rôles, maquis autorisés, **2FA**, WhatsApp 2FA |
+| **Sauvegarde** | Snapshots / restauration (admins habilités) |
+| **Correction** | **Correction de facture** sans annulation : recherche par n° facture → corriger **paiement** ou **quantités** (motif obligatoire) ; **Historique des corrections** en bas de page |
+| **Administration** | Journal audit gérant/serveuses, options super admin (secours JSON, purge maquis, décalage journées…) |
+
+**Sécurité** :
+- Comptes admin / gérant : **2FA recommandée ou obligatoire** selon configuration serveur.
+- **Renouvellement mensuel** du mot de passe (voir §1).
+
+---
+
+## 11. Module restaurant (si activé)
+
+Menus **Menu cuisine** et **Stock ingrédients** : cartes plats et stock ingrédients pour établissements avec restauration. Masqués si le maquis n'a pas l'option restaurant.
+
+---
+
+## 12. Utilisation sur téléphone
+
+- Barre de navigation basse, boutons larges, modales défilables.
+- Tableaux : **défilement horizontal** (stock, inventaire, recouvrement).
+- **Plus** : accès Guide, Charges, Paramètres, PDJ, etc.
+
+---
+
+## 13. Bonnes pratiques
+
+1. Tenir le **catalogue stock** à jour avant ventes et commandes.
+2. **Réceptionner** les achats avec quantités **réelles** ; une réception = une charge.
+3. **Clôturer** chaque journée comptable : stock + caisse cohérents avec le physique.
+4. Vérifier le **maquis actif** avant toute saisie multi-sites.
+5. Utiliser **Correction de facture** (motif tracé) plutôt que des manipulations stock manuelles après clôture.
+6. **Exporter** régulièrement (Excel / sauvegarde Paramètres).
+7. Après mise à jour : **Ctrl+F5** (rechargement forcé) sur l'application.
+
+---
+
+## 14. En cas de problème
+
+| Symptôme | Piste |
+|----------|--------|
+| Session expirée | Reconnectez-vous |
+| Écran « Renouvellement mensuel » | Changez le mot de passe (1er du mois ou compte jamais renouvelé ce mois-ci) |
+| Action refusée | Rôle ou maquis sélectionné |
+| 2FA obligatoire | Activez 2FA dans Paramètres → Accès |
+| Charge en double fournisseur | Supprimez le doublon (admin) ; les nouvelles réceptions sont protégées |
+| Écart stock PDJ / inventaire | Vérifiez achats du jour à la clôture ; consultez Inventaire (écarts, stk réconcilié vs actuel) |
+| Correction qty sans montant | Refaites une correction quantité (sync paiement automatique) ou correction paiement |
+| Import Excel | Reprenez les en-têtes de l'export ; article et prix achat requis pour achats |
+| Casiers vides insuffisants | **Créer des casiers vides…** depuis l'achat |
+| Page blanche / bouton mort | **Ctrl+F5** ; redémarrer `python server.py` si le serveur a changé |
+
+---
+
+*Document **Maquis Manager** — mis à jour pour les fonctionnalités récentes (inventaire, mouvements, correction facture, avoirs clients, renouvellement mot de passe, clôture PDJ). Les libellés à l'écran priment en cas de divergence.*
