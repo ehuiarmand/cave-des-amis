@@ -1691,6 +1691,39 @@ function calcNet(item) {
   return (Number(item.prix) || 0) * (Number(item.qty) || 0) - (Number(item.remise) || 0);
 }
 
+/** Aligne paiementDetails (et paiement) sur le montant net catalogue de la ligne. */
+function syncVentePaymentDetails(vente, newNet) {
+  if (!vente) return;
+  newNet = Math.max(0, Math.round(Number(newNet) || 0));
+  const fallbackMethod = vente.paiement || vente.paiementDetails?.[0]?.method || "Espèces";
+  if (!Array.isArray(vente.paiementDetails) || !vente.paiementDetails.length) {
+    vente.paiement = fallbackMethod;
+    vente.paiementDetails = [{ method: fallbackMethod, amount: newNet }];
+    return;
+  }
+  const oldSum = vente.paiementDetails.reduce((s, d) => s + (Number(d.amount) || 0), 0);
+  if (oldSum <= 0) {
+    vente.paiement = fallbackMethod;
+    vente.paiementDetails = [{ method: fallbackMethod, amount: newNet }];
+    return;
+  }
+  if (newNet === 0) {
+    vente.paiementDetails = vente.paiementDetails.map((d) => ({ ...d, amount: 0 }));
+    vente.paiement = vente.paiementDetails.length > 1 ? "Mixte" : (vente.paiementDetails[0]?.method || fallbackMethod);
+    return;
+  }
+  let allocated = 0;
+  vente.paiementDetails = vente.paiementDetails.map((d, i, arr) => {
+    if (i === arr.length - 1) {
+      return { ...d, amount: newNet - allocated };
+    }
+    const amt = Math.round((Number(d.amount) || 0) / oldSum * newNet);
+    allocated += amt;
+    return { ...d, amount: amt };
+  });
+  vente.paiement = vente.paiementDetails.length > 1 ? "Mixte" : (vente.paiementDetails[0]?.method || fallbackMethod);
+}
+
 function paymentLabel(item) {
   if (item?.paiementDetails?.length > 1) return "Mixte";
   if (item?.paiementDetails?.length === 1) return item.paiementDetails[0].method;
@@ -10653,6 +10686,10 @@ async function confirmReplaceVente(newArticleName) {
     return;
   }
   const newPrix = formatPrice(newFormat, vente.location || "Intérieur");
+  if (newPrix <= 0) {
+    showToast("Prix catalogue indisponible pour ce produit.");
+    return;
+  }
   const prevArticle = vente.article;
   const prevPrix = Number(vente.prix) || 0;
   const oldTotal = prevPrix * originalQty;
@@ -10688,23 +10725,40 @@ async function confirmReplaceVente(newArticleName) {
     venteQty: vente.qty,
     venteFormatQuantite: vente.formatQuantite,
     ventePrix: vente.prix,
+    ventePaiement: vente.paiement,
+    ventePaiementDetails: JSON.parse(JSON.stringify(vente.paiementDetails || [])),
   };
   // Restituer le stock de l'ancien article (quantite originale)
   if (oldStockItem) {
     oldStockItem.sorties = Math.max(0, (Number(oldStockItem.sorties) || 0) - oldBottles);
     restorePhysicalStock(oldStockItem, oldBottles);
+    restoreArticleCasiers(oldStockItem.article, oldBottles, {
+      motif: "correction",
+      commentaire: `Remplacement article · ${vente.factureNumber || ""}`,
+      factureNumber: vente.factureNumber || "",
+    });
   }
   // Consommer le stock du nouvel article (nouvelle quantite)
   newStockItem.sorties = (Number(newStockItem.sorties) || 0) + newBottles;
   newStockItem.lastSortieAt = new Date().toISOString();
   newStockItem.lastSortieBy = sessionUser || "-";
   consumePhysicalStock(newStockItem, newBottles);
-  // Mettre a jour la vente
+  drainArticleCasiers(newStockItem.article, newBottles, {
+    motif: "correction",
+    commentaire: `Remplacement article · ${vente.factureNumber || ""}`,
+    factureNumber: vente.factureNumber || "",
+  });
+  // Mettre a jour la vente (catalogue + montant encaisse alignes)
   vente.article = newProduct.article;
   vente.cat = newProduct.cat || vente.cat;
   vente.qty = newQty;
   vente.formatQuantite = newFormatQty;
-  if (newPrix > 0) vente.prix = newPrix;
+  vente.packSize = newFormatQty;
+  vente.prix = newPrix;
+  const newNet = Math.max(0, Math.round(newTotal - (Number(vente.remise) || 0)));
+  if (diff <= 0) {
+    syncVentePaymentDetails(vente, newNet);
+  }
   recordStaffAudit(
     "update", "vente",
     `Remplacement article · Facture ${vente.factureNumber || "#" + vente.id} · ${vente.client || ""}`,
@@ -10792,32 +10846,23 @@ async function confirmSupplement() {
     return;
   }
   const paymentMethod = inputs.length > 1 ? "Mixte" : inputs[0].method;
-  // Enregistrer une vente supplementaire pour la difference
-  const suppVente = {
-    id: state.nextId.vente++,
-    siteId: vente.siteId || currentSiteId(),
-    factureNumber: vente.factureNumber,
-    date: vente.date,
-    soldAt: new Date().toISOString(),
-    client: vente.client,
-    table: vente.table,
-    article: vente.article,
-    cat: vente.cat,
-    prix: diff,
-    qty: 1,
-    formatQuantite: 1,
-    packSize: 1,
-    remise: 0,
-    paiement: paymentMethod,
-    paiementDetails: inputs.map((i) => ({ method: i.method, amount: i.amount })),
-    debiteur: creditName || undefined,
-    server: vente.server || sessionUser || "",
-    serveur: vente.serveur || sessionUser || "",
-    note: "Supplément remplacement article",
-    // Ligne de montant seul (différence de prix) : ne représente pas une bouteille vendue.
-    noStock: true,
-  };
-  state.ventes = [suppVente, ...state.ventes];
+  // Fusionner le supplément dans la ligne principale (évite double comptage CA / fiche contrôle)
+  const mergedDetails = (vente.paiementDetails || []).map((d) => ({ ...d }));
+  inputs.forEach((inp) => {
+    const existing = mergedDetails.find((d) => d.method === inp.method);
+    if (existing) existing.amount = (Number(existing.amount) || 0) + inp.amount;
+    else mergedDetails.push({ method: inp.method, amount: inp.amount });
+  });
+  vente.paiementDetails = mergedDetails;
+  vente.paiement = mergedDetails.length > 1 ? "Mixte" : (mergedDetails[0]?.method || paymentMethod);
+  if (inputs.some((i) => isCreditClientMethod(i.method))) {
+    vente.debiteur = creditName || vente.debiteur;
+  }
+  const expectedNet = calcNet(vente);
+  const paidTotal = mergedDetails.reduce((s, d) => s + (Number(d.amount) || 0), 0);
+  if (Math.round(paidTotal) !== Math.round(expectedNet)) {
+    syncVentePaymentDetails(vente, expectedNet);
+  }
   recordStaffAudit(
     "create", "encaissement",
     `Supplément · Facture ${vente.factureNumber || ""} · ${vente.client || ""}`,
@@ -17583,6 +17628,8 @@ function closeModal(id) {
         s.vente.qty = s.venteQty;
         s.vente.formatQuantite = s.venteFormatQuantite;
         s.vente.prix = s.ventePrix;
+        s.vente.paiement = s.ventePaiement;
+        s.vente.paiementDetails = JSON.parse(JSON.stringify(s.ventePaiementDetails || []));
       }
       _pendingSupplementStockSnapshot = null;
       renderSalesHistory();
