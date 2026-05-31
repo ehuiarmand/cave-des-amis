@@ -948,7 +948,7 @@
                   <th class="stock-inv-th-num" style="color:#72d7a9">Achats</th>
                   <th class="th-blue stock-inv-th-num">Ventes</th>
                   <th class="stock-inv-th-num" style="color:#ff8e82">Pertes</th>
-                  <th class="stock-inv-th-num">Écarts PDJ</th>
+                  <th class="stock-inv-th-num">Écarts inexpliqués</th>
                   <th class="stock-inv-th-num">Stk fin (th.)</th>
                   <th class="stock-inv-th-num">Stk réconcilié</th>
                   <th class="stock-inv-th-num">Stk actuel</th>
@@ -986,7 +986,7 @@
           </div>
           <div class="manager-only" id="stock-move-synth-toolbar" style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;align-items:center">
             <button id="stock-move-print-btn" class="btn btn-primary" type="button" style="width:auto;font-size:0.88rem" title="Imprimer la synthèse par article selon le type choisi (entrées, sorties ou les deux)">Imprimer par article</button>
-            <span class="muted" style="font-size:0.82rem">Inclut pertes, écarts PDJ et stock actuel catalogue. Lignes surlignées si réconcilié ≠ actuel.</span>
+            <span class="muted" style="font-size:0.82rem">Écarts inexpliqués recalculés (sans double compter les achats). Lignes surlignées si réconcilié ≠ actuel.</span>
           </div>
           <div class="manager-only stock-table-wrap stock-inventaire-wrap" id="stock-move-article-summary-wrap" style="margin-top:14px">
             <p class="eyebrow" style="margin:0 0 8px">Synthèse par article (période · selon type)</p>
@@ -2960,7 +2960,7 @@
   <script src="./cave-components.js"></script>
   <script src="./cave-extras.js"></script>
   <script src="./cave-order-pad.js"></script>
-  <script src="./app-orders.js?v=353"></script>
+  <script src="./app-orders.js?v=354"></script>
   <script src="./restaurant-module.js"></script>
 </body>
 </html>

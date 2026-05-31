@@ -15698,8 +15698,8 @@ function pertesForArticlePeriod(article, start, end) {
     .reduce((s, l) => s + (Number(l.qty) || 0), 0);
 }
 
-/** Écarts physiques en clôture PDJ (stockChecks.items[].ecart) sur la période. */
-function closureEcartBottlesForArticlePeriod(item, start, end) {
+/** Écarts inexpliqués en clôture PDJ (recalcul : physique − (ouv. + entrées − ventes − pertes)). */
+function closureEcartUnexplainedForArticlePeriod(item, start, end) {
   if (!item) return 0;
   const siteId = item.siteId || currentSiteId();
   const articleLow = String(item.article || "").toLowerCase();
@@ -15707,9 +15707,20 @@ function closureEcartBottlesForArticlePeriod(item, start, end) {
   return (state.stockChecks || [])
     .filter((sc) => sc.siteId === siteId && isoDateInRange(sc.date, start, end))
     .reduce((sum, sc) => {
+      const d = String(sc.date || "").slice(0, 10);
       const ci = (sc.items || []).find((x) => Number(x.id) === itemId
         || String(x.article || "").toLowerCase() === articleLow);
-      return sum + (Number(ci?.ecart) || 0);
+      if (!ci) return sum;
+      const stockAvant = Number(ci.stockAvant ?? ci.expected ?? 0);
+      const sortiesToday = Number(ci.sortiesToday ?? 0);
+      const entreesJour = entreesBottlesForArticlePeriod(item.article, d, d);
+      const pertesJour = pertesForArticlePeriod(item.article, d, d);
+      const countedRaw = Number(ci.counted);
+      const physical = Number.isFinite(countedRaw) && !Number.isNaN(countedRaw)
+        ? countedRaw
+        : Math.max(0, (Number(ci.frigo) || 0) + (Number(ci.reserve) || 0));
+      const expected = Math.max(0, stockAvant + entreesJour - sortiesToday - pertesJour);
+      return sum + (physical - expected);
     }, 0);
 }
 
@@ -15729,7 +15740,7 @@ function stockInventoryReportRows(start, end) {
       const achats = entreesBottlesForArticlePeriod(item.article, start, end);
       const ventes = ventesBottlesForArticlePeriod(item.article, start, end);
       const pertes = pertesForArticlePeriod(item.article, start, end);
-      const ecartsCloture = closureEcartBottlesForArticlePeriod(item, start, end);
+      const ecartsCloture = closureEcartUnexplainedForArticlePeriod(item, start, end);
       const stockFin = Math.max(0, stockDebut + achats - ventes - pertes);
       const stockFinReconcilie = Math.max(0, stockFin + ecartsCloture);
       const stockActuelCatalogue = stockActuel(item);
@@ -15780,7 +15791,7 @@ function renderStockInventoryReport() {
       <div class="pdj-kpi"><span class="kpi-label">Achats (btl)</span><strong class="pdj-val amber">${fmt(totAchats)}</strong></div>
       <div class="pdj-kpi"><span class="kpi-label">Ventes (btl)</span><strong class="pdj-val red">${fmt(totVentes)}</strong></div>
       <div class="pdj-kpi"><span class="kpi-label">Pertes (btl)</span><strong class="pdj-val red">${fmt(totPertes)}</strong></div>
-      <div class="pdj-kpi"><span class="kpi-label">Écarts PDJ (btl)</span><strong class="pdj-val ${totEcarts < 0 ? "red" : "amber"}">${fmtEcartSigned(totEcarts)}</strong></div>`;
+      <div class="pdj-kpi"><span class="kpi-label">Écarts inexpliqués (btl)</span><strong class="pdj-val ${totEcarts < 0 ? "red" : "amber"}">${fmtEcartSigned(totEcarts)}</strong></div>`;
   }
   list.innerHTML = rows.length
     ? rows.map((r) => {
@@ -15828,12 +15839,12 @@ function stockMoveSynthColCount(moveType) {
 function stockMoveSynthHeadHtml(moveType) {
   const reconc = `<th class="stock-inv-th-num">Stk réconcilié</th><th class="stock-inv-th-num">Stk actuel</th>`;
   if (moveType === "entree") {
-    return `<th>Article</th><th class="th-orange stock-inv-th-num">Stock début</th><th class="stock-inv-th-num" style="color:#72d7a9">Entrées</th><th class="stock-inv-th-num">Écarts PDJ</th>${reconc}`;
+    return `<th>Article</th><th class="th-orange stock-inv-th-num">Stock début</th><th class="stock-inv-th-num" style="color:#72d7a9">Entrées</th><th class="stock-inv-th-num">Écarts inexpliqués</th>${reconc}`;
   }
   if (moveType === "sortie") {
-    return `<th>Article</th><th class="th-orange stock-inv-th-num">Stock début</th><th class="th-blue stock-inv-th-num">Ventes</th><th class="stock-inv-th-num" style="color:#ff8e82">Pertes</th><th class="stock-inv-th-num">Écarts PDJ</th>${reconc}`;
+    return `<th>Article</th><th class="th-orange stock-inv-th-num">Stock début</th><th class="th-blue stock-inv-th-num">Ventes</th><th class="stock-inv-th-num" style="color:#ff8e82">Pertes</th><th class="stock-inv-th-num">Écarts inexpliqués</th>${reconc}`;
   }
-  return `<th>Article</th><th class="th-orange stock-inv-th-num">Stock début</th><th class="stock-inv-th-num" style="color:#72d7a9">Entrées</th><th class="th-blue stock-inv-th-num">Ventes</th><th class="stock-inv-th-num" style="color:#ff8e82">Pertes</th><th class="stock-inv-th-num">Écarts PDJ</th><th class="stock-inv-th-num">Stk fin (th.)</th>${reconc}`;
+  return `<th>Article</th><th class="th-orange stock-inv-th-num">Stock début</th><th class="stock-inv-th-num" style="color:#72d7a9">Entrées</th><th class="th-blue stock-inv-th-num">Ventes</th><th class="stock-inv-th-num" style="color:#ff8e82">Pertes</th><th class="stock-inv-th-num">Écarts inexpliqués</th><th class="stock-inv-th-num">Stk fin (th.)</th>${reconc}`;
 }
 
 function stockMoveSynthRowHtml(r, moveType) {
@@ -15874,12 +15885,12 @@ function stockMoveSynthRowHtml(r, moveType) {
 function stockMoveSynthHeadPrintHtml(moveType) {
   const reconc = "<th>Stk réconcilié</th><th>Stk actuel</th>";
   if (moveType === "entree") {
-    return `<th>Article</th><th>Stock début</th><th>Entrées</th><th>Écarts PDJ</th>${reconc}`;
+    return `<th>Article</th><th>Stock début</th><th>Entrées</th><th>Écarts inexpliqués</th>${reconc}`;
   }
   if (moveType === "sortie") {
-    return `<th>Article</th><th>Stock début</th><th>Ventes</th><th>Pertes</th><th>Écarts PDJ</th>${reconc}`;
+    return `<th>Article</th><th>Stock début</th><th>Ventes</th><th>Pertes</th><th>Écarts inexpliqués</th>${reconc}`;
   }
-  return `<th>Article</th><th>Stock début</th><th>Entrées</th><th>Ventes</th><th>Pertes</th><th>Écarts PDJ</th><th>Stk fin (th.)</th>${reconc}`;
+  return `<th>Article</th><th>Stock début</th><th>Entrées</th><th>Ventes</th><th>Pertes</th><th>Écarts inexpliqués</th><th>Stk fin (th.)</th>${reconc}`;
 }
 
 function stockMoveSynthRowPrintHtml(r, moveType) {
@@ -15952,9 +15963,9 @@ function printStockPeriodByArticle(startRaw, endRaw, { title = "Synthèse stock"
     if (mt === "entree" || mt === "all") summaryHtml += `<span>Total entrées : <strong>${fmt(totEntrees)}</strong> btl</span>`;
     if (mt === "sortie" || mt === "all") summaryHtml += `<span>Total ventes : <strong>${fmt(totVentes)}</strong> btl</span>`;
     if (mt === "sortie" || mt === "all") summaryHtml += `<span>Total pertes : <strong>${fmt(totPertes)}</strong> btl</span>`;
-    summaryHtml += `<span>Écarts PDJ : <strong>${fmtEcartSigned(totEcarts)}</strong> btl</span>`;
+    summaryHtml += `<span>Écarts inexpliqués : <strong>${fmtEcartSigned(totEcarts)}</strong> btl</span>`;
   } else if (full) {
-    headCols = "<th>Article</th><th>Stock début</th><th>Achats</th><th>Ventes</th><th>Pertes</th><th>Écarts PDJ</th><th>Stk fin (th.)</th><th>Stk réconcilié</th><th>Stk actuel</th>";
+    headCols = "<th>Article</th><th>Stock début</th><th>Achats</th><th>Ventes</th><th>Pertes</th><th>Écarts inexpliqués</th><th>Stk fin (th.)</th><th>Stk réconcilié</th><th>Stk actuel</th>";
     tableRows = rows.map((r) => `<tr>
       <td>${escapeHtml(r.article)}</td>
       <td>${fmt(r.stockDebut)}</td>
@@ -15968,7 +15979,7 @@ function printStockPeriodByArticle(startRaw, endRaw, { title = "Synthèse stock"
     </tr>`).join("");
     const totVentes = rows.reduce((s, r) => s + r.ventes, 0);
     const totEcarts = rows.reduce((s, r) => s + r.ecartsCloture, 0);
-    summaryHtml = `<span><strong>${fmt(rows.length)}</strong> article(s)</span><span>Total ventes : <strong>${fmt(totVentes)}</strong> btl</span><span>Écarts PDJ : <strong>${fmtEcartSigned(totEcarts)}</strong> btl</span>`;
+    summaryHtml = `<span><strong>${fmt(rows.length)}</strong> article(s)</span><span>Total ventes : <strong>${fmt(totVentes)}</strong> btl</span><span>Écarts inexpliqués : <strong>${fmtEcartSigned(totEcarts)}</strong> btl</span>`;
   } else {
     headCols = "<th>Article</th><th>Stock début</th><th>Ventes</th><th>Stock fin (th.)</th>";
     tableRows = rows.map((r) => `<tr>
@@ -15987,8 +15998,8 @@ function printStockPeriodByArticle(startRaw, endRaw, { title = "Synthèse stock"
   }
   const printScript = "<scr" + "ipt>window.onload=function(){window.print();}</scr" + "ipt>";
   const footnote = end < today()
-    ? `<p class="meta" style="margin-top:14px;font-size:12px">Stk réconcilié = début + entrées − ventes − pertes + écarts PDJ. Stk actuel = catalogue au moment de l'impression (période terminée avant aujourd'hui).</p>`
-    : `<p class="meta" style="margin-top:14px;font-size:12px">Stk fin (th.) = début + entrées − ventes − pertes · Stk réconcilié inclut les écarts de clôture PDJ · Stk actuel = frigo + réserve catalogue.</p>`;
+    ? `<p class="meta" style="margin-top:14px;font-size:12px">Stk réconcilié = début + entrées − ventes − pertes + écarts inexpliqués (hors achats/pertes déjà comptés). Stk actuel = catalogue au moment de l'impression.</p>`
+    : `<p class="meta" style="margin-top:14px;font-size:12px">Stk fin (th.) = début + entrées − ventes − pertes · Écarts inexpliqués = écart clôture recalculé (physique − théorique du jour) · Stk réconcilié = th. + écarts inexpliqués · Stk actuel = frigo + réserve.</p>`;
   ticketWindow.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>
     body{font-family:Arial,sans-serif;color:#111;padding:28px}header{display:flex;justify-content:space-between;gap:18px;border-bottom:2px solid #111;padding-bottom:14px;margin-bottom:18px}
     h1,h2,p{margin:0 0 8px}.meta{color:#555}.summary{display:flex;flex-wrap:wrap;gap:16px 24px;margin:12px 0 16px;font-size:14px}
@@ -16299,19 +16310,23 @@ async function closeAccountingDay() {
       ?? existingCloseItem?.stockAvant
       ?? stockActuel(item);
     const sortiesToday = todaySortiesBottlesForArticle(item.article, dStr);
-    const expectedRemaining = Math.max(0, stockAtOpen - sortiesToday); // restant théorique après ventes
+    const entreesToday = entreesBottlesForArticlePeriod(item.article, dStr, dStr);
+    const pertesToday = pertesForArticlePeriod(item.article, dStr, dStr);
+    const expectedRemaining = Math.max(0, stockAtOpen + entreesToday - sortiesToday - pertesToday);
     const counted = frigo + reserve;
     return {
       id: item.id,
       article: item.article,
       cat: item.cat || "",
-      stockAvant: stockAtOpen,        // stock à l'ouverture
+      stockAvant: stockAtOpen,
+      entreesToday,
+      pertesToday,
       sortiesToday,
-      expected: expectedRemaining,    // restant théorique (ouverture − ventes)
+      expected: expectedRemaining,
       frigo,
       reserve,
       counted,
-      ecart: counted - expectedRemaining, // écart physique réel (hors ventes)
+      ecart: counted - expectedRemaining,
       stockApres: counted,
     };
   });
