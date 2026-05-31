@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./styles.css?v=50">
+  <link rel="stylesheet" href="./styles.css?v=51">
   <link rel="stylesheet" href="./styles-cave-manager.css?v=2">
   <link rel="stylesheet" href="./cave-casier.css">
   <link rel="stylesheet" href="./cave-components.css">
@@ -409,6 +409,14 @@
           <button class="tab" data-subtab-ventes="qr">QR Codes</button>
         </div>
         <div id="ventes-rest-day-gate" class="hidden" hidden style="margin:0 0 12px"></div>
+        <nav id="ventes-mobile-subnav" class="ventes-mobile-subnav no-print" aria-label="Ventes mobile">
+          <button type="button" class="ventes-mobile-subnav-btn" data-mobile-ventes="commandes">Commandes</button>
+          <button type="button" class="ventes-mobile-subnav-btn" data-mobile-ventes="caisse" data-mobile-caisse="recouvrement">Crédits</button>
+        </nav>
+        <nav id="ventes-mobile-caisse-subnav" class="ventes-mobile-subnav ventes-mobile-caisse-subnav hidden no-print" aria-label="Caisse mobile">
+          <button type="button" class="ventes-mobile-subnav-btn" data-mobile-caisse="recouvrement">Recouvrement</button>
+          <button type="button" class="ventes-mobile-subnav-btn" data-mobile-caisse="avoirs">Avoirs</button>
+        </nav>
         <div id="ventes-journal-gate" class="hidden" style="margin:0 0 12px"></div>
         <article class="card" id="ventes-card-board">
           <div class="section-head">
@@ -1981,11 +1989,11 @@
         </span>
         <span class="bottom-nav-label">Planning</span>
       </button>
-      <button type="button" class="nav-btn bottom-nav-item manager-caisse-nav" data-page="ventes" data-ventes-subtab="caisse" data-caisse-inner="recouvrement" aria-current="false">
+      <button type="button" class="nav-btn bottom-nav-item staff-caisse-nav manager-caisse-nav" data-page="ventes" data-ventes-subtab="caisse" data-caisse-inner="recouvrement" aria-current="false">
         <span class="bottom-nav-icon-wrap">
           <svg class="nav-icon bottom-nav-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1.5 2A1.5 1.5 0 0 0 0 3.5v2h15v-2A1.5 1.5 0 0 0 13.5 2h-12zM15 7H1v5.5a1.5 1.5 0 0 0 1.5 1.5h11a1.5 1.5 0 0 0 1.5-1.5V7z"/></svg>
         </span>
-        <span class="bottom-nav-label">Caisse</span>
+        <span class="bottom-nav-label staff-caisse-nav-label">Crédits</span>
       </button>
       <button type="button" class="nav-btn bottom-nav-item" data-page="stock" aria-current="false">
         <span class="bottom-nav-icon-wrap">
@@ -2022,6 +2030,13 @@
         </header>
         <p class="mobile-more-sub">Accès rapide aux outils hors barre du bas.</p>
         <nav class="mobile-more-features" aria-label="Sections supplementaires">
+          <button type="button" class="mobile-more-feature staff-caisse-more-nav" data-more-nav="caisse">
+            <span class="mobile-more-feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M2 8h20v12H2z"/><path d="M2 12h20M6 16h4"/></svg></span>
+            <span class="mobile-more-feature-copy">
+              <strong>Crédits &amp; avoirs</strong>
+              <span class="mobile-more-feature-desc">Recouvrement crédit client et avoirs (monnaie gardée).</span>
+            </span>
+          </button>
           <button type="button" class="mobile-more-feature" data-more-nav="qr">
             <span class="mobile-more-feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2"/><path d="M8 12h8M12 8v8"/></svg></span>
             <span class="mobile-more-feature-copy">
@@ -2978,7 +2993,7 @@
   <script src="./cave-components.js"></script>
   <script src="./cave-extras.js"></script>
   <script src="./cave-order-pad.js"></script>
-  <script src="./app-orders.js?v=360"></script>
+  <script src="./app-orders.js?v=361"></script>
   <script src="./restaurant-module.js"></script>
 </body>
 </html>

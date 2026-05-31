@@ -2500,9 +2500,53 @@ textarea { font: inherit; }
 
   .topbar-more-btn { display: grid; }
 
-  /* Évite doublon avec la barre du bas (Commandes / Caisse) : on masque la rangée d’onglets.
+  /* Évite doublon avec la barre du bas (Commandes / Crédits) : on masque la rangée d’onglets desktop.
      Consignes et QR restent accessibles via le menu « Plus » (bas d’écran). */
-  #page-ventes > .tabs.page-subtabs {
+  #page-ventes > .tabs.page-subtabs,
+  #page-ventes .caisse-shell > .tabs {
+    display: none !important;
+  }
+
+  .ventes-mobile-subnav {
+    display: flex;
+    gap: 8px;
+    margin: 0 0 12px;
+    padding: 4px;
+    border-radius: 12px;
+    background: var(--mm-bg, #f5f5f5);
+    border: 1px solid var(--line, #ddd);
+  }
+
+  .ventes-mobile-caisse-subnav {
+    margin-top: -6px;
+    border-color: rgba(33, 150, 243, 0.35);
+    background: linear-gradient(135deg, rgba(33, 150, 243, 0.08), transparent 55%), var(--mm-bg, #f5f5f5);
+  }
+
+  .ventes-mobile-subnav-btn {
+    flex: 1;
+    min-height: 44px;
+    padding: 10px 8px;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    background: transparent;
+    font: inherit;
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: var(--muted, #666);
+    cursor: pointer;
+  }
+
+  .ventes-mobile-subnav-btn.active {
+    background: #fff;
+    color: var(--accent, #1e4d8c);
+    border-color: rgba(33, 150, 243, 0.35);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+  }
+}
+
+@media (min-width: 769px) and (hover: hover) and (pointer: fine) {
+  .ventes-mobile-subnav {
     display: none !important;
   }
 }
@@ -2608,6 +2652,48 @@ textarea { font: inherit; }
 }
 
 @media (hover: none) and (pointer: coarse) {
+  #page-ventes > .tabs.page-subtabs,
+  #page-ventes .caisse-shell > .tabs {
+    display: none !important;
+  }
+
+  .ventes-mobile-subnav {
+    display: flex;
+    gap: 8px;
+    margin: 0 0 12px;
+    padding: 4px;
+    border-radius: 12px;
+    background: var(--mm-bg, #f5f5f5);
+    border: 1px solid var(--line, #ddd);
+  }
+
+  .ventes-mobile-caisse-subnav {
+    margin-top: -6px;
+    border-color: rgba(33, 150, 243, 0.35);
+    background: linear-gradient(135deg, rgba(33, 150, 243, 0.08), transparent 55%), var(--mm-bg, #f5f5f5);
+  }
+
+  .ventes-mobile-subnav-btn {
+    flex: 1;
+    min-height: 44px;
+    padding: 10px 8px;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    background: transparent;
+    font: inherit;
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: var(--muted, #666);
+    cursor: pointer;
+  }
+
+  .ventes-mobile-subnav-btn.active {
+    background: #fff;
+    color: var(--accent, #1e4d8c);
+    border-color: rgba(33, 150, 243, 0.35);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+  }
+
   .main-shell {
     padding-bottom: calc(110px + var(--safe-bottom));
     padding-left: calc(14px + var(--safe-left));

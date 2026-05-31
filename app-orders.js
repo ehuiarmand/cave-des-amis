@@ -3226,7 +3226,7 @@ function syncServeuseRestDayNavAccess() {
     if (!rest) return true;
     if (nav === "logout") return true;
     if (nav === "pdj" && _hasOpenService) return true;
-    return nav === "planning" || nav === "historique-ventes";
+    return nav === "planning" || nav === "historique-ventes" || nav === "caisse";
   };
   document.querySelectorAll("[data-more-nav]").forEach((btn) => {
     const nav = btn.dataset.moreNav;
@@ -3296,9 +3296,11 @@ function syncServeuseVentesPageRestDay() {
       syncCaisseInnerPanels();
       renderCreditRecovery();
       renderClientAvoirs();
+      syncMobileVentesSubnav();
       return;
     }
     cardIds.forEach((id) => document.getElementById(id)?.classList.add("hidden"));
+    syncMobileVentesSubnav();
     return;
   }
   document.querySelectorAll("[data-subtab-ventes]").forEach((btn) => btn.classList.remove("hidden"));
@@ -3311,6 +3313,7 @@ function syncServeuseVentesPageRestDay() {
   document.getElementById("ventes-card-qr")?.classList.toggle("hidden", !isQr);
   document.getElementById("ventes-card-historique")?.classList.toggle("hidden", !isCaisse);
   document.getElementById("ventes-card-consignes")?.classList.toggle("hidden", !isConsignes);
+  syncMobileVentesSubnav();
 }
 
 function schedulableStaffForCurrentSite() {
@@ -5058,7 +5061,13 @@ function applyRoleVisibility() {
   document.querySelectorAll(".serveuse-only-nav").forEach((node) => {
     node.classList.toggle("hidden", !serveuse);
   });
-  /* Recouvrement crédit + avoirs : accessible aux serveuses (bouton Caisse). */
+  /* Recouvrement crédit + avoirs : accessible aux serveuses (bouton Caisse / Crédits). */
+  document.querySelectorAll(".staff-caisse-nav, .staff-caisse-more-nav").forEach((node) => {
+    node.classList.remove("hidden");
+  });
+  document.querySelectorAll(".staff-caisse-nav-label").forEach((el) => {
+    el.textContent = isServeuseAccount() ? "Crédits" : "Caisse";
+  });
   if (!serveuse && currentPage === "historique-ventes") {
     navigate("ventes");
     return;
@@ -5247,8 +5256,61 @@ function syncCaisseInnerPanels() {
     btn.classList.toggle("active", active);
     btn.setAttribute("aria-selected", active ? "true" : "false");
   });
+  syncMobileVentesSubnav();
   if (showHistorique) renderSalesHistory();
   if (showAvoirs) renderClientAvoirs();
+  if (showRecouvrement) renderCreditRecovery();
+}
+
+/** Barre Ventes / Crédits / Recouvrement / Avoirs visible sur mobile (onglets desktop masqués). */
+function syncMobileVentesSubnav() {
+  const main = document.getElementById("ventes-mobile-subnav");
+  const caisseBar = document.getElementById("ventes-mobile-caisse-subnav");
+  if (!main) return;
+  const onVentes = currentPage === "ventes";
+  main.classList.toggle("hidden", !onVentes);
+  if (!onVentes) {
+    caisseBar?.classList.add("hidden");
+    return;
+  }
+  const restBlocked = serveuseVentesModuleBlocked();
+  const cmdBtn = main.querySelector('[data-mobile-ventes="commandes"]');
+  if (cmdBtn) {
+    const hideCmd = restBlocked && isServeuseAccount();
+    cmdBtn.classList.toggle("hidden", hideCmd);
+    cmdBtn.disabled = hideCmd;
+  }
+  main.querySelectorAll("[data-mobile-ventes]").forEach((btn) => {
+    const tab = btn.dataset.mobileVentes;
+    btn.classList.toggle("active", ventesSubTab === tab);
+  });
+  const showCaisseBar = ventesSubTab === "caisse";
+  caisseBar?.classList.toggle("hidden", !showCaisseBar);
+  caisseBar?.querySelectorAll("[data-mobile-caisse]").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.mobileCaisse === caisseInnerTab);
+  });
+}
+
+function bindMobileVentesSubnav() {
+  document.getElementById("ventes-mobile-subnav")?.addEventListener("click", (event) => {
+    const btn = event.target.closest("[data-mobile-ventes]");
+    if (!btn || btn.disabled) return;
+    const tab = btn.dataset.mobileVentes;
+    if (tab === "commandes") {
+      setVentesSubTab("commandes");
+      renderVentesPage();
+      return;
+    }
+    if (tab === "caisse") {
+      const inner = btn.dataset.mobileCaisse || "recouvrement";
+      navigate("ventes", { ventesSubtab: "caisse", caisseInner: inner });
+    }
+  });
+  document.getElementById("ventes-mobile-caisse-subnav")?.addEventListener("click", (event) => {
+    const btn = event.target.closest("[data-mobile-caisse]");
+    if (!btn) return;
+    setCaisseInnerTab(btn.dataset.mobileCaisse);
+  });
 }
 
 function setCaisseInnerTab(tab) {
@@ -5317,6 +5379,7 @@ function setVentesSubTab(tab) {
   ventesSubTab = tab;
   if (serveuseVentesModuleBlocked() && tab !== "caisse") {
     syncServeuseVentesPageRestDay();
+    syncMobileVentesSubnav();
     syncNavActiveState();
     return;
   }
@@ -5333,6 +5396,7 @@ function setVentesSubTab(tab) {
     btn.classList.toggle("active", btn.dataset.subtabVentes === tab);
   });
   if (isCaisse) syncCaisseInnerPanels();
+  else syncMobileVentesSubnav();
   syncNavActiveState();
 }
 
@@ -5967,6 +6031,7 @@ function bindMobileMoreSheet() {
       return;
     }
     if (nav === "qr") navigate("ventes", { ventesSubtab: "qr" });
+    else if (nav === "caisse") navigate("ventes", { ventesSubtab: "caisse", caisseInner: "recouvrement" });
     else if (nav === "consignes") navigate("ventes", { ventesSubtab: "consignes" });
     else if (nav === "guide") navigate("guide");
     else if (nav === "charges") navigate("charges");
@@ -9718,9 +9783,13 @@ function renderVentesPage() {
   if (serveuseRestBlocked && ventesSubTab === "caisse") {
     renderCreditRecovery();
     renderClientAvoirs();
+    syncMobileVentesSubnav();
     return;
   }
-  if (serveuseRestBlocked) return;
+  if (serveuseRestBlocked) {
+    syncMobileVentesSubnav();
+    return;
+  }
   const gate = document.getElementById("ventes-journal-gate");
   if (gate) {
     const d = journalSaleDateFromDom();
@@ -21275,6 +21344,7 @@ document.getElementById("fab-btn").addEventListener("click", () => {
   bindPlanningEvents();
   document.querySelectorAll(".nav-btn").forEach((button) => button.addEventListener("click", () => handleNavButtonClick(button)));
   bindMobileMoreSheet();
+  bindMobileVentesSubnav();
   document.getElementById("page-pdj")?.addEventListener("click", (event) => {
     const pdjTab = event.target.closest("[data-subtab-pdj]");
     if (pdjTab) {
