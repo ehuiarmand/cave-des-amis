@@ -15771,7 +15771,79 @@ function printStockInventoryReport() {
   });
 }
 
-/** Impression récap. par article depuis l'onglet Mouvements (dates stock-move-start/end). */
+/** Type Mouvements : all | entree | sortie (filtre liste + impression). */
+function stockMoveTypeFromUi() {
+  const v = String(document.getElementById("stock-move-type")?.value || "all").trim();
+  return v === "entree" || v === "sortie" ? v : "all";
+}
+
+function stockMoveSynthColCount(moveType) {
+  return moveType === "all" ? 5 : 4;
+}
+
+function stockMoveSynthHeadHtml(moveType) {
+  if (moveType === "entree") {
+    return `<th>Article</th><th class="th-orange stock-inv-th-num">Stock début</th><th class="stock-inv-th-num" style="color:#72d7a9">Entrées</th><th class="stock-inv-th-num">Stock fin (th.)</th>`;
+  }
+  if (moveType === "sortie") {
+    return `<th>Article</th><th class="th-orange stock-inv-th-num">Stock début</th><th class="th-blue stock-inv-th-num">Ventes</th><th class="stock-inv-th-num">Stock fin (th.)</th>`;
+  }
+  return `<th>Article</th><th class="th-orange stock-inv-th-num">Stock début</th><th class="stock-inv-th-num" style="color:#72d7a9">Entrées</th><th class="th-blue stock-inv-th-num">Ventes</th><th class="stock-inv-th-num">Stock fin (th.)</th>`;
+}
+
+function stockMoveSynthRowHtml(r, moveType) {
+  if (moveType === "entree") {
+    return `<tr>
+      <td><strong>${escapeHtml(r.article)}</strong></td>
+      <td class="stock-inv-td-num" style="color:#1976d2">${fmt(r.stockDebut)}</td>
+      <td class="stock-inv-td-num" style="color:#72d7a9">${r.achats > 0 ? "+" + fmt(r.achats) : fmt(0)}</td>
+      <td class="stock-inv-td-num"><strong>${fmt(r.stockFin)}</strong></td>
+    </tr>`;
+  }
+  if (moveType === "sortie") {
+    return `<tr>
+      <td><strong>${escapeHtml(r.article)}</strong></td>
+      <td class="stock-inv-td-num" style="color:#1976d2">${fmt(r.stockDebut)}</td>
+      <td class="stock-inv-td-num" style="color:#ff8e82">${fmt(r.ventes)}</td>
+      <td class="stock-inv-td-num"><strong>${fmt(r.stockFin)}</strong></td>
+    </tr>`;
+  }
+  return `<tr>
+    <td><strong>${escapeHtml(r.article)}</strong></td>
+    <td class="stock-inv-td-num" style="color:#1976d2">${fmt(r.stockDebut)}</td>
+    <td class="stock-inv-td-num" style="color:#72d7a9">${r.achats > 0 ? "+" + fmt(r.achats) : fmt(0)}</td>
+    <td class="stock-inv-td-num" style="color:#ff8e82">${fmt(r.ventes)}</td>
+    <td class="stock-inv-td-num"><strong>${fmt(r.stockFin)}</strong></td>
+  </tr>`;
+}
+
+function stockMoveSynthHeadPrintHtml(moveType) {
+  if (moveType === "entree") {
+    return "<th>Article</th><th>Stock début</th><th>Entrées</th><th>Stock fin (th.)</th>";
+  }
+  if (moveType === "sortie") {
+    return "<th>Article</th><th>Stock début</th><th>Ventes</th><th>Stock fin (th.)</th>";
+  }
+  return "<th>Article</th><th>Stock début</th><th>Entrées</th><th>Ventes</th><th>Stock fin (th.)</th>";
+}
+
+function stockMoveSynthRowPrintHtml(r, moveType) {
+  if (moveType === "entree") {
+    return `<tr><td>${escapeHtml(r.article)}</td><td>${fmt(r.stockDebut)}</td><td>${r.achats > 0 ? "+" + fmt(r.achats) : fmt(0)}</td><td><strong>${fmt(r.stockFin)}</strong></td></tr>`;
+  }
+  if (moveType === "sortie") {
+    return `<tr><td>${escapeHtml(r.article)}</td><td>${fmt(r.stockDebut)}</td><td>${fmt(r.ventes)}</td><td><strong>${fmt(r.stockFin)}</strong></td></tr>`;
+  }
+  return `<tr><td>${escapeHtml(r.article)}</td><td>${fmt(r.stockDebut)}</td><td>${r.achats > 0 ? "+" + fmt(r.achats) : fmt(0)}</td><td>${fmt(r.ventes)}</td><td><strong>${fmt(r.stockFin)}</strong></td></tr>`;
+}
+
+function stockMovePrintTitle(moveType) {
+  if (moveType === "entree") return "Entrées stock par article";
+  if (moveType === "sortie") return "Ventes par article";
+  return "Stock par article (entrées & ventes)";
+}
+
+/** Impression récap. par article depuis l'onglet Mouvements (dates + type stock-move-*). */
 function printStockMovementsByArticle() {
   if (!canManage()) {
     showToast("Réservé au gérant ou à un administrateur.");
@@ -15779,17 +15851,21 @@ function printStockMovementsByArticle() {
   }
   let start = document.getElementById("stock-move-start")?.value || today().slice(0, 8) + "01";
   let end = document.getElementById("stock-move-end")?.value || today();
+  const moveType = stockMoveTypeFromUi();
   printStockPeriodByArticle(start, end, {
-    title: "Ventes par article",
-    columns: "ventes",
+    title: stockMovePrintTitle(moveType),
+    columns: "movements",
+    moveType,
   });
 }
 
 /**
  * Impression HTML : synthèse par article sur une période.
- * columns "ventes" = Article, Stock début, Ventes, Stock fin | "full" = + Achats, Pertes
+ * columns "ventes" = Article, Stock début, Ventes, Stock fin
+ * columns "full" = + Achats, Pertes (inventaire)
+ * columns "movements" = selon moveType (all | entree | sortie)
  */
-function printStockPeriodByArticle(startRaw, endRaw, { title = "Synthèse stock", columns = "ventes" } = {}) {
+function printStockPeriodByArticle(startRaw, endRaw, { title = "Synthèse stock", columns = "ventes", moveType = "all" } = {}) {
   let start = String(startRaw || "").slice(0, 10);
   let end = String(endRaw || "").slice(0, 10);
   if (!start) start = end || today();
@@ -15803,25 +15879,43 @@ function printStockPeriodByArticle(startRaw, endRaw, { title = "Synthèse stock"
   const site = currentSite();
   const period = start === end ? formatDateDdMmYyyy(start) : `${formatDateDdMmYyyy(start)} → ${formatDateDdMmYyyy(end)}`;
   const full = columns === "full";
-  const headCols = full
-    ? "<th>Article</th><th>Stock début</th><th>Achats</th><th>Ventes</th><th>Pertes</th><th>Stock fin (th.)</th>"
-    : "<th>Article</th><th>Stock début</th><th>Ventes</th><th>Stock fin (th.)</th>";
-  const tableRows = rows.map((r) => full
-    ? `<tr>
+  const movements = columns === "movements";
+  const mt = movements ? (moveType === "entree" || moveType === "sortie" ? moveType : "all") : null;
+  let headCols;
+  let tableRows;
+  let summaryHtml;
+  if (movements) {
+    headCols = stockMoveSynthHeadPrintHtml(mt);
+    tableRows = rows.map((r) => stockMoveSynthRowPrintHtml(r, mt)).join("");
+    const totEntrees = rows.reduce((s, r) => s + r.achats, 0);
+    const totVentes = rows.reduce((s, r) => s + r.ventes, 0);
+    const typeLabel = mt === "entree" ? "Entrées" : mt === "sortie" ? "Sorties (ventes)" : "Entrées & sorties";
+    summaryHtml = `<span><strong>${fmt(rows.length)}</strong> article(s)</span><span>Type : <strong>${escapeHtml(typeLabel)}</strong></span>`;
+    if (mt === "entree" || mt === "all") summaryHtml += `<span>Total entrées : <strong>${fmt(totEntrees)}</strong> btl</span>`;
+    if (mt === "sortie" || mt === "all") summaryHtml += `<span>Total ventes : <strong>${fmt(totVentes)}</strong> btl</span>`;
+  } else if (full) {
+    headCols = "<th>Article</th><th>Stock début</th><th>Achats</th><th>Ventes</th><th>Pertes</th><th>Stock fin (th.)</th>";
+    tableRows = rows.map((r) => `<tr>
       <td>${escapeHtml(r.article)}</td>
       <td>${fmt(r.stockDebut)}</td>
       <td>${r.achats > 0 ? "+" + fmt(r.achats) : fmt(0)}</td>
       <td>${fmt(r.ventes)}</td>
       <td>${fmt(r.pertes)}</td>
       <td><strong>${fmt(r.stockFin)}</strong></td>
-    </tr>`
-    : `<tr>
+    </tr>`).join("");
+    const totVentes = rows.reduce((s, r) => s + r.ventes, 0);
+    summaryHtml = `<span><strong>${fmt(rows.length)}</strong> article(s)</span><span>Total ventes : <strong>${fmt(totVentes)}</strong> btl</span>`;
+  } else {
+    headCols = "<th>Article</th><th>Stock début</th><th>Ventes</th><th>Stock fin (th.)</th>";
+    tableRows = rows.map((r) => `<tr>
       <td>${escapeHtml(r.article)}</td>
       <td>${fmt(r.stockDebut)}</td>
       <td>${fmt(r.ventes)}</td>
       <td><strong>${fmt(r.stockFin)}</strong></td>
     </tr>`).join("");
-  const totVentes = rows.reduce((s, r) => s + r.ventes, 0);
+    const totVentes = rows.reduce((s, r) => s + r.ventes, 0);
+    summaryHtml = `<span><strong>${fmt(rows.length)}</strong> article(s)</span><span>Total ventes : <strong>${fmt(totVentes)}</strong> btl</span>`;
+  }
   const ticketWindow = window.open("", "_blank", "width=900,height=800");
   if (!ticketWindow) {
     showToast("Impression bloquée : autorisez les pop-ups pour ce site, puis réessayez.");
@@ -15835,7 +15929,7 @@ function printStockPeriodByArticle(startRaw, endRaw, { title = "Synthèse stock"
     th,td{border-bottom:1px solid #ddd;padding:8px 6px;text-align:left}th{background:#f2f2f2}
     td:nth-child(n+2),th:nth-child(n+2){text-align:right}@media print{body{padding:0}table{font-size:11px}}
   </style></head><body><header><div><h1>${escapeHtml(site?.nom || "Maquis")}</h1><p>${escapeHtml(site?.ville || "")}</p></div><div><h2>${escapeHtml(title)}</h2><p class="meta">Période : ${escapeHtml(period)}</p><p class="meta">Imprimé le ${escapeHtml(formatDateTimeDdMmYyyy(new Date()))}</p></div></header>
-  <div class="summary"><span><strong>${fmt(rows.length)}</strong> article(s)</span><span>Total ventes : <strong>${fmt(totVentes)}</strong> btl</span></div>
+  <div class="summary">${summaryHtml}</div>
   <table><thead><tr>${headCols}</tr></thead><tbody>${tableRows}</tbody></table>
   ${printScript}</body></html>`);
   ticketWindow.document.close();
@@ -15917,15 +16011,25 @@ function stockMovements() {
   return movements;
 }
 
-function renderStockMoveArticleSummary(startRaw, endRaw) {
+function renderStockMoveArticleSummary(startRaw, endRaw, moveType = "all") {
   const wrap = document.getElementById("stock-move-article-summary-wrap");
   const list = document.getElementById("stock-move-article-list");
+  const headRow = document.getElementById("stock-move-article-head");
+  const colgroup = document.getElementById("stock-move-article-cols");
   if (!wrap || !list) return;
   if (!canManage()) {
     wrap.classList.add("hidden-by-role");
     return;
   }
   wrap.classList.remove("hidden-by-role");
+  const mt = moveType === "entree" || moveType === "sortie" ? moveType : "all";
+  const table = wrap.querySelector(".stock-move-synth-table");
+  if (table) table.classList.toggle("stock-move-synth-table--all", mt === "all");
+  if (headRow) headRow.innerHTML = stockMoveSynthHeadHtml(mt);
+  if (colgroup) {
+    const n = stockMoveSynthColCount(mt);
+    colgroup.innerHTML = `<col class="stock-inv-col-article">${Array(n - 1).fill('<col class="stock-inv-col-num">').join("")}`;
+  }
   let start = String(startRaw || "").slice(0, 10);
   let end = String(endRaw || "").slice(0, 10);
   if (!start && !end) {
@@ -15936,21 +16040,17 @@ function renderStockMoveArticleSummary(startRaw, endRaw) {
   if (!end) end = start;
   if (start > end) { const t = start; start = end; end = t; }
   const rows = stockInventoryReportRows(start, end);
+  const colspan = stockMoveSynthColCount(mt);
   list.innerHTML = rows.length
-    ? rows.map((r) => `<tr>
-      <td><strong>${escapeHtml(r.article)}</strong></td>
-      <td class="stock-inv-td-num" style="color:#1976d2">${fmt(r.stockDebut)}</td>
-      <td class="stock-inv-td-num" style="color:#ff8e82">${fmt(r.ventes)}</td>
-      <td class="stock-inv-td-num"><strong>${fmt(r.stockFin)}</strong></td>
-    </tr>`).join("")
-    : `<tr><td colspan="4" style="text-align:center;color:var(--muted);padding:24px">Aucun article dans le catalogue.</td></tr>`;
+    ? rows.map((r) => stockMoveSynthRowHtml(r, mt)).join("")
+    : `<tr><td colspan="${colspan}" style="text-align:center;color:var(--muted);padding:24px">Aucun article dans le catalogue.</td></tr>`;
 }
 
 function renderStockMovements() {
   const start = document.getElementById("stock-move-start")?.value || "";
   const end = document.getElementById("stock-move-end")?.value || "";
   const type = document.getElementById("stock-move-type")?.value || "all";
-  renderStockMoveArticleSummary(start, end);
+  renderStockMoveArticleSummary(start, end, stockMoveTypeFromUi());
   const inPeriod = (item) => {
     const date = stockMovementDateValue(item);
     return (!start || date >= start) && (!end || date <= end);

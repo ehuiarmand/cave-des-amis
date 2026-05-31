@@ -2363,8 +2363,10 @@ textarea { font: inherit; }
 .stock-inventaire-table td.stock-inv-td-num {
   text-align: right;
 }
-.stock-move-synth-table .stock-inv-col-article { width: 46%; }
-.stock-move-synth-table .stock-inv-col-num { width: 18%; }
+.stock-move-synth-table .stock-inv-col-article { width: 34%; }
+.stock-move-synth-table .stock-inv-col-num { width: 16.5%; }
+.stock-move-synth-table.stock-move-synth-table--all .stock-inv-col-article { width: 28%; }
+.stock-move-synth-table.stock-move-synth-table--all .stock-inv-col-num { width: 18%; }
 
 .stock-inventaire-wrap {
   overflow-x: auto;
