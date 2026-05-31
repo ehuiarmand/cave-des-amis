@@ -293,12 +293,30 @@ def current_password_month_ym() -> str:
 
 
 def password_change_required_for_user(user: dict[str, Any] | None) -> bool:
+    """Renouvellement exigé seulement si le dernier changement date d'un mois antérieur (ex. le 1er juin si changé en mai)."""
     if not user or not monthly_password_change_required():
         return False
     changed = str(user.get("passwordChangedAt") or "").strip()
     if len(changed) < 7:
-        return True
-    return changed[:7] != current_password_month_ym()
+        return False
+    return changed[:7] < current_password_month_ym()
+
+
+def grandfather_password_month_if_needed(user: dict[str, Any] | None) -> bool:
+    """Compte sans date : valide pour le mois en cours sans bloquer (ex. fin de mois avant le 1er)."""
+    if not user or not monthly_password_change_required():
+        return False
+    if str(user.get("passwordChangedAt") or "").strip():
+        return False
+    user["passwordChangedAt"] = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return True
+
+
+def auth_user_row_by_username(username: str, auth_users: list[dict[str, Any]]) -> dict[str, Any] | None:
+    un = str(username or "").strip()
+    if not un:
+        return None
+    return next((u for u in auth_users if u.get("username") == un), None)
 
 
 def password_policy_fields(user: dict[str, Any] | None) -> dict[str, Any]:
@@ -4351,10 +4369,9 @@ class AppHandler(BaseHTTPRequestHandler):
             if session is None:
                 return
             with store._lock:
-                user_row = next(
-                    (u for u in store._state.get("auth", {}).get("users", []) if u.get("username") == session.get("username")),
-                    None,
-                )
+                user_row = auth_user_row_by_username(str(session.get("username", "")), list(store._state.get("auth", {}).get("users", [])))
+                if user_row and grandfather_password_month_if_needed(user_row):
+                    store._write(store._state)
             aids = store.all_site_ids()
             bs = resolve_backup_session(session, store)
             role = str(bs.get("role", session.get("role", "")))
@@ -4631,10 +4648,9 @@ class AppHandler(BaseHTTPRequestHandler):
             sess_view = sessions.get(token) or {}
             bs_login = resolve_backup_session(sess_view, store)
             with store._lock:
-                login_user_row = next(
-                    (u for u in store._state["auth"]["users"] if u.get("username") == user["username"]),
-                    None,
-                )
+                login_user_row = auth_user_row_by_username(user["username"], store._state["auth"]["users"])
+                if login_user_row and grandfather_password_month_if_needed(login_user_row):
+                    store._write(store._state)
             self.send_json(
                 HTTPStatus.OK,
                 {
@@ -4680,6 +4696,8 @@ class AppHandler(BaseHTTPRequestHandler):
                         store._write(store._state)
                 elif role == "superadmin":
                     allowed = [sid for sid in user_data.get("allowedSiteIds", all_site_ids) if sid in all_site_ids] or all_site_ids[:1]
+                if grandfather_password_month_if_needed(user_data):
+                    store._write(store._state)
                 gs = compute_global_superadmin(str(username), role, allowed, all_site_ids)
             aids_2fa = store.all_site_ids()
             token = sessions.create(username, role, allowed, global_superadmin=gs, all_site_ids=aids_2fa)
@@ -4742,6 +4760,8 @@ class AppHandler(BaseHTTPRequestHandler):
                         sid for sid in wv_user_row.get("allowedSiteIds", wv_all_site_ids)
                         if sid in wv_all_site_ids
                     ] or wv_all_site_ids[:1]
+                if grandfather_password_month_if_needed(wv_user_row):
+                    store._write(store._state)
                 wv_gs = compute_global_superadmin(wv_username, wv_role, wv_allowed, wv_all_site_ids)
             wv_aids = store.all_site_ids()
             wv_token = sessions.create(wv_username, wv_role, wv_allowed, global_superadmin=wv_gs, all_site_ids=wv_aids)
