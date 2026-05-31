@@ -5273,12 +5273,14 @@ function setVentesSubTab(tab) {
 function setStockSubTab(tab) {
   stockSubTab = tab;
   const isCatalogue = tab === "catalogue";
+  const isInventaire = tab === "inventaire";
   const isMouvements = tab === "mouvements";
   const isAchats = tab === "achats";
   const isCreanciers = tab === "creanciers";
   const isCasiers = tab === "casiers";
   document.getElementById("stock-card-catalogue").classList.toggle("hidden", !isCatalogue);
   document.getElementById("stock-list").classList.toggle("hidden", !isCatalogue);
+  document.getElementById("stock-card-inventaire")?.classList.toggle("hidden", !isInventaire);
   document.getElementById("stock-card-mouvements").classList.toggle("hidden", !isMouvements);
   document.getElementById("stock-card-achats").classList.toggle("hidden", !isAchats);
   document.getElementById("stock-card-creanciers").classList.toggle("hidden", !isCreanciers);
@@ -5287,7 +5289,8 @@ function setStockSubTab(tab) {
     btn.classList.toggle("active", btn.dataset.subtabStock === tab);
   });
   if (currentPage === "stock") {
-    if (isAchats) renderPurchaseOrders();
+    if (isInventaire) renderStockInventoryReport();
+    else if (isAchats) renderPurchaseOrders();
     else if (isCreanciers) renderCreanciers();
     else if (isMouvements) renderStockMovements();
     else if (isCasiers) { renderCasiers(); syncCasiersManquants({ silent: true }).then((n) => { if (n > 0) renderCasiers(); }).catch(() => {}); }
@@ -12841,7 +12844,8 @@ async function syncStateSilently() {
       renderSiteSwitcher();
       if (!deferRender) {
         renderStock();
-        if (stockSubTab === "mouvements") renderStockMovements();
+        if (stockSubTab === "inventaire") renderStockInventoryReport();
+        else if (stockSubTab === "mouvements") renderStockMovements();
         else if (stockSubTab === "achats") renderPurchaseOrders();
         else if (stockSubTab === "creanciers") renderCreanciers();
         else if (stockSubTab === "casiers") renderCasiers();
@@ -15616,7 +15620,184 @@ function stockMovementDateValue(item) {
   return String(item.date || item.createdAt || "").slice(0, 10);
 }
 
-/** Libellé « Utilisateur » pour la traçabilité : ne pas attribuer la vente à la personne qui consulte l’écran. */
+/** Date ISO (yyyy-mm-dd) incluse dans [start, end] (bornes optionnelles). */
+function isoDateInRange(dateStr, start, end) {
+  const d = String(dateStr || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return false;
+  if (start && d < start) return false;
+  if (end && d > end) return false;
+  return true;
+}
+
+/** Stock à l'ouverture d'une date comptable (dayBook, clôture veille, ou reconstruction). */
+function openingStockForArticleAtDate(item, dateStr) {
+  if (!item || !dateStr) return 0;
+  const siteId = item.siteId || currentSiteId();
+  const book = dayBookFor(dateStr, siteId);
+  const fromBook = stockOpeningFromDayBook(item, book);
+  if (fromBook !== null) return fromBook;
+  const checks = (state.stockChecks || [])
+    .filter((sc) => sc.siteId === siteId && String(sc.date || "").slice(0, 10) < dateStr)
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  for (const sc of checks) {
+    const ci = (sc.items || []).find((x) => Number(x.id) === Number(item.id));
+    if (ci) {
+      const ap = ci.stockApres ?? ci.counted;
+      if (ap !== undefined && ap !== null) return Math.max(0, Number(ap) || 0);
+      const exp = Number(ci.expected);
+      if (Number.isFinite(exp)) return Math.max(0, exp);
+    }
+  }
+  return reconstructOpeningStockAtDate(item, dateStr);
+}
+
+function reconstructOpeningStockAtDate(item, dateStr) {
+  const siteId = item.siteId || currentSiteId();
+  const multi = multiSiteActive();
+  const articleLow = String(item.article || "").toLowerCase();
+  const onOrAfter = (raw) => String(raw || "").slice(0, 10) >= dateStr;
+  const entrees = (state.stockEntrees || [])
+    .filter((e) => rowMatchesSite(e, siteId, multi) && String(e.article || "").toLowerCase() === articleLow && onOrAfter(e.date))
+    .reduce((s, e) => s + (Number(e.qty) || 0), 0);
+  const ventes = recordsForSite(state.ventes)
+    .filter((v) => !v.noStock && String(v.article || "").toLowerCase() === articleLow && onOrAfter(v.date))
+    .reduce((s, v) => s + lineBottleQty(v, item), 0);
+  const pertes = (state.stockLosses || [])
+    .filter((l) => rowMatchesSite(l, siteId, multi) && String(l.article || "").toLowerCase() === articleLow && onOrAfter(l.date || l.createdAt))
+    .reduce((s, l) => s + (Number(l.qty) || 0), 0);
+  return Math.max(0, stockActuel(item) - entrees + ventes + pertes);
+}
+
+function entreesBottlesForArticlePeriod(article, start, end) {
+  const siteId = currentSiteId();
+  const multi = multiSiteActive();
+  const articleLow = String(article || "").toLowerCase();
+  return (state.stockEntrees || [])
+    .filter((e) => rowMatchesSite(e, siteId, multi)
+      && String(e.article || "").toLowerCase() === articleLow
+      && isoDateInRange(e.date, start, end))
+    .reduce((s, e) => s + (Number(e.qty) || 0), 0);
+}
+
+function ventesBottlesForArticlePeriod(article, start, end) {
+  const articleLow = String(article || "").toLowerCase();
+  const stockItem = recordsForSite(state.stock).find((s) => String(s.article || "").toLowerCase() === articleLow);
+  return recordsForSite(state.ventes)
+    .filter((v) => !v.noStock && String(v.article || "").toLowerCase() === articleLow && isoDateInRange(v.date, start, end))
+    .reduce((s, v) => s + lineBottleQty(v, stockItem), 0);
+}
+
+function pertesForArticlePeriod(article, start, end) {
+  const siteId = currentSiteId();
+  const multi = multiSiteActive();
+  const articleLow = String(article || "").toLowerCase();
+  return (state.stockLosses || [])
+    .filter((l) => rowMatchesSite(l, siteId, multi)
+      && String(l.article || "").toLowerCase() === articleLow
+      && isoDateInRange(l.date || l.createdAt, start, end))
+    .reduce((s, l) => s + (Number(l.qty) || 0), 0);
+}
+
+function stockInventoryReportRows(start, end) {
+  const rows = [];
+  recordsForSite(state.stock)
+    .slice()
+    .sort((a, b) => String(a.article || "").localeCompare(String(b.article || ""), "fr"))
+    .forEach((item) => {
+      const stockDebut = openingStockForArticleAtDate(item, start);
+      const achats = entreesBottlesForArticlePeriod(item.article, start, end);
+      const ventes = ventesBottlesForArticlePeriod(item.article, start, end);
+      const pertes = pertesForArticlePeriod(item.article, start, end);
+      const stockFin = Math.max(0, stockDebut + achats - ventes - pertes);
+      rows.push({ article: item.article, stockDebut, achats, ventes, pertes, stockFin });
+    });
+  return rows;
+}
+
+function renderStockInventoryReport() {
+  const list = document.getElementById("stock-inv-list");
+  if (!list) return;
+  if (!canManage()) {
+    list.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:32px;color:var(--muted)">Réservé au gérant ou à un administrateur.</td></tr>`;
+    return;
+  }
+  let start = document.getElementById("stock-inv-start")?.value || "";
+  let end = document.getElementById("stock-inv-end")?.value || today();
+  if (!start) start = end;
+  if (!end) end = start;
+  if (start > end) { const t = start; start = end; end = t; }
+  const rows = stockInventoryReportRows(start, end);
+  const labelEl = document.getElementById("stock-inv-period-label");
+  if (labelEl) {
+    labelEl.textContent = start === end
+      ? `Journée du ${formatDateDdMmYyyy(start)} · ${rows.length} article(s) du catalogue`
+      : `Du ${formatDateDdMmYyyy(start)} au ${formatDateDdMmYyyy(end)} · ${rows.length} article(s) du catalogue`;
+  }
+  const countEl = document.getElementById("stock-inv-count");
+  if (countEl) countEl.textContent = `${fmt(rows.length)} article${rows.length > 1 ? "s" : ""}`;
+  const totAchats = rows.reduce((s, r) => s + r.achats, 0);
+  const totVentes = rows.reduce((s, r) => s + r.ventes, 0);
+  const totPertes = rows.reduce((s, r) => s + r.pertes, 0);
+  const summary = document.getElementById("stock-inv-summary");
+  if (summary) {
+    summary.innerHTML = `
+      <div class="pdj-kpi"><span class="kpi-label">Articles</span><strong class="pdj-val amber">${fmt(rows.length)}</strong></div>
+      <div class="pdj-kpi"><span class="kpi-label">Achats (btl)</span><strong class="pdj-val amber">${fmt(totAchats)}</strong></div>
+      <div class="pdj-kpi"><span class="kpi-label">Ventes (btl)</span><strong class="pdj-val red">${fmt(totVentes)}</strong></div>
+      <div class="pdj-kpi"><span class="kpi-label">Pertes (btl)</span><strong class="pdj-val red">${fmt(totPertes)}</strong></div>`;
+  }
+  list.innerHTML = rows.length
+    ? rows.map((r) => `<tr>
+      <td><strong>${escapeHtml(r.article)}</strong></td>
+      <td style="text-align:right;color:#1976d2">${fmt(r.stockDebut)}</td>
+      <td style="text-align:right;color:#72d7a9">${r.achats > 0 ? "+" + fmt(r.achats) : fmt(0)}</td>
+      <td style="text-align:right;color:#ff8e82">${fmt(r.ventes)}</td>
+      <td style="text-align:right;color:#ff8e82">${fmt(r.pertes)}</td>
+      <td style="text-align:right"><strong>${fmt(r.stockFin)}</strong></td>
+    </tr>`).join("")
+    : `<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:32px">Aucun article dans le catalogue.</td></tr>`;
+}
+
+function printStockInventoryReport() {
+  if (!canManage()) {
+    showToast("Réservé au gérant ou à un administrateur.");
+    return;
+  }
+  let start = document.getElementById("stock-inv-start")?.value || today();
+  let end = document.getElementById("stock-inv-end")?.value || start;
+  if (start > end) { const t = start; start = end; end = t; }
+  const rows = stockInventoryReportRows(start, end);
+  if (!rows.length) {
+    showToast("Aucun article dans le catalogue.");
+    return;
+  }
+  const site = currentSite();
+  const period = start === end ? formatDateDdMmYyyy(start) : `${formatDateDdMmYyyy(start)} → ${formatDateDdMmYyyy(end)}`;
+  const tableRows = rows.map((r) => `<tr>
+    <td>${escapeHtml(r.article)}</td>
+    <td>${fmt(r.stockDebut)}</td>
+    <td>${r.achats > 0 ? "+" + fmt(r.achats) : fmt(0)}</td>
+    <td>${fmt(r.ventes)}</td>
+    <td>${fmt(r.pertes)}</td>
+    <td><strong>${fmt(r.stockFin)}</strong></td>
+  </tr>`).join("");
+  const ticketWindow = window.open("", "_blank", "width=900,height=800");
+  if (!ticketWindow) {
+    showToast("Impossible d'ouvrir l'impression.");
+    return;
+  }
+  ticketWindow.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>Inventaire stock</title><style>
+    body{font-family:Arial,sans-serif;color:#111;padding:28px}header{display:flex;justify-content:space-between;gap:18px;border-bottom:2px solid #111;padding-bottom:14px;margin-bottom:18px}
+    h1,h2,p{margin:0 0 8px}.meta{color:#555}table{width:100%;border-collapse:collapse;margin-top:12px;font-size:13px}
+    th,td{border-bottom:1px solid #ddd;padding:8px 6px;text-align:left}th{background:#f2f2f2}
+    td:nth-child(n+2){text-align:right}@media print{body{padding:0}table{font-size:11px}}
+  </style></head><body><header><div><h1>${escapeHtml(site?.nom || "Maquis")}</h1><p>${escapeHtml(site?.ville || "")}</p></div><div><h2>Inventaire ventes &amp; stock</h2><p class="meta">Période : ${escapeHtml(period)}</p><p class="meta">Imprimé le ${escapeHtml(formatDateTimeDdMmYyyy(new Date()))}</p></div></header>
+  <table><thead><tr><th>Article</th><th>Stock début</th><th>Achats</th><th>Ventes</th><th>Pertes</th><th>Stock fin (th.)</th></tr></thead><tbody>${tableRows}</tbody></table>
+  <script>window.onload=function(){window.print();}</script></body></html>`);
+  ticketWindow.document.close();
+}
+
+/** Libellé « Utilisateur » pour la traçabilité : ne pas attribuer la vente à la personne qui consulte l'écran. */
 function formatStockMovementUser(item) {
   const raw = String(item?.user ?? "").trim();
   if (!raw || raw === "-" || raw === "—" || raw === "–") return "Non renseigné";
@@ -19517,6 +19698,11 @@ async function bootstrapAuthenticatedApp(opts = {}) {
   initExportPeriodDom();
   document.getElementById("stock-move-start").value = today().slice(0, 8) + "01";
   document.getElementById("stock-move-end").value = today();
+  const invDay = pdjCalendarDate();
+  const invStart = document.getElementById("stock-inv-start");
+  const invEnd = document.getElementById("stock-inv-end");
+  if (invStart) invStart.value = invDay;
+  if (invEnd) invEnd.value = invDay;
   populateOrderSelect();
   renderTopbar();
   applyProductionUiGuards();
@@ -20616,6 +20802,11 @@ document.getElementById("fab-btn").addEventListener("click", () => {
   });
   ["stock-move-start", "stock-move-end", "stock-move-type"].forEach((id) => {
     document.getElementById(id).addEventListener("change", renderStockMovements);
+  });
+  document.getElementById("stock-inv-apply-btn")?.addEventListener("click", renderStockInventoryReport);
+  document.getElementById("stock-inv-print-btn")?.addEventListener("click", printStockInventoryReport);
+  ["stock-inv-start", "stock-inv-end"].forEach((id) => {
+    document.getElementById(id)?.addEventListener("change", renderStockInventoryReport);
   });
   document.body.addEventListener("click", (event) => {
     const closeButton = event.target.closest(".close-modal");

@@ -845,6 +845,7 @@
       <section id="page-stock" class="page">
         <div class="tabs page-subtabs">
           <button class="tab active" data-subtab-stock="catalogue">Catalogue</button>
+          <button class="tab manager-only" data-subtab-stock="inventaire">Inventaire</button>
           <button class="tab" data-subtab-stock="mouvements">Mouvements</button>
           <button class="tab" data-subtab-stock="achats">Achats fournisseurs</button>
           <button class="tab" data-subtab-stock="creanciers">Creanciers</button>
@@ -898,6 +899,50 @@
             </div>
           </div>
           <div id="stock-filter-bar" class="stock-filter-bar" style="margin-top:12px"></div>
+        </article>
+        <article class="card hidden manager-only" id="stock-card-inventaire" style="margin-bottom:14px">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Synthèse période</p>
+              <h3>Inventaire ventes &amp; stock</h3>
+              <p class="muted" style="margin-top:6px;font-size:0.88rem;line-height:1.45">
+                Tout le catalogue du maquis : choisissez uniquement les dates (Du / Au). Même jour = une journée.
+                Ex. le 25/05 : 15 Heineken en ouverture, +24 achetées, −20 vendues → 19 en fin de journée.
+              </p>
+            </div>
+            <span id="stock-inv-count" class="section-meta">0 article</span>
+          </div>
+          <div class="form-grid two-cols">
+            <div class="form-group">
+              <label for="stock-inv-start">Du</label>
+              <input id="stock-inv-start" type="date">
+            </div>
+            <div class="form-group">
+              <label for="stock-inv-end">Au</label>
+              <input id="stock-inv-end" type="date">
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+            <button id="stock-inv-apply-btn" class="btn btn-primary" type="button" style="width:auto;font-size:0.88rem">Afficher</button>
+            <button id="stock-inv-print-btn" class="mini-btn" type="button">Imprimer</button>
+          </div>
+          <p id="stock-inv-period-label" class="muted" style="margin-top:12px;font-size:0.84rem"></p>
+          <div id="stock-inv-summary" class="pdj-kpis" style="margin-top:14px"></div>
+          <div class="stock-table-wrap" style="margin-top:14px">
+            <table class="stock-table">
+              <thead>
+                <tr>
+                  <th>Article</th>
+                  <th class="th-orange" style="text-align:right">Stock début</th>
+                  <th style="text-align:right;color:#72d7a9">Achats</th>
+                  <th class="th-blue" style="text-align:right">Ventes</th>
+                  <th style="text-align:right;color:#ff8e82">Pertes</th>
+                  <th style="text-align:right">Stock fin (th.)</th>
+                </tr>
+              </thead>
+              <tbody id="stock-inv-list"></tbody>
+            </table>
+          </div>
         </article>
         <article class="card hidden" id="stock-card-mouvements" style="margin-bottom:14px">
           <div class="section-head">
@@ -2877,7 +2922,7 @@
   <script src="./cave-components.js"></script>
   <script src="./cave-extras.js"></script>
   <script src="./cave-order-pad.js"></script>
-  <script src="./app-orders.js?v=346"></script>
+  <script src="./app-orders.js?v=348"></script>
   <script src="./restaurant-module.js"></script>
 </body>
 </html>
