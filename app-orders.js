@@ -4522,6 +4522,8 @@ function staffAuditEntityLabel(entity) {
     cloture_jour: "Clôture journée",
     planning: "Planning / horaires",
     catalogue_article: "Article catalogue",
+    correction_paiement: "Correction paiement",
+    correction_quantite: "Correction quantités",
   };
   return map[entity] || entity;
 }
@@ -7581,6 +7583,32 @@ function todayEntreesFromPOForArticle(article, dateStr, openedAt) {
       sum + (po.lines || [])
         .filter((l) => String(l.article || "").toLowerCase() === String(article || "").toLowerCase())
         .reduce((s, l) => s + Math.round((Number(l.cases) || 0) * (Number(l.caseSize) || 0)), 0), 0);
+}
+
+/** Recalcule sorties/entrées/écart sur une fiche PDJ déjà clôturée après correction de ventes. */
+function refreshStockCheckAfterVenteCorrection(dateStr, siteId = currentSiteId()) {
+  const d = String(dateStr || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return false;
+  const check = (state.stockChecks || []).find((sc) => sc.siteId === siteId && (sc.date || "").slice(0, 10) === d);
+  if (!check || !Array.isArray(check.items)) return false;
+  const openedAt = dayBookFor(d, siteId)?.openedAt;
+  check.items.forEach((ci) => {
+    const article = ci.article;
+    const stockAvant = Number(ci.stockAvant ?? 0);
+    const entreesToday = todayEntreesFromPOForArticle(article, d, openedAt);
+    const sortiesToday = todaySortiesBottlesForArticle(article, d);
+    const pertesToday = todayLossesForArticle(article, d, openedAt);
+    const frigo = Math.max(0, Number(ci.frigo) || 0);
+    const reserve = Math.max(0, Number(ci.reserve) || 0);
+    const counted = Number.isFinite(Number(ci.counted)) ? Number(ci.counted) : frigo + reserve;
+    const expected = Math.max(0, stockAvant + entreesToday - sortiesToday - pertesToday);
+    ci.entreesToday = entreesToday;
+    ci.sortiesToday = sortiesToday;
+    ci.pertesToday = pertesToday;
+    ci.expected = expected;
+    ci.ecart = counted - expected;
+  });
+  return true;
 }
 
 /** Résumé lecture seule d'une fiche de clôture (serveuse ou gérant hors correction administrateur). */
@@ -10772,7 +10800,15 @@ async function confirmReplaceVente(newArticleName) {
     openSupplementModal(diff, newProduct.article, vente.client, vente.factureNumber);
   } else {
     _pendingSupplementStockSnapshot = null;
-    await persistState({ ventes: state.ventes, stock: state.stock, staffAuditLog: state.staffAuditLog });
+    const saleDate = String(vente.date || "").slice(0, 10);
+    const stockChecksDirty = /^\d{4}-\d{2}-\d{2}$/.test(saleDate)
+      && refreshStockCheckAfterVenteCorrection(saleDate, siteId);
+    await persistState({
+      ventes: state.ventes,
+      stock: state.stock,
+      staffAuditLog: state.staffAuditLog,
+      ...(stockChecksDirty ? { stockChecks: state.stockChecks } : {}),
+    });
     renderSalesHistory();
     renderPointDuJour();
     if (currentPage === "stock") renderStock();
@@ -11924,11 +11960,139 @@ async function deleteSite(siteId) {
 
 // ─── Correction de facture ───────────────────────────────────────────────────
 
+const CORRECTION_AUDIT_ENTITIES = new Set(["correction_paiement", "correction_quantite"]);
+
+function correctionAuditTypeLabel(entity) {
+  if (entity === "correction_paiement") return "Paiement";
+  if (entity === "correction_quantite") return "Quantités";
+  return staffAuditEntityLabel(entity);
+}
+
+function factureFromCorrectionAuditSummary(summary) {
+  const m = String(summary || "").match(/Correction (?:paiement|qt[eé]s)\s+(\S+)/i);
+  return m ? m[1].replace(/[.:,;]$/, "") : "";
+}
+
+function motifFromCorrectionAuditDetail(detail) {
+  const m = String(detail || "").match(/^Motif\s*:\s*(.+)$/im);
+  return m ? m[1].trim() : "—";
+}
+
 function renderCorrectionPanel() {
   const input = document.getElementById("corr-facture-num");
   const result = document.getElementById("corr-result");
   if (input) input.value = "";
   if (result) result.innerHTML = "";
+  renderCorrectionHistory();
+}
+
+function renderCorrectionHistory() {
+  const container = document.getElementById("corr-history");
+  const meta = document.getElementById("corr-history-meta");
+  if (!container) return;
+  if (!canAnyAdmin()) {
+    container.innerHTML = "";
+    if (meta) meta.textContent = "—";
+    return;
+  }
+  const siteId = currentSiteId();
+  const log = (Array.isArray(state.staffAuditLog) ? state.staffAuditLog : [])
+    .filter((row) => CORRECTION_AUDIT_ENTITIES.has(String(row.entity || "")))
+    .filter((row) => !siteId || String(row.siteId || "") === String(siteId));
+
+  window.__corrHistoryUi = window.__corrHistoryUi || { q: "", type: "all", page: 0, pageSize: 25 };
+  const ui = window.__corrHistoryUi;
+
+  if (!log.length) {
+    if (meta) meta.textContent = "0 correction";
+    container.innerHTML = emptyState("Aucune correction", "Les corrections de paiement et de quantités apparaîtront ici.");
+    return;
+  }
+
+  const q = String(ui.q || "").trim().toLowerCase();
+  const filtered = log.filter((row) => {
+    if (ui.type !== "all" && String(row.entity || "") !== ui.type) return false;
+    if (!q) return true;
+    const facture = factureFromCorrectionAuditSummary(row.summary);
+    const motif = motifFromCorrectionAuditDetail(row.detail);
+    const hay = `${row.at || ""} ${facture} ${row.summary || ""} ${motif} ${row.actor || ""} ${row.detail || ""}`.toLowerCase();
+    return hay.includes(q);
+  });
+
+  const total = filtered.length;
+  const maxPage = Math.max(0, Math.ceil(total / ui.pageSize) - 1);
+  ui.page = Math.min(Math.max(0, ui.page), maxPage);
+  const start = ui.page * ui.pageSize;
+  const pageRows = filtered.slice(start, start + ui.pageSize);
+
+  if (meta) {
+    meta.textContent = total === 1 ? "1 correction" : `${fmt(total)} corrections`;
+  }
+
+  const opt = (value, label, current) =>
+    `<option value="${escapeHtml(value)}" ${String(current) === String(value) ? "selected" : ""}>${escapeHtml(label)}</option>`;
+
+  container.innerHTML = `
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
+      <div class="form-group form-group--zero" style="min-width:200px;flex:1">
+        <label for="corr-hist-q">Recherche</label>
+        <input id="corr-hist-q" type="search" placeholder="Facture, motif, utilisateur…" value="${escapeHtml(ui.q || "")}">
+      </div>
+      <div class="form-group form-group--zero" style="min-width:160px">
+        <label for="corr-hist-type">Type</label>
+        <select id="corr-hist-type">
+          ${opt("all", "Tous", ui.type)}
+          ${opt("correction_paiement", "Paiement", ui.type)}
+          ${opt("correction_quantite", "Quantités", ui.type)}
+        </select>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;margin-left:auto">
+        <button type="button" class="mini-btn" id="corr-hist-prev" ${ui.page <= 0 ? "disabled" : ""}>◀</button>
+        <span class="muted" style="font-size:0.82rem">${total ? `${fmt(start + 1)}–${fmt(Math.min(start + ui.pageSize, total))} / ${fmt(total)}` : "0"}</span>
+        <button type="button" class="mini-btn" id="corr-hist-next" ${ui.page >= maxPage ? "disabled" : ""}>▶</button>
+      </div>
+    </div>
+    <div class="stock-table-wrap">
+      <table class="stock-table" style="min-width:720px">
+        <thead><tr>
+          <th>Date</th>
+          <th>Type</th>
+          <th>Facture</th>
+          <th>Résumé</th>
+          <th>Motif</th>
+          <th>Par</th>
+          <th></th>
+        </tr></thead>
+        <tbody>
+          ${pageRows.length ? pageRows.map((row) => {
+            const facture = factureFromCorrectionAuditSummary(row.summary);
+            const motif = motifFromCorrectionAuditDetail(row.detail);
+            const typeLabel = correctionAuditTypeLabel(row.entity);
+            const factureCell = facture
+              ? `<button type="button" class="linkish-btn" data-corr-search-facture="${escapeHtml(facture)}" title="Recharger cette facture">${escapeHtml(facture)}</button>`
+              : `<span class="muted">—</span>`;
+            return `<tr>
+              <td style="white-space:nowrap">${escapeHtml(formatDateTimeDdMmYyyy(row.at))}</td>
+              <td>${escapeHtml(typeLabel)}</td>
+              <td>${factureCell}</td>
+              <td class="audit-cell-wrap">
+                <span class="audit-cell-expand" data-audit-open="${escapeHtml(String(row.id))}" role="button" tabindex="0" title="Voir le détail">${escapeHtml(row.summary || "")}</span>
+              </td>
+              <td>${escapeHtml(motif)}</td>
+              <td>${escapeHtml(row.actor || "—")}</td>
+              <td><button type="button" class="mini-btn" data-audit-open="${escapeHtml(String(row.id))}">Détail</button></td>
+            </tr>`;
+          }).join("") : `<tr><td colspan="7" class="muted" style="padding:14px;text-align:center">Aucun résultat pour ce filtre.</td></tr>`}
+        </tbody>
+      </table>
+    </div>`;
+
+  const bind = (id, fn) => { const el = document.getElementById(id); if (el) el.addEventListener("change", fn); };
+  const bindInput = (id, fn) => { const el = document.getElementById(id); if (el) el.addEventListener("input", fn); };
+  bindInput("corr-hist-q", (e) => { ui.q = e.target.value; ui.page = 0; renderCorrectionHistory(); });
+  bind("corr-hist-type", (e) => { ui.type = e.target.value; ui.page = 0; renderCorrectionHistory(); });
+  document.getElementById("corr-hist-prev")?.addEventListener("click", () => { ui.page = Math.max(0, ui.page - 1); renderCorrectionHistory(); });
+  document.getElementById("corr-hist-next")?.addEventListener("click", () => { ui.page = Math.min(maxPage, ui.page + 1); renderCorrectionHistory(); });
 }
 
 function searchFactureForCorrection() {
@@ -12035,6 +12199,7 @@ async function applyPaymentCorrection(factureNum, originalVentes) {
     (v) => String(v.factureNumber || "").trim() === factureNum && v.siteId === currentSiteId(),
   );
   renderCorrectionResult(factureNum, refreshed);
+  renderCorrectionHistory();
 }
 
 async function applyQtyCorrection(factureNum, originalVentes) {
@@ -12058,15 +12223,8 @@ async function applyQtyCorrection(factureNum, originalVentes) {
     .map((v) => {
       const c = idMap.get(v.id);
       if (!c) return v;
-      const newNet = c.newQty * (Number(v.prix) || 0) - (Number(v.remise) || 0);
       const updated = { ...v, qty: c.newQty, total: c.newQty * (Number(v.prix) || 0) };
-      if (Array.isArray(v.paiementDetails) && v.paiementDetails.length) {
-        const total = v.paiementDetails.reduce((s, d) => s + (Number(d.amount) || 0), 0);
-        updated.paiementDetails = v.paiementDetails.map((d) => ({
-          ...d,
-          amount: total > 0 ? Math.round((Number(d.amount) || 0) / total * newNet) : 0,
-        }));
-      }
+      syncVentePaymentDetails(updated, calcNet(updated));
       return updated;
     })
     .filter((v) => {
@@ -12100,13 +12258,24 @@ async function applyQtyCorrection(factureNum, originalVentes) {
   recordStaffAudit("update", "correction_quantite",
     `Correction qtés ${factureNum} : ${desc}`,
     `Motif : ${motif}`);
-  await persistState({ ventes: state.ventes, stock: state.stock, casiers: state.casiers, casierMouvements: state.casierMouvements, staffAuditLog: state.staffAuditLog, nextId: state.nextId });
+  const datesToRefresh = [...new Set(changes.map((c) => (c.v.date || "").slice(0, 10)).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)))];
+  const stockChecksDirty = datesToRefresh.some((d) => refreshStockCheckAfterVenteCorrection(d, siteId));
+  await persistState({
+    ventes: state.ventes,
+    stock: state.stock,
+    casiers: state.casiers,
+    casierMouvements: state.casierMouvements,
+    staffAuditLog: state.staffAuditLog,
+    nextId: state.nextId,
+    ...(stockChecksDirty ? { stockChecks: state.stockChecks } : {}),
+  });
   showToast(`Quantités de ${factureNum} corrigées.`);
   const refreshed = (state.ventes || []).filter(
     (v) => String(v.factureNumber || "").trim() === factureNum && v.siteId === currentSiteId(),
   );
   if (refreshed.length) renderCorrectionResult(factureNum, refreshed);
   else document.getElementById("corr-result").innerHTML = `<p class="muted" style="padding:10px 0">Toutes les lignes ont été retirées (quantité 0).</p>`;
+  renderCorrectionHistory();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -21127,6 +21296,17 @@ document.getElementById("fab-btn").addEventListener("click", () => {
       const raw = auditOpen.getAttribute("data-audit-open");
       const id = Number(raw);
       if (raw != null && raw !== "" && !Number.isNaN(id)) openStaffAuditDetailModal(id);
+      return;
+    }
+    const corrFacture = event.target.closest("[data-corr-search-facture]");
+    if (corrFacture) {
+      const num = String(corrFacture.getAttribute("data-corr-search-facture") || "").trim();
+      const input = document.getElementById("corr-facture-num");
+      if (input && num) {
+        input.value = num;
+        searchFactureForCorrection();
+        input.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
       return;
     }
     const ventePick = event.target.closest("[data-vente-pick]");
