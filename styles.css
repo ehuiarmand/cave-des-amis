@@ -2336,6 +2336,38 @@ textarea { font: inherit; }
 }
 
 .stock-table tbody tr:hover { background: rgba(33, 150, 243, 0.04); }
+
+/* Inventaire période — 6 colonnes, pas le min-width 1080px du catalogue */
+.stock-inventaire-table {
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  table-layout: fixed;
+}
+.stock-inventaire-table .stock-inv-col-article { width: 34%; }
+.stock-inventaire-table .stock-inv-col-num { width: 13.2%; }
+.stock-inventaire-table th,
+.stock-inventaire-table td {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.stock-inventaire-table th:first-child,
+.stock-inventaire-table td:first-child {
+  white-space: normal;
+  word-break: break-word;
+  overflow: visible;
+  text-overflow: unset;
+}
+.stock-inventaire-table .stock-inv-th-num,
+.stock-inventaire-table td.stock-inv-td-num {
+  text-align: right;
+}
+.stock-inventaire-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
 .stock-row-alert { background: rgba(211, 78, 63, 0.05) !important; }
 
 .stock-reappro-btn {

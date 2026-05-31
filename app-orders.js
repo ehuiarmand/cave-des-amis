@@ -15749,11 +15749,11 @@ function renderStockInventoryReport() {
   list.innerHTML = rows.length
     ? rows.map((r) => `<tr>
       <td><strong>${escapeHtml(r.article)}</strong></td>
-      <td style="text-align:right;color:#1976d2">${fmt(r.stockDebut)}</td>
-      <td style="text-align:right;color:#72d7a9">${r.achats > 0 ? "+" + fmt(r.achats) : fmt(0)}</td>
-      <td style="text-align:right;color:#ff8e82">${fmt(r.ventes)}</td>
-      <td style="text-align:right;color:#ff8e82">${fmt(r.pertes)}</td>
-      <td style="text-align:right"><strong>${fmt(r.stockFin)}</strong></td>
+      <td class="stock-inv-td-num" style="color:#1976d2">${fmt(r.stockDebut)}</td>
+      <td class="stock-inv-td-num" style="color:#72d7a9">${r.achats > 0 ? "+" + fmt(r.achats) : fmt(0)}</td>
+      <td class="stock-inv-td-num" style="color:#ff8e82">${fmt(r.ventes)}</td>
+      <td class="stock-inv-td-num" style="color:#ff8e82">${fmt(r.pertes)}</td>
+      <td class="stock-inv-td-num"><strong>${fmt(r.stockFin)}</strong></td>
     </tr>`).join("")
     : `<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:32px">Aucun article dans le catalogue.</td></tr>`;
 }

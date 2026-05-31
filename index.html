@@ -928,16 +928,24 @@
           </div>
           <p id="stock-inv-period-label" class="muted" style="margin-top:12px;font-size:0.84rem"></p>
           <div id="stock-inv-summary" class="pdj-kpis" style="margin-top:14px"></div>
-          <div class="stock-table-wrap" style="margin-top:14px">
-            <table class="stock-table">
+          <div class="stock-table-wrap stock-inventaire-wrap" style="margin-top:14px">
+            <table class="stock-table stock-inventaire-table">
+              <colgroup>
+                <col class="stock-inv-col-article">
+                <col class="stock-inv-col-num">
+                <col class="stock-inv-col-num">
+                <col class="stock-inv-col-num">
+                <col class="stock-inv-col-num">
+                <col class="stock-inv-col-num">
+              </colgroup>
               <thead>
                 <tr>
                   <th>Article</th>
-                  <th class="th-orange" style="text-align:right">Stock début</th>
-                  <th style="text-align:right;color:#72d7a9">Achats</th>
-                  <th class="th-blue" style="text-align:right">Ventes</th>
-                  <th style="text-align:right;color:#ff8e82">Pertes</th>
-                  <th style="text-align:right">Stock fin (th.)</th>
+                  <th class="th-orange stock-inv-th-num">Stock début</th>
+                  <th class="stock-inv-th-num" style="color:#72d7a9">Achats</th>
+                  <th class="th-blue stock-inv-th-num">Ventes</th>
+                  <th class="stock-inv-th-num" style="color:#ff8e82">Pertes</th>
+                  <th class="stock-inv-th-num">Stock fin (th.)</th>
                 </tr>
               </thead>
               <tbody id="stock-inv-list"></tbody>
@@ -2922,7 +2930,7 @@
   <script src="./cave-components.js"></script>
   <script src="./cave-extras.js"></script>
   <script src="./cave-order-pad.js"></script>
-  <script src="./app-orders.js?v=348"></script>
+  <script src="./app-orders.js?v=349"></script>
   <script src="./restaurant-module.js"></script>
 </body>
 </html>
