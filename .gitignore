@@ -38,6 +38,7 @@ dist/
 # Fichiers bureautiques / exports
 *.xlsx
 *.pdf
+!guide.pdf
 
 # Secrets locaux
 settings.local.json
