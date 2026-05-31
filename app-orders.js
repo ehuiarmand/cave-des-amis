@@ -3168,15 +3168,20 @@ function serveuseRestDayActive(siteId = currentSiteId()) {
   return serveuseVentesModuleBlocked(siteId);
 }
 
-function serveusePageAllowedDuringRest(page) {
+function serveuseCaisseCreditOnlyAccess(opts = {}) {
+  return String(opts.ventesSubtab || "").trim() === "caisse";
+}
+
+function serveusePageAllowedDuringRest(page, opts = {}) {
   if (!staffRequiresShiftWindowForSales() || !serveuseRestDayActive()) return true;
   if (SERVEUSE_REST_DAY_PAGES.has(String(page || "").trim())) return true;
   if (page === "pdj" && serveuseHasOpenServiceToday()) return true;
+  if (page === "ventes" && serveuseCaisseCreditOnlyAccess(opts)) return true;
   return false;
 }
 
 function serveuseRestDayBlockToast() {
-  showToast("Jour de repos : seuls Planning et Mes ventes sont disponibles.");
+  showToast("Jour de repos : Planning, Mes ventes et Caisse (recouvrement / avoirs) sont disponibles.");
 }
 
 /** Message si serveuse hors créneau ou jour de repos (gérant / admin : jamais bloqué). */
@@ -3206,7 +3211,7 @@ function syncServeuseRestDayNavAccess() {
   document.querySelectorAll(".nav-btn[data-page]").forEach((btn) => {
     const page = btn.dataset.page;
     if (!page) return;
-    const allowed = serveusePageAllowedDuringRest(page);
+    const allowed = serveusePageAllowedDuringRest(page, { ventesSubtab: btn.dataset.ventesSubtab });
     const hide = roleRestricted(page) || (rest && !allowed);
     btn.classList.toggle("hidden", hide);
     btn.disabled = rest && !allowed;
@@ -3238,7 +3243,9 @@ function syncServeuseRestDayNavAccess() {
 }
 
 function ensureServeuseRestDayPage() {
-  if (serveusePageAllowedDuringRest(currentPage)) return false;
+  if (serveusePageAllowedDuringRest(currentPage, {
+    ventesSubtab: currentPage === "ventes" ? ventesSubTab : undefined,
+  })) return false;
   serveuseRestDayBlockToast();
   navigate("planning");
   return true;
@@ -3270,9 +3277,31 @@ function syncServeuseVentesPageRestDay() {
   journalGate?.classList.toggle("hidden", blocked);
   const cardIds = ["ventes-card-board", "ventes-card-gestion", "ventes-card-consignes", "ventes-card-qr", "ventes-card-historique"];
   if (blocked) {
+    if (ventesSubTab === "caisse") {
+      cardIds.forEach((id) => document.getElementById(id)?.classList.add("hidden"));
+      document.getElementById("ventes-card-historique")?.classList.remove("hidden");
+      document.querySelectorAll("[data-subtab-ventes]").forEach((btn) => {
+        btn.classList.toggle("hidden", btn.dataset.subtabVentes !== "caisse");
+      });
+      if (restGate) {
+        restGate.classList.remove("hidden");
+        restGate.removeAttribute("hidden");
+        restGate.innerHTML = `<div class="inline-card ventes-rest-day-alert" role="alert">
+          <strong>Jour de repos</strong>
+          <p class="ventes-rest-day-alert-msg">Ventes et commandes indisponibles. Vous pouvez encaisser les <strong>crédits</strong> et gérer les <strong>avoirs clients</strong> ci-dessous.</p>
+        </div>`;
+      }
+      tabs?.classList.remove("hidden");
+      journalGate?.classList.add("hidden");
+      syncCaisseInnerPanels();
+      renderCreditRecovery();
+      renderClientAvoirs();
+      return;
+    }
     cardIds.forEach((id) => document.getElementById(id)?.classList.add("hidden"));
     return;
   }
+  document.querySelectorAll("[data-subtab-ventes]").forEach((btn) => btn.classList.remove("hidden"));
   const isCommandes = ventesSubTab === "commandes";
   const isCaisse = ventesSubTab === "caisse";
   const isQr = ventesSubTab === "qr";
@@ -5029,9 +5058,7 @@ function applyRoleVisibility() {
   document.querySelectorAll(".serveuse-only-nav").forEach((node) => {
     node.classList.toggle("hidden", !serveuse);
   });
-  document.querySelectorAll(".manager-caisse-nav").forEach((node) => {
-    node.classList.toggle("hidden", serveuse);
-  });
+  /* Recouvrement crédit + avoirs : accessible aux serveuses (bouton Caisse). */
   if (!serveuse && currentPage === "historique-ventes") {
     navigate("ventes");
     return;
@@ -5288,7 +5315,7 @@ function updatePdjSubTabHints() {
 
 function setVentesSubTab(tab) {
   ventesSubTab = tab;
-  if (serveuseVentesModuleBlocked()) {
+  if (serveuseVentesModuleBlocked() && tab !== "caisse") {
     syncServeuseVentesPageRestDay();
     syncNavActiveState();
     return;
@@ -5836,7 +5863,7 @@ function syncNavActiveState() {
 
 function navigate(page, opts = {}) {
   if (page === "historique-ventes" && !isServeuseAccount()) page = "ventes";
-  if (!serveusePageAllowedDuringRest(page)) {
+  if (!serveusePageAllowedDuringRest(page, { ventesSubtab: opts.ventesSubtab })) {
     serveuseRestDayBlockToast();
     page = "planning";
   }
@@ -5890,7 +5917,7 @@ function navigate(page, opts = {}) {
 function handleNavButtonClick(button) {
   const page = button?.dataset?.page;
   if (!page) return;
-  if (!serveusePageAllowedDuringRest(page)) {
+  if (!serveusePageAllowedDuringRest(page, { ventesSubtab: button.dataset.ventesSubtab })) {
     serveuseRestDayBlockToast();
     return;
   }
@@ -9687,7 +9714,13 @@ async function submitSaisieRapide() {
 function renderVentesPage() {
   syncDualZonePricingUi();
   syncServeuseVentesPageRestDay();
-  if (serveuseVentesModuleBlocked()) return;
+  const serveuseRestBlocked = serveuseVentesModuleBlocked();
+  if (serveuseRestBlocked && ventesSubTab === "caisse") {
+    renderCreditRecovery();
+    renderClientAvoirs();
+    return;
+  }
+  if (serveuseRestBlocked) return;
   const gate = document.getElementById("ventes-journal-gate");
   if (gate) {
     const d = journalSaleDateFromDom();
@@ -13371,7 +13404,7 @@ const PURGE_MAQUIS_ROW_KEYS = [
 const STATE_PUT_ROW_KEYS = [
   "ventes", "stock", "commandes", "stockChecks", "stockEntrees", "stockLosses",
   "dayBooks", "purchaseOrders", "supplierPrices", "casiers", "casierMouvements",
-  "creditRecoveries", "consignes", "charges", "staffAuditLog", "workShifts",
+  "creditRecoveries", "clientAvoirs", "consignes", "charges", "staffAuditLog", "workShifts",
 ];
 
 /**
@@ -13396,6 +13429,7 @@ function buildStatePutBody(overrides = {}) {
     body.purchaseOrders = state.purchaseOrders ?? [];
     body.supplierPrices = state.supplierPrices ?? [];
     body.creditRecoveries = state.creditRecoveries ?? [];
+    body.clientAvoirs = state.clientAvoirs ?? [];
     body.consignes = state.consignes ?? [];
     body.categories = state.categories ?? CATEGORIES;
     body.charges = state.charges;
@@ -13877,6 +13911,7 @@ async function saveCreditRecovery() {
       paiement: method,
       note,
       createdAt: new Date().toISOString(),
+      createdBy: String(sessionUser || "").trim(),
     };
     state.creditRecoveries = [row, ...(state.creditRecoveries || [])];
     recordStaffAudit("create", "credit_recovery", `Encaissement credit · ${nameNorm}`, `${fmt(applied)} FCFA · ${method}${note ? ` · ${note}` : ""}`);

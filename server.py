@@ -3877,7 +3877,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
             _SERVEUSE_WRITE = frozenset({
                 "ventes", "commandes", "dayBooks",
                 "stock", "casiers", "casierMouvements", "staffAuditLog",
-                "clientAvoirs",
+                "creditRecoveries", "clientAvoirs",
             })
             _MANAGER_WRITE = frozenset({
                 "ventes", "stock", "commandes", "stockChecks", "dayBooks",
