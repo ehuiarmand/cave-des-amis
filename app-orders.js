@@ -754,6 +754,8 @@ let ventesDomPdjStamp = "";
 let pendingPreAuthToken = null;
 let pendingWaUsername = null;
 let pendingReceivePurchaseId = null;
+let _purchaseReceiptBusy = false;
+let mustChangePassword = false;
 let purchaseDraftLines = [];
 /** Après fermeture du modal « nouveau casier » sans enregistrer, on annule la reprise commande achat. */
 let pendingPurchaseCasierResume = false;
@@ -806,6 +808,7 @@ function applySessionFieldsFromApi(payload) {
   if (Array.isArray(payload.allowedSiteIds)) allowedSiteIds = payload.allowedSiteIds;
   if ("globalSuperadmin" in payload) globalSuperadmin = payload.globalSuperadmin;
   if ("maquisBackupAllowed" in payload) maquisBackupAllowed = Boolean(payload.maquisBackupAllowed);
+  if ("mustChangePassword" in payload) mustChangePassword = Boolean(payload.mustChangePassword);
   applySessionTimingFromApi(payload);
 }
 
@@ -2116,6 +2119,7 @@ async function apiRequest(url, options = {}) {
   if (!response.ok) {
     const error = new Error(payload?.error || `HTTP ${response.status}`);
     error.status = response.status;
+    if (payload?.mustChangePassword) error.mustChangePassword = true;
     throw error;
   }
   return payload;
@@ -11227,8 +11231,24 @@ function initStockScrollMirror() {
   }, { passive: true });
 }
 
+function dedupeChargesForDisplay(charges) {
+  const kept = [];
+  charges.forEach((charge) => {
+    const poId = Number(charge.purchaseOrderId);
+    if (poId) {
+      if (kept.some((c) => Number(c.purchaseOrderId) === poId)) return;
+      kept.push(charge);
+      return;
+    }
+    const key = `${charge.siteId}|${charge.date}|${charge.montant}|${charge.lib}`;
+    if (kept.some((c) => !c.purchaseOrderId && `${c.siteId}|${c.date}|${c.montant}|${c.lib}` === key)) return;
+    kept.push(charge);
+  });
+  return kept;
+}
+
 function renderCharges() {
-  const chargesForSite = recordsForSite(state.charges);
+  const chargesForSite = dedupeChargesForDisplay(recordsForSite(state.charges));
   const total = chargesForSite.reduce((sum, charge) => sum + Number(charge.montant || 0), 0);
   document.getElementById("charges-total").textContent = `${fmt(total)} FCFA`;
   const charges = chargesForSite.slice().sort((a, b) => b.date.localeCompare(a.date));
@@ -14534,10 +14554,19 @@ function purchaseReceiptNeedsSnapshot(originalLines, receivedLines) {
 
 async function applyPurchaseReceipt(po, linesReceived, opts = {}) {
   if (po.status === "Reçue") return false;
-  po.status = "Reçue";
+  const siteId = po.siteId || currentSiteId();
+  if ((state.charges || []).some(
+    (c) => Number(c.purchaseOrderId) === Number(po.id) && String(c.siteId || "") === String(siteId),
+  )) {
+    showToast("Cette commande a déjà été réceptionnée (charge enregistrée).");
+    return false;
+  }
+  if (_purchaseReceiptBusy) return false;
+  _purchaseReceiptBusy = true;
+  try {
   const rangerCasiers = opts.rangerCasiers !== false;
   const receivedTotal = Math.round(linesReceived.reduce((sum, l) => sum + (Number(l.amount) || 0), 0));
-  if (!linesReceived.length || receivedTotal <= 0) { po.status = "En attente"; return false; }
+  if (!linesReceived.length || receivedTotal <= 0) return false;
 
   if (purchaseReceiptNeedsSnapshot(po.lines, linesReceived)) {
     po.linesOrderedSnapshot = JSON.parse(JSON.stringify(po.lines || []));
@@ -14545,7 +14574,6 @@ async function applyPurchaseReceipt(po, linesReceived, opts = {}) {
     delete po.linesOrderedSnapshot;
   }
 
-  const siteId = po.siteId || currentSiteId();
   const stockItems = state.stock || [];
   const stockEntrees = state.stockEntrees || [];
   if (!state.nextId) state.nextId = {};
@@ -14692,15 +14720,18 @@ async function applyPurchaseReceipt(po, linesReceived, opts = {}) {
   });
 
   state.charges = state.charges || [];
+  const chargeId = state.nextId.charge++;
   state.charges.unshift({
-    id: state.nextId.charge++,
+    id: chargeId,
     siteId,
     date: po.date,
     lib: `Commande fournisseur ${po.supplier} (${fmt(receivedTotal)} FCFA)`,
     cat: "Approvisionnement",
     montant: receivedTotal,
     paiement: po.payment || "Especes",
+    purchaseOrderId: po.id,
   });
+  po.chargeId = chargeId;
   po.lines = linesReceived;
   po.total = receivedTotal;
   po.status = "Reçue";
@@ -14725,6 +14756,9 @@ async function applyPurchaseReceipt(po, linesReceived, opts = {}) {
     showToast("Commande receptionnee selon les quantites livrees.");
   }
   return true;
+  } finally {
+    _purchaseReceiptBusy = false;
+  }
 }
 
 function updateReceivePurchaseModalTotals(po) {
@@ -14783,6 +14817,7 @@ function openReceivePurchaseModal(poId) {
 }
 
 async function confirmReceivePurchaseOrder() {
+  if (_purchaseReceiptBusy) return;
   const poId = pendingReceivePurchaseId;
   const po = (state.purchaseOrders || []).find((p) => p.id === poId);
   if (!po || po.status !== "En attente") {
@@ -20025,6 +20060,95 @@ async function disableTwoFactor(username) {
   }
 }
 
+async function enterAuthenticatedApp(sessionPayload) {
+  applySessionFieldsFromApi(sessionPayload);
+  setAuthVisible(true);
+  if (mustChangePassword) {
+    showMustChangePasswordOverlay();
+    return;
+  }
+  await bootstrapAuthenticatedApp();
+}
+
+function showMustChangePasswordOverlay() {
+  let overlay = document.getElementById("must-change-password-overlay");
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.id = "must-change-password-overlay";
+    overlay.className = "reauth-overlay";
+    overlay.innerHTML = `
+      <div class="reauth-dialog" style="max-width:420px">
+        <h3 class="reauth-title">Renouvellement mensuel</h3>
+        <p class="reauth-desc">Pour votre sécurité, changez votre mot de passe pour le mois en cours avant d'utiliser l'application.</p>
+        <div class="reauth-field">
+          <label for="mcp-current">Mot de passe actuel</label>
+          <input id="mcp-current" type="password" autocomplete="current-password" placeholder="••••••••">
+        </div>
+        <div class="reauth-field">
+          <label for="mcp-new">Nouveau mot de passe</label>
+          <input id="mcp-new" type="password" autocomplete="new-password" placeholder="6 caractères minimum">
+        </div>
+        <div class="reauth-field">
+          <label for="mcp-confirm">Confirmer</label>
+          <input id="mcp-confirm" type="password" autocomplete="new-password" placeholder="Répéter le mot de passe">
+        </div>
+        <div class="reauth-error" id="mcp-error" style="display:none"></div>
+        <div class="reauth-actions">
+          <button type="button" class="btn btn-outline" id="mcp-logout">Se déconnecter</button>
+          <button type="button" class="btn btn-primary" id="mcp-submit">Enregistrer</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    overlay.querySelector("#mcp-logout")?.addEventListener("click", () => logout().catch(() => {}));
+    overlay.querySelector("#mcp-submit")?.addEventListener("click", () => submitMustChangePassword().catch(handleApiError));
+    overlay.querySelector("#mcp-confirm")?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") submitMustChangePassword().catch(handleApiError);
+    });
+  }
+  overlay.classList.remove("hidden");
+  overlay.style.display = "";
+  const err = overlay.querySelector("#mcp-error");
+  if (err) { err.textContent = ""; err.style.display = "none"; }
+  overlay.querySelector("#mcp-current")?.focus();
+}
+
+async function submitMustChangePassword() {
+  const overlay = document.getElementById("must-change-password-overlay");
+  const errEl = overlay?.querySelector("#mcp-error");
+  const btn = overlay?.querySelector("#mcp-submit");
+  const currentPassword = String(overlay?.querySelector("#mcp-current")?.value || "");
+  const newPassword = String(overlay?.querySelector("#mcp-new")?.value || "");
+  const confirmPassword = String(overlay?.querySelector("#mcp-confirm")?.value || "");
+  if (!currentPassword || !newPassword) {
+    if (errEl) { errEl.textContent = "Remplissez tous les champs."; errEl.style.display = ""; }
+    return;
+  }
+  if (newPassword !== confirmPassword) {
+    if (errEl) { errEl.textContent = "Les mots de passe ne correspondent pas."; errEl.style.display = ""; }
+    return;
+  }
+  if (newPassword.length < 6) {
+    if (errEl) { errEl.textContent = "Mot de passe trop court (6 caractères minimum)."; errEl.style.display = ""; }
+    return;
+  }
+  if (btn) { btn.disabled = true; btn.textContent = "Enregistrement…"; }
+  try {
+    const resp = await apiRequest("/api/account/password", {
+      method: "POST",
+      body: JSON.stringify({ currentPassword, newPassword, confirmPassword }),
+    });
+    mustChangePassword = false;
+    if (overlay) overlay.style.display = "none";
+    showToast("Mot de passe mis à jour.");
+    await bootstrapAuthenticatedApp();
+    if (resp?.mustChangePassword) showMustChangePasswordOverlay();
+  } catch (error) {
+    if (errEl) { errEl.textContent = error.message || "La modification a échoué."; errEl.style.display = ""; }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "Enregistrer"; }
+  }
+}
+
 async function handleLoginSubmit(event) {
   event.preventDefault();
   const totpSection = document.getElementById("totp-section");
@@ -20044,8 +20168,7 @@ async function handleLoginSubmit(event) {
       document.querySelector("#login-form button[type=submit]").textContent = "Ouvrir le tableau de bord";
       applySessionFieldsFromApi(session);
       errorEl.textContent = "";
-      setAuthVisible(true);
-      await bootstrapAuthenticatedApp();
+      await enterAuthenticatedApp(session);
       showToast("Connexion réussie.");
     } else if (pendingPreAuthToken) {
       const code = document.getElementById("login-totp").value.trim();
@@ -20059,8 +20182,7 @@ async function handleLoginSubmit(event) {
       document.querySelector("#login-form button[type=submit]").textContent = "Ouvrir le tableau de bord";
       applySessionFieldsFromApi(session);
       errorEl.textContent = "";
-      setAuthVisible(true);
-      await bootstrapAuthenticatedApp();
+      await enterAuthenticatedApp(session);
       showToast("Connexion réussie.");
     } else {
       const username = document.getElementById("login-username").value.trim();
@@ -20081,8 +20203,7 @@ async function handleLoginSubmit(event) {
       } else {
         applySessionFieldsFromApi(result);
         errorEl.textContent = "";
-        setAuthVisible(true);
-        await bootstrapAuthenticatedApp();
+        await enterAuthenticatedApp(result);
         const me = state?.auth?.users?.find((u) => u.username === result.username);
         if (me && !me.twoFactorEnabled) {
           showToast("Activez la 2FA dans Parametres > Acces pour securiser votre compte.");
@@ -20245,6 +20366,11 @@ async function bootstrapAuthenticatedApp(opts = {}) {
 
 function handleApiError(error) {
   console.error(error);
+  if (error?.mustChangePassword) {
+    mustChangePassword = true;
+    showMustChangePasswordOverlay();
+    return;
+  }
   if (error?.status === 401) {
     logout();
     return;
@@ -21719,9 +21845,7 @@ async function init() {
   setAuthVisible(false);
   try {
     const session = await apiRequest(API.session);
-    applySessionFieldsFromApi(session);
-    setAuthVisible(true);
-    await bootstrapAuthenticatedApp();
+    await enterAuthenticatedApp(session);
   } catch (error) {
     setAuthVisible(false);
   }

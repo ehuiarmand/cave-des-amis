@@ -14,6 +14,7 @@ import socket
 import struct
 import threading
 import time
+from datetime import datetime, timezone
 from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -276,6 +277,40 @@ def session_missing_required_2fa(session: dict[str, Any], auth_users: list[dict[
     if not u:
         return False
     return not (bool(u.get("twoFactorEnabled")) and bool(u.get("twoFactorSecret")))
+
+
+def monthly_password_change_required() -> bool:
+    return _env_first("MAQUIS_MANAGER_REQUIRE_MONTHLY_PASSWORD", default="1").lower() not in (
+        "0",
+        "false",
+        "no",
+        "off",
+    )
+
+
+def current_password_month_ym() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m")
+
+
+def password_change_required_for_user(user: dict[str, Any] | None) -> bool:
+    if not user or not monthly_password_change_required():
+        return False
+    changed = str(user.get("passwordChangedAt") or "").strip()
+    if len(changed) < 7:
+        return True
+    return changed[:7] != current_password_month_ym()
+
+
+def password_policy_fields(user: dict[str, Any] | None) -> dict[str, Any]:
+    return {
+        "mustChangePassword": password_change_required_for_user(user),
+        "passwordMonth": current_password_month_ym(),
+    }
+
+
+def session_password_change_required(session: dict[str, Any], auth_users: list[dict[str, Any]]) -> bool:
+    u = next((x for x in auth_users if x.get("username") == session.get("username")), None)
+    return password_change_required_for_user(u)
 
 
 def _today_iso_local() -> str:
@@ -2343,6 +2378,13 @@ def merge_auth_users_scoped(
             "wa2faEnabled": bool(pu.get("wa2faEnabled", exist.get("wa2faEnabled", False))),
             "displayName": dn,
         }
+        if pwd:
+            if str(exist.get("username", "")) == s_user:
+                entry["passwordChangedAt"] = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            else:
+                entry.pop("passwordChangedAt", None)
+        elif exist.get("passwordChangedAt"):
+            entry["passwordChangedAt"] = exist.get("passwordChangedAt")
         if wa_upd:
             entry["waPhone"] = wa_upd
         if exist.get("twoFactorSecret"):
@@ -4305,9 +4347,14 @@ class AppHandler(BaseHTTPRequestHandler):
             self.send_json(HTTPStatus.OK, store.public_orders(site_id, table, client))
             return
         if get_path == "/api/session":
-            session = self.require_session()
+            session = self.require_session(allow_password_expired=True)
             if session is None:
                 return
+            with store._lock:
+                user_row = next(
+                    (u for u in store._state.get("auth", {}).get("users", []) if u.get("username") == session.get("username")),
+                    None,
+                )
             aids = store.all_site_ids()
             bs = resolve_backup_session(session, store)
             role = str(bs.get("role", session.get("role", "")))
@@ -4323,6 +4370,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     "globalSuperadmin": global_sa,
                     "maquisBackupAllowed": session_can_manage_maquis_backups(bs, all_site_ids=aids),
                     **session_timing_fields(session),
+                    **password_policy_fields(user_row),
                 },
             )
             return
@@ -4582,6 +4630,11 @@ class AppHandler(BaseHTTPRequestHandler):
             )
             sess_view = sessions.get(token) or {}
             bs_login = resolve_backup_session(sess_view, store)
+            with store._lock:
+                login_user_row = next(
+                    (u for u in store._state["auth"]["users"] if u.get("username") == user["username"]),
+                    None,
+                )
             self.send_json(
                 HTTPStatus.OK,
                 {
@@ -4592,6 +4645,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     "globalSuperadmin": bool(bs_login.get("globalSuperadmin")),
                     "maquisBackupAllowed": session_can_manage_maquis_backups(bs_login, all_site_ids=aids_login),
                     **session_timing_fields(sess_view),
+                    **password_policy_fields(login_user_row),
                 },
                 cookie=token,
             )
@@ -4641,6 +4695,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     "globalSuperadmin": bool(bs_2fa.get("globalSuperadmin")),
                     "maquisBackupAllowed": session_can_manage_maquis_backups(bs_2fa, all_site_ids=aids_2fa),
                     **session_timing_fields(sess_view),
+                    **password_policy_fields(user_data),
                 },
                 cookie=token,
             )
@@ -4703,6 +4758,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     "globalSuperadmin": bool(wv_bs.get("globalSuperadmin")),
                     "maquisBackupAllowed": session_can_manage_maquis_backups(wv_bs, all_site_ids=wv_aids),
                     **session_timing_fields(wv_sess_view),
+                    **password_policy_fields(wv_user_row),
                 },
                 cookie=wv_token,
             )
@@ -4827,6 +4883,52 @@ class AppHandler(BaseHTTPRequestHandler):
                 audit_log("logout", {"ip": self.client_ip(), "username": str(sess.get("username", ""))})
             sessions.clear(token)
             self.send_json(HTTPStatus.OK, {"authenticated": False}, clear_cookie=True)
+            return
+
+        if post_path == "/api/account/password":
+            session = self.require_session(allow_password_expired=True)
+            if session is None:
+                return
+            if not self.require_csrf(session):
+                return
+            body = self.read_json() or {}
+            current_password = str(body.get("currentPassword", ""))
+            new_password = str(body.get("newPassword", "")).strip()
+            confirm_password = str(body.get("confirmPassword", new_password)).strip()
+            if not current_password or not new_password:
+                self.send_json(HTTPStatus.BAD_REQUEST, {"error": "Mot de passe actuel et nouveau mot de passe requis."})
+                return
+            if new_password != confirm_password:
+                self.send_json(HTTPStatus.BAD_REQUEST, {"error": "Les mots de passe ne correspondent pas."})
+                return
+            if len(new_password) < 6:
+                self.send_json(HTTPStatus.BAD_REQUEST, {"error": "Mot de passe trop court (6 caracteres minimum)."})
+                return
+            username = str(session.get("username", ""))
+            if store.verify_credentials(username, current_password) is None:
+                audit_log("password_change_failed", {"ip": self.client_ip(), "username": username})
+                self.send_json(HTTPStatus.UNAUTHORIZED, {"error": "Mot de passe actuel incorrect."})
+                return
+            with store._lock:
+                user_row = next(
+                    (u for u in store._state["auth"]["users"] if u.get("username") == username),
+                    None,
+                )
+                if not user_row:
+                    self.send_json(HTTPStatus.NOT_FOUND, {"error": "Utilisateur introuvable."})
+                    return
+                user_row["passwordHash"] = hash_password(new_password)
+                user_row["passwordChangedAt"] = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                store._write(store._state)
+            audit_log("password_changed", {"ip": self.client_ip(), "username": username})
+            self.send_json(
+                HTTPStatus.OK,
+                {
+                    "ok": True,
+                    "mustChangePassword": False,
+                    "passwordMonth": current_password_month_ym(),
+                },
+            )
             return
 
         if post_path == "/api/reauth":
@@ -5041,7 +5143,7 @@ class AppHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def require_session(self) -> dict[str, Any] | None:
+    def require_session(self, *, allow_password_expired: bool = False) -> dict[str, Any] | None:
         token = self.session_token()
         session = sessions.get(token)
         if session is None:
@@ -5062,7 +5164,21 @@ class AppHandler(BaseHTTPRequestHandler):
             )
             return None
         sessions.sync_from_auth_user(token, store)
-        return sessions.get(token)
+        session = sessions.get(token)
+        if session is None:
+            self.send_json(HTTPStatus.UNAUTHORIZED, {"authenticated": False, "error": "Session invalide ou expiree."}, clear_cookie=True)
+            return None
+        if not allow_password_expired and session_password_change_required(session, auth_users):
+            self.send_json(
+                HTTPStatus.FORBIDDEN,
+                {
+                    "error": "Changez votre mot de passe pour continuer (renouvellement mensuel).",
+                    "mustChangePassword": True,
+                    "passwordMonth": current_password_month_ym(),
+                },
+            )
+            return None
+        return session
 
     def require_csrf(self, session: dict[str, Any]) -> bool:
         # Fail-closed : une session validee possede toujours un csrfToken (backfill cote serveur).
