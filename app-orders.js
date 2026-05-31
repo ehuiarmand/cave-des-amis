@@ -15765,6 +15765,35 @@ function printStockInventoryReport() {
   }
   let start = document.getElementById("stock-inv-start")?.value || today();
   let end = document.getElementById("stock-inv-end")?.value || start;
+  printStockPeriodByArticle(start, end, {
+    title: "Inventaire ventes & stock",
+    columns: "full",
+  });
+}
+
+/** Impression récap. par article depuis l'onglet Mouvements (dates stock-move-start/end). */
+function printStockMovementsByArticle() {
+  if (!canManage()) {
+    showToast("Réservé au gérant ou à un administrateur.");
+    return;
+  }
+  let start = document.getElementById("stock-move-start")?.value || today().slice(0, 8) + "01";
+  let end = document.getElementById("stock-move-end")?.value || today();
+  printStockPeriodByArticle(start, end, {
+    title: "Ventes par article",
+    columns: "ventes",
+  });
+}
+
+/**
+ * Impression HTML : synthèse par article sur une période.
+ * columns "ventes" = Article, Stock début, Ventes, Stock fin | "full" = + Achats, Pertes
+ */
+function printStockPeriodByArticle(startRaw, endRaw, { title = "Synthèse stock", columns = "ventes" } = {}) {
+  let start = String(startRaw || "").slice(0, 10);
+  let end = String(endRaw || "").slice(0, 10);
+  if (!start) start = end || today();
+  if (!end) end = start;
   if (start > end) { const t = start; start = end; end = t; }
   const rows = stockInventoryReportRows(start, end);
   if (!rows.length) {
@@ -15773,26 +15802,40 @@ function printStockInventoryReport() {
   }
   const site = currentSite();
   const period = start === end ? formatDateDdMmYyyy(start) : `${formatDateDdMmYyyy(start)} → ${formatDateDdMmYyyy(end)}`;
-  const tableRows = rows.map((r) => `<tr>
-    <td>${escapeHtml(r.article)}</td>
-    <td>${fmt(r.stockDebut)}</td>
-    <td>${r.achats > 0 ? "+" + fmt(r.achats) : fmt(0)}</td>
-    <td>${fmt(r.ventes)}</td>
-    <td>${fmt(r.pertes)}</td>
-    <td><strong>${fmt(r.stockFin)}</strong></td>
-  </tr>`).join("");
+  const full = columns === "full";
+  const headCols = full
+    ? "<th>Article</th><th>Stock début</th><th>Achats</th><th>Ventes</th><th>Pertes</th><th>Stock fin (th.)</th>"
+    : "<th>Article</th><th>Stock début</th><th>Ventes</th><th>Stock fin (th.)</th>";
+  const tableRows = rows.map((r) => full
+    ? `<tr>
+      <td>${escapeHtml(r.article)}</td>
+      <td>${fmt(r.stockDebut)}</td>
+      <td>${r.achats > 0 ? "+" + fmt(r.achats) : fmt(0)}</td>
+      <td>${fmt(r.ventes)}</td>
+      <td>${fmt(r.pertes)}</td>
+      <td><strong>${fmt(r.stockFin)}</strong></td>
+    </tr>`
+    : `<tr>
+      <td>${escapeHtml(r.article)}</td>
+      <td>${fmt(r.stockDebut)}</td>
+      <td>${fmt(r.ventes)}</td>
+      <td><strong>${fmt(r.stockFin)}</strong></td>
+    </tr>`).join("");
+  const totVentes = rows.reduce((s, r) => s + r.ventes, 0);
   const ticketWindow = window.open("", "_blank", "width=900,height=800");
   if (!ticketWindow) {
     showToast("Impossible d'ouvrir l'impression.");
     return;
   }
-  ticketWindow.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>Inventaire stock</title><style>
+  ticketWindow.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>
     body{font-family:Arial,sans-serif;color:#111;padding:28px}header{display:flex;justify-content:space-between;gap:18px;border-bottom:2px solid #111;padding-bottom:14px;margin-bottom:18px}
-    h1,h2,p{margin:0 0 8px}.meta{color:#555}table{width:100%;border-collapse:collapse;margin-top:12px;font-size:13px}
+    h1,h2,p{margin:0 0 8px}.meta{color:#555}.summary{display:flex;gap:24px;margin:12px 0 16px;font-size:14px}
+    table{width:100%;border-collapse:collapse;margin-top:8px;font-size:13px}
     th,td{border-bottom:1px solid #ddd;padding:8px 6px;text-align:left}th{background:#f2f2f2}
-    td:nth-child(n+2){text-align:right}@media print{body{padding:0}table{font-size:11px}}
-  </style></head><body><header><div><h1>${escapeHtml(site?.nom || "Maquis")}</h1><p>${escapeHtml(site?.ville || "")}</p></div><div><h2>Inventaire ventes &amp; stock</h2><p class="meta">Période : ${escapeHtml(period)}</p><p class="meta">Imprimé le ${escapeHtml(formatDateTimeDdMmYyyy(new Date()))}</p></div></header>
-  <table><thead><tr><th>Article</th><th>Stock début</th><th>Achats</th><th>Ventes</th><th>Pertes</th><th>Stock fin (th.)</th></tr></thead><tbody>${tableRows}</tbody></table>
+    td:nth-child(n+2),th:nth-child(n+2){text-align:right}@media print{body{padding:0}table{font-size:11px}}
+  </style></head><body><header><div><h1>${escapeHtml(site?.nom || "Maquis")}</h1><p>${escapeHtml(site?.ville || "")}</p></div><div><h2>${escapeHtml(title)}</h2><p class="meta">Période : ${escapeHtml(period)}</p><p class="meta">Imprimé le ${escapeHtml(formatDateTimeDdMmYyyy(new Date()))}</p></div></header>
+  <div class="summary"><span><strong>${fmt(rows.length)}</strong> article(s)</span><span>Total ventes : <strong>${fmt(totVentes)}</strong> btl</span></div>
+  <table><thead><tr>${headCols}</tr></thead><tbody>${tableRows}</tbody></table>
   <script>window.onload=function(){window.print();}</script></body></html>`);
   ticketWindow.document.close();
 }
@@ -20803,6 +20846,7 @@ document.getElementById("fab-btn").addEventListener("click", () => {
   ["stock-move-start", "stock-move-end", "stock-move-type"].forEach((id) => {
     document.getElementById(id).addEventListener("change", renderStockMovements);
   });
+  document.getElementById("stock-move-print-btn")?.addEventListener("click", printStockMovementsByArticle);
   document.getElementById("stock-inv-apply-btn")?.addEventListener("click", renderStockInventoryReport);
   document.getElementById("stock-inv-print-btn")?.addEventListener("click", printStockInventoryReport);
   ["stock-inv-start", "stock-inv-end"].forEach((id) => {
