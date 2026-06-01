@@ -4402,6 +4402,18 @@ function initExportPeriodDom() {
   initPeriodDom("export");
 }
 
+function chargesPeriod() {
+  return periodFromControls("charges");
+}
+
+function syncChargesPeriodCustomUi() {
+  syncPeriodCustomUi("charges");
+}
+
+function initChargesPeriodDom() {
+  initPeriodDom("charges");
+}
+
 function ventesForDateRange(start, end) {
   return recordsForSite(state.ventes).filter((v) => {
     const d = saleDateValue(v);
@@ -11350,13 +11362,28 @@ function dedupeChargesForDisplay(charges) {
 }
 
 function renderCharges() {
-  const chargesForSite = dedupeChargesForDisplay(recordsForSite(state.charges));
+  syncChargesPeriodCustomUi();
+  const period = chargesPeriod();
+  const allForSite = dedupeChargesForDisplay(recordsForSite(state.charges));
+  const chargesForSite = recordsInPeriod(allForSite, (c) => c.date, period);
   const total = chargesForSite.reduce((sum, charge) => sum + Number(charge.montant || 0), 0);
   document.getElementById("charges-total").textContent = `${fmt(total)} FCFA`;
+  const totalLabel = document.getElementById("charges-total-label");
+  if (totalLabel) {
+    totalLabel.textContent = period.mode === "month"
+      ? "Total charges du mois"
+      : period.mode === "all"
+        ? "Total charges (historique)"
+        : "Total charges — période";
+  }
+  const foot = document.getElementById("charges-period-foot");
+  if (foot) {
+    foot.textContent = `${period.label} · ${chargesForSite.length} dépense${chargesForSite.length > 1 ? "s" : ""}`;
+  }
   const charges = chargesForSite.slice().sort((a, b) => b.date.localeCompare(a.date));
   document.getElementById("charges-list").innerHTML = charges.length
     ? charges.map((charge) => `<article class="list-item"><div><p class="list-item-title">${escapeHtml(charge.lib)}</p><p class="list-item-sub">${escapeHtml(charge.cat)} · ${escapeHtml(charge.paiement)}</p></div><div class="list-side"><div><p class="list-item-amount" style="color:#ff8e82">${fmt(charge.montant)} FCFA</p><p class="list-item-date">${escapeHtml(formatDateDdMmYyyy(charge.date))}</p></div>${canDeleteCharge() ? `<button class="del-btn" type="button" data-delete-type="charge" data-id="${charge.id}">Suppr.</button>` : ""}</div></article>`).join("")
-    : emptyState("Aucune charge", "Ajoutez une depense pour suivre les sorties du mois.");
+    : emptyState("Aucune charge", `Aucune dépense enregistrée pour ${period.label.toLowerCase()}.`);
   refreshCreanciersIfVisible();
 }
 
@@ -20623,6 +20650,7 @@ function attachEvents() {
     document.getElementById(id).addEventListener("change", renderOrdersManagement);
   });
   initDashboardPeriodDom();
+  initChargesPeriodDom();
   document.getElementById("dashboard-print-margins-btn")?.addEventListener("click", printDashboardPeriodMarginsReport);
   document.getElementById("obj-formula-tip")?.addEventListener("click", showObjectifFormulaTip);
   document.getElementById("dashboard-period-mode")?.addEventListener("change", () => {
@@ -20631,6 +20659,13 @@ function attachEvents() {
   });
   ["dashboard-period-start", "dashboard-period-end"].forEach((id) => {
     document.getElementById(id)?.addEventListener("change", renderDashboard);
+  });
+  document.getElementById("charges-period-mode")?.addEventListener("change", () => {
+    syncChargesPeriodCustomUi();
+    renderCharges();
+  });
+  ["charges-period-start", "charges-period-end"].forEach((id) => {
+    document.getElementById(id)?.addEventListener("change", renderCharges);
   });
   document.getElementById("export-period-mode")?.addEventListener("change", () => syncPeriodCustomUi("export"));
   ["export-period-start", "export-period-end"].forEach((id) => {

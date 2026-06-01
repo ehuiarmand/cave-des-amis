@@ -1284,9 +1284,34 @@
       </section>
 
       <section id="page-charges" class="page">
+        <div class="charges-period-bar card" style="padding:12px 14px;margin-bottom:12px">
+          <div class="form-grid two-cols" style="align-items:end;margin:0;gap:12px">
+            <div class="form-group" style="margin:0;min-width:200px">
+              <label for="charges-period-mode">Période affichée</label>
+              <select id="charges-period-mode">
+                <option value="month" selected>Mois en cours</option>
+                <option value="week">Semaine en cours</option>
+                <option value="custom">Période personnalisée</option>
+                <option value="all">Tout l'historique</option>
+              </select>
+            </div>
+            <p id="charges-period-label" class="muted" style="margin:0;font-size:0.82rem;padding-bottom:6px"></p>
+          </div>
+          <div id="charges-period-custom" class="form-grid two-cols hidden" style="gap:12px;margin:10px 0 0">
+            <div class="form-group" style="margin:0">
+              <label for="charges-period-start">Du</label>
+              <input id="charges-period-start" type="date">
+            </div>
+            <div class="form-group" style="margin:0">
+              <label for="charges-period-end">Au</label>
+              <input id="charges-period-end" type="date">
+            </div>
+          </div>
+        </div>
         <article class="card spotlight-card">
-          <p class="eyebrow">Total charges du mois</p>
+          <p class="eyebrow" id="charges-total-label">Total charges du mois</p>
           <h3 id="charges-total" class="spotlight-value">0 FCFA</h3>
+          <p id="charges-period-foot" class="muted" style="font-size:0.82rem;margin:8px 0 0"></p>
         </article>
         <div id="charges-list"></div>
       </section>
@@ -2993,7 +3018,7 @@
   <script src="./cave-components.js"></script>
   <script src="./cave-extras.js"></script>
   <script src="./cave-order-pad.js"></script>
-  <script src="./app-orders.js?v=361"></script>
+  <script src="./app-orders.js?v=362"></script>
   <script src="./restaurant-module.js"></script>
 </body>
 </html>
