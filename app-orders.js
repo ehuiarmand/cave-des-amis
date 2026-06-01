@@ -7953,13 +7953,7 @@ function renderDailyStockCheck() {
   const totauxJourOpen = paymentTotals(ventesJour);
   const especesVentes = Number(totauxJourOpen["Espèces"]) || Number(totauxJourOpen["EspÃ¨ces"]) || 0;
   const especesRecouvrement = especesFromCreditRecoveriesForDate(dStr);
-  const chargesJour = recordsForSite(state.charges).filter((c) => (c.date || "").slice(0, 10) === dStr);
-  const especesCharges = chargesJour.reduce((sum, c) => (
-    normalizePaymentMethodKey(c.paiement) === normalizePaymentMethodKey("Espèces")
-    || normalizePaymentMethodKey(c.paiement) === normalizePaymentMethodKey("EspÃ¨ces")
-      ? sum + (Number(c.montant) || 0)
-      : sum
-  ), 0);
+  const especesCharges = especesChargesForAccountingDate(dStr);
   const openingCash = Number(dayBook?.openingCashFcfa) || 0;
   /** Théorique caisse = ouverture + ventes espèces + recouvrements crédit espèces + avoirs émis (monnaie gardée), charges non déduites. */
   const expectedEspeces = openingCash + especesVentes + especesRecouvrement + especesAvoirsEmisForDate(dStr);
@@ -11382,7 +11376,12 @@ function renderCharges() {
   }
   const charges = chargesForSite.slice().sort((a, b) => b.date.localeCompare(a.date));
   document.getElementById("charges-list").innerHTML = charges.length
-    ? charges.map((charge) => `<article class="list-item"><div><p class="list-item-title">${escapeHtml(charge.lib)}</p><p class="list-item-sub">${escapeHtml(charge.cat)} · ${escapeHtml(charge.paiement)}</p></div><div class="list-side"><div><p class="list-item-amount" style="color:#ff8e82">${fmt(charge.montant)} FCFA</p><p class="list-item-date">${escapeHtml(formatDateDdMmYyyy(charge.date))}</p></div>${canDeleteCharge() ? `<button class="del-btn" type="button" data-delete-type="charge" data-id="${charge.id}">Suppr.</button>` : ""}</div></article>`).join("")
+    ? charges.map((charge) => {
+      const paidNote = isSupplierCreditPayment(charge.paiement) && isSupplierCreditDebtPaid(charge)
+        ? ` · Réglé le ${formatDateDdMmYyyy(charge.supplierDebtPaidAt)} (${escapeHtml(charge.supplierDebtPaymentMethod || "")})`
+        : "";
+      return `<article class="list-item"><div><p class="list-item-title">${escapeHtml(charge.lib)}</p><p class="list-item-sub">${escapeHtml(charge.cat)} · ${escapeHtml(charge.paiement)}${paidNote}</p></div><div class="list-side"><div><p class="list-item-amount" style="color:#ff8e82">${fmt(charge.montant)} FCFA</p><p class="list-item-date">${escapeHtml(formatDateDdMmYyyy(charge.date))}</p></div>${canDeleteCharge() ? `<button class="del-btn" type="button" data-delete-type="charge" data-id="${charge.id}">Suppr.</button>` : ""}</div></article>`;
+    }).join("")
     : emptyState("Aucune charge", `Aucune dépense enregistrée pour ${period.label.toLowerCase()}.`);
   refreshCreanciersIfVisible();
 }
@@ -11394,6 +11393,118 @@ function normalizePaymentKeyForCreditor(paiement) {
 function isSupplierCreditPayment(paiement) {
   const s = normalizePaymentKeyForCreditor(paiement);
   return s.includes("credit") && s.includes("fournisseur");
+}
+
+function isSupplierCreditDebtPaid(charge) {
+  return Boolean(charge?.supplierDebtPaidAt);
+}
+
+function openSupplierCreditCharges() {
+  return recordsForSite(state.charges || []).filter(
+    (c) => isSupplierCreditPayment(c.paiement) && !isSupplierCreditDebtPaid(c),
+  );
+}
+
+function isEspecesPaymentMethod(paiement) {
+  const k = normalizePaymentMethodKey(paiement);
+  return k === normalizePaymentMethodKey("Espèces") || k === normalizePaymentMethodKey("EspÃ¨ces");
+}
+
+function especesFromSupplierDebtSettlementsForDate(dStr) {
+  return recordsForSite(state.charges || []).reduce((sum, c) => {
+    if (!isSupplierCreditDebtPaid(c)) return sum;
+    if (String(c.supplierDebtPaidAt || "").slice(0, 10) !== dStr) return sum;
+    return isEspecesPaymentMethod(c.supplierDebtPaymentMethod)
+      ? sum + (Number(c.montant) || 0)
+      : sum;
+  }, 0);
+}
+
+/** Dépenses espèces du jour : charges saisies en espèces + règlements dettes fournisseur payés ce jour en espèces. */
+function especesChargesForAccountingDate(dStr) {
+  const chargesJour = recordsForSite(state.charges).filter((c) => (c.date || "").slice(0, 10) === dStr);
+  const fromDayCharges = chargesJour.reduce(
+    (sum, c) => (isEspecesPaymentMethod(c.paiement) ? sum + (Number(c.montant) || 0) : sum),
+    0,
+  );
+  return fromDayCharges + especesFromSupplierDebtSettlementsForDate(dStr);
+}
+
+let _settleSupplierDebtChargeId = null;
+
+function initSupplierDebtSettlePaySelect() {
+  const paySel = document.getElementById("sd-settle-pay");
+  if (!paySel || paySel.dataset.initialized === "1") return;
+  paySel.innerHTML = PAYMENT_METHODS.map((m) => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("");
+  paySel.dataset.initialized = "1";
+}
+
+function openSettleSupplierDebtModal(chargeId) {
+  if (!canManage()) {
+    showToast("Accès refusé.");
+    return;
+  }
+  const charge = recordsForSite(state.charges || []).find((c) => Number(c.id) === Number(chargeId));
+  if (!charge || !isSupplierCreditPayment(charge.paiement) || isSupplierCreditDebtPaid(charge)) {
+    showToast("Dette introuvable ou déjà réglée.");
+    return;
+  }
+  initSupplierDebtSettlePaySelect();
+  _settleSupplierDebtChargeId = charge.id;
+  document.getElementById("sd-settle-lib").textContent = charge.lib || "Dette fournisseur";
+  document.getElementById("sd-settle-amount").textContent = `${fmt(charge.montant)} FCFA`;
+  document.getElementById("sd-settle-date").value = today();
+  const paySel = document.getElementById("sd-settle-pay");
+  if (paySel) paySel.value = "Espèces";
+  openModal("modal-supplier-debt-settle");
+}
+
+async function settleSupplierDebt() {
+  if (!canManage()) {
+    showToast("Accès refusé.");
+    return;
+  }
+  const chargeId = _settleSupplierDebtChargeId;
+  const charge = recordsForSite(state.charges || []).find((c) => Number(c.id) === Number(chargeId));
+  if (!charge || !isSupplierCreditPayment(charge.paiement) || isSupplierCreditDebtPaid(charge)) {
+    showToast("Dette introuvable ou déjà réglée.");
+    return;
+  }
+  const payDate = String(document.getElementById("sd-settle-date")?.value || "").slice(0, 10);
+  const payMethod = String(document.getElementById("sd-settle-pay")?.value || "Espèces").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(payDate)) {
+    showToast("Date de paiement invalide.");
+    return;
+  }
+  const amount = Number(charge.montant) || 0;
+  if (!window.confirm(
+    `Confirmer le règlement de ${fmt(amount)} FCFA (${charge.lib || "dette fournisseur"}) en ${payMethod} le ${formatDateDdMmYyyy(payDate)} ?\n\nAucune nouvelle dépense ne sera créée.`,
+  )) return;
+  const now = new Date();
+  charge.supplierDebtPaidAt = `${payDate}T${pad2(now.getHours())}:${pad2(now.getMinutes())}:${pad2(now.getSeconds())}`;
+  charge.supplierDebtPaidBy = sessionUser || "system";
+  charge.supplierDebtPaymentMethod = payMethod;
+  recordStaffAudit(
+    "update",
+    "reglement_fournisseur",
+    `Règlement dette · ${charge.lib || "fournisseur"}`,
+    `${fmt(amount)} FCFA · ${payMethod} · ${formatDateDdMmYyyy(payDate)}`,
+  );
+  const btn = document.getElementById("sd-settle-submit-btn");
+  const prev = btn ? btn.textContent : "";
+  if (btn) { btn.disabled = true; btn.textContent = "Enregistrement…"; }
+  try {
+    await persistState();
+    closeModal("modal-supplier-debt-settle");
+    _settleSupplierDebtChargeId = null;
+    renderCreanciers();
+    renderCharges();
+    renderDashboard();
+    if (currentPage === "pdj") renderPointDuJour();
+    showToast("Dette fournisseur réglée.");
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = prev; }
+  }
 }
 
 function refreshCreanciersIfVisible() {
@@ -11427,8 +11538,7 @@ function renderCreanciers() {
       </article>`).join("")
     : emptyState("Aucune commande a credit en attente", "Creez une commande fournisseur avec paiement Credit fournisseur.");
 
-  const creditCharges = recordsForSite(state.charges || [])
-    .filter((c) => isSupplierCreditPayment(c.paiement))
+  const creditCharges = openSupplierCreditCharges()
     .slice()
     .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
   const chargesTotal = creditCharges.reduce((sum, c) => sum + (Number(c.montant) || 0), 0);
@@ -11439,14 +11549,15 @@ function renderCreanciers() {
       <article class="list-item">
         <div>
           <p class="list-item-title">${escapeHtml(charge.lib)}</p>
-          <p class="list-item-sub">${escapeHtml(charge.cat)} · ${escapeHtml(charge.date ? formatDateDdMmYyyy(charge.date) : "")}</p>
+          <p class="list-item-sub">${escapeHtml(charge.cat)} · Reçu le ${escapeHtml(charge.date ? formatDateDdMmYyyy(charge.date) : "")}</p>
         </div>
-        <div class="list-side">
-          <p class="list-item-amount" style="color:#ff8e82">${fmt(charge.montant)} FCFA</p>
+        <div class="list-side" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <p class="list-item-amount" style="color:#ff8e82;margin:0">${fmt(charge.montant)} FCFA</p>
+          ${canManage() ? `<button class="btn btn-primary mini-btn" type="button" data-settle-supplier-debt="${escapeHtml(String(charge.id))}">Régler</button>` : ""}
           ${canDeleteCharge() ? `<button class="del-btn" type="button" data-delete-type="charge" data-id="${charge.id}">Suppr.</button>` : ""}
         </div>
       </article>`).join("")
-    : emptyState("Aucune dette fournisseur en charges", "Une charge apparait quand vous receptionnez une commande au credit.");
+    : emptyState("Aucune dette fournisseur ouverte", "Les dettes reglees disparaissent d'ici. Le cout reste visible dans Charges a la date de reception.");
 }
 
 function renderUserSiteCheckboxes() {
@@ -13090,12 +13201,7 @@ async function performAutoClotureBackground(dStr) {
   const caCreances = totalCreditOutstanding();
   const especesVentes = Number(totauxJour["Espèces"]) || Number(totauxJour["EspÃ¨ces"]) || 0;
   const especesRecouvrement = especesFromCreditRecoveriesForDate(dStr);
-  const chargesJour = recordsForSite(state.charges).filter((c) => (c.date || "").slice(0, 10) === dStr);
-  const especesCharges = chargesJour.reduce((sum, c) => (
-    normalizePaymentMethodKey(c.paiement) === normalizePaymentMethodKey("Espèces")
-    || normalizePaymentMethodKey(c.paiement) === normalizePaymentMethodKey("EspÃ¨ces")
-      ? sum + (Number(c.montant) || 0) : sum
-  ), 0);
+  const especesCharges = especesChargesForAccountingDate(dStr);
   const openingCash = Number(dayBook?.openingCashFcfa) || 0;
   const expectedEspecesCash = openingCash + especesVentes + especesRecouvrement + especesAvoirsEmisForDate(dStr);
   const closingCashFcfa = expectedEspecesCash;
@@ -16595,13 +16701,7 @@ function closureCashSnapshot(dStr) {
   const caCreances = totalCreditOutstanding();
   const especesVentes = Number(totauxJour["Espèces"]) || Number(totauxJour["EspÃ¨ces"]) || 0;
   const especesRecouvrement = especesFromCreditRecoveriesForDate(dStr);
-  const chargesJour = recordsForSite(state.charges).filter((c) => (c.date || "").slice(0, 10) === dStr);
-  const especesCharges = chargesJour.reduce((sum, c) => (
-    normalizePaymentMethodKey(c.paiement) === normalizePaymentMethodKey("Espèces")
-    || normalizePaymentMethodKey(c.paiement) === normalizePaymentMethodKey("EspÃ¨ces")
-      ? sum + (Number(c.montant) || 0)
-      : sum
-  ), 0);
+  const especesCharges = especesChargesForAccountingDate(dStr);
   const dayBook = dayBookFor(dStr, currentSiteId());
   const openingCash = Number(dayBook?.openingCashFcfa) || 0;
   /** Même règle que l'écran PDJ : ouverture + ventes espèces + recouvrement crédit espèces + avoirs émis (monnaie gardée). */
@@ -16688,13 +16788,7 @@ async function closeAccountingDay() {
   const caCreances = totalCreditOutstanding();
   const especesVentes = Number(totauxJour["Espèces"]) || Number(totauxJour["EspÃ¨ces"]) || 0;
   const especesRecouvrement = especesFromCreditRecoveriesForDate(dStr);
-  const chargesJour = recordsForSite(state.charges).filter((c) => (c.date || "").slice(0, 10) === dStr);
-  const especesCharges = chargesJour.reduce((sum, c) => (
-    normalizePaymentMethodKey(c.paiement) === normalizePaymentMethodKey("Espèces")
-    || normalizePaymentMethodKey(c.paiement) === normalizePaymentMethodKey("EspÃ¨ces")
-      ? sum + (Number(c.montant) || 0)
-      : sum
-  ), 0);
+  const especesCharges = especesChargesForAccountingDate(dStr);
   const openingCash = Number(dayBook?.openingCashFcfa) || 0;
   /** Même règle que l'écran PDJ : ouverture + ventes espèces + recouvrement crédit espèces + avoirs émis (monnaie gardée). */
   const expectedEspecesCash = openingCash + especesVentes + especesRecouvrement + especesAvoirsEmisForDate(dStr);
@@ -21457,6 +21551,12 @@ document.getElementById("fab-btn").addEventListener("click", () => {
     if (btn && !btn.classList.contains("hidden-by-role")) setParamsSubTab(btn.dataset.subtabParams);
   });
   document.getElementById("goto-client-debtors-btn")?.addEventListener("click", () => navigateToClientCredits());
+  document.getElementById("creanciers-charges-list")?.addEventListener("click", (event) => {
+    const btn = event.target.closest("[data-settle-supplier-debt]");
+    if (!btn) return;
+    openSettleSupplierDebtModal(btn.getAttribute("data-settle-supplier-debt"));
+  });
+  document.getElementById("sd-settle-submit-btn")?.addEventListener("click", () => settleSupplierDebt().catch(handleApiError));
   document.getElementById("purchase-new-btn")?.addEventListener("click", () => openPurchaseForm());
   document.getElementById("purchase-add-line-btn")?.addEventListener("click", () => addPurchaseLine());
   document.getElementById("purchase-save-btn")?.addEventListener("click", () => savePurchaseOrder().catch(handleApiError));

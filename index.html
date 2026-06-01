@@ -1137,14 +1137,14 @@
               <strong id="creanciers-kpi-pending" class="stock-kpi-val">0 FCFA</strong>
             </div>
             <div class="stock-kpi">
-              <span class="stock-kpi-label">Charges credit fournisseur (historique)</span>
+              <span class="stock-kpi-label">Dettes fournisseurs ouvertes</span>
               <strong id="creanciers-kpi-charges" class="stock-kpi-val">0 FCFA</strong>
             </div>
           </div>
           <div class="section-head" style="margin-top:8px"><h4 style="margin:0;font-size:1rem">Commandes en attente</h4></div>
           <div id="creanciers-pending-list"></div>
-          <div class="section-head" style="margin-top:18px"><h4 style="margin:0;font-size:1rem">Dettes enregistrees en charges</h4></div>
-          <p class="muted" style="font-size:0.82rem;margin-bottom:8px">Apres reception d&apos;une commande au credit, une charge est creee avec ce mode de paiement.</p>
+          <div class="section-head" style="margin-top:18px"><h4 style="margin:0;font-size:1rem">Dettes a regler</h4></div>
+          <p class="muted" style="font-size:0.82rem;margin-bottom:8px">A la reception au credit, le cout marchandise est enregistre une seule fois. Le bouton <strong>Regler</strong> trace le paiement au fournisseur sans recreer une depense (pas de double comptage).</p>
           <div id="creanciers-charges-list"></div>
         </article>
         <article class="card hidden" id="stock-card-casiers" style="margin-bottom:14px">
@@ -2514,6 +2514,33 @@
     </div>
   </div>
 
+  <div id="modal-supplier-debt-settle" class="modal-overlay" aria-hidden="true">
+    <div class="modal">
+      <div class="modal-handle"></div>
+      <div class="section-head">
+        <h3>Regler une dette fournisseur</h3>
+        <button class="icon-btn close-modal" data-close="modal-supplier-debt-settle" type="button">Fermer</button>
+      </div>
+      <p class="muted" style="margin:0 0 14px;font-size:0.88rem;line-height:1.45">Le montant reste comptabilise a la date de reception. Seul le paiement (date et mode) est ajoute — pas de nouvelle ligne de depense.</p>
+      <div class="inline-card" style="margin-bottom:14px">
+        <p class="list-item-title" id="sd-settle-lib" style="margin:0 0 4px"></p>
+        <p class="list-item-amount" id="sd-settle-amount" style="margin:0;color:#ff8e82"></p>
+      </div>
+      <div class="form-group">
+        <label for="sd-settle-date">Date du paiement</label>
+        <input id="sd-settle-date" type="date">
+      </div>
+      <div class="form-group">
+        <label for="sd-settle-pay">Mode de paiement</label>
+        <select id="sd-settle-pay"></select>
+      </div>
+      <div class="button-stack">
+        <button id="sd-settle-submit-btn" class="btn btn-primary" type="button">Confirmer le reglement</button>
+        <button class="btn btn-outline close-modal" data-close="modal-supplier-debt-settle" type="button">Annuler</button>
+      </div>
+    </div>
+  </div>
+
   <div id="modal-purchase-receive" class="modal-overlay" aria-hidden="true">
     <div class="modal" style="max-width:560px">
       <div class="modal-handle"></div>
@@ -3018,7 +3045,7 @@
   <script src="./cave-components.js"></script>
   <script src="./cave-extras.js"></script>
   <script src="./cave-order-pad.js"></script>
-  <script src="./app-orders.js?v=362"></script>
+  <script src="./app-orders.js?v=363"></script>
   <script src="./restaurant-module.js"></script>
 </body>
 </html>
