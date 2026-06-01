@@ -5142,20 +5142,23 @@ function syncParamsTabsAccess() {
   if (!root) return;
   const serveuse = isServeuseAccount();
   const gerant = isGerantRole();
-  const profilOnly = serveuse || gerant;
 
-  root.querySelector(".params-subtabs")?.classList.toggle("hidden-by-role", profilOnly);
+  root.querySelector(".params-subtabs")?.classList.toggle("hidden-by-role", serveuse);
 
   root.querySelectorAll("[data-subtab-params]").forEach((btn) => {
     const tab = btn.dataset.subtabParams;
     let hide = false;
-    if (profilOnly) hide = tab !== "profil";
+    if (serveuse) hide = tab !== "profil";
+    else if (gerant) hide = tab !== "profil" && tab !== "correction";
     else if (tab === "sauvegarde") hide = !canManageMaquisBackups();
     else if (tab === "catalogue" || tab === "acces" || tab === "admin") hide = !canAnyAdmin();
     btn.classList.toggle("hidden-by-role", hide);
   });
 
-  if (profilOnly && currentPage === "params" && paramsSubTab !== "profil") {
+  if (serveuse && currentPage === "params" && paramsSubTab !== "profil") {
+    setParamsSubTab("profil");
+  }
+  if (gerant && currentPage === "params" && paramsSubTab !== "profil" && paramsSubTab !== "correction") {
     setParamsSubTab("profil");
   }
 }
@@ -12220,17 +12223,18 @@ async function deleteSite(siteId) {
 
 // ─── Correction de facture ───────────────────────────────────────────────────
 
-const CORRECTION_AUDIT_ENTITIES = new Set(["correction_paiement", "correction_quantite"]);
+const CORRECTION_AUDIT_ENTITIES = new Set(["correction_paiement", "correction_quantite", "correction_article"]);
 let _correctionApplyBusy = false;
 
 function correctionAuditTypeLabel(entity) {
   if (entity === "correction_paiement") return "Paiement";
   if (entity === "correction_quantite") return "Quantités";
+  if (entity === "correction_article") return "Article";
   return staffAuditEntityLabel(entity);
 }
 
 function factureFromCorrectionAuditSummary(summary) {
-  const m = String(summary || "").match(/Correction (?:paiement|qt[eé]s)\s+(\S+)/i);
+  const m = String(summary || "").match(/Correction (?:paiement|qt[eé]s|article)\s+(\S+)/i);
   return m ? m[1].replace(/[.:,;]$/, "") : "";
 }
 
@@ -12267,7 +12271,7 @@ function renderCorrectionHistory() {
   const container = document.getElementById("corr-history");
   const meta = document.getElementById("corr-history-meta");
   if (!container) return;
-  if (!canAnyAdmin()) {
+  if (!canAnyAdmin() && !isGerantRole()) {
     container.innerHTML = "";
     if (meta) meta.textContent = "—";
     return;
@@ -12323,6 +12327,7 @@ function renderCorrectionHistory() {
           ${opt("all", "Tous", ui.type)}
           ${opt("correction_paiement", "Paiement", ui.type)}
           ${opt("correction_quantite", "Quantités", ui.type)}
+          ${opt("correction_article", "Article", ui.type)}
         </select>
       </div>
       <div style="display:flex;gap:8px;align-items:center;margin-left:auto">
@@ -12399,7 +12404,17 @@ function renderCorrectionResult(factureNum, ventes) {
   const currentPay = paymentLabel(firstV) || firstV.paiement || "—";
   const isMultiPay = ventes.some((v) => (v.paiementDetails || []).length > 1);
 
-  const lines = ventes.map((v, i) => `
+  const siteArticles = (state.stock || [])
+    .filter((s) => !currentSiteId() || String(s.siteId || "") === String(currentSiteId()))
+    .map((s) => s.article)
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b, "fr", { sensitivity: "base" }));
+
+  const lines = ventes.map((v, i) => {
+    const articleOptions = siteArticles.map((a) =>
+      `<option value="${escapeHtml(a)}" ${a === v.article ? "selected" : ""}>${escapeHtml(a)}</option>`
+    ).join("");
+    return `
     <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line);flex-wrap:wrap">
       <div style="flex:1;min-width:120px">
         <strong>${escapeHtml(v.article)}</strong>
@@ -12411,7 +12426,15 @@ function renderCorrectionResult(factureNum, ventes) {
                style="width:72px;padding:6px 10px;border-radius:8px;border:1px solid var(--line);font-size:0.93rem"
                data-vente-id="${escapeHtml(String(v.id))}">
       </div>
-    </div>`).join("");
+      <div style="display:flex;align-items:center;gap:6px">
+        <label style="font-size:0.85rem;color:var(--muted)">Article :</label>
+        <select id="corr-art-${i}" data-vente-id="${escapeHtml(String(v.id))}"
+                style="padding:6px 10px;border-radius:8px;border:1px solid var(--line);font-size:0.88rem;max-width:180px">
+          ${articleOptions}
+        </select>
+      </div>
+    </div>`;
+  }).join("");
 
   const payOptions = PAYMENT_METHODS.map(
     (m) => `<option value="${escapeHtml(m)}" ${m === currentPay ? "selected" : ""}>${escapeHtml(m)}</option>`,
@@ -12446,10 +12469,12 @@ function renderCorrectionResult(factureNum, ventes) {
     <div class="button-stack">
       <button id="corr-apply-pay-btn" class="btn btn-primary" type="button">Appliquer correction paiement</button>
       <button id="corr-apply-qty-btn" class="btn btn-outline" type="button">Appliquer correction quantités</button>
+      <button id="corr-apply-art-btn" class="btn btn-outline" type="button">Appliquer correction article</button>
     </div>`;
 
   const payBtn = document.getElementById("corr-apply-pay-btn");
   const qtyBtn = document.getElementById("corr-apply-qty-btn");
+  const artBtn = document.getElementById("corr-apply-art-btn");
   if (payBtn) {
     payBtn.onclick = () => applyPaymentCorrection(factureNum, ventes).catch(handleApiError);
     payBtn.disabled = _correctionApplyBusy;
@@ -12457,6 +12482,10 @@ function renderCorrectionResult(factureNum, ventes) {
   if (qtyBtn) {
     qtyBtn.onclick = () => applyQtyCorrection(factureNum, ventes).catch(handleApiError);
     qtyBtn.disabled = _correctionApplyBusy;
+  }
+  if (artBtn) {
+    artBtn.onclick = () => applyArticleCorrection(factureNum, ventes).catch(handleApiError);
+    artBtn.disabled = _correctionApplyBusy;
   }
 }
 
@@ -12580,6 +12609,97 @@ async function applyQtyCorrection(factureNum, originalVentes) {
     _correctionApplyBusy = false;
     document.getElementById("corr-apply-pay-btn")?.removeAttribute("disabled");
     document.getElementById("corr-apply-qty-btn")?.removeAttribute("disabled");
+  }
+}
+
+async function applyArticleCorrection(factureNum, originalVentes) {
+  if (_correctionApplyBusy) return;
+  const motif = String(document.getElementById("corr-motif")?.value || "").trim();
+  if (!motif) { showToast("Le motif est obligatoire."); return; }
+
+  const changes = [];
+  originalVentes.forEach((v, i) => {
+    const sel = document.getElementById(`corr-art-${i}`);
+    if (!sel) return;
+    const newArticle = sel.value;
+    if (!newArticle || newArticle === v.article) return;
+    changes.push({ v, oldArticle: v.article, newArticle });
+  });
+  if (!changes.length) { showToast("Aucun article modifié."); return; }
+
+  _correctionApplyBusy = true;
+  document.getElementById("corr-apply-pay-btn")?.setAttribute("disabled", "disabled");
+  document.getElementById("corr-apply-qty-btn")?.setAttribute("disabled", "disabled");
+  document.getElementById("corr-apply-art-btn")?.setAttribute("disabled", "disabled");
+  try {
+    const siteId = currentSiteId();
+    const idMap = new Map(changes.map((c) => [c.v.id, c]));
+
+    changes.forEach(({ v, oldArticle, newArticle }) => {
+      if (v.noStock) return;
+      const qty = Number(v.qty) || 0;
+      if (!qty) return;
+
+      const oldItem = stockItemForArticle(oldArticle, siteId);
+      const newItem = stockItemForArticle(newArticle, siteId);
+
+      if (oldItem) {
+        const oldPack = linePackSize(v, oldItem);
+        const oldBottles = qty * oldPack;
+        oldItem.sorties = Math.max(0, (Number(oldItem.sorties) || 0) - oldBottles);
+        restorePhysicalStock(oldItem, oldBottles);
+        restoreArticleCasiers(oldItem.article, oldBottles, { motif: "correction", commentaire: `Correction article ${factureNum} : → ${newArticle}` });
+      }
+
+      if (newItem) {
+        const newPack = linePackSize({ ...v, article: newArticle }, newItem);
+        const newBottles = qty * newPack;
+        newItem.sorties = (Number(newItem.sorties) || 0) + newBottles;
+        consumePhysicalStock(newItem, newBottles);
+        drainArticleCasiers(newItem.article, newBottles, { motif: "correction", commentaire: `Correction article ${factureNum} : ${oldArticle} →` });
+      }
+    });
+
+    state.ventes = (state.ventes || []).map((v) => {
+      const c = idMap.get(v.id);
+      if (!c) return v;
+      const newItem = stockItemForArticle(c.newArticle, siteId);
+      const { prixInt } = resolveItemPrices(newItem || {});
+      const newPrix = prixInt || v.prix;
+      const newTotal = (Number(v.qty) || 0) * newPrix;
+      const updated = { ...v, article: c.newArticle, prix: newPrix, total: newTotal };
+      syncVentePaymentDetails(updated, calcNet(updated));
+      return updated;
+    });
+
+    const desc = changes.map((c) => `${c.oldArticle} → ${c.newArticle}`).join(", ");
+    recordStaffAudit("update", "correction_article",
+      `Correction article ${factureNum} : ${desc}`,
+      `Motif : ${motif}`);
+
+    const datesToRefresh = [...new Set(changes.map((c) => (c.v.date || "").slice(0, 10)).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)))];
+    const stockChecksDirty = datesToRefresh.some((d) => refreshStockCheckAfterVenteCorrection(d, siteId));
+    await persistState({
+      ventes: state.ventes,
+      stock: state.stock,
+      casiers: state.casiers,
+      casierMouvements: state.casierMouvements,
+      staffAuditLog: state.staffAuditLog,
+      nextId: state.nextId,
+      ...(stockChecksDirty ? { stockChecks: state.stockChecks } : {}),
+    });
+    showToast(`Articles de ${factureNum} corrigés.`);
+    const refreshed = (state.ventes || []).filter(
+      (v) => String(v.factureNumber || "").trim() === factureNum && v.siteId === currentSiteId(),
+    );
+    if (refreshed.length) renderCorrectionResult(factureNum, refreshed);
+    else document.getElementById("corr-result").innerHTML = `<p class="muted" style="padding:10px 0">Facture introuvable après correction.</p>`;
+    renderCorrectionHistory();
+  } finally {
+    _correctionApplyBusy = false;
+    document.getElementById("corr-apply-pay-btn")?.removeAttribute("disabled");
+    document.getElementById("corr-apply-qty-btn")?.removeAttribute("disabled");
+    document.getElementById("corr-apply-art-btn")?.removeAttribute("disabled");
   }
 }
 
