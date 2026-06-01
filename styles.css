@@ -1232,6 +1232,7 @@ textarea { font: inherit; }
 .any-admin.hidden-by-role,
 .superadmin-only.hidden-by-role,
 .global-superadmin-only.hidden-by-role,
+.maquis-backup-admin.hidden-by-role,
 .pdj-accounting-only.hidden-by-role,
 .pdj-accounting-open-only.hidden-by-role,
 .pdj-accounting-close-only.hidden-by-role,
