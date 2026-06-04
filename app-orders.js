@@ -12084,6 +12084,7 @@ function renderUsersList() {
         </div>
         <div style="display:flex;flex-direction:column;gap:5px;flex-shrink:0">
           ${canEdit ? `<button type="button" class="mini-btn" data-edit-user="${escapeHtml(user.username)}">Modifier</button>` : ""}
+          ${canEdit && !isSelf ? `<button type="button" class="mini-btn" data-reset-pwd-user="${escapeHtml(user.username)}">Réinitialiser MDP</button>` : ""}
           ${canDelete ? `<button type="button" class="mini-btn mini-btn--warn" data-delete-user="${escapeHtml(user.username)}">Supprimer</button>` : ""}
           ${user.twoFactorEnabled
             ? `<button type="button" class="mini-btn" data-disable-2fa="${escapeHtml(user.username)}">Désactiver 2FA</button>`
@@ -12165,6 +12166,16 @@ async function addUser() {
   resetUserForm();
   renderUsersList();
   showToast(editUsername ? `Utilisateur "${username}" modifie.` : `Utilisateur "${username}" ajoute.`);
+}
+
+async function resetUserPassword(username) {
+  const newPwd = window.prompt(`Nouveau mot de passe pour "${username}" (min. 6 caractères) :`);
+  if (newPwd === null) return;
+  if (!newPwd || newPwd.length < 6) { showToast("Mot de passe trop court (min. 6 caractères)."); return; }
+  const users = state.auth.users || [];
+  const newUsers = users.map((u) => u.username === username ? { ...u, password: newPwd, mustChangePassword: true } : u);
+  await persistState({ auth: { users: newUsers } });
+  showToast(`Mot de passe de "${username}" réinitialisé. Il devra le changer à la prochaine connexion.`);
 }
 
 async function deleteUser(username) {
@@ -20960,6 +20971,18 @@ function attachEvents() {
   document.addEventListener("touchmove", _markUserInteraction, { passive: true });
   document.addEventListener("keydown", _markUserInteraction, { passive: true });
   document.getElementById("login-form").addEventListener("submit", handleLoginSubmit);
+  document.getElementById("toggle-login-password")?.addEventListener("click", () => {
+    const inp = document.getElementById("login-password");
+    const btn = document.getElementById("toggle-login-password");
+    if (!inp) return;
+    const show = inp.type === "password";
+    inp.type = show ? "text" : "password";
+    btn.textContent = show ? "🙈" : "👁";
+    btn.setAttribute("aria-label", show ? "Masquer le mot de passe" : "Afficher le mot de passe");
+  });
+  document.getElementById("forgot-password-btn")?.addEventListener("click", () => {
+    document.getElementById("forgot-password-msg")?.classList.toggle("hidden");
+  });
   document.getElementById("logout-btn").addEventListener("click", () => logout());
   document.getElementById("site-switcher").addEventListener("change", () => {
     const siteId = document.getElementById("site-switcher").value;
@@ -22141,6 +22164,11 @@ document.getElementById("fab-btn").addEventListener("click", () => {
     const editUserBtn = event.target.closest("[data-edit-user]");
     if (editUserBtn) {
       editUser(editUserBtn.dataset.editUser);
+      return;
+    }
+    const resetPwdBtn = event.target.closest("[data-reset-pwd-user]");
+    if (resetPwdBtn) {
+      resetUserPassword(resetPwdBtn.dataset.resetPwdUser).catch(handleApiError);
       return;
     }
     const autoFillBtn = event.target.closest("[data-auto-fill-fridge]");

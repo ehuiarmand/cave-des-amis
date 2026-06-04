@@ -37,7 +37,18 @@
         <input id="login-username" name="username" type="text" placeholder="Nom d'utilisateur" autocomplete="username" required>
 
         <label for="login-password">Mot de passe</label>
-        <input id="login-password" name="password" type="password" placeholder="Mot de passe" autocomplete="current-password" required>
+        <div style="position:relative">
+          <input id="login-password" name="password" type="password" placeholder="Mot de passe" autocomplete="current-password" required style="width:100%;padding-right:44px;box-sizing:border-box">
+          <button type="button" id="toggle-login-password" aria-label="Afficher/masquer le mot de passe"
+            style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;padding:4px;color:var(--muted,#888);font-size:1.1rem;line-height:1">👁</button>
+        </div>
+        <p style="text-align:right;margin:4px 0 0">
+          <button type="button" id="forgot-password-btn" style="background:none;border:none;color:var(--primary,#b07d2e);font-size:0.83rem;cursor:pointer;padding:0;text-decoration:underline">Mot de passe oublié ?</button>
+        </p>
+        <div id="forgot-password-msg" class="hidden" style="background:#fef3c7;border-radius:8px;padding:10px 12px;font-size:0.85rem;margin-top:6px;line-height:1.5">
+          Contactez votre <strong>gérante ou administrateur</strong>.<br>
+          L'admin peut réinitialiser votre mot de passe dans <strong>Paramètres → Accès → Réinitialiser MDP</strong>.
+        </div>
 
         <div id="totp-section" class="hidden">
           <label for="login-totp">Code d'authentification (6 chiffres)</label>
