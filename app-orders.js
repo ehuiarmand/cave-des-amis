@@ -5274,7 +5274,7 @@ function applyPermissionVisibility() {
 
   // Onglet Accès dans Paramètres : contrôlé par permission "utilisateurs"
   const accesTabs = document.querySelectorAll("[data-subtab-params='acces'], [data-params-panel='acces']");
-  accesTabs.forEach((el) => el.classList.toggle("hidden-by-role", !hasPermission("utilisateurs")));
+  accesTabs.forEach((el) => el.classList.toggle("hidden-by-role", !isGerantRole() && !hasPermission("utilisateurs")));
 
   // Sections avec data-require-perm="..."
   document.querySelectorAll("[data-require-perm]").forEach((el) => {
@@ -5295,7 +5295,7 @@ function syncParamsTabsAccess() {
     const tab = btn.dataset.subtabParams;
     let hide = false;
     if (serveuse) hide = tab !== "profil";
-    else if (gerant) hide = tab !== "profil" && tab !== "correction";
+    else if (gerant) hide = tab !== "profil" && tab !== "correction" && tab !== "acces";
     else if (tab === "sauvegarde") hide = !canManageMaquisBackups();
     else if (tab === "catalogue" || tab === "acces" || tab === "admin") hide = !canAnyAdmin();
     btn.classList.toggle("hidden-by-role", hide);
@@ -5304,7 +5304,7 @@ function syncParamsTabsAccess() {
   if (serveuse && currentPage === "params" && paramsSubTab !== "profil") {
     setParamsSubTab("profil");
   }
-  if (gerant && currentPage === "params" && paramsSubTab !== "profil" && paramsSubTab !== "correction") {
+  if (gerant && currentPage === "params" && !["profil", "correction", "acces"].includes(paramsSubTab)) {
     setParamsSubTab("profil");
   }
 }
