@@ -3055,12 +3055,57 @@ function lastSellingServeuseToday(siteId = currentSiteId()) {
   return String(latest.serveur || latest.server || "").trim().toLowerCase() || null;
 }
 
-/** Vrai si la serveuse courante est en relais de service (dernière vente du jour = elle, ou aucune vente). */
+/**
+ * Qui est actuellement en service ? Prend en compte la dernière vente ET
+ * les prises de service explicites (bouton "Prendre le service").
+ * La plus récente des deux actions gagne.
+ * Retourne null si personne n'a rien fait aujourd'hui.
+ */
+function currentServeuseOnDuty(siteId = currentSiteId()) {
+  const d = workingDate(siteId);
+  if (!d) return null;
+  const sid = String(siteId || "");
+
+  // Dernière vente du jour
+  const todaySales = (state.ventes || []).filter(
+    (v) => String(v.siteId || "") === sid && String(v.date || "").slice(0, 10) === d,
+  );
+  let lastSaleTs = "";
+  let lastSeller = null;
+  if (todaySales.length) {
+    const latest = todaySales.reduce((best, v) =>
+      String(v.soldAt || v.date || "") > String(best.soldAt || best.date || "") ? v : best
+    );
+    lastSaleTs = String(latest.soldAt || latest.date || "");
+    lastSeller = String(latest.serveur || latest.server || "").trim().toLowerCase() || null;
+  }
+
+  // Dernière prise de service explicite du jour
+  const todayRelay = (state.serviceRelay || []).filter(
+    (r) => String(r.siteId || "") === sid && String(r.date || "").slice(0, 10) === d,
+  );
+  let lastRelayTs = "";
+  let relayUser = null;
+  if (todayRelay.length) {
+    const latest = todayRelay.reduce((best, r) =>
+      String(r.takenAt || "") > String(best.takenAt || "") ? r : best
+    );
+    lastRelayTs = String(latest.takenAt || "");
+    relayUser = String(latest.username || "").trim().toLowerCase() || null;
+  }
+
+  if (!lastSeller && !relayUser) return null;
+  if (!lastSeller) return relayUser;
+  if (!relayUser) return lastSeller;
+  return lastRelayTs > lastSaleTs ? relayUser : lastSeller;
+}
+
+/** Vrai si la serveuse courante est en service (via vente ou prise explicite). */
 function serveuseIsOnSalesRelay(siteId = currentSiteId()) {
   if (!staffRequiresShiftWindowForSales()) return false;
-  const last = lastSellingServeuseToday(siteId);
-  if (last === null) return true; // personne n'a encore vendu → n'importe qui peut prendre service
-  return last === String(sessionUser || "").trim().toLowerCase();
+  const current = currentServeuseOnDuty(siteId);
+  if (current === null) return true; // personne → n'importe qui peut démarrer
+  return current === String(sessionUser || "").trim().toLowerCase();
 }
 
 /** Créneau planning obligatoire pour vendre : serveuses uniquement (gérant / admin jamais bloqués). */
@@ -3604,17 +3649,31 @@ function renderPlanningMine() {
   const rows = myWorkShiftsInWeek(bounds);
   const totalMins = rows.reduce((acc, s) => acc + workShiftDurationMinutes(s), 0);
   const periodLab = bounds.start === bounds.end ? "ce jour" : "cette période";
-  const restToday = serveusePlanningBlocksSale(today(), currentSiteId());
+  const siteId = currentSiteId();
+  const restToday = serveusePlanningBlocksSale(today(), siteId);
+  const onDutyUser = currentServeuseOnDuty(siteId);
+  const meUser = String(sessionUser || "").trim().toLowerCase();
+  const isRestDay = !!restToday && serveuseIsRestDay(today(), siteId);
+  const canSell = staffIsOnDutyNow(siteId);
+  const anotherIsOnDuty = !isRestDay && !canSell && !!onDutyUser && onDutyUser !== meUser && isServeuseAccount();
+
   if (sumEl) {
-    if (restToday) {
+    if (anotherIsOnDuty) {
+      const onDutyName = escapeHtml(staffDisplayName(onDutyUser));
+      sumEl.innerHTML = `<div class="inline-card" style="border-left:3px solid #e08a1e;padding:10px 12px;font-size:0.88rem">
+        <strong>${onDutyName} est en service</strong>
+        <p style="margin:4px 0 8px;font-size:0.83rem;color:var(--muted)">Prenez le service pour pouvoir vendre.</p>
+        <button type="button" class="btn btn-sm btn-outline" id="take-service-btn">Prendre le service</button>
+      </div>`;
+      document.getElementById("take-service-btn")?.addEventListener("click", () => takeService().catch(handleApiError));
+    } else if (restToday) {
       const _openSvc = serveuseHasOpenServiceToday();
       sumEl.innerHTML = `<div class="inline-card ventes-rest-day-alert" role="alert">
         <strong>Hors service</strong>
         <p class="ventes-rest-day-alert-msg">${escapeHtml(restToday)}</p>
         ${_openSvc ? `<button type="button" class="btn btn-sm btn-primary" style="margin-top:8px" onclick="navigate('pdj')">Point du jour — Fin de service</button>` : ""}
       </div>`;
-    } else if (staffIsOnDutyNow()) {
-      const siteId = currentSiteId();
+    } else if (canSell) {
       const active = activeWorkShiftsNow(sessionUser, siteId);
       if (!active.length && staffInShiftBridgeGap(sessionUser, siteId)) {
         const todaySh = workShiftsForUserOnDate(sessionUser, siteId, today());
@@ -3623,8 +3682,7 @@ function renderPlanningMine() {
           <strong>Relais de service</strong> · entre la fin de nuit et ${escapeHtml(nextWin)} (ventes et encaissements autorisés)
         </div>`;
       } else if (!active.length && serveuseIsOnSalesRelay(siteId)) {
-        const last = lastSellingServeuseToday(siteId);
-        const label = last ? "depuis votre dernière vente" : "aucune vente enregistrée ce jour";
+        const label = onDutyUser ? "depuis votre dernière vente" : "aucune vente enregistrée ce jour";
         sumEl.innerHTML = `<div class="inline-card" style="border-left:3px solid #72d7a9;padding:10px 12px;font-size:0.88rem">
           <strong>En service</strong> · ${escapeHtml(label)}
         </div>`;
@@ -3654,6 +3712,36 @@ function renderPlanningMine() {
   listEl.innerHTML = rows.map((s) => renderPlanningShiftRow(s)).join("");
 }
 
+async function takeService() {
+  const siteId = currentSiteId();
+  const d = workingDate(siteId);
+  if (!d) return;
+  const onDuty = currentServeuseOnDuty(siteId);
+  const me = String(sessionUser || "").trim().toLowerCase();
+  if (onDuty === me) return;
+  const fromName = onDuty ? staffDisplayName(onDuty) : null;
+  const msg = fromName
+    ? `Prendre le service de ${fromName} ?`
+    : "Démarrer le service ?";
+  if (!window.confirm(msg)) return;
+  if (!Array.isArray(state.serviceRelay)) state.serviceRelay = [];
+  state.serviceRelay.push({
+    id: Date.now(),
+    siteId,
+    date: d,
+    username: me,
+    takenAt: new Date().toISOString(),
+    takenFrom: onDuty || null,
+  });
+  recordStaffAudit("update", "planning",
+    `Prise de service`,
+    fromName ? `${me} a pris le service de ${fromName}` : `${me} a démarré le service`);
+  await persistState({ serviceRelay: state.serviceRelay, staffAuditLog: state.staffAuditLog });
+  showToast(fromName ? `Service pris de ${fromName}.` : "Service démarré.");
+  renderPlanningMine();
+  if (canManageTeamSchedule()) renderPlanningTeam();
+}
+
 function renderPlanningTeam() {
   if (!canManageTeamSchedule()) return;
   const bounds = planningDisplayBounds();
@@ -3666,15 +3754,15 @@ function renderPlanningTeam() {
 
   if (serviceNowEl) {
     const siteId = currentSiteId();
-    const lastSeller = lastSellingServeuseToday(siteId);
-    if (lastSeller) {
-      const displayName = escapeHtml(staffDisplayName(lastSeller));
+    const onDuty = currentServeuseOnDuty(siteId);
+    if (onDuty) {
+      const displayName = escapeHtml(staffDisplayName(onDuty));
       serviceNowEl.innerHTML = `<div class="inline-card" style="border-left:3px solid #72d7a9;padding:10px 12px;font-size:0.88rem">
-        <strong>En service actuellement</strong> · ${displayName} (dernière vente du jour)
+        <strong>En service actuellement</strong> · ${displayName}
       </div>`;
     } else {
       serviceNowEl.innerHTML = `<div class="inline-card" style="padding:10px 12px;font-size:0.88rem;color:var(--muted)">
-        Aucune vente enregistrée aujourd'hui — le service n'a pas encore commencé.
+        Le service n'a pas encore commencé aujourd'hui.
       </div>`;
     }
   }
