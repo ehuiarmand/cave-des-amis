@@ -3656,15 +3656,19 @@ function renderPlanningMine() {
   const onDutyUser = currentServeuseOnDuty(siteId);
   const meUser = String(sessionUser || "").trim().toLowerCase();
   const canSell = staffIsOnDutyNow(siteId);
-  const anotherIsOnDuty = !canSell && !!onDutyUser && onDutyUser !== meUser && isServeuseAccount();
+  const showTakeServiceBtn = !canSell && isServeuseAccount();
 
   if (sumEl) {
-    if (anotherIsOnDuty) {
-      const onDutyName = escapeHtml(staffDisplayName(onDutyUser));
+    if (showTakeServiceBtn) {
+      const onDutyName = onDutyUser && onDutyUser !== meUser ? escapeHtml(staffDisplayName(onDutyUser)) : null;
+      const title = onDutyName ? `${onDutyName} est en service` : "Service non démarré";
+      const btnLabel = onDutyName ? "Prendre le service" : "Démarrer le service";
+      const _openSvc = serveuseHasOpenServiceToday();
       sumEl.innerHTML = `<div class="inline-card" style="border-left:3px solid #e08a1e;padding:10px 12px;font-size:0.88rem">
-        <strong>${onDutyName} est en service</strong>
-        <p style="margin:4px 0 8px;font-size:0.83rem;color:var(--muted)">Prenez le service pour pouvoir vendre.</p>
-        <button type="button" class="btn btn-sm btn-outline" id="take-service-btn">Prendre le service</button>
+        <strong>${title}</strong>
+        <p style="margin:4px 0 8px;font-size:0.83rem;color:var(--muted)">Cliquez pour pouvoir vendre.</p>
+        <button type="button" class="btn btn-sm btn-outline" id="take-service-btn">${btnLabel}</button>
+        ${_openSvc ? `<button type="button" class="btn btn-sm btn-primary" style="margin-left:8px" onclick="navigate('pdj')">Point du jour — Fin de service</button>` : ""}
       </div>`;
       document.getElementById("take-service-btn")?.addEventListener("click", () => takeService().catch(handleApiError));
     } else if (restToday) {
