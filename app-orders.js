@@ -17,6 +17,73 @@ const API = {
   twoFaDisable: "/api/2fa/disable",
 };
 
+// ─── Mode hors ligne ────────────────────────────────────────────────────────
+const _LS_STATE   = "mm_state_cache";
+const _LS_SESSION = "mm_session_cache";
+const _LS_PENDING = "mm_offline_pending";
+let _offlineSyncing = false;
+
+function offlineSaveState(s) {
+  try { localStorage.setItem(_LS_STATE, JSON.stringify(s)); } catch (_) {}
+}
+function offlineLoadState() {
+  try { return JSON.parse(localStorage.getItem(_LS_STATE)); } catch (_) { return null; }
+}
+function offlineSaveSession(payload) {
+  try {
+    localStorage.setItem(_LS_SESSION, JSON.stringify({
+      username: payload.username, role: payload.role,
+      allowedSiteIds: payload.allowedSiteIds, globalSuperadmin: payload.globalSuperadmin,
+      maquisBackupAllowed: payload.maquisBackupAllowed, activeSiteId: payload.activeSiteId,
+    }));
+  } catch (_) {}
+}
+function offlineLoadSession() {
+  try { return JSON.parse(localStorage.getItem(_LS_SESSION)); } catch (_) { return null; }
+}
+function offlinePendingGet()   { return Number(localStorage.getItem(_LS_PENDING)) || 0; }
+function offlinePendingSet(n)  { try { localStorage.setItem(_LS_PENDING, String(n)); } catch (_) {} }
+function offlinePendingAdd()   { offlinePendingSet(offlinePendingGet() + 1); updateOfflineBanner(); }
+function offlinePendingClear() { offlinePendingSet(0); updateOfflineBanner(); }
+
+function updateOfflineBanner() {
+  const banner = document.getElementById("offline-banner");
+  if (!banner) return;
+  const pending = offlinePendingGet();
+  const offline = !navigator.onLine;
+  banner.style.display = (offline || pending > 0) ? "" : "none";
+  const txt = document.getElementById("offline-banner-text");
+  if (!txt) return;
+  if (offline)      txt.textContent = `⚡ Mode hors ligne${pending ? ` — ${pending} modification(s) en attente` : ""}`;
+  else if (pending) txt.textContent = `🔄 ${pending} modification(s) non synchronisée(s) — reconnecté`;
+}
+
+async function flushOfflineSync() {
+  if (_offlineSyncing || !navigator.onLine || !offlinePendingGet()) return;
+  _offlineSyncing = true;
+  const btn = document.querySelector("#offline-banner button");
+  if (btn) btn.textContent = "Synchronisation…";
+  try {
+    await persistState({});
+    offlinePendingClear();
+    showToast("Synchronisation réussie.");
+  } catch (_) {
+    showToast("Synchronisation échouée — réessayez.");
+  } finally {
+    _offlineSyncing = false;
+    if (btn) btn.textContent = "Synchroniser";
+    updateOfflineBanner();
+  }
+}
+
+function _isNetworkError(err) {
+  return !navigator.onLine
+    || String(err?.message || "").toLowerCase().includes("failed to fetch")
+    || String(err?.message || "").toLowerCase().includes("networkerror")
+    || err?.status === 0;
+}
+// ────────────────────────────────────────────────────────────────────────────
+
 const CATEGORIES = ["Bières", "Sodas & Jus", "Eaux", "Vins & Spiritueux", "Cocktails", "Snacks", "Autres"];
 const PAYMENT_METHODS = ["Espèces", "Orange Money", "MTN MoMo", "Wave", "Carte", "Crédit client"];
 /** Modes incluant Credit fournisseur (dettes fournisseurs), uniquement pour les charges / depenses */
@@ -810,6 +877,7 @@ function applySessionFieldsFromApi(payload) {
   if ("maquisBackupAllowed" in payload) maquisBackupAllowed = Boolean(payload.maquisBackupAllowed);
   if ("mustChangePassword" in payload) mustChangePassword = Boolean(payload.mustChangePassword);
   applySessionTimingFromApi(payload);
+  if (payload.username) offlineSaveSession(payload);
 }
 
 function applySessionTimingFromApi(payload) {
@@ -14079,14 +14147,24 @@ async function persistState(overrides = {}) {
   const isFullSave = !Object.keys(overrides || {}).length;
   const patchedKeys = isFullSave ? null : patchedKeysFromPutBody(body);
   const opId = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const incoming = await apiRequest(API.state, {
-    method: "PUT",
-    body: JSON.stringify(body),
-    headers: { "X-Op-Id": opId },
-  });
-  if (incoming?.idempotent) return;
-  state = mergeStateFromServerResponse(incoming, prev, patchedKeys);
-  applyPersistStateResponseExtras(overrides, _stockChecks);
+  try {
+    const incoming = await apiRequest(API.state, {
+      method: "PUT",
+      body: JSON.stringify(body),
+      headers: { "X-Op-Id": opId },
+    });
+    if (incoming?.idempotent) return;
+    state = mergeStateFromServerResponse(incoming, prev, patchedKeys);
+    offlineSaveState(state);
+    applyPersistStateResponseExtras(overrides, _stockChecks);
+  } catch (err) {
+    if (_isNetworkError(err)) {
+      offlineSaveState(state);
+      offlinePendingAdd();
+      return;
+    }
+    throw err;
+  }
 }
 
 /**
@@ -14110,13 +14188,24 @@ async function persistStatePatch(patch) {
   );
   const patchedKeys = patchedKeysFromPutBody(body);
   const opId = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const incoming = await apiRequest(API.state, {
-    method: "PUT",
-    body: JSON.stringify(body),
-    headers: { "X-Op-Id": opId },
-  });
+  let incoming;
+  try {
+    incoming = await apiRequest(API.state, {
+      method: "PUT",
+      body: JSON.stringify(body),
+      headers: { "X-Op-Id": opId },
+    });
+  } catch (err) {
+    if (_isNetworkError(err)) {
+      offlineSaveState(state);
+      offlinePendingAdd();
+      return;
+    }
+    throw err;
+  }
   if (incoming?.idempotent) return;
   state = mergeStateFromServerResponse(incoming, prev, patchedKeys);
+  offlineSaveState(state);
   if (patchedKeys.has("commandes")) {
     pruneFinalizedCommandesFromState();
   }
@@ -20794,7 +20883,17 @@ function migrateCasiersVidesBouteillesVides() {
 
 async function bootstrapAuthenticatedApp(opts = {}) {
   const skipCasierLsRestore = Boolean(opts.skipCasierLsRestore);
-  state = await apiRequest(API.state);
+  try {
+    state = await apiRequest(API.state);
+    offlineSaveState(state);
+    offlinePendingClear();
+  } catch (err) {
+    const cached = offlineLoadState();
+    if (!cached) throw err;
+    state = cached;
+    showToast("Mode hors ligne — données du dernier accès chargées.");
+    updateOfflineBanner();
+  }
   if (!Array.isArray(state.creditRecoveries)) state.creditRecoveries = [];
   if (!Array.isArray(state.clientAvoirs)) state.clientAvoirs = [];
   if (!Array.isArray(state.purchaseOrders)) state.purchaseOrders = [];
@@ -20975,6 +21074,9 @@ function attachEvents() {
   document.addEventListener("touchstart", _markUserInteraction, { passive: true });
   document.addEventListener("touchmove", _markUserInteraction, { passive: true });
   document.addEventListener("keydown", _markUserInteraction, { passive: true });
+  window.addEventListener("online",  () => { updateOfflineBanner(); flushOfflineSync().catch(() => {}); });
+  window.addEventListener("offline", () => updateOfflineBanner());
+  updateOfflineBanner();
   document.getElementById("login-form").addEventListener("submit", handleLoginSubmit);
   document.getElementById("toggle-login-password")?.addEventListener("click", () => {
     const inp = document.getElementById("login-password");
