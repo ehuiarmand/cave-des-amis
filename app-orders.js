@@ -3035,6 +3035,34 @@ function staffInShiftBridgeGap(username = sessionUser, siteId = currentSiteId())
   return now > latestPrevEnd.getTime() && now < earliestTodayStart.getTime();
 }
 
+/**
+ * Retourne le username de la serveuse qui a vendu en dernier sur le jour comptable,
+ * ou null si aucune vente aujourd'hui.
+ */
+function lastSellingServeuseToday(siteId = currentSiteId()) {
+  const d = workingDate(siteId);
+  if (!d) return null;
+  const sid = String(siteId || "");
+  const todaySales = (state.ventes || []).filter(
+    (v) => String(v.siteId || "") === sid && String(v.date || "").slice(0, 10) === d,
+  );
+  if (!todaySales.length) return null;
+  const latest = todaySales.reduce((best, v) => {
+    const t = String(v.soldAt || v.date || "");
+    const bt = String(best.soldAt || best.date || "");
+    return t > bt ? v : best;
+  });
+  return String(latest.serveur || latest.server || "").trim().toLowerCase() || null;
+}
+
+/** Vrai si la serveuse courante est en relais de service (dernière vente du jour = elle, ou aucune vente). */
+function serveuseIsOnSalesRelay(siteId = currentSiteId()) {
+  if (!staffRequiresShiftWindowForSales()) return false;
+  const last = lastSellingServeuseToday(siteId);
+  if (last === null) return true; // personne n'a encore vendu → n'importe qui peut prendre service
+  return last === String(sessionUser || "").trim().toLowerCase();
+}
+
 /** Créneau planning obligatoire pour vendre : serveuses uniquement (gérant / admin jamais bloqués). */
 function staffRequiresShiftWindowForSales() {
   return String(currentRole || "").trim() === "serveuse";
@@ -3043,7 +3071,8 @@ function staffRequiresShiftWindowForSales() {
 function staffIsOnDutyNow(siteId = currentSiteId()) {
   if (!staffRequiresShiftWindowForSales()) return true;
   if (activeWorkShiftsNow(sessionUser, siteId).length > 0) return true;
-  return staffInShiftBridgeGap(sessionUser, siteId);
+  if (staffInShiftBridgeGap(sessionUser, siteId)) return true;
+  return serveuseIsOnSalesRelay(siteId);
 }
 
 function formatShiftWindowLabel(shift) {
@@ -3585,12 +3614,19 @@ function renderPlanningMine() {
         ${_openSvc ? `<button type="button" class="btn btn-sm btn-primary" style="margin-top:8px" onclick="navigate('pdj')">Point du jour — Fin de service</button>` : ""}
       </div>`;
     } else if (staffIsOnDutyNow()) {
-      const active = activeWorkShiftsNow(sessionUser, currentSiteId());
-      if (!active.length && staffInShiftBridgeGap(sessionUser, currentSiteId())) {
-        const todaySh = workShiftsForUserOnDate(sessionUser, currentSiteId(), today());
+      const siteId = currentSiteId();
+      const active = activeWorkShiftsNow(sessionUser, siteId);
+      if (!active.length && staffInShiftBridgeGap(sessionUser, siteId)) {
+        const todaySh = workShiftsForUserOnDate(sessionUser, siteId, today());
         const nextWin = todaySh.length ? formatShiftWindowLabel(todaySh[0]) : "votre prochain créneau";
         sumEl.innerHTML = `<div class="inline-card" style="border-left:3px solid #72d7a9;padding:10px 12px;font-size:0.88rem">
           <strong>Relais de service</strong> · entre la fin de nuit et ${escapeHtml(nextWin)} (ventes et encaissements autorisés)
+        </div>`;
+      } else if (!active.length && serveuseIsOnSalesRelay(siteId)) {
+        const last = lastSellingServeuseToday(siteId);
+        const label = last ? "depuis votre dernière vente" : "aucune vente enregistrée ce jour";
+        sumEl.innerHTML = `<div class="inline-card" style="border-left:3px solid #72d7a9;padding:10px 12px;font-size:0.88rem">
+          <strong>En service</strong> · ${escapeHtml(label)}
         </div>`;
       } else {
         const win = active.map(formatShiftWindowLabel).join(", ");
@@ -3623,9 +3659,26 @@ function renderPlanningTeam() {
   const bounds = planningDisplayBounds();
   const labelEl = document.getElementById("planning-team-week-label");
   const listEl = document.getElementById("planning-team-list");
+  const serviceNowEl = document.getElementById("planning-team-service-now");
   if (labelEl) labelEl.textContent = planningWeekLabel(bounds);
   populateWorkShiftUserSelect();
   renderRotationStaffList();
+
+  if (serviceNowEl) {
+    const siteId = currentSiteId();
+    const lastSeller = lastSellingServeuseToday(siteId);
+    if (lastSeller) {
+      const displayName = escapeHtml(staffDisplayName(lastSeller));
+      serviceNowEl.innerHTML = `<div class="inline-card" style="border-left:3px solid #72d7a9;padding:10px 12px;font-size:0.88rem">
+        <strong>En service actuellement</strong> · ${displayName} (dernière vente du jour)
+      </div>`;
+    } else {
+      serviceNowEl.innerHTML = `<div class="inline-card" style="padding:10px 12px;font-size:0.88rem;color:var(--muted)">
+        Aucune vente enregistrée aujourd'hui — le service n'a pas encore commencé.
+      </div>`;
+    }
+  }
+
   const rows = teamWorkShiftsInWeek(bounds);
   if (!listEl) return;
   if (!rows.length) {
