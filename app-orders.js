@@ -3265,6 +3265,8 @@ function serveusePlanningBlocksSale(saleDateStr, siteId = currentSiteId()) {
   const sid = siteId || currentSiteId();
   if (!sid || !/^\d{4}-\d{2}-\d{2}$/.test(d)) return null;
   if (!teamHasPlanningOnDate(sid, d)) return null;
+  // Le relais de service prime sur le jour de repos : si la serveuse a pris le service, elle peut vendre.
+  if (serveuseIsOnSalesRelay(sid)) return null;
   const label = formatDateDdMmYyyy(d);
   if (serveuseIsRestDay(d, sid)) {
     return `Jour de repos (${label}) : le module Ventes est indisponible. Consultez Planning → Mes horaires ou contactez votre gérante.`;
@@ -3653,9 +3655,8 @@ function renderPlanningMine() {
   const restToday = serveusePlanningBlocksSale(today(), siteId);
   const onDutyUser = currentServeuseOnDuty(siteId);
   const meUser = String(sessionUser || "").trim().toLowerCase();
-  const isRestDay = !!restToday && serveuseIsRestDay(today(), siteId);
   const canSell = staffIsOnDutyNow(siteId);
-  const anotherIsOnDuty = !isRestDay && !canSell && !!onDutyUser && onDutyUser !== meUser && isServeuseAccount();
+  const anotherIsOnDuty = !canSell && !!onDutyUser && onDutyUser !== meUser && isServeuseAccount();
 
   if (sumEl) {
     if (anotherIsOnDuty) {
