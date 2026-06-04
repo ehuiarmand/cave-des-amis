@@ -12169,13 +12169,18 @@ async function addUser() {
 }
 
 async function resetUserPassword(username) {
+  const users = state.auth.users || [];
+  const target = users.find((u) => u.username === username);
+  if (isGerantRole() && target?.role !== "serveuse") {
+    showToast("Les gérantes peuvent uniquement réinitialiser le mot de passe des serveuses.");
+    return;
+  }
   const newPwd = window.prompt(`Nouveau mot de passe pour "${username}" (min. 6 caractères) :`);
   if (newPwd === null) return;
   if (!newPwd || newPwd.length < 6) { showToast("Mot de passe trop court (min. 6 caractères)."); return; }
-  const users = state.auth.users || [];
   const newUsers = users.map((u) => u.username === username ? { ...u, password: newPwd, mustChangePassword: true } : u);
   await persistState({ auth: { users: newUsers } });
-  showToast(`Mot de passe de "${username}" réinitialisé. Il devra le changer à la prochaine connexion.`);
+  showToast(`Mot de passe de "${username}" réinitialisé. Elle devra le changer à la prochaine connexion.`);
 }
 
 async function deleteUser(username) {
