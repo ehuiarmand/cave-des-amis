@@ -12672,7 +12672,12 @@ function renderCorrectionResult(factureNum, ventes) {
     const articleOptions = siteArticles.map((a) =>
       `<option value="${escapeHtml(a)}" ${a === v.article ? "selected" : ""}>${escapeHtml(a)}</option>`
     ).join("");
-    const priceInfo = corrBuildPriceInfo(v.article, siteId, v.prix);
+    const pack = Number(v.packSize || v.formatQuantite) || 1;
+    const origPrix = Number(v.prix) || 0;
+    const origTotal = origPrix * (Number(v.qty) || 0);
+    const origInfo = pack > 1
+      ? `Prix vente : <strong>${fmt(origPrix)} FCFA</strong> / kit de ${pack} btl · total ${fmt(origTotal)} FCFA`
+      : `Prix vente : <strong>${fmt(origPrix)} FCFA</strong> / u · total ${fmt(origTotal)} FCFA`;
     return `
     <div style="padding:8px 0;border-bottom:1px solid var(--line)">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
@@ -12691,7 +12696,7 @@ function renderCorrectionResult(factureNum, ventes) {
           </select>
         </div>
       </div>
-      <div id="corr-prix-${i}" style="margin-top:4px;font-size:0.82rem;color:var(--muted)">${priceInfo}</div>
+      <div id="corr-prix-${i}" style="margin-top:4px;font-size:0.82rem;color:var(--muted)">${origInfo}</div>
     </div>`;
   }).join("");
 
