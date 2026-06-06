@@ -12624,6 +12624,32 @@ function searchFactureForCorrection() {
   renderCorrectionResult(num, ventes);
 }
 
+/** Construit le texte d'info prix pour un article (formats kit + prix). */
+function corrBuildPriceInfo(articleName, siteId, fallbackPrix) {
+  const item = stockItemForArticle(articleName, siteId || currentSiteId());
+  if (!item) {
+    return fallbackPrix ? `${fmt(fallbackPrix)} FCFA / u (prix original)` : "Prix non disponible";
+  }
+  const formats = normalizeSaleFormats(item);
+  if (formats.length) {
+    return formats.map((f) => {
+      const pack = Number(f.quantite) || 1;
+      const prix = fmt(f.prixInterieur);
+      return pack > 1
+        ? `<strong>${prix} FCFA</strong> / kit de ${pack} btl`
+        : `<strong>${prix} FCFA</strong> / btl`;
+    }).join(" &nbsp;·&nbsp; ");
+  }
+  const { prixInt } = resolveItemPrices(item);
+  const pack = linePackSize({ article: articleName }, item);
+  if (prixInt) {
+    return pack > 1
+      ? `<strong>${fmt(prixInt)} FCFA</strong> / kit de ${pack} btl`
+      : `<strong>${fmt(prixInt)} FCFA</strong> / u`;
+  }
+  return fallbackPrix ? `${fmt(fallbackPrix)} FCFA / u` : "Prix non disponible";
+}
+
 function renderCorrectionResult(factureNum, ventes) {
   const container = document.getElementById("corr-result");
   if (!container) return;
@@ -12640,29 +12666,32 @@ function renderCorrectionResult(factureNum, ventes) {
     .filter(Boolean)
     .sort((a, b) => a.localeCompare(b, "fr", { sensitivity: "base" }));
 
+  const siteId = currentSiteId();
+
   const lines = ventes.map((v, i) => {
     const articleOptions = siteArticles.map((a) =>
       `<option value="${escapeHtml(a)}" ${a === v.article ? "selected" : ""}>${escapeHtml(a)}</option>`
     ).join("");
+    const priceInfo = corrBuildPriceInfo(v.article, siteId, v.prix);
     return `
-    <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line);flex-wrap:wrap">
-      <div style="flex:1;min-width:120px">
-        <strong>${escapeHtml(v.article)}</strong>
-        <span class="muted" style="font-size:0.85rem;margin-left:8px">${fmt(v.prix)} FCFA / u</span>
+    <div style="padding:8px 0;border-bottom:1px solid var(--line)">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <div style="flex:1;min-width:120px"><strong>${escapeHtml(v.article)}</strong></div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <label style="font-size:0.85rem;color:var(--muted)">Qté :</label>
+          <input type="number" id="corr-qty-${i}" value="${Number(v.qty) || 0}" min="0" step="1"
+                 style="width:72px;padding:6px 10px;border-radius:8px;border:1px solid var(--line);font-size:0.93rem"
+                 data-vente-id="${escapeHtml(String(v.id))}">
+        </div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <label style="font-size:0.85rem;color:var(--muted)">Article :</label>
+          <select id="corr-art-${i}" data-vente-id="${escapeHtml(String(v.id))}"
+                  style="padding:6px 10px;border-radius:8px;border:1px solid var(--line);font-size:0.88rem;max-width:180px">
+            ${articleOptions}
+          </select>
+        </div>
       </div>
-      <div style="display:flex;align-items:center;gap:6px">
-        <label style="font-size:0.85rem;color:var(--muted)">Qté :</label>
-        <input type="number" id="corr-qty-${i}" value="${Number(v.qty) || 0}" min="0" step="1"
-               style="width:72px;padding:6px 10px;border-radius:8px;border:1px solid var(--line);font-size:0.93rem"
-               data-vente-id="${escapeHtml(String(v.id))}">
-      </div>
-      <div style="display:flex;align-items:center;gap:6px">
-        <label style="font-size:0.85rem;color:var(--muted)">Article :</label>
-        <select id="corr-art-${i}" data-vente-id="${escapeHtml(String(v.id))}"
-                style="padding:6px 10px;border-radius:8px;border:1px solid var(--line);font-size:0.88rem;max-width:180px">
-          ${articleOptions}
-        </select>
-      </div>
+      <div id="corr-prix-${i}" style="margin-top:4px;font-size:0.82rem;color:var(--muted)">${priceInfo}</div>
     </div>`;
   }).join("");
 
@@ -12717,6 +12746,13 @@ function renderCorrectionResult(factureNum, ventes) {
     artBtn.onclick = () => applyArticleCorrection(factureNum, ventes).catch(handleApiError);
     artBtn.disabled = _correctionApplyBusy;
   }
+  // Mise à jour dynamique du prix quand on change l'article
+  ventes.forEach((_, i) => {
+    document.getElementById(`corr-art-${i}`)?.addEventListener("change", (e) => {
+      const el = document.getElementById(`corr-prix-${i}`);
+      if (el) el.innerHTML = corrBuildPriceInfo(e.target.value, siteId, null);
+    });
+  });
 }
 
 async function applyPaymentCorrection(factureNum, originalVentes) {
@@ -12894,8 +12930,9 @@ async function applyArticleCorrection(factureNum, originalVentes) {
       const c = idMap.get(v.id);
       if (!c) return v;
       const newItem = stockItemForArticle(c.newArticle, siteId);
-      const { prixInt } = resolveItemPrices(newItem || {});
-      const newPrix = prixInt || v.prix;
+      // Utiliser le prix du format primaire (kit) plutôt que le prix bouteille brut
+      const newFormat = primarySaleFormat(newItem || {});
+      const newPrix = Number(newFormat?.prixInterieur) || resolveItemPrices(newItem || {}).prixInt || v.prix;
       const newTotal = (Number(v.qty) || 0) * newPrix;
       const updated = { ...v, article: c.newArticle, prix: newPrix, total: newTotal };
       syncVentePaymentDetails(updated, calcNet(updated));
