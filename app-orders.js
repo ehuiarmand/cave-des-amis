@@ -6687,7 +6687,7 @@ function renderPointDuJour() {
     <article class="list-item">
       <div>
         <p class="list-item-title">${escapeHtml(v.article)}</p>
-        <p class="list-item-sub">${escapeHtml(v.cat)} · ${fmt(v.qty)} x ${fmt(v.prix)} FCFA${v.remise ? ` · -${fmt(v.remise)}` : ""} · ${escapeHtml(v.paiement)}</p>
+        <p class="list-item-sub">${escapeHtml(v.cat)} · ${lineQtyLabel(v)} x ${fmt(v.prix)} FCFA${v.remise ? ` · -${fmt(v.remise)}` : ""} · ${escapeHtml(v.paiement)}</p>
       </div>
       <div class="list-side">
         <div>
