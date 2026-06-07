@@ -9564,7 +9564,7 @@ function renderOrdersManagement() {
   const { orders, activeOrders, salesToday, journalDay } = computeOrdersManagementList();
 
   document.getElementById("orders-today-kpi").textContent = String(activeOrders.filter((order) => saleDateValue(order) === journalDay).length + salesToday.length);
-  document.getElementById("orders-pending-kpi").textContent = String(activeOrders.filter((order) => orderStatus(order) === "En attente").length);
+  document.getElementById("orders-pending-kpi").textContent = String(activeOrders.filter((order) => ["En attente", "Servi"].includes(orderStatus(order))).length);
   document.getElementById("orders-ca-kpi").textContent = `${fmt(salesToday.reduce((sum, vente) => sum + calcNet(vente), 0))} FCFA`;
   document.getElementById("orders-management-table").innerHTML = orders.length
     ? orders.map((order) => {
