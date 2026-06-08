@@ -15403,7 +15403,7 @@ async function applyPurchaseReceipt(po, linesReceived, opts = {}) {
   linesReceived.forEach((line) => {
     const cases = Number(line.cases) || 0;
     if (cases <= 0) return;
-    const item = stockItems.find((s) => s.siteId === siteId && String(s.article || "").toLowerCase() === String(line.article || "").toLowerCase());
+    const item = stockItems.find((s) => String(s.siteId) === String(siteId) && String(s.article || "").toLowerCase() === String(line.article || "").toLowerCase());
     if (!item) return;
     const cs = Number(line.caseSize) || caseSize(item);
     const bottles = Math.round(cases * cs);
