@@ -12596,14 +12596,19 @@ function renderCorrectionHistory() {
             const factureCell = facture
               ? `<button type="button" class="linkish-btn" data-corr-search-facture="${escapeHtml(facture)}" title="Recharger cette facture">${escapeHtml(facture)}</button>`
               : `<span class="muted">—</span>`;
-            return `<tr>
+            const isIncompleteDeletion = String(row.summary || "").startsWith("Suppression doublon") && motif === "—";
+            const rowStyle = isIncompleteDeletion ? ' style="opacity:0.5"' : "";
+            const motifCell = isIncompleteDeletion
+              ? `<span class="muted" title="Suppression sans motif (ancienne version)">incomplet</span>`
+              : escapeHtml(motif);
+            return `<tr${rowStyle}>
               <td style="white-space:nowrap">${escapeHtml(formatDateTimeDdMmYyyy(row.at))}</td>
               <td>${escapeHtml(typeLabel)}</td>
               <td>${factureCell}</td>
               <td class="audit-cell-wrap">
                 <span class="audit-cell-expand" data-audit-open="${escapeHtml(String(row.id))}" role="button" tabindex="0" title="Voir le détail">${escapeHtml(row.summary || "")}</span>
               </td>
-              <td>${escapeHtml(motif)}</td>
+              <td>${motifCell}</td>
               <td>${escapeHtml(row.actor || "—")}</td>
               <td><button type="button" class="mini-btn" data-audit-open="${escapeHtml(String(row.id))}">Détail</button></td>
             </tr>`;
