@@ -7910,7 +7910,7 @@ function todayEntreesFromPOForArticle(article, dateStr, openedAt) {
         .reduce((s, l) => s + Math.round((Number(l.cases) || 0) * (Number(l.caseSize) || 0)), 0), 0);
 }
 
-/** Recalcule sorties/entrées/écart sur une fiche PDJ déjà clôturée après correction de ventes. */
+/** Recalcule sorties/entrées/écart et CA sur une fiche PDJ déjà clôturée après correction de ventes. */
 function refreshStockCheckAfterVenteCorrection(dateStr, siteId = currentSiteId()) {
   const d = String(dateStr || "").slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return false;
@@ -7933,6 +7933,17 @@ function refreshStockCheckAfterVenteCorrection(dateStr, siteId = currentSiteId()
     ci.expected = expected;
     ci.ecart = counted - expected;
   });
+  // Recalcule les totaux CA du snapshot de clôture
+  const ventesJour = (state.ventes || []).filter(
+    (v) => String(v.siteId) === String(siteId) && (v.date || "").slice(0, 10) === d,
+  );
+  const totauxJour = paymentTotals(ventesJour);
+  check.totauxJour = totauxJour;
+  check.caEncaisse = Object.entries(totauxJour).reduce(
+    (sum, [m, a]) => (isCreditClientPayment(m) ? sum : sum + (Number(a) || 0)), 0,
+  );
+  check.caCreances = totalCreditOutstanding();
+  check.nbVentes = ventesJour.length;
   return true;
 }
 
@@ -12464,8 +12475,8 @@ function correctionAuditTypeLabel(entity) {
 }
 
 function factureFromCorrectionAuditSummary(summary) {
-  const m = String(summary || "").match(/Correction (?:paiement|qt[eé]s|article)\s+(\S+)/i);
-  return m ? m[1].replace(/[.:,;]$/, "") : "";
+  const m = String(summary || "").match(/(?:Correction (?:paiement|qt[eé]s|article)|Suppression doublon)\s+(\S+)/i);
+  return m ? m[1].replace(/[.:,;·]$/, "") : "";
 }
 
 function motifFromCorrectionAuditDetail(detail) {
@@ -12633,7 +12644,39 @@ function searchFactureForDeletion() {
     (v) => String(v.factureNumber || "").trim() === num && v.siteId === currentSiteId(),
   );
   if (!ventes.length) {
-    result.innerHTML = `<p class="muted" style="padding:10px 0">Facture &laquo;${escapeHtml(num)}&raquo; introuvable pour ce maquis.</p>`;
+    // Ventes déjà supprimées mais commande orpheline ?
+    const orphanCmd = (state.commandes || []).find(
+      (c) => String(c.factureNumber || "") === num && String(c.siteId || "") === String(currentSiteId()),
+    );
+    if (orphanCmd) {
+      const cmdTotal = fmt(Number(orphanCmd.total) || 0);
+      const cmdLines = (orphanCmd.items || []).map((it) =>
+        `<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--line);font-size:0.9rem">
+          <span><strong>${escapeHtml(it.article || it.nom || "—")}</strong> &times; ${Number(it.qty || it.quantite) || 1}</span>
+          <span>${fmt(Number(it.prix || it.prixUnitaire) || 0)} FCFA</span>
+        </div>`,
+      ).join("");
+      result.innerHTML = `
+        <div style="background:var(--surface2,#f5f5f5);border-radius:12px;padding:14px;margin-bottom:12px">
+          <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px;margin-bottom:10px">
+            <strong>${escapeHtml(num)}</strong>
+            <span class="muted">${escapeHtml(orphanCmd.client || "—")}</span>
+            <span style="font-weight:700">${cmdTotal} FCFA</span>
+          </div>
+          ${cmdLines || '<p class="muted" style="font-size:0.85rem">Détail non disponible.</p>'}
+        </div>
+        <div style="background:#e8f5e9;border-radius:10px;padding:12px;margin-bottom:12px;font-size:0.86rem">
+          ℹ️ Les ventes de cette facture ont déjà été supprimées. Il reste une <strong>commande orpheline</strong> à effacer.
+        </div>
+        <button id="del-facture-confirm-btn" class="btn btn-danger" type="button" style="width:100%">
+          Supprimer la commande orpheline ${escapeHtml(num)}
+        </button>`;
+      document.getElementById("del-facture-confirm-btn")?.addEventListener("click", () =>
+        deleteCommandeOrpheline(num, orphanCmd).catch(handleApiError),
+      );
+    } else {
+      result.innerHTML = `<p class="muted" style="padding:10px 0">Facture &laquo;${escapeHtml(num)}&raquo; introuvable pour ce maquis.</p>`;
+    }
     return;
   }
   const firstV = ventes[0];
@@ -12665,7 +12708,10 @@ function searchFactureForDeletion() {
 }
 
 async function deleteFactureDoublon(factureNum, ventes) {
-  if (!window.confirm(`Supprimer définitivement la facture ${factureNum} (${ventes.length} ligne(s)) et restituer le stock ?`)) return;
+  const motif = window.prompt(`Motif de suppression de la facture ${factureNum} :`);
+  if (motif === null) return;
+  if (!String(motif).trim()) { showToast("Veuillez saisir un motif."); return; }
+  if (!window.confirm(`Supprimer définitivement la facture ${factureNum} (${ventes.length} ligne(s)) et restituer le stock ?\n\nMotif : ${motif}`)) return;
   const siteId = currentSiteId();
   ventes.forEach((v) => {
     if (v.noStock) return;
@@ -12683,14 +12729,19 @@ async function deleteFactureDoublon(factureNum, ventes) {
   });
   const ids = new Set(ventes.map((v) => v.id));
   state.ventes = (state.ventes || []).filter((v) => !ids.has(v.id));
+  // Supprimer aussi la commande associée à ce numéro de facture
+  state.commandes = (state.commandes || []).filter(
+    (c) => !(String(c.factureNumber || "") === String(factureNum) && String(c.siteId || "") === String(siteId)),
+  );
   const total = ventes.reduce((s, v) => s + calcNet(v), 0);
   recordStaffAudit("delete", "correction_article",
     `Suppression doublon ${factureNum} · ${fmt(total)} FCFA`,
-    `${ventes.length} ligne(s) supprimée(s) · stock restitué`);
+    `Motif: ${motif}\n${ventes.length} ligne(s) supprimée(s) · stock restitué`);
   const datesToRefresh = [...new Set(ventes.map((v) => (v.date || "").slice(0, 10)).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)))];
   const stockChecksDirty = datesToRefresh.some((d) => refreshStockCheckAfterVenteCorrection(d, siteId));
   await persistState({
     ventes: state.ventes,
+    commandes: state.commandes,
     stock: state.stock,
     casiers: state.casiers,
     casierMouvements: state.casierMouvements,
@@ -12702,7 +12753,32 @@ async function deleteFactureDoublon(factureNum, ventes) {
     `<p style="color:#2e7d32;padding:10px 0;font-weight:600">✓ Facture ${escapeHtml(factureNum)} supprimée — stock restitué.</p>`;
   document.getElementById("del-facture-num").value = "";
   renderCorrectionHistory();
+  renderPointDuJour();
+  renderOrdersManagement();
+  if (currentPage === "home") renderDashboard();
   showToast(`Facture ${factureNum} supprimée.`);
+}
+
+async function deleteCommandeOrpheline(factureNum, commande) {
+  const motif = window.prompt(`Motif de suppression de la commande orpheline ${factureNum} :`);
+  if (motif === null) return;
+  if (!String(motif).trim()) { showToast("Veuillez saisir un motif."); return; }
+  if (!window.confirm(`Supprimer définitivement la commande orpheline ${factureNum} ?`)) return;
+  const siteId = currentSiteId();
+  state.commandes = (state.commandes || []).filter(
+    (c) => !(String(c.factureNumber || "") === String(factureNum) && String(c.siteId || "") === String(siteId)),
+  );
+  recordStaffAudit("delete", "correction_article",
+    `Suppression doublon ${factureNum} (commande orpheline)`,
+    `Motif: ${motif}\nCommande orpheline supprimée (ventes déjà absentes)`);
+  await persistState({ commandes: state.commandes, staffAuditLog: state.staffAuditLog, nextId: state.nextId });
+  document.getElementById("del-facture-result").innerHTML =
+    `<p style="color:#2e7d32;padding:10px 0;font-weight:600">✓ Commande orpheline ${escapeHtml(factureNum)} supprimée.</p>`;
+  document.getElementById("del-facture-num").value = "";
+  renderCorrectionHistory();
+  renderOrdersManagement();
+  if (currentPage === "home") renderDashboard();
+  showToast(`Commande orpheline ${factureNum} supprimée.`);
 }
 
 /** Construit le texte d'info prix pour un article (formats kit + prix). */

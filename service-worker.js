@@ -1,6 +1,6 @@
 // Service Worker — cache app shell pour fonctionnement hors ligne.
 // Version incrémentée à chaque déploiement pour forcer le rechargement.
-const CACHE_VERSION = "maquis-2026-06-04-v1";
+const CACHE_VERSION = "maquis-2026-06-08-v1";
 const APP_SHELL = ["/", "/index.html", "/app-orders.js", "/styles.css"];
 
 self.addEventListener("install", (event) => {
