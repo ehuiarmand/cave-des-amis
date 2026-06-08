@@ -21972,6 +21972,7 @@ document.getElementById("fab-btn").addEventListener("click", () => {
   document.getElementById("corr-search-btn")?.addEventListener("click", () => searchFactureForCorrection());
   document.getElementById("del-facture-search-btn")?.addEventListener("click", () => searchFactureForDeletion());
   document.getElementById("del-facture-num")?.addEventListener("keydown", (e) => { if (e.key === "Enter") searchFactureForDeletion(); });
+  document.getElementById("del-facture-num")?.addEventListener("input", (e) => { const el = e.target; const pos = el.selectionStart; el.value = el.value.toUpperCase(); el.setSelectionRange(pos, pos); });
   document.getElementById("corr-facture-num")?.addEventListener("keydown", (e) => {
     if (e.key === "Enter") searchFactureForCorrection();
   });
