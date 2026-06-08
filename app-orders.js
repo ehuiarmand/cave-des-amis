@@ -12624,6 +12624,87 @@ function searchFactureForCorrection() {
   renderCorrectionResult(num, ventes);
 }
 
+function searchFactureForDeletion() {
+  const num = String(document.getElementById("del-facture-num")?.value || "").trim();
+  const result = document.getElementById("del-facture-result");
+  if (!result) return;
+  if (!num) { showToast("Saisissez un numéro de facture."); return; }
+  const ventes = (state.ventes || []).filter(
+    (v) => String(v.factureNumber || "").trim() === num && v.siteId === currentSiteId(),
+  );
+  if (!ventes.length) {
+    result.innerHTML = `<p class="muted" style="padding:10px 0">Facture &laquo;${escapeHtml(num)}&raquo; introuvable pour ce maquis.</p>`;
+    return;
+  }
+  const firstV = ventes[0];
+  const total = ventes.reduce((s, v) => s + calcNet(v), 0);
+  const lines = ventes.map((v) =>
+    `<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--line);font-size:0.9rem">
+      <span><strong>${escapeHtml(v.article)}</strong> &times; ${Number(v.qty)} <span class="muted">${fmt(v.prix)} FCFA/u</span></span>
+      <span>${fmt(calcNet(v))} FCFA</span>
+    </div>`
+  ).join("");
+  result.innerHTML = `
+    <div style="background:var(--surface2,#f5f5f5);border-radius:12px;padding:14px;margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px;margin-bottom:10px">
+        <strong>${escapeHtml(num)}</strong>
+        <span class="muted">${escapeHtml(firstV.date || "—")} · ${escapeHtml(firstV.client || "—")}</span>
+        <span style="font-weight:700">${fmt(total)} FCFA</span>
+      </div>
+      ${lines}
+    </div>
+    <div style="background:#fff3cd;border-radius:10px;padding:12px;margin-bottom:12px;font-size:0.86rem">
+      ⚠️ Suppression <strong>irréversible</strong>. Le stock sera restitué automatiquement.
+    </div>
+    <button id="del-facture-confirm-btn" class="btn btn-danger" type="button" style="width:100%">
+      Supprimer la facture ${escapeHtml(num)}
+    </button>`;
+  document.getElementById("del-facture-confirm-btn")?.addEventListener("click", () =>
+    deleteFactureDoublon(num, ventes).catch(handleApiError)
+  );
+}
+
+async function deleteFactureDoublon(factureNum, ventes) {
+  if (!window.confirm(`Supprimer définitivement la facture ${factureNum} (${ventes.length} ligne(s)) et restituer le stock ?`)) return;
+  const siteId = currentSiteId();
+  ventes.forEach((v) => {
+    if (v.noStock) return;
+    const stockItem = stockItemForArticle(v.article, siteId);
+    if (!stockItem) return;
+    const bottles = lineBottleQty(v, stockItem);
+    if (bottles <= 0) return;
+    stockItem.sorties = Math.max(0, (Number(stockItem.sorties) || 0) - bottles);
+    restorePhysicalStock(stockItem, bottles);
+    restoreArticleCasiers(stockItem.article, bottles, {
+      motif: "annulation_vente",
+      commentaire: `Suppression doublon ${factureNum}`,
+      factureNumber: factureNum,
+    });
+  });
+  const ids = new Set(ventes.map((v) => v.id));
+  state.ventes = (state.ventes || []).filter((v) => !ids.has(v.id));
+  const total = ventes.reduce((s, v) => s + calcNet(v), 0);
+  recordStaffAudit("delete", "correction_article",
+    `Suppression doublon ${factureNum} · ${fmt(total)} FCFA`,
+    `${ventes.length} ligne(s) supprimée(s) · stock restitué`);
+  const datesToRefresh = [...new Set(ventes.map((v) => (v.date || "").slice(0, 10)).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)))];
+  const stockChecksDirty = datesToRefresh.some((d) => refreshStockCheckAfterVenteCorrection(d, siteId));
+  await persistState({
+    ventes: state.ventes,
+    stock: state.stock,
+    casiers: state.casiers,
+    casierMouvements: state.casierMouvements,
+    staffAuditLog: state.staffAuditLog,
+    nextId: state.nextId,
+    ...(stockChecksDirty ? { stockChecks: state.stockChecks } : {}),
+  });
+  document.getElementById("del-facture-result").innerHTML =
+    `<p style="color:#2e7d32;padding:10px 0;font-weight:600">✓ Facture ${escapeHtml(factureNum)} supprimée — stock restitué.</p>`;
+  document.getElementById("del-facture-num").value = "";
+  renderCorrectionHistory();
+  showToast(`Facture ${factureNum} supprimée.`);
+}
+
 /** Construit le texte d'info prix pour un article (formats kit + prix). */
 function corrBuildPriceInfo(articleName, siteId, fallbackPrix) {
   const item = stockItemForArticle(articleName, siteId || currentSiteId());
@@ -21889,6 +21970,8 @@ document.getElementById("fab-btn").addEventListener("click", () => {
     }
   });
   document.getElementById("corr-search-btn")?.addEventListener("click", () => searchFactureForCorrection());
+  document.getElementById("del-facture-search-btn")?.addEventListener("click", () => searchFactureForDeletion());
+  document.getElementById("del-facture-num")?.addEventListener("keydown", (e) => { if (e.key === "Enter") searchFactureForDeletion(); });
   document.getElementById("corr-facture-num")?.addEventListener("keydown", (e) => {
     if (e.key === "Enter") searchFactureForCorrection();
   });

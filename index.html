@@ -1915,6 +1915,23 @@
 
           <article class="card" style="margin-top:14px">
             <div class="section-head">
+              <h3>Supprimer une facture en double</h3>
+              <span class="section-meta">Irréversible</span>
+            </div>
+            <p class="muted" style="font-size:0.86rem;margin-bottom:14px;line-height:1.45">
+              Supprime toutes les lignes d'une facture et <strong>restitue le stock</strong>.
+              À utiliser uniquement pour les doublons de saisie.
+            </p>
+            <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+              <input id="del-facture-num" type="text" placeholder="Numéro de facture (ex: CDAYOP-0335)"
+                     style="flex:1;min-width:180px;padding:11px 14px;border-radius:12px;border:1px solid var(--line);font-size:0.93rem">
+              <button id="del-facture-search-btn" class="btn btn-primary" type="button">Rechercher</button>
+            </div>
+            <div id="del-facture-result"></div>
+          </article>
+
+          <article class="card" style="margin-top:14px">
+            <div class="section-head">
               <h3>Historique des corrections</h3>
               <span class="section-meta" id="corr-history-meta">—</span>
             </div>
