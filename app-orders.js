@@ -1231,9 +1231,10 @@ function renderLoyaltyPage() {
   const cfg = loyaltyConfig();
   const allRows = buildLoyaltyRows(loyaltyUiPeriodDays, "all");
   const rows = buildLoyaltyRows();
-  document.getElementById("loyalty-kpi-regular")?.textContent = String(allRows.filter((r) => r.tier === "regular").length);
-  document.getElementById("loyalty-kpi-vip")?.textContent = String(allRows.filter((r) => r.tier === "vip").length);
-  document.getElementById("loyalty-kpi-eligible")?.textContent = String(allRows.filter((r) => r.tier === "regular" || r.tier === "vip").length);
+  const setKpi = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+  setKpi("loyalty-kpi-regular", String(allRows.filter((r) => r.tier === "regular").length));
+  setKpi("loyalty-kpi-vip", String(allRows.filter((r) => r.tier === "vip").length));
+  setKpi("loyalty-kpi-eligible", String(allRows.filter((r) => r.tier === "regular" || r.tier === "vip").length));
   const periodEl = document.getElementById("loyalty-period-label");
   if (periodEl) {
     periodEl.textContent = `Période : ${loyaltyUiPeriodDays} jours · régulier ${cfg.regularVisits} visites ou ${fmt(cfg.regularCa)} FCFA · VIP ${cfg.vipVisits} visites ou ${fmt(cfg.vipCa)} FCFA`;
