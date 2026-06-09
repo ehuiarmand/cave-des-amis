@@ -2243,6 +2243,31 @@ textarea { font: inherit; }
 .stock-kpi-val.red { color: #ff8e82; }
 .stock-kpi-val.green { color: #72d7a9; }
 
+.loyalty-tier-badge,
+.loyalty-client-hint {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.loyalty-badge-regular {
+  background: rgba(114, 215, 169, 0.16);
+  color: #72d7a9;
+}
+
+.loyalty-badge-vip {
+  background: rgba(255, 202, 105, 0.2);
+  color: #ffcf79;
+}
+
+.loyalty-badge-blocked {
+  background: rgba(255, 142, 130, 0.16);
+  color: #ffb0a7;
+}
+
 .stock-marge-preview {
   margin: 4px 0 12px;
   padding: 12px 14px;

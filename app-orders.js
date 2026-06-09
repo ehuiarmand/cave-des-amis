@@ -1039,6 +1039,303 @@ function especesAvoirsEmisForDate(dStr, sourceState = state) {
     .reduce((sum, a) => sum + (Number(a.montant) || 0), 0);
 }
 
+
+/** ——— Fidélité clients (réguliers / VIP) ——— */
+let loyaltyUiPeriodDays = 90;
+let loyaltyUiTierFilter = "eligible";
+let _loyaltyEditClientKey = null;
+
+const LOYALTY_TIER_LABELS = { none: "Occasionnel", regular: "Régulier", vip: "VIP", blocked: "Exclu" };
+
+function loyaltyProfilesForSite(sourceState = state) {
+  const siteId = currentSiteId();
+  const multiSite = (sourceState?.sites || []).length > 1;
+  return (sourceState?.loyaltyClients || []).filter((r) => rowMatchesSite(r, siteId, multiSite));
+}
+
+function loyaltyProfileByKey(clientKey, sourceState = state) {
+  const key = debtorDisplayKey(clientKey);
+  if (!key) return null;
+  return loyaltyProfilesForSite(sourceState).find((p) => debtorDisplayKey(p.clientKey || p.displayName) === key) || null;
+}
+
+function loyaltyConfig(site = currentSite()) {
+  return {
+    periodDays: Math.max(30, Math.min(365, Number(site?.loyaltyPeriodDays) || 90)),
+    regularVisits: Math.max(1, Number(site?.loyaltyRegularVisits) || 5),
+    regularCa: Math.max(0, Number(site?.loyaltyRegularCa) || 200000),
+    vipVisits: Math.max(1, Number(site?.loyaltyVipVisits) || 12),
+    vipCa: Math.max(0, Number(site?.loyaltyVipCa) || 800000),
+    regularDiscountPct: Math.max(0, Math.min(50, Number(site?.loyaltyRegularDiscountPct) || 0)),
+    vipDiscountPct: Math.max(0, Math.min(50, Number(site?.loyaltyVipDiscountPct) || 5)),
+  };
+}
+
+function loyaltySaleClientKey(v) {
+  const raw = String(v?.client || v?.debiteur || v?.table || "").trim();
+  if (!raw) return "";
+  if (/saisie\s*rapide/i.test(raw)) return "";
+  if (/^comptoir$/i.test(raw)) return "";
+  return debtorDisplayKey(raw);
+}
+
+function loyaltyEncaissedAmount(v) {
+  const net = calcNet(v);
+  const details = v.paiementDetails?.length ? v.paiementDetails : [{ method: v.paiement || "", amount: net }];
+  let enc = 0;
+  details.forEach((d) => {
+    const m = String(d.method || "");
+    if (isCreditClientMethod(m) || isAReglerPaiement(m)) return;
+    enc += Number(d.amount) || 0;
+  });
+  if (!enc && !isCreditClientMethod(v.paiement) && !isAReglerPaiement(v.paiement)) enc = net;
+  return Math.max(0, enc);
+}
+
+function aggregateLoyaltyStats(periodDays = loyaltyUiPeriodDays, sourceState = state) {
+  const cfg = loyaltyConfig();
+  const days = Math.max(1, Number(periodDays) || cfg.periodDays);
+  const end = today();
+  const startDt = new Date(`${end}T12:00:00`);
+  startDt.setDate(startDt.getDate() - (days - 1));
+  const start = `${startDt.getFullYear()}-${String(startDt.getMonth() + 1).padStart(2, "0")}-${String(startDt.getDate()).padStart(2, "0")}`;
+  const map = {};
+  recordsForSite(sourceState?.ventes || []).forEach((v) => {
+    const clientKey = loyaltySaleClientKey(v);
+    if (!clientKey) return;
+    const d = String(saleDateValue(v) || v.date || "").slice(0, 10);
+    if (!d || d < start || d > end) return;
+    const enc = loyaltyEncaissedAmount(v);
+    if (enc <= 0) return;
+    if (!map[clientKey]) {
+      map[clientKey] = { clientKey, displayName: clientKey, visits: new Set(), ca: 0, lastVisit: d, ticketCount: 0 };
+    }
+    const row = map[clientKey];
+    row.visits.add(d);
+    row.ca += enc;
+    row.ticketCount += 1;
+    if (d >= row.lastVisit) row.lastVisit = d;
+  });
+  return map;
+}
+
+function computeLoyaltyTier(stats, profile, cfg = loyaltyConfig()) {
+  const ov = String(profile?.tierOverride || "").trim().toLowerCase();
+  if (ov === "blocked") return "blocked";
+  if (ov === "vip") return "vip";
+  if (ov === "regular") return "regular";
+  if (!stats) return "none";
+  const visits = stats.visits?.size ?? stats.visitCount ?? 0;
+  const ca = Number(stats.ca) || 0;
+  if (visits >= cfg.vipVisits || ca >= cfg.vipCa) return "vip";
+  if (visits >= cfg.regularVisits || ca >= cfg.regularCa) return "regular";
+  return "none";
+}
+
+function loyaltyDiscountPctForTier(tier, profile, cfg = loyaltyConfig()) {
+  const custom = profile?.discountPctOverride;
+  if (custom !== undefined && custom !== null && custom !== "" && !Number.isNaN(Number(custom))) {
+    return Math.max(0, Math.min(50, Number(custom)));
+  }
+  if (tier === "vip") return cfg.vipDiscountPct;
+  if (tier === "regular") return cfg.regularDiscountPct;
+  return 0;
+}
+
+function buildLoyaltyRows(periodDays = loyaltyUiPeriodDays, tierFilter = loyaltyUiTierFilter) {
+  const statsMap = aggregateLoyaltyStats(periodDays);
+  const cfg = loyaltyConfig();
+  const keys = new Set(Object.keys(statsMap));
+  loyaltyProfilesForSite().forEach((p) => keys.add(debtorDisplayKey(p.clientKey || p.displayName)));
+  const rows = [...keys].filter(Boolean).map((clientKey) => {
+    const statsRaw = statsMap[clientKey];
+    const stats = statsRaw
+      ? { visitCount: statsRaw.visits.size, ca: statsRaw.ca, lastVisit: statsRaw.lastVisit, ticketCount: statsRaw.ticketCount }
+      : { visitCount: 0, ca: 0, lastVisit: "", ticketCount: 0 };
+    const profile = loyaltyProfileByKey(clientKey);
+    const tier = computeLoyaltyTier(statsRaw || stats, profile, cfg);
+    const discountPct = loyaltyDiscountPctForTier(tier, profile, cfg);
+    const displayName = profile?.displayName || statsRaw?.displayName || clientKey;
+    return { clientKey, displayName, profile, tier, discountPct, ...stats };
+  });
+  rows.sort((a, b) => b.ca - a.ca || b.visitCount - a.visitCount || a.displayName.localeCompare(b.displayName, "fr"));
+  if (tierFilter === "regular") return rows.filter((r) => r.tier === "regular");
+  if (tierFilter === "vip") return rows.filter((r) => r.tier === "vip");
+  if (tierFilter === "eligible") return rows.filter((r) => r.tier === "regular" || r.tier === "vip");
+  return rows;
+}
+
+function loyaltyHintForClientName(name) {
+  const key = debtorDisplayKey(String(name || "").trim());
+  if (!key) return null;
+  const statsMap = aggregateLoyaltyStats();
+  const statsRaw = statsMap[key];
+  const stats = statsRaw
+    ? { visitCount: statsRaw.visits.size, ca: statsRaw.ca, lastVisit: statsRaw.lastVisit }
+    : null;
+  const profile = loyaltyProfileByKey(key);
+  const tier = computeLoyaltyTier(statsRaw || stats, profile);
+  if (tier === "blocked") return { tier, label: "Client exclu du programme fidélité", discountPct: 0 };
+  const discountPct = loyaltyDiscountPctForTier(tier, profile);
+  if (tier === "none" && !profile) return null;
+  return {
+    tier,
+    label: LOYALTY_TIER_LABELS[tier] || tier,
+    discountPct,
+    visits: stats?.visitCount ?? statsRaw?.visits?.size ?? 0,
+    ca: stats?.ca ?? statsRaw?.ca ?? 0,
+  };
+}
+
+
+function applyLoyaltyDiscountToLine() {
+  const info = loyaltyHintForClientName(document.getElementById("v-client")?.value);
+  if (!info || !info.discountPct) {
+    showToast("Aucune remise fidélité pour ce client.");
+    return;
+  }
+  const prix = Number(document.getElementById("v-prix")?.value) || 0;
+  const qty = Number(document.getElementById("v-qty")?.value) || 1;
+  const brut = prix * qty;
+  if (brut <= 0) {
+    showToast("Saisissez le prix et la quantité avant d'appliquer la remise.");
+    return;
+  }
+  const remise = Math.round(brut * info.discountPct / 100);
+  document.getElementById("v-remise").value = String(remise);
+  if (typeof updateVentePreview === "function") updateVentePreview();
+  showToast(`Remise fidélité ${info.discountPct} % : −${fmt(remise)} FCFA.`);
+}
+
+function syncLoyaltyClientHint() {
+  const hint = document.getElementById("v-loyalty-hint");
+  const input = document.getElementById("v-client");
+  if (!hint || !input) return;
+  const info = loyaltyHintForClientName(input.value);
+  if (!info || info.tier === "none") {
+    hint.classList.add("hidden");
+    hint.innerHTML = "";
+    return;
+  }
+  hint.classList.remove("hidden");
+  const disc = info.discountPct > 0 ? ` · remise <strong>${info.discountPct} %</strong>` : "";
+  const tierClass = info.tier === "vip" ? "loyalty-badge-vip" : info.tier === "regular" ? "loyalty-badge-regular" : "";
+  const applyBtn = info.discountPct > 0
+    ? ` <button type="button" class="mini-btn" id="v-loyalty-apply-btn">Appliquer remise</button>`
+    : "";
+  hint.innerHTML = `<span class="loyalty-client-hint ${tierClass}">${escapeHtml(info.label)}${info.visits ? ` · ${info.visits} jour(s) de visite` : ""}${info.ca ? ` · ${fmt(info.ca)} FCFA` : ""}${disc}</span>${applyBtn}`;
+}
+
+function renderLoyaltyPage() {
+  syncLoyaltySiteConfigForm();
+  const cfg = loyaltyConfig();
+  const allRows = buildLoyaltyRows(loyaltyUiPeriodDays, "all");
+  const rows = buildLoyaltyRows();
+  document.getElementById("loyalty-kpi-regular")?.textContent = String(allRows.filter((r) => r.tier === "regular").length);
+  document.getElementById("loyalty-kpi-vip")?.textContent = String(allRows.filter((r) => r.tier === "vip").length);
+  document.getElementById("loyalty-kpi-eligible")?.textContent = String(allRows.filter((r) => r.tier === "regular" || r.tier === "vip").length);
+  const periodEl = document.getElementById("loyalty-period-label");
+  if (periodEl) {
+    periodEl.textContent = `Période : ${loyaltyUiPeriodDays} jours · régulier ${cfg.regularVisits} visites ou ${fmt(cfg.regularCa)} FCFA · VIP ${cfg.vipVisits} visites ou ${fmt(cfg.vipCa)} FCFA`;
+  }
+  const list = document.getElementById("loyalty-client-list");
+  if (!list) return;
+  list.innerHTML = rows.length
+    ? rows.map((r) => {
+      const tierClass = r.tier === "vip" ? "loyalty-badge-vip" : r.tier === "regular" ? "loyalty-badge-regular" : r.tier === "blocked" ? "loyalty-badge-blocked" : "";
+      const editBtn = canManage() ? `<button type="button" class="mini-btn" data-loyalty-edit="${escapeHtml(r.clientKey)}">Profil</button>` : "";
+      return `<article class="list-item"><div><p class="list-item-title">${escapeHtml(r.displayName)}</p><p class="list-item-sub">${r.visitCount} jour(s) · ${r.ticketCount} ticket(s) · dernière visite ${r.lastVisit ? escapeHtml(formatDateDdMmYyyy(r.lastVisit)) : "—"}</p></div><div class="list-side" style="display:flex;flex-wrap:wrap;align-items:center;gap:8px"><span class="loyalty-tier-badge ${tierClass}">${escapeHtml(LOYALTY_TIER_LABELS[r.tier] || r.tier)}</span><p class="list-item-amount" style="margin:0">${fmt(r.ca)} FCFA</p>${r.discountPct > 0 ? `<span class="muted" style="font-size:0.82rem">−${r.discountPct} %</span>` : ""}${editBtn}</div></article>`;
+    }).join("")
+    : emptyState("Aucun client fidélité", "Les statistiques viennent des ventes encaissées sur la période.");
+}
+
+function syncLoyaltySiteConfigForm() {
+  if (!canManage()) return;
+  const site = currentSite();
+  if (!site) return;
+  const cfg = loyaltyConfig(site);
+  const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
+  set("loyalty-cfg-period", cfg.periodDays);
+  set("loyalty-cfg-regular-visits", cfg.regularVisits);
+  set("loyalty-cfg-regular-ca", cfg.regularCa);
+  set("loyalty-cfg-vip-visits", cfg.vipVisits);
+  set("loyalty-cfg-vip-ca", cfg.vipCa);
+  set("loyalty-cfg-regular-disc", cfg.regularDiscountPct);
+  set("loyalty-cfg-vip-disc", cfg.vipDiscountPct);
+}
+
+async function saveLoyaltySiteConfig() {
+  if (!canManage()) { showToast("Accès refusé."); return; }
+  const site = currentSite();
+  if (!site) return;
+  site.loyaltyPeriodDays = Math.max(30, Math.min(365, Number(document.getElementById("loyalty-cfg-period")?.value) || 90));
+  site.loyaltyRegularVisits = Math.max(1, Number(document.getElementById("loyalty-cfg-regular-visits")?.value) || 5);
+  site.loyaltyRegularCa = Math.max(0, Number(document.getElementById("loyalty-cfg-regular-ca")?.value) || 0);
+  site.loyaltyVipVisits = Math.max(1, Number(document.getElementById("loyalty-cfg-vip-visits")?.value) || 12);
+  site.loyaltyVipCa = Math.max(0, Number(document.getElementById("loyalty-cfg-vip-ca")?.value) || 0);
+  site.loyaltyRegularDiscountPct = Math.max(0, Math.min(50, Number(document.getElementById("loyalty-cfg-regular-disc")?.value) || 0));
+  site.loyaltyVipDiscountPct = Math.max(0, Math.min(50, Number(document.getElementById("loyalty-cfg-vip-disc")?.value) || 0));
+  loyaltyUiPeriodDays = site.loyaltyPeriodDays;
+  await persistState({ sites: state.sites });
+  renderLoyaltyPage();
+  showToast("Règles fidélité enregistrées.");
+}
+
+function openLoyaltyProfileModal(clientKey) {
+  if (!canManage()) { showToast("Accès refusé."); return; }
+  const key = debtorDisplayKey(clientKey);
+  _loyaltyEditClientKey = key;
+  const profile = loyaltyProfileByKey(key);
+  const stats = aggregateLoyaltyStats()[key];
+  document.getElementById("loyalty-edit-name").value = profile?.displayName || key;
+  document.getElementById("loyalty-edit-phone").value = profile?.phone || "";
+  document.getElementById("loyalty-edit-note").value = profile?.note || "";
+  document.getElementById("loyalty-edit-tier").value = profile?.tierOverride || "";
+  document.getElementById("loyalty-edit-discount").value = profile?.discountPctOverride ?? "";
+  const statsEl = document.getElementById("loyalty-edit-stats");
+  if (statsEl) {
+    statsEl.textContent = stats ? `${stats.visits.size} jour(s) · ${fmt(stats.ca)} FCFA sur ${loyaltyUiPeriodDays} j` : "Pas de vente encaissée sur la période.";
+  }
+  openModal("modal-loyalty-profile");
+}
+
+async function saveLoyaltyProfile() {
+  if (!canManage() || !_loyaltyEditClientKey) return;
+  const displayName = debtorDisplayKey(document.getElementById("loyalty-edit-name")?.value || _loyaltyEditClientKey);
+  if (!displayName) { showToast("Nom client obligatoire."); return; }
+  if (!Array.isArray(state.loyaltyClients)) state.loyaltyClients = [];
+  if (!state.nextId) state.nextId = {};
+  if (state.nextId.loyaltyClient == null) {
+    const maxId = state.loyaltyClients.reduce((m, r) => Math.max(m, Number(r.id) || 0), 0);
+    state.nextId.loyaltyClient = Math.max(1, maxId + 1);
+  }
+  let profile = loyaltyProfileByKey(_loyaltyEditClientKey);
+  const tierRaw = String(document.getElementById("loyalty-edit-tier")?.value || "").trim();
+  const discRaw = document.getElementById("loyalty-edit-discount")?.value;
+  const patch = {
+    siteId: currentSiteId(),
+    clientKey: displayName,
+    displayName,
+    phone: String(document.getElementById("loyalty-edit-phone")?.value || "").trim(),
+    note: String(document.getElementById("loyalty-edit-note")?.value || "").trim(),
+    tierOverride: tierRaw || null,
+    discountPctOverride: discRaw === "" || discRaw == null ? null : Math.max(0, Math.min(50, Number(discRaw) || 0)),
+    updatedAt: new Date().toISOString(),
+  };
+  if (profile) Object.assign(profile, patch);
+  else {
+    profile = { id: state.nextId.loyaltyClient++, createdAt: new Date().toISOString(), ...patch };
+    state.loyaltyClients.unshift(profile);
+  }
+  recordStaffAudit("update", "fidelite_client", `Profil fidélité · ${displayName}`, patch.tierOverride ? `Statut : ${patch.tierOverride}` : "Profil enregistré");
+  await persistState({ loyaltyClients: state.loyaltyClients, nextId: state.nextId });
+  closeModal("modal-loyalty-profile");
+  _loyaltyEditClientKey = null;
+  renderLoyaltyPage();
+  showToast("Profil fidélité enregistré.");
+}
+
+
 /** Noms des comptes (serveur / gérant) ayant enregistré une vente avec crédit client, par débiteur. */
 function creditIssuerLabelsByDebtor(sourceState = state) {
   const ventes = recordsForSite(sourceState?.ventes || []);
@@ -5445,6 +5742,7 @@ function renderHero() {
     params: "Paramètres : profil personnel pour tous ; catalogue, accès et administration pour les rôles autorisés.",
     planning: "Consultez vos horaires et, si vous êtes gérant, planifiez l'équipe.",
     "historique-ventes": "Vos factures encaissées, filtrées par période.",
+    loyalty: "Récompensez vos clients réguliers et VIP.",
   };
   const copies = {
     home: "Le serveur garde les sessions et l'état complet de l'application.",
@@ -5456,6 +5754,7 @@ function renderHero() {
     params: "Onglet Profil : mon compte (nom affiché, mot de passe) pour tous ; réglages du maquis réservés au gérant ou aux administrateurs.",
     planning: "Mes horaires : lecture pour toute l'équipe. Onglet Équipe : création des créneaux (gérant / admin).",
     "historique-ventes": "Consultation et impression de vos ventes uniquement — pas l'historique caisse du gérant.",
+    loyalty: "Classement automatique à partir des ventes encaissées ; remises suggérées à la caisse.",
   };
   document.getElementById("hero-title").textContent = titles[currentPage];
   document.getElementById("hero-copy").textContent = copies[currentPage];
@@ -6175,7 +6474,7 @@ function navigate(page, opts = {}) {
   if (pageEl) pageEl.classList.add("active");
 
   syncNavActiveState();
-  document.getElementById("fab-btn").classList.toggle("hidden", !["ventes", "stock", "charges"].includes(page));
+  document.getElementById("fab-btn").classList.toggle("hidden", !["ventes", "stock", "charges", "loyalty"].includes(page));
   renderHero();
   renderSiteSwitcher();
   if (page === "home") renderDashboard();
@@ -6202,6 +6501,7 @@ function navigate(page, opts = {}) {
     maybeAdjustParamsSubTab();
   }
   if (page === "planning") renderPlanningPage().catch(handleApiError);
+  if (page === "loyalty") renderLoyaltyPage();
   if (page === "historique-ventes") renderServeuseSalesHistoryPage().catch(handleApiError);
   syncFabLabelForStockPage();
   applyRoleVisibility();
@@ -6262,6 +6562,7 @@ function bindMobileMoreSheet() {
     if (nav === "qr") navigate("ventes", { ventesSubtab: "qr" });
     else if (nav === "caisse") navigate("ventes", { ventesSubtab: "caisse", caisseInner: "recouvrement" });
     else if (nav === "consignes") navigate("ventes", { ventesSubtab: "consignes" });
+    else if (nav === "loyalty") navigate("loyalty");
     else if (nav === "guide") navigate("guide");
     else if (nav === "charges") navigate("charges");
     else if (nav === "params") navigate("params");
@@ -13364,6 +13665,7 @@ function openOrderEditor(orderId = null) {
   const vSearch = document.getElementById("v-article-search");
   if (vSearch) vSearch.value = "";
   renderVenteArticlePicker();
+  syncLoyaltyClientHint();
   openModal("modal-vente");
   window.requestAnimationFrame(() => document.getElementById("v-article-search")?.focus());
 }
@@ -13386,6 +13688,7 @@ function resetOrderForm() {
   renderVenteArticlePicker();
   updateKitInfo(null);
   updateVentePreview();
+  syncLoyaltyClientHint();
 }
 
 function modalIsOpen() {
@@ -14160,7 +14463,7 @@ const PURGE_MAQUIS_ROW_KEYS = [
 const STATE_PUT_ROW_KEYS = [
   "ventes", "stock", "commandes", "stockChecks", "stockEntrees", "stockLosses",
   "dayBooks", "purchaseOrders", "supplierPrices", "casiers", "casierMouvements",
-  "creditRecoveries", "clientAvoirs", "consignes", "charges", "staffAuditLog", "workShifts",
+  "creditRecoveries", "clientAvoirs", "loyaltyClients", "consignes", "charges", "staffAuditLog", "workShifts",
 ];
 
 /**
@@ -14186,6 +14489,7 @@ function buildStatePutBody(overrides = {}) {
     body.supplierPrices = state.supplierPrices ?? [];
     body.creditRecoveries = state.creditRecoveries ?? [];
     body.clientAvoirs = state.clientAvoirs ?? [];
+    body.loyaltyClients = state.loyaltyClients ?? [];
     body.consignes = state.consignes ?? [];
     body.categories = state.categories ?? CATEGORIES;
     body.charges = state.charges;
@@ -16083,6 +16387,7 @@ async function finalizeOrder(orderId = activeOrderId) {
       .reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
     if (avoirUsedRaw > 0 && paymentMix.creditName) {
       if (!Array.isArray(state.clientAvoirs)) state.clientAvoirs = [];
+      if (!Array.isArray(state.loyaltyClients)) state.loyaltyClients = [];
       if (!state.nextId.clientAvoir || Number.isNaN(Number(state.nextId.clientAvoir))) state.nextId.clientAvoir = 1;
       const avoirUsed = Math.min(Math.round(avoirUsedRaw), Math.round(avoirBalanceForClient(paymentMix.creditName)));
       if (avoirUsed > 0) {
@@ -22154,6 +22459,25 @@ document.getElementById("fab-btn").addEventListener("click", () => {
     if (btn && !btn.classList.contains("hidden-by-role")) setParamsSubTab(btn.dataset.subtabParams);
   });
   document.getElementById("goto-client-debtors-btn")?.addEventListener("click", () => navigateToClientCredits());
+  document.getElementById("loyalty-period-select")?.addEventListener("change", (e) => {
+    loyaltyUiPeriodDays = Number(e.target.value) || 90;
+    renderLoyaltyPage();
+  });
+  document.getElementById("loyalty-tier-filter")?.addEventListener("change", (e) => {
+    loyaltyUiTierFilter = e.target.value || "eligible";
+    renderLoyaltyPage();
+  });
+  document.getElementById("loyalty-save-config-btn")?.addEventListener("click", () => saveLoyaltySiteConfig().catch(handleApiError));
+  document.getElementById("loyalty-client-list")?.addEventListener("click", (event) => {
+    const btn = event.target.closest("[data-loyalty-edit]");
+    if (!btn) return;
+    openLoyaltyProfileModal(btn.getAttribute("data-loyalty-edit"));
+  });
+  document.getElementById("loyalty-save-profile-btn")?.addEventListener("click", () => saveLoyaltyProfile().catch(handleApiError));
+  document.getElementById("v-client")?.addEventListener("input", syncLoyaltyClientHint);
+  document.getElementById("v-loyalty-hint")?.addEventListener("click", (e) => {
+    if (e.target.closest("#v-loyalty-apply-btn")) applyLoyaltyDiscountToLine();
+  });
   document.getElementById("creanciers-charges-list")?.addEventListener("click", (event) => {
     const btn = event.target.closest("[data-settle-supplier-debt]");
     if (!btn) return;

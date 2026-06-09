@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./styles.css?v=51">
+  <link rel="stylesheet" href="./styles.css?v=52">
   <link rel="stylesheet" href="./styles-cave-manager.css?v=2">
   <link rel="stylesheet" href="./cave-casier.css">
   <link rel="stylesheet" href="./cave-components.css">
@@ -95,6 +95,10 @@
         <button class="nav-btn" data-page="ventes" type="button">
           <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M2 0a2 2 0 0 0-2 2v13.5a.5.5 0 0 0 .74.439L4 14.71l3.26 1.229a.5.5 0 0 0 .48 0L11 14.71l3.26 1.229A.5.5 0 0 0 15 15.5V2a2 2 0 0 0-2-2H2zM4 5.5a.5.5 0 0 1 0-1h8a.5.5 0 0 1 0 1H4zm0 3a.5.5 0 0 1 0-1h6a.5.5 0 0 1 0 1H4z"/></svg>
           <span>Ventes</span>
+        </button>
+        <button class="nav-btn" data-page="loyalty" type="button">
+          <span class="nav-icon" aria-hidden="true">★</span>
+          Fidélité
         </button>
         <button class="nav-btn" data-page="guide" type="button">
           <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5 1a2 2 0 0 0-2 2v11h10a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2H5zm1 3h6v1H6V4zm0 2h6v1H6V6zm0 2h4v1H6V8z"/></svg>
@@ -1331,6 +1335,42 @@
         <div id="charges-list"></div>
       </section>
 
+
+      <section id="page-loyalty" class="page">
+        <article class="card" style="margin-bottom:12px">
+          <div class="section-head"><h3>Fidélité clients</h3><span class="section-meta">Réguliers &amp; VIP</span></div>
+          <p class="muted" style="font-size:0.88rem;margin:0 0 12px">Classement automatique à partir des <strong>ventes encaissées</strong> (hors crédit non payé). Les serveuses voient le statut à la saisie client.</p>
+          <div class="stock-kpi-bar" style="margin-bottom:12px">
+            <div class="stock-kpi"><span class="stock-kpi-label">Réguliers</span><strong id="loyalty-kpi-regular" class="stock-kpi-val">0</strong></div>
+            <div class="stock-kpi"><span class="stock-kpi-label">VIP</span><strong id="loyalty-kpi-vip" class="stock-kpi-val amber">0</strong></div>
+            <div class="stock-kpi"><span class="stock-kpi-label">Éligibles</span><strong id="loyalty-kpi-eligible" class="stock-kpi-val">0</strong></div>
+          </div>
+          <div class="form-grid two-cols" style="align-items:end;margin-bottom:8px">
+            <div class="form-group" style="margin:0"><label for="loyalty-period-select">Période d&apos;analyse</label>
+              <select id="loyalty-period-select"><option value="30">30 jours</option><option value="90" selected>90 jours</option><option value="180">180 jours</option><option value="365">12 mois</option></select>
+            </div>
+            <div class="form-group" style="margin:0"><label for="loyalty-tier-filter">Filtrer</label>
+              <select id="loyalty-tier-filter"><option value="eligible">Réguliers + VIP</option><option value="all">Tous les clients</option><option value="vip">VIP seulement</option><option value="regular">Réguliers seulement</option></select>
+            </div>
+          </div>
+          <p id="loyalty-period-label" class="muted" style="font-size:0.82rem;margin:0"></p>
+        </article>
+        <article class="card manager-only" style="margin-bottom:12px">
+          <h4 style="margin:0 0 10px">Règles du programme</h4>
+          <div class="form-grid three-cols">
+            <div class="form-group"><label for="loyalty-cfg-period">Jours analysés</label><input id="loyalty-cfg-period" type="number" min="30" max="365"></div>
+            <div class="form-group"><label for="loyalty-cfg-regular-visits">Régulier — visites min.</label><input id="loyalty-cfg-regular-visits" type="number" min="1"></div>
+            <div class="form-group"><label for="loyalty-cfg-regular-ca">Régulier — CA min. (FCFA)</label><input id="loyalty-cfg-regular-ca" type="number" min="0" step="1000"></div>
+            <div class="form-group"><label for="loyalty-cfg-vip-visits">VIP — visites min.</label><input id="loyalty-cfg-vip-visits" type="number" min="1"></div>
+            <div class="form-group"><label for="loyalty-cfg-vip-ca">VIP — CA min. (FCFA)</label><input id="loyalty-cfg-vip-ca" type="number" min="0" step="1000"></div>
+            <div class="form-group"><label for="loyalty-cfg-regular-disc">Remise régulier (%)</label><input id="loyalty-cfg-regular-disc" type="number" min="0" max="50"></div>
+            <div class="form-group"><label for="loyalty-cfg-vip-disc">Remise VIP (%)</label><input id="loyalty-cfg-vip-disc" type="number" min="0" max="50"></div>
+          </div>
+          <button type="button" class="btn btn-primary" id="loyalty-save-config-btn" style="margin-top:10px;width:auto">Enregistrer les règles</button>
+        </article>
+        <div id="loyalty-client-list"></div>
+      </section>
+
       <section id="page-guide" class="page">
         <article class="card">
           <div class="section-head">
@@ -2109,6 +2149,10 @@
               <span class="mobile-more-feature-desc">Reliquats payés et consignes bouteilles.</span>
             </span>
           </button>
+          <button type="button" class="mobile-more-feature" data-more-nav="loyalty">
+            <span class="mobile-more-feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M12 2l2.4 7.4H22l-6 4.6 2.3 7L12 16.8 5.7 21l2.3-7-6-4.6h7.6L12 2z"/></svg></span>
+            <span class="mobile-more-feature-copy"><strong>Fidélité clients</strong><span class="mobile-more-feature-desc">Clients réguliers et VIP, remises suggérées.</span></span>
+          </button>
           <button type="button" class="mobile-more-feature" data-more-nav="guide">
             <span class="mobile-more-feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg></span>
             <span class="mobile-more-feature-copy">
@@ -2184,6 +2228,7 @@
         <div class="form-group">
           <label for="v-client">Client / table</label>
           <input id="v-client" type="text" placeholder="ex: Table 4 - M. Niamke">
+          <p id="v-loyalty-hint" class="hidden" style="margin:6px 0 0;font-size:0.82rem"></p>
         </div>
         <div class="form-group">
           <label for="v-order-select">Commande en cours</label>
@@ -3073,12 +3118,28 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+  <div id="modal-loyalty-profile" class="modal-overlay" aria-hidden="true">
+    <div class="modal">
+      <div class="section-head"><h3>Profil fidélité</h3><button class="icon-btn close-modal" data-close="modal-loyalty-profile" type="button">Fermer</button></div>
+      <p id="loyalty-edit-stats" class="muted" style="font-size:0.85rem"></p>
+      <div class="form-group"><label for="loyalty-edit-name">Nom client</label><input id="loyalty-edit-name" type="text"></div>
+      <div class="form-group"><label for="loyalty-edit-phone">Téléphone</label><input id="loyalty-edit-phone" type="tel"></div>
+      <div class="form-group"><label for="loyalty-edit-tier">Statut forcé</label>
+        <select id="loyalty-edit-tier"><option value="">Automatique (selon règles)</option><option value="regular">Régulier</option><option value="vip">VIP</option><option value="blocked">Exclu</option></select>
+      </div>
+      <div class="form-group"><label for="loyalty-edit-discount">Remise % (vide = règle par défaut)</label><input id="loyalty-edit-discount" type="number" min="0" max="50" placeholder="ex: 5"></div>
+      <div class="form-group"><label for="loyalty-edit-note">Note</label><input id="loyalty-edit-note" type="text" placeholder="Préférences, anniversaire…"></div>
+      <div class="button-stack"><button type="button" class="btn btn-primary" id="loyalty-save-profile-btn">Enregistrer</button><button type="button" class="btn btn-outline close-modal" data-close="modal-loyalty-profile">Annuler</button></div>
+    </div>
+  </div>
+
   <script src="./utils-shared.js?v=1"></script>
   <script src="./cave-casier.js"></script>
   <script src="./cave-components.js"></script>
   <script src="./cave-extras.js"></script>
   <script src="./cave-order-pad.js"></script>
-  <script src="./app-orders.js?v=363"></script>
+  <script src="./app-orders.js?v=365"></script>
   <script src="./restaurant-module.js"></script>
 </body>
 </html>

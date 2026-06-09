@@ -141,6 +141,15 @@ CREATE TABLE IF NOT EXISTS consignes (
 );
 CREATE INDEX IF NOT EXISTS idx_consignes_site_id ON consignes (site_id);
 
+-- Fidélité clients (profils / remises)
+CREATE TABLE IF NOT EXISTS loyalty_clients (
+    row_id  BIGSERIAL PRIMARY KEY,
+    item_id BIGINT,
+    site_id TEXT,
+    data    JSONB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_loyalty_clients_site_id ON loyalty_clients (site_id);
+
 -- Charges (dépenses)
 CREATE TABLE IF NOT EXISTS charges (
     row_id  BIGSERIAL PRIMARY KEY,

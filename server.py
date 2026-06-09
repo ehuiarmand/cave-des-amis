@@ -160,7 +160,7 @@ REQUIRE_2FA_FOR_PRIVILEGED = _env_first(
 STATE_PUT_LIST_KEYS = (
     "ventes", "stock", "commandes", "stockChecks", "stockEntrees", "stockLosses",
     "dayBooks", "purchaseOrders", "supplierPrices", "casiers", "casierMouvements",
-    "creditRecoveries", "clientAvoirs", "consignes", "charges", "staffAuditLog", "workShifts",
+    "creditRecoveries", "clientAvoirs", "loyaltyClients", "consignes", "charges", "staffAuditLog", "workShifts",
     "restaurantMenu", "ingredientStock",
 )
 # Mapping clé JSON → (table PostgreSQL, type d'id)
@@ -178,6 +178,7 @@ _PG_TABLES: dict[str, tuple[str, str]] = {
     "casiers":          ("casiers",          "int"),
     "casierMouvements": ("casier_mouvements","int"),
     "creditRecoveries": ("credit_recoveries","int"),
+    "loyaltyClients":   ("loyalty_clients",  "int"),
     "consignes":        ("consignes",        "int"),
     "charges":          ("charges",          "int"),
     "staffAuditLog":    ("staff_audit_log",  "text"),
@@ -683,6 +684,7 @@ DEFAULT_STATE: dict[str, Any] = {
     "casierMouvements": [],
     "creditRecoveries": [],
     "clientAvoirs": [],
+    "loyaltyClients": [],
     "consignes": [],
     "categories": ["Bières", "Sodas & Jus", "Eaux", "Vins & Spiritueux", "Cocktails", "Snacks", "Autres"],
     "charges": [
@@ -705,6 +707,7 @@ DEFAULT_STATE: dict[str, Any] = {
         "casier": 1,
         "casierMouvement": 1,
         "consigne": 0,
+        "loyaltyClient": 1,
     },
 }
 
@@ -1590,6 +1593,7 @@ def build_default_state() -> dict[str, Any]:
         "casierMouvements": [],
         "creditRecoveries": [],
         "clientAvoirs": [],
+        "loyaltyClients": [],
         "consignes": [],
         "categories": legacy.get("categories", DEFAULT_STATE["categories"]),
         "charges": [
@@ -1652,6 +1656,7 @@ def migrate_state(payload: dict[str, Any]) -> dict[str, Any]:
             "stockChecks": [{**item, "siteId": item.get("siteId", site_id)} for item in payload.get("stockChecks", [])],
             "creditRecoveries": [{**item, "siteId": item.get("siteId", site_id)} for item in payload.get("creditRecoveries", [])],
             "clientAvoirs": [{**item, "siteId": item.get("siteId", site_id)} for item in payload.get("clientAvoirs", [])],
+            "loyaltyClients": [{**item, "siteId": item.get("siteId", site_id)} for item in payload.get("loyaltyClients", [])],
             "consignes": [{**item, "siteId": item.get("siteId", site_id)} for item in payload.get("consignes", [])],
             "categories": payload.get("categories", default["categories"]),
             "charges": [{**item, "siteId": item.get("siteId", site_id)} for item in payload.get("charges", default["charges"])],
@@ -1703,6 +1708,7 @@ _SITE_SCOPED_ROW_KEYS: tuple[str, ...] = (
     "casierMouvements",
     "creditRecoveries",
     "clientAvoirs",
+    "loyaltyClients",
     "consignes",
     "charges",
     "staffAuditLog",
@@ -2969,6 +2975,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
         merged["casierMouvements"] = payload.get("casierMouvements", merged.get("casierMouvements", []))
         merged["creditRecoveries"] = payload.get("creditRecoveries", merged.get("creditRecoveries", []))
         merged["clientAvoirs"] = payload.get("clientAvoirs", merged.get("clientAvoirs", []))
+        merged["loyaltyClients"] = payload.get("loyaltyClients", merged.get("loyaltyClients", []))
         merged["consignes"] = payload.get("consignes", merged.get("consignes", []))
         merged["staffAuditLog"] = payload.get("staffAuditLog", merged.get("staffAuditLog", []))
         merged["workShifts"] = payload.get("workShifts", merged.get("workShifts", []))
@@ -3160,6 +3167,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                 "casierMouvements": copy.deepcopy(s.get("casierMouvements", [])),
                 "creditRecoveries": copy.deepcopy(s.get("creditRecoveries", [])),
                 "clientAvoirs": copy.deepcopy(s.get("clientAvoirs", [])),
+                "loyaltyClients": copy.deepcopy(s.get("loyaltyClients", [])),
                 "consignes": copy.deepcopy(s.get("consignes", [])),
                 "categories": copy.deepcopy(s.get("categories", DEFAULT_STATE["categories"])),
                 "charges": copy.deepcopy(s["charges"]),
@@ -3245,6 +3253,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                 "casierMouvements": filter_site_rows(self._state.get("casierMouvements", [])),
                 "creditRecoveries": filter_site_rows(self._state.get("creditRecoveries", [])),
                 "clientAvoirs": filter_site_rows(self._state.get("clientAvoirs", [])),
+                "loyaltyClients": filter_site_rows(self._state.get("loyaltyClients", [])),
                 "consignes": filter_site_rows(self._state.get("consignes", [])),
                 "categories": full["categories"],
                 "charges": filter_site_rows(self._state.get("charges", [])),
@@ -3368,6 +3377,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
             merged["casierMouvements"] = payload.get("casierMouvements", merged.get("casierMouvements", []))
             merged["creditRecoveries"] = payload.get("creditRecoveries", merged.get("creditRecoveries", []))
             merged["clientAvoirs"] = payload.get("clientAvoirs", merged.get("clientAvoirs", []))
+            merged["loyaltyClients"] = payload.get("loyaltyClients", merged.get("loyaltyClients", []))
             merged["consignes"] = payload.get("consignes", merged.get("consignes", []))
             merged["staffAuditLog"] = payload.get("staffAuditLog", merged.get("staffAuditLog", []))
             merged["stockEntrees"] = payload.get("stockEntrees", merged.get("stockEntrees", []))
@@ -3746,7 +3756,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                 _GLOBAL_PATCH_KEYS = [
                     "ventes", "stock", "commandes", "stockChecks", "dayBooks",
                     "purchaseOrders", "supplierPrices", "casiers", "casierMouvements",
-                    "creditRecoveries", "clientAvoirs", "consignes", "charges", "staffAuditLog",
+                    "creditRecoveries", "clientAvoirs", "loyaltyClients", "consignes", "charges", "staffAuditLog",
                     "stockEntrees", "stockLosses", "restaurantMenu", "ingredientStock",
                 ]
                 _old_sc_snap_g: dict[str, dict[str, Any]] = (
@@ -3877,12 +3887,12 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
             _SERVEUSE_WRITE = frozenset({
                 "ventes", "commandes", "dayBooks",
                 "stock", "casiers", "casierMouvements", "staffAuditLog",
-                "creditRecoveries", "clientAvoirs",
+                "creditRecoveries", "clientAvoirs", "loyaltyClients",
             })
             _MANAGER_WRITE = frozenset({
                 "ventes", "stock", "commandes", "stockChecks", "dayBooks",
                 "purchaseOrders", "supplierPrices", "casiers", "casierMouvements",
-                "creditRecoveries", "clientAvoirs", "consignes", "charges", "staffAuditLog",
+                "creditRecoveries", "clientAvoirs", "loyaltyClients", "consignes", "charges", "staffAuditLog",
                 "stockEntrees", "stockLosses", "workShifts",
             })
             if _role_str == "serveuse":
@@ -3897,7 +3907,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
             _SCOPED_KEYS = [
                 "ventes", "stock", "commandes", "stockChecks", "dayBooks",
                 "purchaseOrders", "supplierPrices", "casiers", "casierMouvements",
-                "creditRecoveries", "clientAvoirs", "consignes", "charges", "staffAuditLog",
+                "creditRecoveries", "clientAvoirs", "loyaltyClients", "consignes", "charges", "staffAuditLog",
                 "stockEntrees", "stockLosses", "workShifts",
             ]
             # Retirer du payload les clés que le rôle ne peut pas écrire
