@@ -4925,6 +4925,167 @@ function syncChargesPeriodCustomUi() {
 function initChargesPeriodDom() {
   initPeriodDom("charges");
 }
+function performancePeriod() {
+  return periodFromControls("performance");
+}
+
+function syncPerformancePeriodCustomUi() {
+  syncPeriodCustomUi("performance");
+}
+
+function initPerformancePeriodDom() {
+  initPeriodDom("performance");
+}
+
+function resolvePerformancePeriodBounds() {
+  const period = performancePeriod();
+  if (period.start && period.end) return period;
+  const dates = [];
+  recordsForSite(state.ventes || []).forEach((v) => {
+    const d = String(saleDateValue(v) || "").slice(0, 10);
+    if (d) dates.push(d);
+  });
+  recordsForSite(state.charges || []).forEach((c) => {
+    const d = String(c.date || "").slice(0, 10);
+    if (d) dates.push(d);
+  });
+  if (!dates.length) {
+    const t = today();
+    return { ...period, start: t, end: t };
+  }
+  dates.sort();
+  return { ...period, start: dates[0], end: dates[dates.length - 1] };
+}
+
+function buildDailyPerformanceRows() {
+  const period = resolvePerformancePeriodBounds();
+  const ventesByDay = {};
+  const chargesByDay = {};
+  recordsForSite(state.ventes || []).forEach((v) => {
+    const d = String(saleDateValue(v) || "").slice(0, 10);
+    if (!d) return;
+    if (period.start && (d < period.start || d > period.end)) return;
+    (ventesByDay[d] ||= []).push(v);
+  });
+  recordsForSite(state.charges || []).forEach((c) => {
+    const d = String(c.date || "").slice(0, 10);
+    if (!d) return;
+    if (period.start && (d < period.start || d > period.end)) return;
+    chargesByDay[d] = (chargesByDay[d] || 0) + Number(c.montant || 0);
+  });
+  const days = [...new Set([...Object.keys(ventesByDay), ...Object.keys(chargesByDay)])].sort((a, b) => b.localeCompare(a));
+  const truncated = days.length > 366;
+  const visibleDays = truncated ? days.slice(0, 366) : days;
+  const rows = visibleDays.map((day) => {
+    const vlist = ventesByDay[day] || [];
+    const ca = vlist.reduce((s, v) => s + calcNet(v), 0);
+    const charges = Math.round(chargesByDay[day] || 0);
+    const { margeBrute, excludedLines } = grossMarginFromVenteLines(vlist);
+    return {
+      day,
+      ca,
+      ventes: vlist.length,
+      margeBrute,
+      charges,
+      benefice: margeBrute - charges,
+      excludedLines,
+    };
+  });
+  return { rows, period, truncated };
+}
+
+function renderPerformancePage() {
+  syncPerformancePeriodCustomUi();
+  const { rows, period, truncated } = buildDailyPerformanceRows();
+  const labelEl = document.getElementById("performance-period-foot");
+  if (labelEl) {
+    labelEl.textContent = `Période : ${period.label}${truncated ? " · 366 jours les plus récents affichés" : ""}`;
+  }
+  const totals = rows.reduce(
+    (acc, r) => {
+      acc.ca += r.ca;
+      acc.ventes += r.ventes;
+      acc.margeBrute += r.margeBrute;
+      acc.charges += r.charges;
+      acc.benefice += r.benefice;
+      acc.excludedLines += r.excludedLines;
+      return acc;
+    },
+    { ca: 0, ventes: 0, margeBrute: 0, charges: 0, benefice: 0, excludedLines: 0 },
+  );
+  const setKpi = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+  setKpi("perf-kpi-ca", `${fmt(totals.ca)} FCFA`);
+  setKpi("perf-kpi-ventes", String(totals.ventes));
+  setKpi("perf-kpi-marge", `${fmt(totals.margeBrute)} FCFA`);
+  setKpi("perf-kpi-benefice", `${fmt(totals.benefice)} FCFA`);
+  const hint = document.getElementById("performance-margin-hint");
+  if (hint) {
+    if (totals.excludedLines > 0) {
+      hint.classList.remove("hidden");
+      hint.textContent = `${totals.excludedLines} ligne(s) sans prix d'achat catalogue : marge sous-estimée.`;
+    } else {
+      hint.classList.add("hidden");
+      hint.textContent = "";
+    }
+  }
+  const tbody = document.getElementById("performance-daily-body");
+  if (!tbody) return;
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="6" class="muted" style="padding:14px;text-align:center">Aucune vente ni charge sur la période.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = rows.map((r) => {
+    const benCls = r.benefice >= 0 ? "green" : "red";
+    return `<tr>
+      <td>${escapeHtml(formatDateDdMmYyyy(r.day))}</td>
+      <td style="text-align:right">${fmt(r.ca)}</td>
+      <td style="text-align:right">${r.ventes}</td>
+      <td style="text-align:right">${fmt(r.margeBrute)}</td>
+      <td style="text-align:right">${fmt(r.charges)}</td>
+      <td style="text-align:right" class="${benCls}">${fmt(r.benefice)}</td>
+    </tr>`;
+  }).join("") + `<tr class="perf-daily-tot">
+      <td><strong>Total</strong></td>
+      <td style="text-align:right"><strong>${fmt(totals.ca)}</strong></td>
+      <td style="text-align:right"><strong>${totals.ventes}</strong></td>
+      <td style="text-align:right"><strong>${fmt(totals.margeBrute)}</strong></td>
+      <td style="text-align:right"><strong>${fmt(totals.charges)}</strong></td>
+      <td style="text-align:right" class="${totals.benefice >= 0 ? "green" : "red"}"><strong>${fmt(totals.benefice)}</strong></td>
+    </tr>`;
+  const chart = document.getElementById("performance-ca-chart");
+  if (chart) {
+    const chartRows = rows.slice(0, 31);
+    const maxCa = Math.max(1, ...chartRows.map((r) => r.ca));
+    chart.innerHTML = chartRows.length
+      ? chartRows.map((r) => {
+        const pct = Math.round((r.ca / maxCa) * 100);
+        return `<div class="perf-ca-bar-row"><span class="perf-ca-bar-label">${escapeHtml(formatDateDdMmYyyy(r.day))}</span><div class="perf-ca-bar-track"><div class="perf-ca-bar-fill" style="width:${pct}%"></div></div><span class="perf-ca-bar-val">${fmt(r.ca)}</span></div>`;
+      }).join("")
+      : `<p class="muted" style="margin:0;font-size:0.85rem">Pas de CA sur la période.</p>`;
+  }
+}
+
+function exportPerformanceCsv() {
+  const { rows, period } = buildDailyPerformanceRows();
+  if (!rows.length) {
+    showToast("Aucune donnée à exporter.");
+    return;
+  }
+  const header = ["date", "ca_net_fcfa", "nb_ventes", "marge_brute_fcfa", "charges_fcfa", "benefice_estime_fcfa"];
+  const data = rows.map((r) => [
+    formatDateDdMmYyyy(r.day),
+    r.ca,
+    r.ventes,
+    r.margeBrute,
+    r.charges,
+    r.benefice,
+  ]);
+  const base = exportPeriodFileBase(period, "ca_journalier");
+  downloadCsvFile(`${base}.csv`, header, data);
+  showToast("Export CSV téléchargé.");
+}
+
+
 
 function ventesForDateRange(start, end) {
   return recordsForSite(state.ventes).filter((v) => {
@@ -5533,7 +5694,7 @@ function syncDualZonePricingUi() {
 }
 
 function applyRoleVisibility() {
-  const restrictedPages = ["home", "stock", "charges"];
+  const restrictedPages = ["home", "stock", "charges", "performance"];
   document.querySelectorAll(".nav-btn").forEach((button) => {
     const restricted = restrictedPages.includes(button.dataset.page);
     button.classList.toggle("hidden", !canManage() && restricted);
@@ -5608,6 +5769,7 @@ function applyRoleVisibility() {
 
 const PAGE_PERMISSIONS = {
   home:    "rapports",
+  performance: "rapports",
   pdj:     "caisse",
   stock:   "stock",
   charges: "charges",
@@ -5744,6 +5906,7 @@ function renderHero() {
     planning: "Consultez vos horaires et, si vous êtes gérant, planifiez l'équipe.",
     "historique-ventes": "Vos factures encaissées, filtrées par période.",
     loyalty: "Récompensez vos clients réguliers et VIP.",
+    performance: "CA, ventes et bénéfice jour par jour.",
   };
   const copies = {
     home: "Le serveur garde les sessions et l'état complet de l'application.",
@@ -5756,6 +5919,7 @@ function renderHero() {
     planning: "Mes horaires : lecture pour toute l'équipe. Onglet Équipe : création des créneaux (gérant / admin).",
     "historique-ventes": "Consultation et impression de vos ventes uniquement — pas l'historique caisse du gérant.",
     loyalty: "Classement automatique à partir des ventes encaissées ; remises suggérées à la caisse.",
+    performance: "Synthèse journalière sur la période choisie — même logique que le tableau de bord.",
   };
   document.getElementById("hero-title").textContent = titles[currentPage];
   document.getElementById("hero-copy").textContent = copies[currentPage];
@@ -6503,6 +6667,7 @@ function navigate(page, opts = {}) {
   }
   if (page === "planning") renderPlanningPage().catch(handleApiError);
   if (page === "loyalty") renderLoyaltyPage();
+  if (page === "performance") renderPerformancePage();
   if (page === "historique-ventes") renderServeuseSalesHistoryPage().catch(handleApiError);
   syncFabLabelForStockPage();
   applyRoleVisibility();
@@ -6564,6 +6729,7 @@ function bindMobileMoreSheet() {
     else if (nav === "caisse") navigate("ventes", { ventesSubtab: "caisse", caisseInner: "recouvrement" });
     else if (nav === "consignes") navigate("ventes", { ventesSubtab: "consignes" });
     else if (nav === "loyalty") navigate("loyalty");
+    else if (nav === "performance") navigate("performance");
     else if (nav === "guide") navigate("guide");
     else if (nav === "charges") navigate("charges");
     else if (nav === "params") navigate("params");
@@ -21618,6 +21784,7 @@ function attachEvents() {
     renderVentesPage();
     renderStock();
     renderCharges();
+    if (currentPage === "performance") renderPerformancePage();
     renderCasierPhysique();
     loadParamsForm();
     if (currentPage === "planning") renderPlanningPage().catch(handleApiError);
@@ -21651,6 +21818,7 @@ function attachEvents() {
   });
   initDashboardPeriodDom();
   initChargesPeriodDom();
+  initPerformancePeriodDom();
   document.getElementById("dashboard-print-margins-btn")?.addEventListener("click", printDashboardPeriodMarginsReport);
   document.getElementById("obj-formula-tip")?.addEventListener("click", showObjectifFormulaTip);
   document.getElementById("dashboard-period-mode")?.addEventListener("change", () => {
@@ -21667,6 +21835,14 @@ function attachEvents() {
   ["charges-period-start", "charges-period-end"].forEach((id) => {
     document.getElementById(id)?.addEventListener("change", renderCharges);
   });
+  document.getElementById("performance-period-mode")?.addEventListener("change", () => {
+    syncPerformancePeriodCustomUi();
+    renderPerformancePage();
+  });
+  ["performance-period-start", "performance-period-end"].forEach((id) => {
+    document.getElementById(id)?.addEventListener("change", renderPerformancePage);
+  });
+  document.getElementById("performance-export-csv-btn")?.addEventListener("click", exportPerformanceCsv);
   document.getElementById("export-period-mode")?.addEventListener("change", () => syncPeriodCustomUi("export"));
   ["export-period-start", "export-period-end"].forEach((id) => {
     document.getElementById(id)?.addEventListener("change", () => syncPeriodCustomUi("export"));

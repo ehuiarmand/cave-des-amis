@@ -3572,3 +3572,19 @@ textarea { font: inherit; }
   justify-content: flex-end;
   margin-top: 20px;
 }
+
+.perf-daily-wrap { margin-top: 8px; }
+.perf-daily-table { min-width: 640px; }
+.perf-daily-table .green { color: #72d7a9; font-weight: 700; }
+.perf-daily-table .red { color: #ff8e82; font-weight: 700; }
+tr.perf-daily-tot td { border-top: 2px solid rgba(0,0,0,0.12); background: rgba(33, 150, 243, 0.04); }
+.perf-ca-chart { display: flex; flex-direction: column; gap: 8px; }
+.perf-ca-bar-row { display: grid; grid-template-columns: 72px 1fr auto; gap: 10px; align-items: center; font-size: 0.82rem; }
+.perf-ca-bar-label { color: var(--muted); white-space: nowrap; }
+.perf-ca-bar-track { height: 10px; border-radius: 999px; background: rgba(0,0,0,0.06); overflow: hidden; }
+.perf-ca-bar-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--mm-primary, #b07d2e), var(--mm-primary-dark, #8a6324)); min-width: 2px; }
+.perf-ca-bar-val { font-weight: 700; font-family: Roboto, system-ui, sans-serif; white-space: nowrap; }
+@media (max-width: 640px) {
+  .perf-ca-bar-row { grid-template-columns: 64px 1fr auto; gap: 6px; }
+}
+

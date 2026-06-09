@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./styles.css?v=52">
+  <link rel="stylesheet" href="./styles.css?v=53">
   <link rel="stylesheet" href="./styles-cave-manager.css?v=2">
   <link rel="stylesheet" href="./cave-casier.css">
   <link rel="stylesheet" href="./cave-components.css">
@@ -87,6 +87,10 @@
         <button class="nav-btn active" data-page="home" type="button">
           <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1 1h6v6H1V1zm8 0h6v6H9V1zM1 9h6v6H1V9zm8 0h6v6H9V9z"/></svg>
           <span>Tableau de bord</span>
+        </button>
+        <button class="nav-btn" data-page="performance" type="button">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M0 0h1v15h15v1H0V0zm2 12V8h3v4H2zm4-5V3h3v4H6zm4 6V6h3v7h-3z"/></svg>
+          <span>CA journalier</span>
         </button>
         <button class="nav-btn" data-page="pdj" type="button">
           <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M3.5 0a.5.5 0 0 1 .5.5V1h8V.5a.5.5 0 0 1 1 0V1h1a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2h1V.5a.5.5 0 0 1 .5-.5zM2 2a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1H2zm0 4h12v1H2V6z"/></svg>
@@ -1302,6 +1306,69 @@
         <div id="stock-list"></div>
       </section>
 
+
+      <section id="page-performance" class="page">
+        <article class="card" style="margin-bottom:12px">
+          <div class="section-head"><h3>CA journalier</h3><span class="section-meta">Par jour</span></div>
+          <p class="muted" style="font-size:0.88rem;margin:0 0 12px">Chiffre d&apos;affaires net, nombre de ventes, marge brute et bénéfice estimé (marge − charges) pour chaque jour de la période.</p>
+          <div class="form-grid two-cols" style="align-items:end;margin-bottom:10px;gap:12px">
+            <div class="form-group" style="margin:0;min-width:200px">
+              <label for="performance-period-mode">Période</label>
+              <select id="performance-period-mode">
+                <option value="month" selected>Mois en cours</option>
+                <option value="week">Semaine en cours</option>
+                <option value="custom">Période personnalisée</option>
+                <option value="all">Tout l&apos;historique</option>
+              </select>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding-bottom:4px">
+              <button type="button" class="mini-btn" id="performance-export-csv-btn">Export CSV</button>
+            </div>
+          </div>
+          <div id="performance-period-custom" class="form-grid two-cols hidden" style="gap:12px;margin:0 0 10px">
+            <div class="form-group" style="margin:0">
+              <label for="performance-period-start">Du</label>
+              <input id="performance-period-start" type="date">
+            </div>
+            <div class="form-group" style="margin:0">
+              <label for="performance-period-end">Au</label>
+              <input id="performance-period-end" type="date">
+            </div>
+          </div>
+          <p id="performance-period-label" class="muted" style="font-size:0.82rem;margin:0"></p>
+          <p id="performance-period-foot" class="muted" style="font-size:0.82rem;margin:6px 0 0"></p>
+        </article>
+        <div class="stock-kpi-bar" style="margin-bottom:12px">
+          <div class="stock-kpi"><span class="stock-kpi-label">CA net total</span><strong id="perf-kpi-ca" class="stock-kpi-val amber">0 FCFA</strong></div>
+          <div class="stock-kpi"><span class="stock-kpi-label">Ventes</span><strong id="perf-kpi-ventes" class="stock-kpi-val">0</strong></div>
+          <div class="stock-kpi"><span class="stock-kpi-label">Marge brute</span><strong id="perf-kpi-marge" class="stock-kpi-val green">0 FCFA</strong></div>
+          <div class="stock-kpi"><span class="stock-kpi-label">Bénéfice estimé</span><strong id="perf-kpi-benefice" class="stock-kpi-val">0 FCFA</strong></div>
+        </div>
+        <p id="performance-margin-hint" class="muted hidden" style="font-size:0.78rem;margin:0 0 12px;line-height:1.45"></p>
+        <article class="card" style="margin-bottom:12px">
+          <h4 style="margin:0 0 10px">CA par jour (31 derniers jours affichés)</h4>
+          <div id="performance-ca-chart" class="perf-ca-chart"></div>
+        </article>
+        <article class="card">
+          <div class="section-head"><h3>Détail journalier</h3></div>
+          <div class="stock-table-wrap perf-daily-wrap">
+            <table class="stock-table perf-daily-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th style="text-align:right">CA net</th>
+                  <th style="text-align:right">Ventes</th>
+                  <th style="text-align:right">Marge brute</th>
+                  <th style="text-align:right">Charges</th>
+                  <th style="text-align:right">Bénéfice est.</th>
+                </tr>
+              </thead>
+              <tbody id="performance-daily-body"></tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+
       <section id="page-charges" class="page">
         <div class="charges-period-bar card" style="padding:12px 14px;margin-bottom:12px">
           <div class="form-grid two-cols" style="align-items:end;margin:0;gap:12px">
@@ -2173,6 +2240,10 @@
               <strong>Planning</strong>
               <span class="mobile-more-feature-desc">Mes horaires et programme équipe.</span>
             </span>
+          </button>
+          <button type="button" class="mobile-more-feature manager-more-item" data-more-nav="performance">
+            <span class="mobile-more-feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M4 19V5"/><path d="M4 19h16"/><path d="M8 17V9"/><path d="M12 17V6"/><path d="M16 17v-4"/></svg></span>
+            <span class="mobile-more-feature-copy"><strong>CA journalier</strong><span class="mobile-more-feature-desc">CA, ventes et bénéfice par jour sur une période.</span></span>
           </button>
           <button type="button" class="mobile-more-feature manager-more-item" data-more-nav="charges">
             <span class="mobile-more-feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg></span>
@@ -3139,7 +3210,7 @@
   <script src="./cave-components.js"></script>
   <script src="./cave-extras.js"></script>
   <script src="./cave-order-pad.js"></script>
-  <script src="./app-orders.js?v=366"></script>
+  <script src="./app-orders.js?v=367"></script>
   <script src="./restaurant-module.js"></script>
 </body>
 </html>
