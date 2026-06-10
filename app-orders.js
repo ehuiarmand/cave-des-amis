@@ -3592,6 +3592,9 @@ function serveuseIsRestDay(dateIso, siteId = currentSiteId()) {
 
 /** Module Ventes indisponible aujourd'hui (serveuse en repos). */
 function serveuseVentesModuleBlocked(siteId = currentSiteId()) {
+  if (!staffRequiresShiftWindowForSales()) return false;
+  // Créneau actif (nuit après minuit), relais ou dernière vendeuse → pas un jour de repos.
+  if (staffIsOnDutyNow(siteId)) return false;
   return serveuseIsRestDay(today(), siteId);
 }
 
@@ -3631,6 +3634,7 @@ function serveusePlanningBlocksSale(saleDateStr, siteId = currentSiteId()) {
   const sid = siteId || currentSiteId();
   if (!sid || !/^\d{4}-\d{2}-\d{2}$/.test(d)) return null;
   if (!teamHasPlanningOnDate(sid, d)) return null;
+  if (staffIsOnDutyNow(sid)) return null;
   // Le relais de service prime sur le jour de repos : si la serveuse a pris le service, elle peut vendre.
   if (serveuseIsOnSalesRelay(sid)) return null;
   const label = formatDateDdMmYyyy(d);
@@ -3700,7 +3704,7 @@ function syncServeuseVentesPageRestDay() {
   const restGate = document.getElementById("ventes-rest-day-gate");
   const tabs = document.querySelector("#page-ventes > .tabs.page-subtabs");
   const journalGate = document.getElementById("ventes-journal-gate");
-  const msg = blocked ? serveusePlanningBlocksSale(today(), currentSiteId()) : "";
+  const msg = blocked ? serveusePlanningBlocksSale(journalSaleDateFromDom(), currentSiteId()) : "";
   if (restGate) {
     if (blocked && msg) {
       restGate.classList.remove("hidden");
@@ -4037,13 +4041,6 @@ function renderPlanningMine() {
         ${_openSvc ? `<button type="button" class="btn btn-sm btn-primary" style="margin-left:8px" onclick="navigate('pdj')">Point du jour — Fin de service</button>` : ""}
       </div>`;
       document.getElementById("take-service-btn")?.addEventListener("click", () => takeService().catch(handleApiError));
-    } else if (restToday) {
-      const _openSvc = serveuseHasOpenServiceToday();
-      sumEl.innerHTML = `<div class="inline-card ventes-rest-day-alert" role="alert">
-        <strong>Hors service</strong>
-        <p class="ventes-rest-day-alert-msg">${escapeHtml(restToday)}</p>
-        ${_openSvc ? `<button type="button" class="btn btn-sm btn-primary" style="margin-top:8px" onclick="navigate('pdj')">Point du jour — Fin de service</button>` : ""}
-      </div>`;
     } else if (canSell) {
       const active = activeWorkShiftsNow(sessionUser, siteId);
       if (!active.length && staffInShiftBridgeGap(sessionUser, siteId)) {
@@ -4063,6 +4060,13 @@ function renderPlanningMine() {
           <strong>En service maintenant</strong> · ${escapeHtml(win)}
         </div>`;
       }
+    } else if (restToday) {
+      const _openSvc = serveuseHasOpenServiceToday();
+      sumEl.innerHTML = `<div class="inline-card ventes-rest-day-alert" role="alert">
+        <strong>Hors service</strong>
+        <p class="ventes-rest-day-alert-msg">${escapeHtml(restToday)}</p>
+        ${_openSvc ? `<button type="button" class="btn btn-sm btn-primary" style="margin-top:8px" onclick="navigate('pdj')">Point du jour — Fin de service</button>` : ""}
+      </div>`;
     } else {
       sumEl.textContent = rows.length
         ? `${rows.length} créneau(x) · ${formatDurationMinutes(totalMins)} sur ${periodLab}`
