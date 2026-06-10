@@ -21,6 +21,8 @@ const API = {
 const _LS_STATE   = "mm_state_cache";
 const _LS_SESSION = "mm_session_cache";
 const _LS_PENDING = "mm_offline_pending";
+/** Sentinelle renvoyée par persistState/persistStatePatch quand l'écriture a été différée (réseau KO). */
+const OFFLINE_DEFERRED = Object.freeze({ offline: true });
 let _offlineSyncing = false;
 
 function offlineSaveState(s) {
@@ -63,11 +65,20 @@ async function flushOfflineSync() {
   _offlineSyncing = true;
   const btn = document.querySelector("#offline-banner button");
   if (btn) btn.textContent = "Synchronisation…";
+  const before = offlinePendingGet();
   try {
-    await persistState({});
-    offlinePendingClear();
-    showToast("Synchronisation réussie.");
+    const res = await persistState({});
+    // persistState avale les erreurs réseau (renvoie OFFLINE_DEFERRED) : ne valider la
+    // synchronisation que si le serveur a réellement accepté l'écriture.
+    if (res === OFFLINE_DEFERRED) {
+      offlinePendingSet(before);
+      showToast("Synchronisation échouée — réessayez.");
+    } else {
+      offlinePendingClear();
+      showToast("Synchronisation réussie.");
+    }
   } catch (_) {
+    offlinePendingSet(before);
     showToast("Synchronisation échouée — réessayez.");
   } finally {
     _offlineSyncing = false;
@@ -14840,7 +14851,7 @@ async function persistState(overrides = {}) {
     if (_isNetworkError(err)) {
       offlineSaveState(state);
       offlinePendingAdd();
-      return;
+      return OFFLINE_DEFERRED;
     }
     throw err;
   }
@@ -14878,7 +14889,7 @@ async function persistStatePatch(patch) {
     if (_isNetworkError(err)) {
       offlineSaveState(state);
       offlinePendingAdd();
-      return;
+      return OFFLINE_DEFERRED;
     }
     throw err;
   }
