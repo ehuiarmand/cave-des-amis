@@ -3083,6 +3083,84 @@ function recordsForSite(list) {
   return (list || []).filter((item) => rowMatchesSite(item, siteId, multiSite));
 }
 
+function findStockItemForSite(article, siteId) {
+  const multi = multiSiteActive();
+  const key = String(article || "").trim().toLowerCase();
+  return (state.stock || []).find((s) =>
+    rowMatchesSite(s, siteId, multi) && String(s.article || "").trim().toLowerCase() === key,
+  ) || null;
+}
+
+function purchaseLineBottles(line, stockItem) {
+  const cases = Number(line.cases) || 0;
+  if (cases <= 0) return 0;
+  const cs = Number(line.caseSize) || (stockItem ? caseSize(stockItem) : 24);
+  return Math.round(cases * cs);
+}
+
+function stockEntreesForPurchaseOrder(po, siteId) {
+  const multi = multiSiteActive();
+  const poId = Number(po?.id);
+  if (!poId) return [];
+  const sid = siteId ?? po.siteId ?? currentSiteId();
+  return (state.stockEntrees || []).filter((e) =>
+    Number(e.purchaseOrderId) === poId && rowMatchesSite(e, sid, multi),
+  );
+}
+
+function purchaseOrderStockAppliedBottles(po) {
+  const siteId = po.siteId || currentSiteId();
+  return stockEntreesForPurchaseOrder(po, siteId).reduce((sum, e) => sum + (Number(e.qty) || 0), 0);
+}
+
+function purchaseOrderExpectedBottles(po) {
+  const siteId = po.siteId || currentSiteId();
+  return (po.lines || []).reduce((sum, line) => {
+    const stockItem = findStockItemForSite(line.article, siteId);
+    return sum + purchaseLineBottles(line, stockItem);
+  }, 0);
+}
+
+function purchaseOrderIsReceived(po) {
+  const s = String(po?.status || "").trim().toLowerCase();
+  return s === "reçue" || s === "recue" || s.startsWith("re") && s.endsWith("ue");
+}
+
+function legacyStockEntreesCoverPurchaseLine(po, line, siteId) {
+  const multi = multiSiteActive();
+  const sid = siteId ?? po.siteId ?? currentSiteId();
+  const receptionDate = String((po.receivedAt || po.date || today())).slice(0, 10);
+  const articleLow = String(line.article || "").toLowerCase();
+  const stockItem = findStockItemForSite(line.article, sid);
+  const expectedBottles = purchaseLineBottles(line, stockItem);
+  if (expectedBottles <= 0) return true;
+  const legacyQty = (state.stockEntrees || [])
+    .filter((e) =>
+      !e.purchaseOrderId
+      && rowMatchesSite(e, sid, multi)
+      && String(e.article || "").toLowerCase() === articleLow
+      && String(e.date || "").slice(0, 10) === receptionDate,
+    )
+    .reduce((sum, e) => sum + (Number(e.qty) || 0), 0);
+  return legacyQty >= expectedBottles;
+}
+
+function purchaseOrderNeedsStockRepair(po) {
+  if (!purchaseOrderIsReceived(po)) return false;
+  const expected = purchaseOrderExpectedBottles(po);
+  if (expected <= 0) return false;
+  const applied = purchaseOrderStockAppliedBottles(po);
+  if (applied >= expected) return false;
+  const siteId = po.siteId || currentSiteId();
+  const legacyCoversAll = (po.lines || []).every((line) => legacyStockEntreesCoverPurchaseLine(po, line, siteId));
+  if (legacyCoversAll) return false;
+  return applied < expected;
+}
+
+function countReceivedPurchaseOrdersNeedingRepair() {
+  return purchaseOrdersForSite().filter((po) => purchaseOrderIsReceived(po) && purchaseOrderNeedsStockRepair(po)).length;
+}
+
 /**
  * Duplique catalogue stock et grilles fournisseur depuis un maquis modele vers un nouveau siteId.
  * Les quantites (init, entrees, sorties, frigo, reserve, lots) sont remises a zero ; nouveaux ids stock.
@@ -6248,7 +6326,7 @@ function setStockSubTab(tab) {
   });
   if (currentPage === "stock") {
     if (isInventaire) renderStockInventoryReport();
-    else if (isAchats) renderPurchaseOrders();
+    else if (isAchats) { initPurchasePeriodDom(); renderPurchaseOrders(); }
     else if (isCreanciers) renderCreanciers();
     else if (isMouvements) renderStockMovements();
     else if (isCasiers) { renderCasiers(); syncCasiersManquants({ silent: true }).then((n) => { if (n > 0) renderCasiers(); }).catch(() => {}); }
@@ -8513,6 +8591,34 @@ function todayEntreesFromPOForArticle(article, dateStr, openedAt) {
         .reduce((s, l) => s + Math.round((Number(l.cases) || 0) * (Number(l.caseSize) || 0)), 0), 0);
 }
 
+function pdjEntreesTodayForArticle(article, dateStr, openedAt) {
+  const articleLow = String(article || "").toLowerCase();
+  const siteId = currentSiteId();
+  const multi = multiSiteActive();
+  const matchDate = (row) => {
+    if ((row.date || "").slice(0, 10) === dateStr) return true;
+    if (openedAt && row.createdAt && row.createdAt >= openedAt) return true;
+    return false;
+  };
+  const fromEntries = (state.stockEntrees || [])
+    .filter((e) => rowMatchesSite(e, siteId, multi)
+      && String(e.article || "").toLowerCase() === articleLow
+      && matchDate(e))
+    .reduce((sum, e) => sum + (Number(e.qty) || 0), 0);
+  if (fromEntries > 0) return fromEntries;
+  return todayEntreesFromPOForArticle(article, dateStr, openedAt);
+}
+
+function pdjExpectedStockTheoretical(stockAtOpen, entreesToday, sortiesToday, pertesToday) {
+  return Math.max(
+    0,
+    (Number(stockAtOpen) || 0)
+      + (Number(entreesToday) || 0)
+      - (Number(sortiesToday) || 0)
+      - (Number(pertesToday) || 0),
+  );
+}
+
 /** Recalcule sorties/entrées/écart et CA sur une fiche PDJ déjà clôturée après correction de ventes. */
 function refreshStockCheckAfterVenteCorrection(dateStr, siteId = currentSiteId()) {
   const d = String(dateStr || "").slice(0, 10);
@@ -8730,18 +8836,19 @@ function renderDailyStockCheck() {
     const ventesJourRo = recordsForSite(state.ventes).filter((v) => v.date.slice(0, 10) === dStr);
     const rowsOpen = items.map((item) => {
       const stockAtOpen = stockOpeningFromDayBook(item, dayBook) ?? stockActuel(item);
-      const entreesToday = todayEntreesFromPOForArticle(item.article, dStr, dayBook?.openedAt);
+      const entreesToday = pdjEntreesTodayForArticle(item.article, dStr, dayBook?.openedAt);
       const sortiesToday = todaySortiesBottlesForArticle(item.article, dStr);
+      const pertesToday = todayLossesForArticle(item.article, dStr, dayBook?.openedAt);
+      const theoretical = pdjExpectedStockTheoretical(stockAtOpen, entreesToday, sortiesToday, pertesToday);
       const frigoVal = stockFrigo(item);
       const reserveVal = stockReserve(item);
-      const remaining = frigoVal + reserveVal;
-      const gap = (frigoVal + reserveVal) - remaining;
+      const gap = (frigoVal + reserveVal) - theoretical;
       return `<tr>
         <td>${escapeHtml(item.article)}</td>
         <td style="text-align:right;color:#1976d2">${fmt(stockAtOpen)}</td>
         <td style="text-align:right;color:#72d7a9">${entreesToday > 0 ? "+" + fmt(entreesToday) : "—"}</td>
         <td style="text-align:right;color:#ff8e82">${sortiesToday > 0 ? fmt(sortiesToday) : "—"}</td>
-        <td style="text-align:right">${fmt(remaining)}</td>
+        <td style="text-align:right">${fmt(theoretical)}</td>
         <td style="text-align:right">${fmt(frigoVal)}</td>
         <td style="text-align:right">${fmt(reserveVal)}</td>
         <td style="text-align:right;color:${gap === 0 ? "#72d7a9" : "#ff8e82"}">${gap === 0 ? "OK" : fmt(gap)}</td>
@@ -8819,16 +8926,17 @@ function renderDailyStockCheck() {
     const stockAtOpen = stockOpeningFromDayBook(item, dayBook)
       ?? closedCheckItem?.stockAvant
       ?? stockActuel(item);
-    const entreesToday = todayEntreesFromPOForArticle(item.article, dStr, dayBook?.openedAt);
+    const entreesToday = pdjEntreesTodayForArticle(item.article, dStr, dayBook?.openedAt);
     const sortiesToday = todaySortiesBottlesForArticle(item.article, dStr);
+    const pertesToday = todayLossesForArticle(item.article, dStr, dayBook?.openedAt);
+    const theoretical = pdjExpectedStockTheoretical(stockAtOpen, entreesToday, sortiesToday, pertesToday);
     const seedCi = seedFromClose ? (seedFromClose.items || []).find((ci) => Number(ci.id) === Number(item.id)) : null;
     const idn = Number(item.id);
     let frigoVal = seedCi != null ? Math.max(0, Number(seedCi.frigo) || 0) : stockFrigo(item);
     let reserveVal = seedCi != null ? Math.max(0, Number(seedCi.reserve) || 0) : stockReserve(item);
     if (domFrigo.has(idn)) frigoVal = Math.max(0, Number(domFrigo.get(idn)) || 0);
     if (domReserve.has(idn)) reserveVal = Math.max(0, Number(domReserve.get(idn)) || 0);
-    const remaining = stockFrigo(item) + stockReserve(item);
-    const gap = (frigoVal + reserveVal) - remaining;
+    const gap = (frigoVal + reserveVal) - theoretical;
     const frigoCell = gerantView
       ? `<td style="text-align:right">${fmt(stockFrigo(item))}</td>`
       : `<td><input class="stock-check-input" type="number" min="0" data-check-frigo="${item.id}" value="${frigoVal}"></td>`;
@@ -8843,7 +8951,7 @@ function renderDailyStockCheck() {
         <td style="text-align:right;color:#1976d2">${fmt(stockAtOpen)}</td>
         <td style="text-align:right;color:#72d7a9">${entreesToday > 0 ? "+" + fmt(entreesToday) : "—"}</td>
         <td style="text-align:right;color:#ff8e82">${sortiesToday > 0 ? fmt(sortiesToday) : "—"}</td>
-        <td style="text-align:right">${fmt(remaining)}</td>
+        <td style="text-align:right">${fmt(theoretical)}</td>
         ${frigoCell}${reserveCell}${gapCell}
       </tr>`;
   }).join("");
@@ -15486,6 +15594,79 @@ function purchaseOrdersForSite() {
   return (state.purchaseOrders || []).filter((p) => rowMatchesSite(p, siteId, multiSite));
 }
 
+function purchaseMonthBoundsFromYm(ym) {
+  const parts = String(ym || "").slice(0, 7).match(/^(\d{4})-(\d{2})$/);
+  if (!parts) return monthPeriodBounds(new Date(pdjCalendarDate()));
+  const y = Number(parts[1]);
+  const m = Number(parts[2]) - 1;
+  return monthPeriodBounds(new Date(y, m, 1));
+}
+
+function initPurchasePeriodDom() {
+  const monthEl = document.getElementById("purchase-period-month");
+  if (monthEl && !monthEl.value) monthEl.value = pdjCalendarDate().slice(0, 7);
+  const { start } = monthPeriodBounds(new Date(pdjCalendarDate()));
+  const startEl = document.getElementById("purchase-period-start");
+  const endEl = document.getElementById("purchase-period-end");
+  if (startEl && !startEl.value) startEl.value = start;
+  if (endEl && !endEl.value) endEl.value = pdjCalendarDate().slice(0, 10);
+  syncPurchasePeriodUi();
+}
+
+function syncPurchasePeriodUi() {
+  const mode = document.getElementById("purchase-period-mode")?.value || "month";
+  document.getElementById("purchase-period-custom")?.classList.toggle("hidden", mode !== "custom");
+  const label = document.getElementById("purchase-period-label");
+  if (label) label.textContent = purchasePeriod().label;
+}
+
+function purchasePeriod() {
+  const mode = document.getElementById("purchase-period-mode")?.value || "month";
+  if (mode === "all") {
+    return { start: null, end: null, mode, label: "Tout l'historique" };
+  }
+  if (mode === "accounting") {
+    const pdj = pdjCalendarDate();
+    const { start, end } = purchaseMonthBoundsFromYm(pdj.slice(0, 7));
+    const mois = new Date(start).toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
+    return { start, end, mode, label: `Mois comptable PDJ (${mois})` };
+  }
+  if (mode === "month") {
+    const ym = document.getElementById("purchase-period-month")?.value || pdjCalendarDate().slice(0, 7);
+    const { start, end } = purchaseMonthBoundsFromYm(ym);
+    const mois = new Date(start).toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
+    return { start, end, mode, label: `Achats de ${mois}` };
+  }
+  if (mode === "week") {
+    const { start, end } = weekPeriodBounds(new Date());
+    return { start, end, mode, label: `Semaine en cours (${formatPeriodLabel(start, end)})` };
+  }
+  const { start, end } = dateRangeFromDom("purchase-period-start", "purchase-period-end", pdjCalendarDate());
+  return { start, end, mode, label: formatPeriodLabel(start, end) };
+}
+
+function purchaseOrdersForPeriod() {
+  return recordsInPeriod(purchaseOrdersForSite(), (po) => po.date, purchasePeriod());
+}
+
+function renderPurchasePeriodKpi(orders) {
+  const kpi = document.getElementById("purchase-period-kpi");
+  if (!kpi) return;
+  const total = orders.reduce((sum, po) => sum + (Number(po.total) || 0), 0);
+  const received = orders.filter(purchaseOrderIsReceived).length;
+  const pending = orders.filter((po) => po.status === "En attente").length;
+  const cancelled = orders.filter((po) => po.status === "Annulée").length;
+  kpi.style.display = "grid";
+  kpi.style.gridTemplateColumns = "repeat(auto-fit, minmax(120px, 1fr))";
+  kpi.style.gap = "6px";
+  kpi.innerHTML = `
+    <div class="pdj-kpi"><span class="kpi-label">Commandes</span><strong class="pdj-val amber">${fmt(orders.length)}</strong></div>
+    <div class="pdj-kpi"><span class="kpi-label">Montant total</span><strong class="pdj-val amber">${fmt(total)} FCFA</strong></div>
+    <div class="pdj-kpi"><span class="kpi-label">Reçues</span><strong class="pdj-val green">${fmt(received)}</strong></div>
+    <div class="pdj-kpi"><span class="kpi-label">En attente</span><strong class="pdj-val amber">${fmt(pending)}</strong></div>
+    ${cancelled > 0 ? `<div class="pdj-kpi"><span class="kpi-label">Annulées</span><strong class="pdj-val red">${fmt(cancelled)}</strong></div>` : ""}`;
+}
+
 function purchaseCataloguePricePerCase(articleName) {
   const product = findKnownProduct(String(articleName || "").trim());
   const prix = Number(product?.prixAchat) || 0;
@@ -16013,14 +16194,22 @@ async function applyPurchaseReceipt(po, linesReceived, opts = {}) {
   if (!state.nextId.casierMouvement || Number.isNaN(Number(state.nextId.casierMouvement))) state.nextId.casierMouvement = 1;
   let casiersCreated = 0;
   let casiersUsed = 0;
+  let bottlesAdded = 0;
+  const skippedArticles = [];
+  const receptionIso = po.receivedAt || new Date().toISOString();
+  const receptionDate = String((receptionIso || po.date || today())).slice(0, 10);
 
   linesReceived.forEach((line) => {
     const cases = Number(line.cases) || 0;
     if (cases <= 0) return;
-    const item = stockItems.find((s) => String(s.siteId) === String(siteId) && String(s.article || "").toLowerCase() === String(line.article || "").toLowerCase());
-    if (!item) return;
+    const item = findStockItemForSite(line.article, siteId);
+    if (!item) {
+      skippedArticles.push(String(line.article || "").trim() || "?");
+      return;
+    }
     const cs = Number(line.caseSize) || caseSize(item);
     const bottles = Math.round(cases * cs);
+    bottlesAdded += bottles;
     item.entrees = (Number(item.entrees) || 0) + bottles;
     item.reserve = Math.max(0, Number(item.reserve) || 0) + bottles;
     item.lastReapproAt = new Date().toISOString();
@@ -16028,12 +16217,13 @@ async function applyPurchaseReceipt(po, linesReceived, opts = {}) {
     stockEntrees.unshift({
       id: state.nextId.stockEntree++,
       siteId,
-      date: po.date,
+      date: receptionDate,
       article: item.article,
       qty: bottles,
       cases,
       caseSize: line.caseSize,
       user: sessionUser || "system",
+      purchaseOrderId: po.id,
     });
 
     if (rangerCasiers && lotType(item) === "casier") {
@@ -16145,6 +16335,20 @@ async function applyPurchaseReceipt(po, linesReceived, opts = {}) {
     }
   });
 
+  if (bottlesAdded <= 0) {
+    showToast(`Réception impossible — article(s) introuvable(s) au stock : ${skippedArticles.join(", ")}`);
+    return false;
+  }
+  if (skippedArticles.length > 0) {
+    if (!window.confirm(
+      `Article(s) introuvable(s) : ${skippedArticles.join(", ")}.
+
+Continuer la réception pour les ${fmt(bottlesAdded)} bouteille(s) reconnues ?`,
+    )) {
+      return false;
+    }
+  }
+
   state.charges = state.charges || [];
   const chargeId = state.nextId.charge++;
   state.charges.unshift({
@@ -16161,7 +16365,7 @@ async function applyPurchaseReceipt(po, linesReceived, opts = {}) {
   po.lines = linesReceived;
   po.total = receivedTotal;
   po.status = "Reçue";
-  po.receivedAt = new Date().toISOString();
+  po.receivedAt = receptionIso;
   po.receivedBy = sessionUser || "system";
   const casierDetail = rangerCasiers ? ` · casiers: ${casiersUsed} re-utilise(s), ${casiersCreated} cree(s)` : "";
   recordStaffAudit(
@@ -16319,31 +16523,169 @@ function receivePurchaseOrder(id) {
   openReceivePurchaseModal(id);
 }
 
+
+async function repairReceivedPurchaseOrderStock(poId) {
+  if (!canManage()) {
+    showToast("Accès refusé.");
+    return;
+  }
+  const po = (state.purchaseOrders || []).find((p) => Number(p.id) === Number(poId));
+  if (!po || !purchaseOrderIsReceived(po)) {
+    showToast("Commande introuvable ou non reçue.");
+    return;
+  }
+  const siteId = po.siteId || currentSiteId();
+  const stockItems = state.stock || [];
+  const stockEntrees = state.stockEntrees || [];
+  if (!state.nextId) state.nextId = {};
+  if (state.nextId.stockEntree == null || Number.isNaN(Number(state.nextId.stockEntree))) {
+    const maxE = stockEntrees.reduce((m, e) => Math.max(m, Number(e.id) || 0), 0);
+    state.nextId.stockEntree = Math.max(100, maxE + 1);
+  }
+  const receptionDate = String((po.receivedAt || po.date || today())).slice(0, 10);
+  const appliedByArticle = new Map();
+  stockEntreesForPurchaseOrder(po, siteId).forEach((e) => {
+    const key = String(e.article || "").toLowerCase();
+    appliedByArticle.set(key, (appliedByArticle.get(key) || 0) + (Number(e.qty) || 0));
+  });
+  let bottlesAdded = 0;
+  const skippedArticles = [];
+  (po.lines || []).forEach((line) => {
+    const item = findStockItemForSite(line.article, siteId);
+    if (!item) {
+      skippedArticles.push(String(line.article || "").trim() || "?");
+      return;
+    }
+    const expectedBottles = purchaseLineBottles(line, item);
+    const key = String(line.article || "").toLowerCase();
+    const alreadyApplied = appliedByArticle.get(key) || 0;
+    const missing = expectedBottles - alreadyApplied;
+    if (missing <= 0) return;
+    const cs = Math.max(1, Number(line.caseSize) || caseSize(item));
+    item.entrees = (Number(item.entrees) || 0) + missing;
+    item.reserve = Math.max(0, Number(item.reserve) || 0) + missing;
+    item.lastReapproAt = new Date().toISOString();
+    item.lastReapproBy = sessionUser || "system";
+    stockEntrees.unshift({
+      id: state.nextId.stockEntree++,
+      siteId,
+      date: receptionDate,
+      article: item.article,
+      qty: missing,
+      cases: missing / cs,
+      caseSize: cs,
+      user: sessionUser || "system",
+      purchaseOrderId: po.id,
+    });
+    appliedByArticle.set(key, alreadyApplied + missing);
+    bottlesAdded += missing;
+  });
+  if (bottlesAdded <= 0) {
+    showToast(
+      skippedArticles.length
+        ? `Réparation impossible — article(s) introuvable(s) : ${skippedArticles.join(", ")}`
+        : "Le stock est déjà à jour pour cette commande.",
+    );
+    return;
+  }
+  await persistState({ stock: stockItems, stockEntrees, nextId: state.nextId, purchaseOrders: state.purchaseOrders });
+  renderStock();
+  renderPurchaseOrders();
+  refreshCreanciersIfVisible();
+  renderDashboard();
+  showToast(`Stock réparé : ${fmt(bottlesAdded)} bouteille(s) ajoutée(s).`);
+}
+
+async function repairAllReceivedPurchaseOrderStock() {
+  if (!canManage()) {
+    showToast("Accès refusé.");
+    return;
+  }
+  const allReceived = purchaseOrdersForSite().filter(purchaseOrderIsReceived);
+  if (!allReceived.length) {
+    showToast("Aucune commande reçue.");
+    return;
+  }
+  let targets = allReceived.filter(purchaseOrderNeedsStockRepair);
+  if (!targets.length) targets = allReceived;
+  let totalBottles = 0;
+  let repairedCount = 0;
+  for (const po of targets) {
+    const before = purchaseOrderStockAppliedBottles(po);
+    await repairReceivedPurchaseOrderStock(po.id);
+    const after = purchaseOrderStockAppliedBottles(po);
+    const added = after - before;
+    if (added > 0) {
+      repairedCount += 1;
+      totalBottles += added;
+    }
+  }
+  renderPurchaseRepairBanner();
+  if (repairedCount > 0) {
+    showToast(`Réparation terminée : ${fmt(repairedCount)} commande(s), ${fmt(totalBottles)} bouteille(s).`);
+  } else if (targets.length > 1) {
+    showToast("Le stock est déjà à jour pour toutes les réceptions.");
+  }
+}
+
+function renderPurchaseRepairBanner() {
+  const banner = document.getElementById("purchase-repair-banner");
+  const textEl = document.getElementById("purchase-repair-banner-text");
+  const btnEl = document.getElementById("purchase-repair-all-btn");
+  if (!banner || !textEl || !btnEl) return;
+  if (!canAnyAdmin() && !canManage()) {
+    banner.classList.add("hidden");
+    return;
+  }
+  const received = purchaseOrdersForSite().filter(purchaseOrderIsReceived);
+  if (!received.length) {
+    banner.classList.add("hidden");
+    return;
+  }
+  const needCount = countReceivedPurchaseOrdersNeedingRepair();
+  banner.classList.remove("hidden");
+  textEl.textContent = needCount > 0
+    ? `${fmt(needCount)} réception(s) sans entrées stock complètes.`
+    : `${fmt(received.length)} commande(s) reçue(s) — réappliquer le stock si besoin.`;
+  btnEl.className = `mini-btn ${needCount > 0 ? "btn-primary" : "btn-outline"}`;
+}
+
 function renderPurchaseOrders() {
   const list = document.getElementById("purchase-list");
   const count = document.getElementById("purchase-count");
   if (!list) return;
-  const orders = purchaseOrdersForSite().slice().sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+  initPurchasePeriodDom();
+  syncPurchasePeriodUi();
+  renderPurchaseRepairBanner();
+  const orders = purchaseOrdersForPeriod().slice().sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+  renderPurchasePeriodKpi(orders);
   if (count) count.textContent = `${orders.length}`;
   if (!orders.length) {
-    list.innerHTML = emptyState("Aucune commande", "Créez une commande fournisseur pour tracer vos achats.");
+    list.innerHTML = emptyState("Aucune commande sur cette période", "Créez une commande fournisseur ou élargissez la période.");
     return;
   }
   list.innerHTML = orders.map((po) => {
     const pending = po.status === "En attente";
-    const badgeClass = po.status === "Reçue" ? "badge-green" : po.status === "Annulée" ? "badge-red" : "badge-amber";
+    const received = purchaseOrderIsReceived(po);
+    const needsRepair = received && purchaseOrderNeedsStockRepair(po);
+    const badgeClass = received ? "badge-green" : po.status === "Annulée" ? "badge-red" : "badge-amber";
+    const repairBtnClass = needsRepair
+      ? "mini-btn btn-primary"
+      : "mini-btn btn-outline";
     return `
     <article class="list-item" style="flex-direction:column;align-items:stretch;gap:8px">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap">
         <div>
           <p class="list-item-title">${escapeHtml(po.supplier || "Fournisseur")}</p>
           <p class="list-item-sub">${escapeHtml(po.date ? formatDateDdMmYyyy(po.date) : "")} · ${fmt(po.lines?.length || 0)} ligne(s) · ${fmt(po.total || 0)} FCFA · ${escapeHtml(po.payment || "")}</p>
-          ${po.status === "Reçue" && Array.isArray(po.linesOrderedSnapshot) && po.linesOrderedSnapshot.length ? `<p class="muted" style="font-size:0.78rem;margin:4px 0 0">Reception avec ecart par rapport a la commande initiale.</p>` : ""}
+          ${received && Array.isArray(po.linesOrderedSnapshot) && po.linesOrderedSnapshot.length ? `<p class="muted" style="font-size:0.78rem;margin:4px 0 0">Reception avec ecart par rapport a la commande initiale.</p>` : ""}
+          ${needsRepair ? `<p class="muted" style="font-size:0.78rem;margin:4px 0 0;color:#ff8e82">Stock non appliqué — réception enregistrée mais entrées stock manquantes.</p>` : ""}
         </div>
         <div class="line-actions" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
           <span class="badge ${badgeClass}">${escapeHtml(po.status || "En attente")}</span>
           ${pending ? `<button type="button" class="mini-btn" data-purchase-receive="${po.id}">Réceptionner</button>
           <button type="button" class="mini-btn" style="border-color:rgba(197,79,65,0.6);color:#ff8e82" data-purchase-cancel="${po.id}">Annuler</button>` : ""}
+          ${received && (canAnyAdmin() || canManage()) ? `<button type="button" class="${repairBtnClass}" data-purchase-repair-stock="${po.id}">Appliquer au stock</button>` : ""}
         </div>
       </div>
       <div class="customer-order-lines" style="min-width:0">
@@ -22779,7 +23121,7 @@ document.getElementById("fab-btn").addEventListener("click", () => {
     const reserve = Math.max(0, Number(reserveEl.value) || 0);
     const row = input.closest("tr");
     if (!row) return;
-    const theorique = parseFormattedIntegerFr(row.cells[3]?.textContent);
+    const theorique = parseFormattedIntegerFr(row.cells[4]?.textContent);
     const ecart = (frigo + reserve) - theorique;
     const ecartCell = row.cells[row.cells.length - 1];
     if (ecartCell) {
@@ -22849,6 +23191,14 @@ document.getElementById("fab-btn").addEventListener("click", () => {
   document.getElementById("sd-settle-submit-btn")?.addEventListener("click", () => settleSupplierDebt().catch(handleApiError));
   document.getElementById("purchase-new-btn")?.addEventListener("click", () => openPurchaseForm());
   document.getElementById("purchase-add-line-btn")?.addEventListener("click", () => addPurchaseLine());
+  document.getElementById("purchase-period-mode")?.addEventListener("change", () => {
+    syncPurchasePeriodUi();
+    renderPurchaseOrders();
+  });
+  document.getElementById("purchase-period-month")?.addEventListener("change", renderPurchaseOrders);
+  ["purchase-period-start", "purchase-period-end"].forEach((id) => {
+    document.getElementById(id)?.addEventListener("change", renderPurchaseOrders);
+  });
   document.getElementById("purchase-save-btn")?.addEventListener("click", () => savePurchaseOrder().catch(handleApiError));
   document.getElementById("purchase-from-vides-btn")?.addEventListener("click", () => {
     const btn = document.getElementById("purchase-from-vides-btn");
@@ -22933,6 +23283,16 @@ document.getElementById("fab-btn").addEventListener("click", () => {
       purchaseDraftLines[idx].selected = Boolean(selectLine.checked);
       renderPurchaseDraft();
       syncPurchaseLineInputsFromStock();
+      return;
+    }
+    const repairAll = event.target.closest("#purchase-repair-all-btn");
+    if (repairAll) {
+      repairAllReceivedPurchaseOrderStock().catch(handleApiError);
+      return;
+    }
+    const repairStock = event.target.closest("[data-purchase-repair-stock]");
+    if (repairStock) {
+      repairReceivedPurchaseOrderStock(Number(repairStock.dataset.purchaseRepairStock)).catch(handleApiError);
       return;
     }
     const receive = event.target.closest("[data-purchase-receive]");

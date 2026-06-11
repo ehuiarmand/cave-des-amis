@@ -1134,6 +1134,40 @@
             <h3>Historique des commandes</h3>
             <span id="purchase-count" class="section-meta">0</span>
           </div>
+          <div class="dashboard-period-bar" style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin-bottom:14px">
+            <div class="form-group" style="margin:0;min-width:180px">
+              <label for="purchase-period-month">Achats du mois</label>
+              <input id="purchase-period-month" type="month">
+            </div>
+            <div class="form-group" style="margin:0;min-width:200px">
+              <label for="purchase-period-mode">Ou période</label>
+              <select id="purchase-period-mode">
+                <option value="month">Mois sélectionné</option>
+                <option value="accounting">Mois comptable (PDJ)</option>
+                <option value="week">Semaine en cours</option>
+                <option value="custom">Dates personnalisées</option>
+                <option value="all">Tout l'historique</option>
+              </select>
+            </div>
+            <div id="purchase-period-custom" class="form-grid two-cols hidden" style="gap:12px;margin:0;min-width:280px">
+              <div class="form-group" style="margin:0">
+                <label for="purchase-period-start">Du</label>
+                <input id="purchase-period-start" type="date">
+              </div>
+              <div class="form-group" style="margin:0">
+                <label for="purchase-period-end">Au</label>
+                <input id="purchase-period-end" type="date">
+              </div>
+            </div>
+          </div>
+          <p id="purchase-period-label" class="muted" style="margin:0 0 12px;font-size:0.88rem"></p>
+          <div id="purchase-period-kpi" class="inline-card" style="margin-bottom:12px;padding:12px 14px;display:grid;gap:6px"></div>
+          <div id="purchase-repair-banner" class="any-admin" style="margin-bottom:12px">
+            <div style="padding:12px 14px;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;background:rgba(255,142,130,0.08);border:1px solid rgba(255,142,130,0.25);border-radius:10px">
+              <p id="purchase-repair-banner-text" class="muted" style="margin:0;font-size:0.88rem">Réceptions « Reçue » sans entrées stock — corrigez en un clic.</p>
+              <button type="button" id="purchase-repair-all-btn" class="mini-btn btn-primary">Réparer les réceptions sans stock</button>
+            </div>
+          </div>
           <div id="purchase-list"></div>
         </article>
         <article class="card hidden" id="stock-card-creanciers" style="margin-bottom:14px">
@@ -3212,7 +3246,7 @@
   <script src="./cave-components.js"></script>
   <script src="./cave-extras.js"></script>
   <script src="./cave-order-pad.js"></script>
-  <script src="./app-orders.js?v=374"></script>
+  <script src="./app-orders.js?v=377"></script>
   <script src="./restaurant-module.js"></script>
 </body>
 </html>
