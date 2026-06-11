@@ -3430,6 +3430,44 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                 },
             }
 
+    def _apply_recovery_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Fusionne un snapshot complet (data.json ou backups/data-*.json) dans le stockage actif."""
+        payload = migrate_state(payload)
+        merged = build_default_state()
+        merged.update({k: v for k, v in payload.items() if k in merged})
+        merged["auth"]["users"] = payload.get("auth", {}).get("users", merged["auth"]["users"])
+        merged["nextId"].update(payload.get("nextId", {}))
+        merged["sites"] = payload.get("sites", merged["sites"])
+        merged["activeSiteId"] = payload.get("activeSiteId", merged["activeSiteId"])
+        merged["ventes"] = payload.get("ventes", merged["ventes"])
+        merged["stock"] = payload.get("stock", merged["stock"])
+        merged["commandes"] = payload.get("commandes", merged.get("commandes", []))
+        merged["stockChecks"] = payload.get("stockChecks", merged.get("stockChecks", []))
+        merged["dayBooks"] = payload.get("dayBooks", merged.get("dayBooks", []))
+        merged["purchaseOrders"] = payload.get("purchaseOrders", merged.get("purchaseOrders", []))
+        merged["supplierPrices"] = payload.get("supplierPrices", merged.get("supplierPrices", []))
+        merged["casiers"] = payload.get("casiers", merged.get("casiers", []))
+        merged["casierMouvements"] = payload.get("casierMouvements", merged.get("casierMouvements", []))
+        merged["creditRecoveries"] = payload.get("creditRecoveries", merged.get("creditRecoveries", []))
+        merged["clientAvoirs"] = payload.get("clientAvoirs", merged.get("clientAvoirs", []))
+        merged["loyaltyClients"] = payload.get("loyaltyClients", merged.get("loyaltyClients", []))
+        merged["serviceRelay"] = payload.get("serviceRelay", merged.get("serviceRelay", []))
+        merged["consignes"] = payload.get("consignes", merged.get("consignes", []))
+        merged["staffAuditLog"] = payload.get("staffAuditLog", merged.get("staffAuditLog", []))
+        merged["stockEntrees"] = payload.get("stockEntrees", merged.get("stockEntrees", []))
+        merged["stockLosses"] = payload.get("stockLosses", merged.get("stockLosses", []))
+        merged["workShifts"] = payload.get("workShifts", merged.get("workShifts", []))
+        merged["pdjWorkDateBySite"] = payload.get("pdjWorkDateBySite", merged.get("pdjWorkDateBySite", {}))
+        merged["categories"] = payload.get("categories", merged.get("categories", DEFAULT_STATE["categories"]))
+        merged["charges"] = payload.get("charges", merged["charges"])
+        for index, site in enumerate(merged["sites"], start=1):
+            site.setdefault("prefixeFacture", f"SITE{index}")
+            site.setdefault("dualZonePricing", True)
+        normalize_auth_users(merged)
+        self._state = merged
+        self._write(self._state)
+        return self.public_state()
+
     def restore_from_json_file(self) -> dict[str, Any]:
         """Admin recovery: load DATA_FILE and overwrite current storage."""
         with self._lock:
@@ -3437,40 +3475,15 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                 payload = json.loads(DATA_FILE.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 raise ValueError("Impossible de lire data.json.")
+            return self._apply_recovery_payload(payload)
 
-            payload = migrate_state(payload)
-            merged = build_default_state()
-            merged.update({k: v for k, v in payload.items() if k in merged})
-            merged["auth"]["users"] = payload.get("auth", {}).get("users", merged["auth"]["users"])
-            merged["nextId"].update(payload.get("nextId", {}))
-            merged["sites"] = payload.get("sites", merged["sites"])
-            merged["activeSiteId"] = payload.get("activeSiteId", merged["activeSiteId"])
-            merged["ventes"] = payload.get("ventes", merged["ventes"])
-            merged["stock"] = payload.get("stock", merged["stock"])
-            merged["commandes"] = payload.get("commandes", merged.get("commandes", []))
-            merged["stockChecks"] = payload.get("stockChecks", merged.get("stockChecks", []))
-            merged["dayBooks"] = payload.get("dayBooks", merged.get("dayBooks", []))
-            merged["purchaseOrders"] = payload.get("purchaseOrders", merged.get("purchaseOrders", []))
-            merged["supplierPrices"] = payload.get("supplierPrices", merged.get("supplierPrices", []))
-            merged["casiers"] = payload.get("casiers", merged.get("casiers", []))
-            merged["casierMouvements"] = payload.get("casierMouvements", merged.get("casierMouvements", []))
-            merged["creditRecoveries"] = payload.get("creditRecoveries", merged.get("creditRecoveries", []))
-            merged["clientAvoirs"] = payload.get("clientAvoirs", merged.get("clientAvoirs", []))
-            merged["loyaltyClients"] = payload.get("loyaltyClients", merged.get("loyaltyClients", []))
-            merged["serviceRelay"] = payload.get("serviceRelay", merged.get("serviceRelay", []))
-            merged["consignes"] = payload.get("consignes", merged.get("consignes", []))
-            merged["staffAuditLog"] = payload.get("staffAuditLog", merged.get("staffAuditLog", []))
-            merged["stockEntrees"] = payload.get("stockEntrees", merged.get("stockEntrees", []))
-            merged["stockLosses"] = payload.get("stockLosses", merged.get("stockLosses", []))
-            merged["categories"] = payload.get("categories", merged.get("categories", DEFAULT_STATE["categories"]))
-            merged["charges"] = payload.get("charges", merged["charges"])
-            for index, site in enumerate(merged["sites"], start=1):
-                site.setdefault("prefixeFacture", f"SITE{index}")
-                site.setdefault("dualZonePricing", True)
-            normalize_auth_users(merged)
-            self._state = merged
-            self._write(self._state)
-            return self.public_state()
+    def restore_from_backup_file(self, backup_filename: str) -> dict[str, Any]:
+        """Admin recovery: restauration complete depuis backups/data-*.json (ou copie SQLite)."""
+        with self._lock:
+            payload = load_backup_state_payload(backup_filename)
+            if not payload.get("sites"):
+                raise ValueError("Cette sauvegarde ne contient aucun maquis.")
+            return self._apply_recovery_payload(payload)
 
     def public_menu(self, site_id: str, location: str = "Intérieur") -> dict[str, Any] | None:
         with self._lock:
@@ -4565,6 +4578,31 @@ class AppHandler(BaseHTTPRequestHandler):
                 self.send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
                 return
             audit_log("restore_from_json", {"ip": self.client_ip(), "username": session.get("username", "")})
+            self.send_json(HTTPStatus.OK, restored, cache_control="no-store")
+            return
+        if post_path == "/api/admin/restore-from-backup":
+            session = self.require_session()
+            if session is None:
+                return
+            if not self.require_csrf(session):
+                return
+            if not session_is_superadmin(session, all_site_ids=store.all_site_ids()):
+                self.send_json(HTTPStatus.FORBIDDEN, {"error": "Acces refuse."})
+                return
+            body = self.read_json()
+            bf = str((body or {}).get("backupFile", "")).strip()
+            if not bf:
+                self.send_json(HTTPStatus.BAD_REQUEST, {"error": "Fichier de sauvegarde requis."})
+                return
+            try:
+                restored = store.restore_from_backup_file(bf)
+            except ValueError as error:
+                self.send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+                return
+            audit_log(
+                "restore_from_backup",
+                {"ip": self.client_ip(), "username": session.get("username", ""), "backupFile": bf},
+            )
             self.send_json(HTTPStatus.OK, restored, cache_control="no-store")
             return
         if post_path == "/api/admin/restore-site-from-backup":

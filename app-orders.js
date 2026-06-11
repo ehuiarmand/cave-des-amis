@@ -9,6 +9,7 @@ const API = {
   restoreFromJson: "/api/admin/restore-from-json",
   adminBackups: "/api/admin/backups",
   restoreSiteFromBackup: "/api/admin/restore-site-from-backup",
+  restoreFromBackup: "/api/admin/restore-from-backup",
   createManualBackup: "/api/admin/create-manual-backup",
   createSiteBackup: "/api/admin/create-site-backup",
   twoFaVerify: "/api/2fa/verify",
@@ -18417,6 +18418,38 @@ async function refreshRestoreBackupUi() {
   else if (cur && sites.some((s) => String(s.id) === String(cur))) siteSel.value = String(cur);
 }
 
+
+async function restoreFullFromBackup() {
+  if (!canGlobalSuperAdmin()) {
+    showToast("Seul le super administrateur peut restaurer tous les maquis.");
+    return;
+  }
+  const backupFile = document.getElementById("restore-backup-file")?.value?.trim();
+  if (!backupFile) {
+    showToast("Choisissez une sauvegarde dans la liste.");
+    return;
+  }
+  if (
+    !window.confirm(
+      `Restaurer TOUS les maquis depuis la sauvegarde "${backupFile}" ?\n\n`
+      + "L'état actuel sera entièrement remplacé (sites, ventes, stock, utilisateurs…).\n"
+      + "Choisissez une date récente avant l'incident — pas besoin du fichier du 26 mai.",
+    )
+  ) {
+    return;
+  }
+  try {
+    state = await apiRequest(API.restoreFromBackup, { method: "POST", body: JSON.stringify({ backupFile }) });
+    allowedSiteIds = state.allowedSiteIds || allowedSiteIds;
+    globalSuperadmin = state.globalSuperadmin;
+    await bootstrapAuthenticatedApp({ skipCasierLsRestore: true });
+    lsSaveCasiers();
+    showToast(`Restauration complete depuis ${backupFile}. Rechargez la page si besoin.`);
+  } catch (error) {
+    handleApiError(error);
+  }
+}
+
 async function restoreSelectedSiteFromBackup() {
   if (!canManageMaquisBackups()) {
     showToast("Reserve aux administrateurs de maquis.");
@@ -22707,6 +22740,7 @@ document.getElementById("fab-btn").addEventListener("click", () => {
   if (restoreBtn) restoreBtn.addEventListener("click", () => restoreFromJson());
   document.getElementById("restore-backup-refresh-btn")?.addEventListener("click", () => refreshRestoreBackupUi().catch(handleApiError));
   document.getElementById("restore-site-backup-btn")?.addEventListener("click", () => restoreSelectedSiteFromBackup().catch(handleApiError));
+  document.getElementById("restore-full-backup-btn")?.addEventListener("click", () => restoreFullFromBackup().catch(handleApiError));
   bindPlanningEvents();
   document.querySelectorAll(".nav-btn").forEach((button) => button.addEventListener("click", () => handleNavButtonClick(button)));
   bindMobileMoreSheet();
