@@ -3681,12 +3681,10 @@ function serveuseIsRestDay(dateIso, siteId = currentSiteId()) {
   return !serveuseHasShiftOnDate(sessionUser, sid, d);
 }
 
-/** Module Ventes indisponible aujourd'hui (serveuse en repos). */
+/** Module Ventes indisponible tant que la serveuse n'est pas en service. */
 function serveuseVentesModuleBlocked(siteId = currentSiteId()) {
   if (!staffRequiresShiftWindowForSales()) return false;
-  // Créneau actif (nuit après minuit), relais ou dernière vendeuse → pas un jour de repos.
-  if (staffIsOnDutyNow(siteId)) return false;
-  return serveuseIsRestDay(today(), siteId);
+  return !staffIsOnDutyNow(siteId);
 }
 
 /** Vrai si la serveuse a un service ouvert non clôturé (date de travail courante). */
@@ -3718,27 +3716,36 @@ function serveuseRestDayBlockToast() {
   showToast("Jour de repos : Planning, Mes ventes et Caisse (recouvrement / avoirs) sont disponibles.");
 }
 
-/** Message si serveuse hors créneau ou jour de repos (gérant / admin : jamais bloqué). */
+/** Message si serveuse hors service (gérant / admin : jamais bloqué). */
 function serveusePlanningBlocksSale(saleDateStr, siteId = currentSiteId()) {
   if (!staffRequiresShiftWindowForSales()) return null;
   const d = String(saleDateStr || "").slice(0, 10);
   const sid = siteId || currentSiteId();
   if (!sid || !/^\d{4}-\d{2}-\d{2}$/.test(d)) return null;
-  if (!teamHasPlanningOnDate(sid, d)) return null;
   if (staffIsOnDutyNow(sid)) return null;
-  // Le relais de service prime sur le jour de repos : si la serveuse a pris le service, elle peut vendre.
-  if (serveuseIsOnSalesRelay(sid)) return null;
+
   const label = formatDateDdMmYyyy(d);
+  const me = String(sessionUser || "").trim().toLowerCase();
+  const onDuty = currentServeuseOnDuty(sid);
+
+  if (onDuty && onDuty !== me) {
+    return `${staffDisplayName(onDuty)} est en service — demandez à la gérante dans Planning (Mes horaires) pour être autorisée à vendre.`;
+  }
+  if (pendingServiceRelayRequest(sessionUser, sid)) {
+    return "Demande en attente — la gérante doit valider dans Planning → Équipe avant que vous puissiez vendre.";
+  }
+  if (!teamHasPlanningOnDate(sid, d)) {
+    return `Hors service (${label}) : demandez à la gérante l'autorisation de prendre le service (Planning → Mes horaires).`;
+  }
   if (serveuseIsRestDay(d, sid)) {
     return `Jour de repos (${label}) : le module Ventes est indisponible. Consultez Planning → Mes horaires ou contactez votre gérante.`;
   }
-  if (staffIsOnDutyNow(sid)) return null;
   const todayShifts = workShiftsForUserOnDate(sessionUser, sid, d);
   if (todayShifts.length) {
     const windows = todayShifts.map(formatShiftWindowLabel).join(", ");
-    return `Hors période de service (${label}) : vos créneaux sont ${windows}. Revenez pendant votre service ou demandez à la gérante d'ajuster le planning.`;
+    return `Hors période de service (${label}) : vos créneaux sont ${windows}. Demandez à la gérante de vous autoriser ou revenez pendant votre créneau.`;
   }
-  return `Jour de repos (${label}) : vous ne pouvez pas vendre. Voyez votre gérante pour vous autoriser — elle pourra ajouter un créneau dans Planning → Équipe.`;
+  return `Hors service (${label}) : vous ne pouvez pas vendre. Demandez à la gérante dans Planning → Mes horaires.`;
 }
 
 function syncServeuseRestDayNavAccess() {
@@ -3796,12 +3803,13 @@ function syncServeuseVentesPageRestDay() {
   const tabs = document.querySelector("#page-ventes > .tabs.page-subtabs");
   const journalGate = document.getElementById("ventes-journal-gate");
   const msg = blocked ? serveusePlanningBlocksSale(journalSaleDateFromDom(), currentSiteId()) : "";
+  const restTitle = blocked && serveuseIsRestDay(today(), currentSiteId()) ? "Jour de repos" : "Hors service";
   if (restGate) {
     if (blocked && msg) {
       restGate.classList.remove("hidden");
       restGate.removeAttribute("hidden");
       restGate.innerHTML = `<div class="inline-card ventes-rest-day-alert" role="alert">
-        <strong>Jour de repos</strong>
+        <strong>${escapeHtml(restTitle)}</strong>
         <p class="ventes-rest-day-alert-msg">${escapeHtml(msg)}</p>
       </div>`;
     } else {
