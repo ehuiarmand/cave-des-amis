@@ -1991,7 +1991,7 @@ def resolve_backup_session(session: dict[str, Any], store: "StateStore") -> dict
     if not user:
         return out
     role = str(user.get("role", out.get("role", "")))
-    if un.lower() == "admin":
+    if un.lower() in ("admin", "tanoh"):
         role = "superadmin"
         allowed = list(all_ids)
     elif role == "superadmin":
@@ -3040,6 +3040,24 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
         merged["_meta"] = payload.get("_meta") or {"rev": 1, "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
         return merged
 
+    def _load_disk_state_fallback(self) -> dict[str, Any] | None:
+        """PostgreSQL/SQLite vide : reprendre data.json ou la sauvegarde la plus récente."""
+        candidates: list[Path] = []
+        if self.path.exists():
+            candidates.append(self.path)
+        for bp in sorted(BACKUP_DIR.glob("data-*.json"), key=lambda p: p.name, reverse=True)[:10]:
+            if bp not in candidates:
+                candidates.append(bp)
+        for fp in candidates:
+            try:
+                payload = json.loads(fp.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if isinstance(payload, dict) and payload.get("sites"):
+                print(f"[startup] Reprise depuis {fp.name}", flush=True)
+                return payload
+        return None
+
     def _load(self) -> dict[str, Any]:
         if self._pg_enabled:
             pg_load_ok = True
@@ -3061,6 +3079,14 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                     self._write(merged)
                 return merged
             else:
+                fallback = self._load_disk_state_fallback()
+                if fallback:
+                    payload = migrate_state(fallback)
+                    merged = self._merge_payload(payload)
+                    if pg_load_ok:
+                        print("[startup] PostgreSQL vide → état restauré depuis fichier local.", flush=True)
+                        self._write(merged)
+                    return merged
                 initial = build_default_state()
                 if pg_load_ok:
                     # Première utilisation : PostgreSQL vide → initialiser normalement
@@ -3733,7 +3759,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                     self._write(self._state)
                 allowed = [sid for sid in user.get("allowedSiteIds", all_site_ids) if sid in all_site_ids] or all_site_ids[:1]
                 role = str(user.get("role", ""))
-                if str(user.get("username", "")).strip().lower() == "admin":
+                if str(user.get("username", "")).strip().lower() in ("admin", "tanoh"):
                     role = "superadmin"
                     allowed = list(all_site_ids)
                     prev_sites = [str(x) for x in (user.get("allowedSiteIds") or [])]
@@ -4766,7 +4792,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 all_site_ids = [s["id"] for s in store._state["sites"]]
                 allowed = [sid for sid in user_data.get("allowedSiteIds", all_site_ids) if sid in all_site_ids] or all_site_ids[:1]
                 role = str(user_data["role"])
-                if str(username).strip().lower() == "admin":
+                if str(username).strip().lower() in ("admin", "tanoh"):
                     role = "superadmin"
                     allowed = list(all_site_ids)
                     prev_sites = [str(x) for x in (user_data.get("allowedSiteIds") or [])]
@@ -4827,7 +4853,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     if sid in wv_all_site_ids
                 ] or wv_all_site_ids[:1]
                 wv_role = str(wv_user_row.get("role", "serveuse"))
-                if wv_username.strip().lower() == "admin":
+                if wv_username.strip().lower() in ("admin", "tanoh"):
                     wv_role = "superadmin"
                     wv_allowed = list(wv_all_site_ids)
                     prev_sites = [str(x) for x in (wv_user_row.get("allowedSiteIds") or [])]
