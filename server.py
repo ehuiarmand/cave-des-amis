@@ -1564,6 +1564,20 @@ def notify_qr_order_created_async(
     threading.Thread(target=run, daemon=True).start()
 
 
+
+def _is_builtin_demo_state(payload: dict[str, Any]) -> bool:
+    """Etat d'installation vierge (Mon Bar Chez Moi / Maquis Plateau)."""
+    sites = payload.get("sites") if isinstance(payload, dict) else None
+    if not isinstance(sites, list) or len(sites) != 2:
+        return False
+    rows = [s for s in sites if isinstance(s, dict)]
+    if len(rows) != 2:
+        return False
+    ids = sorted(str(s.get("id", "")) for s in rows)
+    names = {str(s.get("nom", "")) for s in rows}
+    return ids == ["maquis-1", "maquis-2"] and {"Mon Bar Chez Moi", "Maquis Plateau"}.issubset(names)
+
+
 def build_default_state() -> dict[str, Any]:
     legacy = json.loads(json.dumps(DEFAULT_STATE))
     return {
@@ -3040,22 +3054,31 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
         merged["_meta"] = payload.get("_meta") or {"rev": 1, "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
         return merged
 
-    def _load_disk_state_fallback(self) -> dict[str, Any] | None:
-        """PostgreSQL/SQLite vide : reprendre data.json ou la sauvegarde la plus récente."""
+    def _load_disk_state_fallback(self, *, skip_demo: bool = True) -> dict[str, Any] | None:
+        """PostgreSQL/SQLite vide : reprendre data.json ou sauvegarde (ignore la demo si possible)."""
         candidates: list[Path] = []
         if self.path.exists():
             candidates.append(self.path)
-        for bp in sorted(BACKUP_DIR.glob("data-*.json"), key=lambda p: p.name, reverse=True)[:10]:
+        for bp in sorted(BACKUP_DIR.glob("data-*.json"), key=lambda p: p.name, reverse=True)[: max(10, BACKUP_KEEP_COUNT)]:
             if bp not in candidates:
                 candidates.append(bp)
+        demo_fallback: dict[str, Any] | None = None
         for fp in candidates:
             try:
                 payload = json.loads(fp.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 continue
-            if isinstance(payload, dict) and payload.get("sites"):
-                print(f"[startup] Reprise depuis {fp.name}", flush=True)
-                return payload
+            if not isinstance(payload, dict) or not payload.get("sites"):
+                continue
+            if skip_demo and _is_builtin_demo_state(payload):
+                if demo_fallback is None:
+                    demo_fallback = payload
+                continue
+            print(f"[startup] Reprise depuis {fp.name}", flush=True)
+            return payload
+        if demo_fallback is not None:
+            print("[startup] Avertissement : seule la copie demo a ete trouvee sur disque.", flush=True)
+            return demo_fallback
         return None
 
     def _load(self) -> dict[str, Any]:
@@ -3087,11 +3110,14 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                         print("[startup] PostgreSQL vide → état restauré depuis fichier local.", flush=True)
                         self._write(merged)
                     return merged
+                print(
+                    "[startup] ALERTE : PostgreSQL vide et aucune sauvegarde exploitable — etat demo charge EN MEMOIRE UNIQUEMENT.",
+                    flush=True,
+                )
                 initial = build_default_state()
-                if pg_load_ok:
-                    # Première utilisation : PostgreSQL vide → initialiser normalement
+                # Ne jamais ecraser PostgreSQL avec la demo si des backups existent mais illisibles.
+                if pg_load_ok and not list(BACKUP_DIR.glob("data-*.json")):
                     self._write(initial)
-                # Si pg_load_ok est False, on NE RIEN ÉCRIT en PostgreSQL
                 return initial
 
         if self._sqlite_enabled:
@@ -3128,6 +3154,25 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
         self._write(merged)
         return merged
 
+    def _mirror_json_file(self, body: str) -> None:
+        """Copie miroir data.json (recuperation si PostgreSQL est vide au prochain demarrage)."""
+        tmp_path = self.path.with_suffix(self.path.suffix + ".tmp")
+        with open(tmp_path, "w", encoding="utf-8") as _f:
+            _f.write(body)
+            _f.flush()
+            try:
+                os.fsync(_f.fileno())
+            except OSError:
+                pass
+        try:
+            tmp_path.replace(self.path)
+        finally:
+            if tmp_path.exists():
+                try:
+                    tmp_path.unlink()
+                except OSError:
+                    pass
+
     def _write(self, payload: dict[str, Any], changed_keys: set | None = None) -> None:
         BACKUP_DIR.mkdir(parents=True, exist_ok=True)
         # Update meta
@@ -3158,6 +3203,10 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                         pass
             except OSError:
                 pass
+            try:
+                self._mirror_json_file(body)
+            except OSError as _mirror_exc:
+                print(f"[startup] Miroir data.json ignore : {_mirror_exc}", flush=True)
             self._last_etag = self._compute_etag()
             return
 
