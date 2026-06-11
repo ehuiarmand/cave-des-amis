@@ -150,6 +150,16 @@ CREATE TABLE IF NOT EXISTS loyalty_clients (
 );
 CREATE INDEX IF NOT EXISTS idx_loyalty_clients_site_id ON loyalty_clients (site_id);
 
+
+-- Prises de service (demandes + validations gérante)
+CREATE TABLE IF NOT EXISTS service_relay (
+    row_id  BIGSERIAL PRIMARY KEY,
+    item_id BIGINT,
+    site_id TEXT,
+    data    JSONB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_service_relay_site_id ON service_relay (site_id);
+
 -- Charges (dépenses)
 CREATE TABLE IF NOT EXISTS charges (
     row_id  BIGSERIAL PRIMARY KEY,

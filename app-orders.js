@@ -3427,6 +3427,97 @@ function lastSellingServeuseToday(siteId = currentSiteId()) {
  * La plus récente des deux actions gagne.
  * Retourne null si personne n'a rien fait aujourd'hui.
  */
+
+function serviceRelayIsApproved(row) {
+  const st = String(row?.status || "").trim().toLowerCase();
+  if (st === "approved") return true;
+  if (st === "pending" || st === "rejected") return false;
+  return true;
+}
+
+function pendingServiceRelayRequest(username = sessionUser, siteId = currentSiteId()) {
+  const un = String(username || "").trim().toLowerCase();
+  const sid = String(siteId || "");
+  const d = workingDate(siteId);
+  if (!un || !sid || !d) return null;
+  return (state.serviceRelay || []).find(
+    (r) => String(r.siteId || "") === sid
+      && String(r.date || "").slice(0, 10) === d
+      && String(r.username || "").trim().toLowerCase() === un
+      && String(r.status || "pending").trim().toLowerCase() === "pending",
+  ) || null;
+}
+
+function serviceRelayRequestsForSite(siteId = currentSiteId(), includeResolved = false) {
+  const sid = String(siteId || "");
+  const d = workingDate(siteId);
+  return (state.serviceRelay || []).filter((r) => {
+    if (String(r.siteId || "") !== sid) return false;
+    if (String(r.date || "").slice(0, 10) !== d) return false;
+    const st = String(r.status || "pending").trim().toLowerCase();
+    if (!includeResolved && st !== "pending") return false;
+    return true;
+  });
+}
+
+function renderPlanningRelayRequests() {
+  const box = document.getElementById("planning-team-relay-requests");
+  if (!box || !canManageTeamSchedule()) return;
+  const rows = serviceRelayRequestsForSite(currentSiteId(), false);
+  if (!rows.length) {
+    box.innerHTML = "";
+    box.classList.add("hidden");
+    return;
+  }
+  box.classList.remove("hidden");
+  box.innerHTML = `<div class="section-head" style="margin-bottom:8px"><h4 style="margin:0">Demandes de prise de service</h4></div>`
+    + rows.map((r) => {
+      const from = r.takenFrom ? staffDisplayName(r.takenFrom) : "personne";
+      const who = escapeHtml(staffDisplayName(r.username));
+      return `<article class="list-item"><div><p class="list-item-title">${who}</p><p class="list-item-sub">Remplace ${escapeHtml(from)} · ${escapeHtml(formatDateTimeDdMmYyyy(r.requestedAt || r.takenAt || ""))}</p></div><div class="list-side" style="display:flex;gap:6px;flex-wrap:wrap"><button type="button" class="mini-btn" data-relay-approve="${escapeHtml(String(r.id))}">Autoriser</button><button type="button" class="mini-btn del-btn" data-relay-reject="${escapeHtml(String(r.id))}">Refuser</button></div></article>`;
+    }).join("");
+  box.querySelectorAll("[data-relay-approve]").forEach((btn) => {
+    btn.addEventListener("click", () => approveServiceRelayRequest(btn.getAttribute("data-relay-approve")).catch(handleApiError));
+  });
+  box.querySelectorAll("[data-relay-reject]").forEach((btn) => {
+    btn.addEventListener("click", () => rejectServiceRelayRequest(btn.getAttribute("data-relay-reject")).catch(handleApiError));
+  });
+}
+
+async function approveServiceRelayRequest(id) {
+  if (!canManageTeamSchedule()) { showToast("Accès refusé."); return; }
+  const rid = String(id || "");
+  const row = (state.serviceRelay || []).find((r) => String(r.id) === rid);
+  if (!row) { showToast("Demande introuvable."); return; }
+  if (!window.confirm(`Autoriser ${staffDisplayName(row.username)} à prendre le service ?`)) return;
+  row.status = "approved";
+  row.decidedAt = new Date().toISOString();
+  row.decidedBy = sessionUser;
+  row.takenAt = row.takenAt || row.requestedAt || row.decidedAt;
+  recordStaffAudit("update", "planning", "Prise de service autorisée", `${row.username} ← ${row.takenFrom || "—"}`);
+  await persistState({ serviceRelay: state.serviceRelay, staffAuditLog: state.staffAuditLog });
+  showToast(`${staffDisplayName(row.username)} peut vendre.`);
+  renderPlanningMine();
+  renderPlanningTeam();
+  syncServeuseVentesPageRestDay();
+}
+
+async function rejectServiceRelayRequest(id) {
+  if (!canManageTeamSchedule()) { showToast("Accès refusé."); return; }
+  const rid = String(id || "");
+  const row = (state.serviceRelay || []).find((r) => String(r.id) === rid);
+  if (!row) { showToast("Demande introuvable."); return; }
+  if (!window.confirm(`Refuser la demande de ${staffDisplayName(row.username)} ?`)) return;
+  row.status = "rejected";
+  row.decidedAt = new Date().toISOString();
+  row.decidedBy = sessionUser;
+  recordStaffAudit("update", "planning", "Prise de service refusée", row.username);
+  await persistState({ serviceRelay: state.serviceRelay, staffAuditLog: state.staffAuditLog });
+  showToast("Demande refusée.");
+  renderPlanningTeam();
+  renderPlanningMine();
+}
+
 function currentServeuseOnDuty(siteId = currentSiteId()) {
   const d = workingDate(siteId);
   if (!d) return null;
@@ -3448,7 +3539,7 @@ function currentServeuseOnDuty(siteId = currentSiteId()) {
 
   // Dernière prise de service explicite du jour
   const todayRelay = (state.serviceRelay || []).filter(
-    (r) => String(r.siteId || "") === sid && String(r.date || "").slice(0, 10) === d,
+    (r) => String(r.siteId || "") === sid && String(r.date || "").slice(0, 10) === d && serviceRelayIsApproved(r),
   );
   let lastRelayTs = "";
   let relayUser = null;
@@ -3466,11 +3557,11 @@ function currentServeuseOnDuty(siteId = currentSiteId()) {
   return lastRelayTs > lastSaleTs ? relayUser : lastSeller;
 }
 
-/** Vrai si la serveuse courante est en service (via vente ou prise explicite). */
+/** Vrai si la serveuse courante est la vendeuse / relais autorisé du jour. */
 function serveuseIsOnSalesRelay(siteId = currentSiteId()) {
   if (!staffRequiresShiftWindowForSales()) return false;
   const current = currentServeuseOnDuty(siteId);
-  if (current === null) return true; // personne → n'importe qui peut démarrer
+  if (current === null) return false;
   return current === String(sessionUser || "").trim().toLowerCase();
 }
 
@@ -4026,21 +4117,27 @@ function renderPlanningMine() {
   const onDutyUser = currentServeuseOnDuty(siteId);
   const meUser = String(sessionUser || "").trim().toLowerCase();
   const canSell = staffIsOnDutyNow(siteId);
-  const showTakeServiceBtn = !canSell && isServeuseAccount();
+  const pendingRelay = pendingServiceRelayRequest(sessionUser, siteId);
+  const showTakeServiceBtn = !canSell && isServeuseAccount() && !pendingRelay;
 
   if (sumEl) {
     if (showTakeServiceBtn) {
       const onDutyName = onDutyUser && onDutyUser !== meUser ? escapeHtml(staffDisplayName(onDutyUser)) : null;
       const title = onDutyName ? `${onDutyName} est en service` : "Service non démarré";
-      const btnLabel = onDutyName ? "Prendre le service" : "Démarrer le service";
+      const btnLabel = onDutyName ? "Demander à la gérante" : "Demander à démarrer";
       const _openSvc = serveuseHasOpenServiceToday();
       sumEl.innerHTML = `<div class="inline-card" style="border-left:3px solid #e08a1e;padding:10px 12px;font-size:0.88rem">
         <strong>${title}</strong>
-        <p style="margin:4px 0 8px;font-size:0.83rem;color:var(--muted)">Cliquez pour pouvoir vendre.</p>
+        <p style="margin:4px 0 8px;font-size:0.83rem;color:var(--muted)">La gérante doit autoriser la prise de service dans Planning → Équipe.</p>
         <button type="button" class="btn btn-sm btn-outline" id="take-service-btn">${btnLabel}</button>
         ${_openSvc ? `<button type="button" class="btn btn-sm btn-primary" style="margin-left:8px" onclick="navigate('pdj')">Point du jour — Fin de service</button>` : ""}
       </div>`;
-      document.getElementById("take-service-btn")?.addEventListener("click", () => takeService().catch(handleApiError));
+      document.getElementById("take-service-btn")?.addEventListener("click", () => requestTakeService().catch(handleApiError));
+    } else if (pendingRelay) {
+      sumEl.innerHTML = `<div class="inline-card" style="border-left:3px solid #e08a1e;padding:10px 12px;font-size:0.88rem">
+        <strong>Demande en attente</strong>
+        <p style="margin:4px 0 0;font-size:0.83rem;color:var(--muted)">La gérante doit valider dans Planning → Équipe avant que vous puissiez vendre.</p>
+      </div>`;
     } else if (canSell) {
       const active = activeWorkShiftsNow(sessionUser, siteId);
       if (!active.length && staffInShiftBridgeGap(sessionUser, siteId)) {
@@ -4087,34 +4184,41 @@ function renderPlanningMine() {
   listEl.innerHTML = rows.map((s) => renderPlanningShiftRow(s)).join("");
 }
 
-async function takeService() {
+async function requestTakeService() {
   const siteId = currentSiteId();
   const d = workingDate(siteId);
   if (!d) return;
   const onDuty = currentServeuseOnDuty(siteId);
   const me = String(sessionUser || "").trim().toLowerCase();
   if (onDuty === me) return;
+  if (pendingServiceRelayRequest(me, siteId)) {
+    showToast("Demande déjà envoyée — en attente de la gérante.");
+    return;
+  }
   const fromName = onDuty ? staffDisplayName(onDuty) : null;
   const msg = fromName
-    ? `Prendre le service de ${fromName} ?`
-    : "Démarrer le service ?";
+    ? `Demander à la gérante l'autorisation de remplacer ${fromName} ?`
+    : "Demander à la gérante l'autorisation de démarrer le service ?";
   if (!window.confirm(msg)) return;
   if (!Array.isArray(state.serviceRelay)) state.serviceRelay = [];
-  state.serviceRelay.push({
-    id: Date.now(),
+  if (!state.nextId) state.nextId = {};
+  if (state.nextId.serviceRelay == null) {
+    const maxId = state.serviceRelay.reduce((m, r) => Math.max(m, Number(r.id) || 0), 0);
+    state.nextId.serviceRelay = Math.max(1, maxId + 1);
+  }
+  state.serviceRelay.unshift({
+    id: state.nextId.serviceRelay++,
     siteId,
     date: d,
     username: me,
-    takenAt: new Date().toISOString(),
+    status: "pending",
+    requestedAt: new Date().toISOString(),
     takenFrom: onDuty || null,
   });
-  recordStaffAudit("update", "planning",
-    `Prise de service`,
-    fromName ? `${me} a pris le service de ${fromName}` : `${me} a démarré le service`);
-  await persistState({ serviceRelay: state.serviceRelay, staffAuditLog: state.staffAuditLog });
-  showToast(fromName ? `Service pris de ${fromName}.` : "Service démarré.");
+  recordStaffAudit("update", "planning", "Demande prise de service", fromName ? `${me} → ${fromName}` : me);
+  await persistState({ serviceRelay: state.serviceRelay, nextId: state.nextId, staffAuditLog: state.staffAuditLog });
+  showToast("Demande envoyée à la gérante.");
   renderPlanningMine();
-  if (canManageTeamSchedule()) renderPlanningTeam();
 }
 
 function renderPlanningTeam() {
@@ -4127,6 +4231,7 @@ function renderPlanningTeam() {
   populateWorkShiftUserSelect();
   renderRotationStaffList();
 
+  renderPlanningRelayRequests();
   if (serviceNowEl) {
     const siteId = currentSiteId();
     const onDuty = currentServeuseOnDuty(siteId);
@@ -4582,6 +4687,7 @@ function applyPlanningRangeAndRender() {
 async function renderPlanningPage() {
   if (!state) return;
   if (!Array.isArray(state.workShifts)) state.workShifts = [];
+  if (!Array.isArray(state.serviceRelay)) state.serviceRelay = [];
   await refreshWorkShiftsFromServer({ replaceSite: true });
   if (!workShiftsForSite(currentSiteId()).length) lsRestoreWorkShifts();
   lsSaveWorkShifts();
@@ -14634,7 +14740,7 @@ const PURGE_MAQUIS_ROW_KEYS = [
 const STATE_PUT_ROW_KEYS = [
   "ventes", "stock", "commandes", "stockChecks", "stockEntrees", "stockLosses",
   "dayBooks", "purchaseOrders", "supplierPrices", "casiers", "casierMouvements",
-  "creditRecoveries", "clientAvoirs", "loyaltyClients", "consignes", "charges", "staffAuditLog", "workShifts",
+  "creditRecoveries", "clientAvoirs", "loyaltyClients", "serviceRelay", "consignes", "charges", "staffAuditLog", "workShifts",
 ];
 
 /**
@@ -16559,6 +16665,7 @@ async function finalizeOrder(orderId = activeOrderId) {
     if (avoirUsedRaw > 0 && paymentMix.creditName) {
       if (!Array.isArray(state.clientAvoirs)) state.clientAvoirs = [];
       if (!Array.isArray(state.loyaltyClients)) state.loyaltyClients = [];
+      if (!Array.isArray(state.serviceRelay)) state.serviceRelay = [];
       if (!state.nextId.clientAvoir || Number.isNaN(Number(state.nextId.clientAvoir))) state.nextId.clientAvoir = 1;
       const avoirUsed = Math.min(Math.round(avoirUsedRaw), Math.round(avoirBalanceForClient(paymentMix.creditName)));
       if (avoirUsed > 0) {

@@ -160,7 +160,7 @@ REQUIRE_2FA_FOR_PRIVILEGED = _env_first(
 STATE_PUT_LIST_KEYS = (
     "ventes", "stock", "commandes", "stockChecks", "stockEntrees", "stockLosses",
     "dayBooks", "purchaseOrders", "supplierPrices", "casiers", "casierMouvements",
-    "creditRecoveries", "clientAvoirs", "loyaltyClients", "consignes", "charges", "staffAuditLog", "workShifts",
+    "creditRecoveries", "clientAvoirs", "loyaltyClients", "serviceRelay", "consignes", "charges", "staffAuditLog", "workShifts",
     "restaurantMenu", "ingredientStock",
 )
 # Mapping clé JSON → (table PostgreSQL, type d'id)
@@ -179,6 +179,7 @@ _PG_TABLES: dict[str, tuple[str, str]] = {
     "casierMouvements": ("casier_mouvements","int"),
     "creditRecoveries": ("credit_recoveries","int"),
     "loyaltyClients":   ("loyalty_clients",  "int"),
+    "serviceRelay":     ("service_relay",    "int"),
     "consignes":        ("consignes",        "int"),
     "charges":          ("charges",          "int"),
     "staffAuditLog":    ("staff_audit_log",  "text"),
@@ -685,6 +686,7 @@ DEFAULT_STATE: dict[str, Any] = {
     "creditRecoveries": [],
     "clientAvoirs": [],
     "loyaltyClients": [],
+    "serviceRelay": [],
     "consignes": [],
     "categories": ["Bières", "Sodas & Jus", "Eaux", "Vins & Spiritueux", "Cocktails", "Snacks", "Autres"],
     "charges": [
@@ -708,6 +710,7 @@ DEFAULT_STATE: dict[str, Any] = {
         "casierMouvement": 1,
         "consigne": 0,
         "loyaltyClient": 1,
+        "serviceRelay": 1,
     },
 }
 
@@ -1657,6 +1660,7 @@ def migrate_state(payload: dict[str, Any]) -> dict[str, Any]:
             "creditRecoveries": [{**item, "siteId": item.get("siteId", site_id)} for item in payload.get("creditRecoveries", [])],
             "clientAvoirs": [{**item, "siteId": item.get("siteId", site_id)} for item in payload.get("clientAvoirs", [])],
             "loyaltyClients": [{**item, "siteId": item.get("siteId", site_id)} for item in payload.get("loyaltyClients", [])],
+            "serviceRelay": [{**item, "siteId": item.get("siteId", site_id)} for item in payload.get("serviceRelay", [])],
             "consignes": [{**item, "siteId": item.get("siteId", site_id)} for item in payload.get("consignes", [])],
             "categories": payload.get("categories", default["categories"]),
             "charges": [{**item, "siteId": item.get("siteId", site_id)} for item in payload.get("charges", default["charges"])],
@@ -1713,6 +1717,7 @@ _SITE_SCOPED_ROW_KEYS: tuple[str, ...] = (
     "charges",
     "staffAuditLog",
     "workShifts",
+    "serviceRelay",
 )
 
 
@@ -2210,6 +2215,51 @@ def merge_commandes_scoped(
     kept.extend(incoming_for_scope)
     return dedupe_commandes_list(kept, ventes)
 
+
+
+def merge_service_relay_serveuse(
+    current: list[Any],
+    incoming: list[Any],
+    session: dict[str, Any],
+    allowed: set[str],
+    site_ids: list[str],
+) -> list[Any]:
+    """Serveuse : ajouter uniquement sa propre demande en attente (status=pending)."""
+    canon = str(session.get("username", "")).strip()
+    key = canon.casefold()
+    kept = [copy.deepcopy(r) for r in (current or []) if isinstance(r, dict)]
+
+    def in_scope(row: dict[str, Any]) -> bool:
+        es = row_effective_site_id(row, site_ids, allowed)
+        return es is not None and es in allowed
+
+    for row in incoming or []:
+        if not isinstance(row, dict) or not in_scope(row):
+            continue
+        if str(row.get("username", "")).strip().casefold() != key:
+            continue
+        st = str(row.get("status") or "pending").strip().lower()
+        if st != "pending":
+            continue
+        site_id = str(row.get("siteId") or "")
+        day = str(row.get("date") or "")[:10]
+        kept = [
+            r for r in kept
+            if not (
+                isinstance(r, dict)
+                and str(r.get("username", "")).strip().casefold() == key
+                and str(r.get("siteId") or "") == site_id
+                and str(r.get("date") or "")[:10] == day
+                and str(r.get("status") or "approved").strip().lower() == "pending"
+            )
+        ]
+        kept.append({
+            **row,
+            "username": canon,
+            "status": "pending",
+            "requestedAt": row.get("requestedAt") or row.get("takenAt") or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+        })
+    return kept
 
 def merge_scoped_rows(
     current: list[dict[str, Any]],
@@ -2976,6 +3026,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
         merged["creditRecoveries"] = payload.get("creditRecoveries", merged.get("creditRecoveries", []))
         merged["clientAvoirs"] = payload.get("clientAvoirs", merged.get("clientAvoirs", []))
         merged["loyaltyClients"] = payload.get("loyaltyClients", merged.get("loyaltyClients", []))
+        merged["serviceRelay"] = payload.get("serviceRelay", merged.get("serviceRelay", []))
         merged["consignes"] = payload.get("consignes", merged.get("consignes", []))
         merged["staffAuditLog"] = payload.get("staffAuditLog", merged.get("staffAuditLog", []))
         merged["workShifts"] = payload.get("workShifts", merged.get("workShifts", []))
@@ -3168,6 +3219,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                 "creditRecoveries": copy.deepcopy(s.get("creditRecoveries", [])),
                 "clientAvoirs": copy.deepcopy(s.get("clientAvoirs", [])),
                 "loyaltyClients": copy.deepcopy(s.get("loyaltyClients", [])),
+                "serviceRelay": copy.deepcopy(s.get("serviceRelay", [])),
                 "consignes": copy.deepcopy(s.get("consignes", [])),
                 "categories": copy.deepcopy(s.get("categories", DEFAULT_STATE["categories"])),
                 "charges": copy.deepcopy(s["charges"]),
@@ -3254,6 +3306,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                 "creditRecoveries": filter_site_rows(self._state.get("creditRecoveries", [])),
                 "clientAvoirs": filter_site_rows(self._state.get("clientAvoirs", [])),
                 "loyaltyClients": filter_site_rows(self._state.get("loyaltyClients", [])),
+                "serviceRelay": filter_site_rows(self._state.get("serviceRelay", [])),
                 "consignes": filter_site_rows(self._state.get("consignes", [])),
                 "categories": full["categories"],
                 "charges": filter_site_rows(self._state.get("charges", [])),
@@ -3378,6 +3431,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
             merged["creditRecoveries"] = payload.get("creditRecoveries", merged.get("creditRecoveries", []))
             merged["clientAvoirs"] = payload.get("clientAvoirs", merged.get("clientAvoirs", []))
             merged["loyaltyClients"] = payload.get("loyaltyClients", merged.get("loyaltyClients", []))
+            merged["serviceRelay"] = payload.get("serviceRelay", merged.get("serviceRelay", []))
             merged["consignes"] = payload.get("consignes", merged.get("consignes", []))
             merged["staffAuditLog"] = payload.get("staffAuditLog", merged.get("staffAuditLog", []))
             merged["stockEntrees"] = payload.get("stockEntrees", merged.get("stockEntrees", []))
@@ -3887,12 +3941,12 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
             _SERVEUSE_WRITE = frozenset({
                 "ventes", "commandes", "dayBooks",
                 "stock", "casiers", "casierMouvements", "staffAuditLog",
-                "creditRecoveries", "clientAvoirs", "loyaltyClients",
+                "creditRecoveries", "clientAvoirs", "loyaltyClients", "serviceRelay",
             })
             _MANAGER_WRITE = frozenset({
                 "ventes", "stock", "commandes", "stockChecks", "dayBooks",
                 "purchaseOrders", "supplierPrices", "casiers", "casierMouvements",
-                "creditRecoveries", "clientAvoirs", "loyaltyClients", "consignes", "charges", "staffAuditLog",
+                "creditRecoveries", "clientAvoirs", "loyaltyClients", "serviceRelay", "consignes", "charges", "staffAuditLog",
                 "stockEntrees", "stockLosses", "workShifts",
             })
             if _role_str == "serveuse":
@@ -3907,7 +3961,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
             _SCOPED_KEYS = [
                 "ventes", "stock", "commandes", "stockChecks", "dayBooks",
                 "purchaseOrders", "supplierPrices", "casiers", "casierMouvements",
-                "creditRecoveries", "clientAvoirs", "loyaltyClients", "consignes", "charges", "staffAuditLog",
+                "creditRecoveries", "clientAvoirs", "loyaltyClients", "serviceRelay", "consignes", "charges", "staffAuditLog",
                 "stockEntrees", "stockLosses", "workShifts",
             ]
             # Retirer du payload les clés que le rôle ne peut pas écrire
@@ -3948,6 +4002,22 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                                 "siteId": str(payload.get("activeSiteId") or ""),
                             },
                         )
+                    elif _key == "serviceRelay":
+                        if str(session.get("role", "")).strip().lower() == "serveuse":
+                            current[_key] = merge_service_relay_serveuse(
+                                current.get(_key, []),
+                                payload[_key],
+                                session,
+                                allowed,
+                                sid_list,
+                            )
+                        else:
+                            current[_key] = merge_scoped_rows(
+                                current.get(_key, []),
+                                payload[_key],
+                                allowed,
+                                sid_list,
+                            )
                     elif _key == "commandes":
                         current[_key] = merge_commandes_scoped(
                             current.get(_key, []),
