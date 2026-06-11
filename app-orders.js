@@ -13912,61 +13912,69 @@ function syncFinalizeButtonJournalState() {
   btn.disabled = !id || !allowJournal || !allowPlanning;
 }
 
+
+function openSaisieRapideModal({
+  order = null,
+  title = "Saisie rapide",
+  submitLabel = "Valider la commande",
+  clientReadonly = false,
+  focusElId = "sr-client",
+} = {}) {
+  const ctx = document.getElementById("sr-order-context-wrap");
+  if (ctx) ctx.classList.remove("hidden");
+  const titleEl = document.getElementById("sr-modal-title");
+  if (titleEl) titleEl.textContent = title;
+  const srDate = document.getElementById("sr-date");
+  if (srDate) srDate.value = order?.date || pdjCalendarDate();
+  const srClient = document.getElementById("sr-client");
+  if (srClient) {
+    srClient.value = order?.client || "";
+    srClient.readOnly = Boolean(clientReadonly);
+    srClient.style.opacity = clientReadonly ? "0.85" : "";
+  }
+  const srOrderSel = document.getElementById("sr-order-select");
+  if (srOrderSel) srOrderSel.value = order ? String(order.id) : "";
+  const srNote = document.getElementById("sr-note");
+  if (srNote) srNote.value = order?.note || "";
+  const srLoc = document.getElementById("sr-location");
+  const orderLoc = order?.lignes?.[0]?.location;
+  if (srLoc) srLoc.value = orderLoc || "Intérieur";
+  srCart = [];
+  const searchEl = document.getElementById("sr-search");
+  if (searchEl) searchEl.value = "";
+  const submitBtn = document.getElementById("sr-submit-btn");
+  if (submitBtn) {
+    submitBtn.textContent = submitLabel;
+    submitBtn.disabled = false;
+  }
+  renderSrMenu("");
+  renderSrCart();
+  openModal("modal-saisie-rapide");
+  window.requestAnimationFrame(() => document.getElementById(focusElId)?.focus());
+}
+
 function openOrderEditor(orderId = null) {
   syncDualZonePricingUi();
   activeOrderId = orderId;
   const order = orderId ? recordsForSite(state.commandes).find((item) => item.id === orderId) : null;
   populateOrderSelect();
-  // Sans commande cible : saisie rapide (panier multi-articles)
-  if (!orderId) {
-    const ctx = document.getElementById("sr-order-context-wrap");
-    if (ctx) ctx.classList.remove("hidden");
-    const titleEl = document.getElementById("sr-modal-title");
-    if (titleEl) titleEl.textContent = "Saisie rapide";
-    const srDate = document.getElementById("sr-date");
-    if (srDate) srDate.value = pdjCalendarDate();
-    const srClient = document.getElementById("sr-client");
-    if (srClient) srClient.value = "";
-    const srOrderSel = document.getElementById("sr-order-select");
-    if (srOrderSel) srOrderSel.value = "";
-    const srNote = document.getElementById("sr-note");
-    if (srNote) srNote.value = "";
-    srCart = [];
-    const searchEl = document.getElementById("sr-search");
-    if (searchEl) searchEl.value = "";
-    renderSrMenu("");
-    renderSrCart();
-    openModal("modal-saisie-rapide");
-    window.requestAnimationFrame(() => document.getElementById("sr-client")?.focus());
-    return;
-  }
   if (orderId && !order) {
     showToast("Commande introuvable.");
     activeOrderId = null;
     populateOrderSelect();
     return;
   }
-  // Commande existante : ajout de ligne — formulaire vente (recherche catalogue)
-  document.getElementById("v-date").value = order?.date || pdjCalendarDate();
-  document.getElementById("v-client").value = order?.client || "";
-  document.getElementById("v-order-select").value = order ? String(order.id) : "";
-  document.getElementById("v-article").value = "";
-  document.getElementById("v-location").value = "Intérieur";
-  populateSaleFormatSelect(null);
-  document.getElementById("v-prix").value = "";
-  document.getElementById("v-qty").value = "1";
-  document.getElementById("v-remise").value = "0";
-  document.getElementById("v-note").value = order?.note || "";
-  document.getElementById("save-vente-btn").textContent = "Ajouter un article";
-  syncFinalizeButtonJournalState();
-  updateKitInfo(null);
-  updateVentePreview();
-  const vSearch = document.getElementById("v-article-search");
-  if (vSearch) vSearch.value = "";
-  renderVenteArticlePicker();
-  syncLoyaltyClientHint();
-  openModal("modal-vente");
-  window.requestAnimationFrame(() => document.getElementById("v-article-search")?.focus());
+  if (!orderId) {
+    openSaisieRapideModal({ title: "Saisie rapide", focusElId: "sr-client" });
+    return;
+  }
+  openSaisieRapideModal({
+    order,
+    title: "Ajouter un article",
+    submitLabel: "Ajouter à la commande",
+    clientReadonly: true,
+    focusElId: "sr-search",
+  });
 }
 
 function resetOrderForm() {
@@ -19261,7 +19269,16 @@ function closeModal(id) {
   if (id === "modal-order-detail") suppressOrderDetailBackdropUntil = 0;
   if (id === "modal-purchase-receive") pendingReceivePurchaseId = null;
   if (id === "modal-finalize") resetFinalizeModalUi();
-  if (id === "modal-saisie-rapide") { srCart = []; }
+  if (id === "modal-saisie-rapide") {
+    srCart = [];
+    const srClient = document.getElementById("sr-client");
+    if (srClient) {
+      srClient.readOnly = false;
+      srClient.style.opacity = "";
+    }
+    const submitBtn = document.getElementById("sr-submit-btn");
+    if (submitBtn) submitBtn.textContent = "Valider la commande";
+  }
   if (id === "modal-casier-edit") pendingPurchaseCasierResume = false;
   if (id === "modal-replace-article") {
     replacingLine = null; replacingVenteId = null;
