@@ -3693,6 +3693,18 @@ function serveuseHasOpenServiceToday(siteId = currentSiteId()) {
   return !!(d && dayBookFor(d, siteId) && !stockCheckForSiteDate(d, siteId));
 }
 
+/** Bouton PDJ fin de service : uniquement si la serveuse est en service et la journée est ouverte. */
+function serveuseShowPdjFinServiceBtn(siteId = currentSiteId()) {
+  if (!staffRequiresShiftWindowForSales()) return false;
+  if (!serveuseHasOpenServiceToday(siteId)) return false;
+  return staffIsOnDutyNow(siteId);
+}
+
+function serveusePdjFinServiceBtnHtml(style = "margin-top:8px") {
+  if (!serveuseShowPdjFinServiceBtn()) return "";
+  return `<button type="button" class="btn btn-sm btn-primary" style="${style}" onclick="navigate('pdj')">Point du jour — Fin de service</button>`;
+}
+
 /** Pages accessibles pour une serveuse en jour de repos. */
 const SERVEUSE_REST_DAY_PAGES = new Set(["planning", "historique-ventes"]);
 
@@ -4132,13 +4144,13 @@ function renderPlanningMine() {
     if (showTakeServiceBtn) {
       const onDutyName = onDutyUser && onDutyUser !== meUser ? escapeHtml(staffDisplayName(onDutyUser)) : null;
       const title = onDutyName ? `${onDutyName} est en service` : "Service non démarré";
-      const btnLabel = onDutyName ? "Demander à la gérante" : "Demander à démarrer";
-      const _openSvc = serveuseHasOpenServiceToday();
+      const hint = onDutyName
+        ? "Commencez le service : la gérante validera dans Planning → Équipe."
+        : "Commencez le service : la gérante doit autoriser dans Planning → Équipe.";
       sumEl.innerHTML = `<div class="inline-card" style="border-left:3px solid #e08a1e;padding:10px 12px;font-size:0.88rem">
         <strong>${title}</strong>
-        <p style="margin:4px 0 8px;font-size:0.83rem;color:var(--muted)">La gérante doit autoriser la prise de service dans Planning → Équipe.</p>
-        <button type="button" class="btn btn-sm btn-outline" id="take-service-btn">${btnLabel}</button>
-        ${_openSvc ? `<button type="button" class="btn btn-sm btn-primary" style="margin-left:8px" onclick="navigate('pdj')">Point du jour — Fin de service</button>` : ""}
+        <p style="margin:4px 0 8px;font-size:0.83rem;color:var(--muted)">${hint}</p>
+        <button type="button" class="btn btn-sm btn-outline" id="take-service-btn">Commencer le service</button>
       </div>`;
       document.getElementById("take-service-btn")?.addEventListener("click", () => requestTakeService().catch(handleApiError));
     } else if (pendingRelay) {
@@ -4153,24 +4165,26 @@ function renderPlanningMine() {
         const nextWin = todaySh.length ? formatShiftWindowLabel(todaySh[0]) : "votre prochain créneau";
         sumEl.innerHTML = `<div class="inline-card" style="border-left:3px solid #72d7a9;padding:10px 12px;font-size:0.88rem">
           <strong>Relais de service</strong> · entre la fin de nuit et ${escapeHtml(nextWin)} (ventes et encaissements autorisés)
+          ${serveusePdjFinServiceBtnHtml("margin-left:8px")}
         </div>`;
       } else if (!active.length && serveuseIsOnSalesRelay(siteId)) {
         const label = onDutyUser ? "depuis votre dernière vente" : "aucune vente enregistrée ce jour";
         sumEl.innerHTML = `<div class="inline-card" style="border-left:3px solid #72d7a9;padding:10px 12px;font-size:0.88rem">
           <strong>En service</strong> · ${escapeHtml(label)}
+          ${serveusePdjFinServiceBtnHtml("margin-left:8px")}
         </div>`;
       } else {
         const win = active.map(formatShiftWindowLabel).join(", ");
         sumEl.innerHTML = `<div class="inline-card" style="border-left:3px solid #72d7a9;padding:10px 12px;font-size:0.88rem">
           <strong>En service maintenant</strong> · ${escapeHtml(win)}
+          ${serveusePdjFinServiceBtnHtml("margin-left:8px")}
         </div>`;
       }
     } else if (restToday) {
-      const _openSvc = serveuseHasOpenServiceToday();
       sumEl.innerHTML = `<div class="inline-card ventes-rest-day-alert" role="alert">
         <strong>Hors service</strong>
         <p class="ventes-rest-day-alert-msg">${escapeHtml(restToday)}</p>
-        ${_openSvc ? `<button type="button" class="btn btn-sm btn-primary" style="margin-top:8px" onclick="navigate('pdj')">Point du jour — Fin de service</button>` : ""}
+        ${serveusePdjFinServiceBtnHtml()}
       </div>`;
     } else {
       sumEl.textContent = rows.length
@@ -4205,8 +4219,8 @@ async function requestTakeService() {
   }
   const fromName = onDuty ? staffDisplayName(onDuty) : null;
   const msg = fromName
-    ? `Demander à la gérante l'autorisation de remplacer ${fromName} ?`
-    : "Demander à la gérante l'autorisation de démarrer le service ?";
+    ? `Commencer le service et remplacer ${fromName} ? La gérante devra valider dans Planning → Équipe.`
+    : "Commencer le service ? La gérante devra valider dans Planning → Équipe.";
   if (!window.confirm(msg)) return;
   if (!Array.isArray(state.serviceRelay)) state.serviceRelay = [];
   if (!state.nextId) state.nextId = {};
@@ -4225,7 +4239,7 @@ async function requestTakeService() {
   });
   recordStaffAudit("update", "planning", "Demande prise de service", fromName ? `${me} → ${fromName}` : me);
   await persistState({ serviceRelay: state.serviceRelay, nextId: state.nextId, staffAuditLog: state.staffAuditLog });
-  showToast("Demande envoyée à la gérante.");
+  showToast("Demande envoyée — en attente de la gérante.");
   renderPlanningMine();
 }
 
