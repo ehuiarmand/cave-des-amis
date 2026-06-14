@@ -2895,6 +2895,21 @@ function physicallyAvailableEmptyCasiersForPurchaseBr(cap, brasserieRaw) {
   ).length;
 }
 
+/** Casiers vides disponibles pour un article précis — séparation BOCK 50 / BOCK 65 / BOCK 100. */
+function physicallyAvailableEmptyCasiersForArticle(articleName, cap, brasserieRaw) {
+  const capN = Math.max(1, Math.floor(Number(cap) || 24));
+  const artKey = String(articleName || "").toLowerCase().trim();
+  const brK = brasserieMatchKey(normalizeBrasserieName(String(brasserieRaw || "").trim()));
+  return casiersForSite().filter((c) => {
+    if (Math.max(1, Number(c.capacite) || 24) !== capN) return false;
+    if (!physicalCasierCountsForPurchaseVides(c)) return false;
+    if (!casierIsAvailableEmptyForOrder(c)) return false;
+    const stockIt = stockItemForArticle(String(c.article || "").trim());
+    if (stockIt) return String(c.article || "").toLowerCase().trim() === artKey;
+    return casierBrasserieKey(c) === brK;
+  }).length;
+}
+
 /** Somme des casiers vides disponibles brasserie donnée — tous capacités (indicatif liste fournisseur). */
 function physicallyAvailableEmptyCasiersForPurchaseBrand(brasserieRaw) {
   const brGrp = normalizeBrasserieName(String(brasserieRaw || "").trim());
@@ -3074,13 +3089,12 @@ function populatePurchaseArticleDetailFromFormat() {
   const brTarif = normalizeBrasserieName(
     supplierKey(brCanon) === supplierKey(PURCHASE_NO_BRASSERIE_VALUE) ? undefined : brCanon,
   );
-  const vRetournablesBeer =
-    brTarif && catalogueHasCasierConsigneForPurchaseBr(brTarif)
-      ? physicallyAvailableEmptyCasiersForPurchaseBr(cap, brTarif)
-      : 0;
+  const hasCasierConsigne = Boolean(brTarif && catalogueHasCasierConsigneForPurchaseBr(brTarif));
   sel.innerHTML = `<option value="">— Choisir un article —</option>` +
     articles.map((item) => {
-      const vr = purchaseLineNeedsConsigneReservation(item) ? vRetournablesBeer : 0;
+      const vr = (hasCasierConsigne && purchaseLineNeedsConsigneReservation(item))
+        ? physicallyAvailableEmptyCasiersForArticle(item.article, cap, brTarif)
+        : 0;
       const videsLabel = vr > 0 ? `  ↩ ${fmt(vr)} casier(s) vide(s)` : "";
       return `<option value="${escapeHtml(item.article)}" data-vides="${vr}">${escapeHtml(item.article + videsLabel)}</option>`;
     }).join("");
@@ -22205,6 +22219,8 @@ async function bootstrapAuthenticatedApp(opts = {}) {
   if (!skipCasierLsRestore && !state.casiers.length) lsRestoreCasiers();
   // Migration : casiers vides existants sans bouteillesVides tracquées → initialiser à capacite
   migrateCasiersVidesBouteillesVides();
+  // Traiter les vides déjà accumulés avant le déploiement du retour auto (données existantes).
+  autoReturnCompletedVideCasiers({ motif: "retour_auto_boot" });
   if (state.nextId.auditEntry === undefined || state.nextId.auditEntry === null) state.nextId.auditEntry = 0;
   knownQrOrderIds = new Set(qrOrdersForCurrentSite(state).map((item) => item.id));
   qrAlertCount = 0;
