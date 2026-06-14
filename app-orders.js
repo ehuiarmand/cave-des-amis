@@ -2659,7 +2659,7 @@ function clampDraftCasesToAvailable(brasserie, cap) {
 }
 
 function reserveEmptyCasiersForPurchaseOrder(po) {
-  if (!po) return;
+  if (!po) return 0;
   const siteId = po.siteId || currentSiteId();
   /** besoin cumulé par ``brasserietarifaire::cap`` (uniquement lignes catalogue casier-consigne). */
   const buckets = {};
@@ -2673,6 +2673,8 @@ function reserveEmptyCasiersForPurchaseOrder(po) {
     buckets[k] = (buckets[k] || 0) + Math.max(0, Number(l.cases) || 0);
     bucketLabel[k] = br;
   }
+  let autoCreated = 0;
+  const ts = new Date().toISOString();
   Object.entries(buckets).forEach(([k, neededRaw]) => {
     const sep = k.lastIndexOf("::");
     const brK = sep >= 0 ? k.slice(0, sep) : k;
@@ -2684,15 +2686,39 @@ function reserveEmptyCasiersForPurchaseOrder(po) {
       .filter((c) => Math.max(1, Number(c.capacite) || 24) === cap)
       .filter((c) => casierIsAvailableEmptyForOrder(c))
       .sort((a, b) => String(a.code || "").localeCompare(String(b.code || ""), "fr"));
-    if (candidates.length < needed) {
+    // Créer automatiquement les casiers vides manquants sans bloquer la commande.
+    const missing = needed - candidates.length;
+    if (missing > 0) {
       const brShow = bucketLabel[k] || brK;
-      throw new Error(`Casiers vides insuffisants pour ${brShow} B${cap}. Disponible: ${candidates.length}, demandé: ${needed} casier(s) vide(s).`);
+      for (let i = 0; i < missing; i++) {
+        const code = nextCasierCode();
+        const newCasier = {
+          id: state.nextId.casier++,
+          siteId,
+          code,
+          article: brShow,
+          capacite: cap,
+          quantiteActuelle: 0,
+          bouteillesVides: 0,
+          emplacement: "À retourner",
+          statut: "vide",
+          createdAt: ts,
+          createdBy: sessionUser || "system",
+          lastMoveAt: ts,
+          lastMoveBy: sessionUser || "system",
+          autoCreatedForPoId: po.id,
+        };
+        state.casiers.push(newCasier);
+        candidates.push(newCasier);
+        autoCreated++;
+      }
     }
     candidates.slice(0, needed).forEach((c) => {
       c.reservedByPoId = po.id;
-      c.reservedAt = new Date().toISOString();
+      c.reservedAt = ts;
     });
   });
+  return autoCreated;
 }
 
 function releaseReservedCasiersForPurchaseOrder(poId) {
@@ -16096,15 +16122,12 @@ async function savePurchaseOrder() {
     total,
   };
   rememberSupplierPrices(supplier, selectedLines);
-  // Réserver les casiers vides (déduction immédiate). Si insuffisant -> blocage.
-  try {
-    reserveEmptyCasiersForPurchaseOrder(po);
-  } catch (e) {
-    if (feedback) feedback.textContent = e?.message || "Casiers vides insuffisants.";
-    showToast(e?.message || "Casiers vides insuffisants.");
-    return;
-  }
+  // Réserver les casiers vides, en créant automatiquement les manquants.
+  const autoCreatedCasiers = reserveEmptyCasiersForPurchaseOrder(po);
   state.purchaseOrders = [po, ...(state.purchaseOrders || [])];
+  if (autoCreatedCasiers > 0) {
+    recordStaffAudit("create", "casier_auto", `Casiers auto-créés pour commande #${po.id}`, `${autoCreatedCasiers} casier(s) vide(s) créés automatiquement pour ${supplier}.`);
+  }
   recordStaffAudit(
     "create",
     "achat_fournisseur",
@@ -16117,7 +16140,10 @@ async function savePurchaseOrder() {
   populateSupplierList();
   renderPurchaseOrders();
   refreshCreanciersIfVisible();
-  showToast("Commande fournisseur enregistrée.");
+  const toastMsg = autoCreatedCasiers > 0
+    ? `Commande fournisseur enregistrée. (${autoCreatedCasiers} casier(s) vide(s) créé(s) automatiquement)`
+    : "Commande fournisseur enregistrée.";
+  showToast(toastMsg);
 }
 
 function recalculatePurchaseOrderTotal(po) {
