@@ -2672,35 +2672,45 @@ function clampDraftCasesToAvailable(brasserie, cap) {
 function reserveEmptyCasiersForPurchaseOrder(po) {
   if (!po) return 0;
   const siteId = po.siteId || currentSiteId();
-  /** besoin cumulé par ``brasserietarifaire::cap`` (uniquement lignes catalogue casier-consigne). */
+  /** besoin cumulé par ``article::cap`` : sépare BOCK 50 de VIN 100 même si les deux sont B12. */
   const buckets = {};
   const bucketLabel = {};
+  const bucketBrasserie = {};
   for (const l of po.lines || []) {
     const it = stockItemForArticle(l.article);
     if (!purchaseLineNeedsConsigneReservation(it)) continue;
     const br = normalizeBrasserieName(it.brasserie || po.supplier || "");
     const cap = Math.max(1, Number(l.caseSize) || caseSize(it) || 24);
-    const k = `${brasserieMatchKey(br)}::${cap}`;
+    const artKey = String(l.article || "").toLowerCase().trim();
+    const k = `${artKey}::${cap}`;
     buckets[k] = (buckets[k] || 0) + Math.max(0, Number(l.cases) || 0);
-    bucketLabel[k] = br;
+    bucketLabel[k] = l.article || br;
+    bucketBrasserie[k] = brasserieMatchKey(br);
   }
   let autoCreated = 0;
   const ts = new Date().toISOString();
   Object.entries(buckets).forEach(([k, neededRaw]) => {
     const sep = k.lastIndexOf("::");
-    const brK = sep >= 0 ? k.slice(0, sep) : k;
+    const artKey = sep >= 0 ? k.slice(0, sep) : k;
     const cap = sep >= 0 ? Math.max(1, Number(k.slice(sep + 2)) || 24) : 24;
+    const brK = bucketBrasserie[k] || artKey;
     const needed = Math.max(0, Math.ceil((Number(neededRaw) || 0) - 1e-9));
     const candidates = casiersForSite()
       .filter((c) => rowMatchesSite(c, siteId, multiSiteActive()))
-      .filter((c) => casierBrasserieKey(c) === brK)
+      .filter((c) => {
+        // Casier article-spécifique : correspond exactement à l'article commandé.
+        const stockIt = stockItemForArticle(c.article);
+        if (stockIt) return String(c.article || "").toLowerCase().trim() === artKey;
+        // Casier générique brasserie : peut servir n'importe quel article de cette brasserie.
+        return casierBrasserieKey(c) === brK;
+      })
       .filter((c) => Math.max(1, Number(c.capacite) || 24) === cap)
       .filter((c) => casierIsAvailableEmptyForOrder(c))
       .sort((a, b) => String(a.code || "").localeCompare(String(b.code || ""), "fr"));
     // Créer automatiquement les casiers vides manquants sans bloquer la commande.
     const missing = needed - candidates.length;
     if (missing > 0) {
-      const brShow = bucketLabel[k] || brK;
+      const brShow = bucketLabel[k];
       for (let i = 0; i < missing; i++) {
         const code = nextCasierCode();
         const newCasier = {
@@ -20604,35 +20614,52 @@ function autoReturnCompletedVideCasiers(opts = {}) {
   const now = new Date().toISOString();
   const idsToDelete = [];
   let returnedCount = 0;
-  for (const casier of state.casiers) {
-    if (casier.siteId !== siteId) continue;
-    const cap = Math.max(1, Number(casier.capacite) || 24);
-    const qty = Math.max(0, Number(casier.quantiteActuelle) || 0);
-    const vides = Math.max(0, Number(casier.bouteillesVides) || 0);
-    if (qty > 0) continue;       // contient encore des bouteilles pleines
-    if (vides < cap) continue;   // pas encore un casier complet de vides
-    const nbCasiers = Math.floor(vides / cap);
-    const returnedBottles = nbCasiers * cap;
-    casier.bouteillesVides = Math.max(0, vides - returnedBottles);
-    casier.statut = "retourne";
-    recomputeCasierStatus(casier);
-    casier.lastMoveAt = now;
-    casier.lastMoveBy = "auto";
+
+  // Grouper les casiers vides (sans bouteilles pleines) par article+cap pour consolider les vides éparpillés.
+  const groups = {};
+  for (const c of state.casiers) {
+    if (c.siteId !== siteId) continue;
+    if ((Number(c.quantiteActuelle) || 0) > 0) continue;
+    if ((Number(c.bouteillesVides) || 0) <= 0) continue;
+    if (String(c.statut || "").toLowerCase() === "retourne") continue;
+    const cap = Math.max(1, Number(c.capacite) || 24);
+    const k = `${String(c.article || "").toLowerCase().trim()}::${cap}`;
+    if (!groups[k]) groups[k] = { cap, casiers: [] };
+    groups[k].casiers.push(c);
+  }
+
+  for (const { cap, casiers } of Object.values(groups)) {
+    const totalVides = casiers.reduce((s, c) => s + Math.max(0, Number(c.bouteillesVides) || 0), 0);
+    let videsARetourner = Math.floor(totalVides / cap) * cap;
+    if (videsARetourner <= 0) continue;
+    const nbCasiers = videsARetourner / cap;
+    // Consolider et retirer depuis les casiers les plus pleins en vides d'abord.
+    const sorted = [...casiers].sort((a, b) => (Number(b.bouteillesVides) || 0) - (Number(a.bouteillesVides) || 0));
+    for (const casier of sorted) {
+      if (videsARetourner <= 0) break;
+      const vides = Math.max(0, Number(casier.bouteillesVides) || 0);
+      const take = Math.min(vides, videsARetourner);
+      if (take <= 0) continue;
+      casier.bouteillesVides = vides - take;
+      videsARetourner -= take;
+      casier.statut = "retourne";
+      recomputeCasierStatus(casier);
+      casier.lastMoveAt = now;
+      casier.lastMoveBy = "auto";
+      if ((Number(casier.bouteillesVides) || 0) === 0) idsToDelete.push(casier.id);
+    }
     state.casierMouvements.unshift({
       id: state.nextId.casierMouvement++,
-      siteId, casierId: casier.id, casierCode: casier.code, article: casier.article,
-      type: "retour_vide", quantite: returnedBottles, nbCasiers,
+      siteId, casierId: null, casierCode: null, article: casiers[0].article,
+      type: "retour_vide", quantite: nbCasiers * cap, nbCasiers,
       source: "", motif: opts.motif || "retour_auto",
       commentaire: `Retour automatique · ${nbCasiers} casier(s) de ${fmt(cap)} btl vides`,
       user: "auto", role: currentRole || "-",
       date: today(), createdAt: now,
     });
     returnedCount += nbCasiers;
-    // Casier entièrement rendu : retiré de l'inventaire (reparti chez le fournisseur).
-    if ((Number(casier.bouteillesVides) || 0) === 0 && (Number(casier.quantiteActuelle) || 0) === 0) {
-      idsToDelete.push(casier.id);
-    }
   }
+
   if (idsToDelete.length) {
     state.casiers = state.casiers.filter((c) => !idsToDelete.includes(c.id));
   }
@@ -21477,7 +21504,7 @@ function renderCasierPhysique() {
     const artKey = String(c.article || "").toLowerCase().trim();
     const grpKey = `${cap}|${artKey}`;
     if (!byBr[rawBr]) byBr[rawBr] = {};
-    if (!byBr[rawBr][grpKey]) byBr[rawBr][grpKey] = { cap, article: c.article || "—", clLabel: _clLabel(c.article), pleins: 0, partiels: 0, vides: 0, btlPleines: 0, btlVides: 0 };
+    if (!byBr[rawBr][grpKey]) byBr[rawBr][grpKey] = { cap, article: c.article || "—", clLabel: _clLabel(c.article), pleins: 0, partiels: 0, vides: 0, btlPleines: 0, btlVides: 0, btlVidesVides: 0 };
     const g = byBr[rawBr][grpKey];
     const st = String(c.statut || "vide").toLowerCase();
     if (st === "plein") g.pleins++;
@@ -21487,6 +21514,7 @@ function renderCasierPhysique() {
     const btlV = Math.max(0, Number(c.bouteillesVides) || 0);
     g.btlPleines += btlP;
     g.btlVides += btlV;
+    if (btlP === 0) g.btlVidesVides += btlV;
   });
 
   if (!Object.keys(byBr).length) {
@@ -21532,8 +21560,8 @@ function renderCasierPhysique() {
             </tr></thead>
             <tbody>
               ${entries.map(([, g]) => {
-                const fullVides = Math.floor(g.btlVides / g.cap);
-                const enCoursFmt = g.btlVides % g.cap;
+                const fullVides = Math.floor(g.btlVidesVides / g.cap);
+                const enCoursFmt = g.btlVidesVides % g.cap;
                 const retourBtn = fullVides >= 1
                   ? `<button type="button" class="mini-btn" data-casier-grp-retour-br="${escapeHtml(br)}" data-casier-grp-retour-cap="${g.cap}" data-casier-grp-retour-article="${escapeHtml(g.article)}" style="background:rgba(230,81,0,0.12);color:#e65100;font-weight:700">↩ Retourner ${fmt(fullVides)}</button>`
                   : enCoursFmt > 0 ? `<span style="color:#9e9e9e;font-size:0.75rem">${fmt(enCoursFmt)} btl en cours</span>` : "";
