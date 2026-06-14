@@ -21339,44 +21339,49 @@ async function retourVidesGroupeBrasserie(br, cap, nbCasiers, filterArticle = ""
       (!filterArticle || (c.article || "") === filterArticle) &&
       (Number(c.quantiteActuelle) || 0) === 0 &&
       (Number(c.bouteillesVides) || 0) > 0;
-  }).slice(0, nbCasiers);
+  });
   const label = filterArticle ? `${br} B${cap} · ${filterArticle}` : `${br} B${cap}`;
-  return _retourVidesLot(matchingVides, cap, label);
+  return _retourVidesLot(matchingVides, cap, label, nbCasiers);
 }
 
-async function _retourVidesLot(matchingVides, cap, label) {
+async function _retourVidesLot(matchingVides, cap, label, maxCasiers) {
   if (!matchingVides.length) { showToast("Aucun casier de vides trouvé."); return 0; }
   const siteId = currentSiteId();
   state.casierMouvements = state.casierMouvements || [];
   state.nextId = state.nextId || {};
   if (!state.nextId.casierMouvement) state.nextId.casierMouvement = 1;
   const now = new Date().toISOString();
-  let processed = 0;
   const idsToDelete = [];
-  for (const casier of matchingVides) {
+  const totalVides = matchingVides.reduce((s, c) => s + Math.max(0, Number(c.bouteillesVides) || 0), 0);
+  const possible = Math.floor(totalVides / cap);
+  const processed = maxCasiers != null ? Math.min(maxCasiers, possible) : possible;
+  if (processed <= 0) { showToast("Aucun casier traité."); return 0; }
+  let toTake = processed * cap;
+  const sorted = [...matchingVides].sort((a, b) => (Number(b.bouteillesVides) || 0) - (Number(a.bouteillesVides) || 0));
+  for (const casier of sorted) {
+    if (toTake <= 0) break;
     const vides = Math.max(0, Number(casier.bouteillesVides) || 0);
-    if (vides < cap) continue; // pas assez de bouteilles vides pour un casier
-    casier.bouteillesVides = Math.max(0, vides - cap);
-    casier.statut = "retourne"; // rendu au fournisseur
+    const take = Math.min(vides, toTake);
+    if (take <= 0) continue;
+    casier.bouteillesVides = vides - take;
+    toTake -= take;
+    casier.statut = "retourne";
     recomputeCasierStatus(casier);
     casier.lastMoveAt = now;
     casier.lastMoveBy = sessionUser || "system";
-    state.casierMouvements.unshift({
-      id: state.nextId.casierMouvement++,
-      siteId, casierId: casier.id, casierCode: casier.code, article: casier.article,
-      type: "retour_vide", quantite: cap, nbCasiers: 1,
-      source: "", motif: "retour_fournisseur",
-      commentaire: `1 casier de ${fmt(cap)} btl vides`,
-      user: sessionUser || "system", role: currentRole || "-",
-      date: today(), createdAt: now,
-    });
-    // Casier complètement vide après retour : supprimer (il repart chez le fournisseur)
     if ((Number(casier.bouteillesVides) || 0) === 0 && (Number(casier.quantiteActuelle) || 0) === 0) {
       idsToDelete.push(casier.id);
     }
-    processed++;
   }
-  if (!processed) { showToast("Aucun casier traité."); return 0; }
+  state.casierMouvements.unshift({
+    id: state.nextId.casierMouvement++,
+    siteId, casierId: null, casierCode: null, article: sorted[0]?.article || "",
+    type: "retour_vide", quantite: processed * cap, nbCasiers: processed,
+    source: "", motif: "retour_fournisseur",
+    commentaire: `${processed} casier(s) de ${fmt(cap)} btl vides`,
+    user: sessionUser || "system", role: currentRole || "-",
+    date: today(), createdAt: now,
+  });
   if (idsToDelete.length > 0) {
     state.casiers = state.casiers.filter((c) => !idsToDelete.includes(c.id));
   }
@@ -21399,8 +21404,8 @@ async function retourVidesGroupe(article, cap, nbCasiers) {
       Math.max(1, Number(c.capacite) || 1) === cap &&
       (Number(c.quantiteActuelle) || 0) === 0 &&
       (Number(c.bouteillesVides) || 0) > 0;
-  }).slice(0, nbCasiers);
-  return _retourVidesLot(matchingVides, cap, `${article} B${cap}`);
+  });
+  return _retourVidesLot(matchingVides, cap, `${article} B${cap}`, nbCasiers);
 }
 
 async function retourVidesCasier(casierId, qty) {
@@ -22220,7 +22225,8 @@ async function bootstrapAuthenticatedApp(opts = {}) {
   // Migration : casiers vides existants sans bouteillesVides tracquées → initialiser à capacite
   migrateCasiersVidesBouteillesVides();
   // Traiter les vides déjà accumulés avant le déploiement du retour auto (données existantes).
-  autoReturnCompletedVideCasiers({ motif: "retour_auto_boot" });
+  const _bootReturned = autoReturnCompletedVideCasiers({ motif: "retour_auto_boot" });
+  if (_bootReturned > 0) await persistStatePatch({ casiers: state.casiers, casierMouvements: state.casierMouvements, nextId: state.nextId });
   if (state.nextId.auditEntry === undefined || state.nextId.auditEntry === null) state.nextId.auditEntry = 0;
   knownQrOrderIds = new Set(qrOrdersForCurrentSite(state).map((item) => item.id));
   qrAlertCount = 0;
@@ -22656,14 +22662,16 @@ function attachEvents() {
       const br = grpRetourBtn.dataset.casierGrpRetourBr;
       const cap = Number(grpRetourBtn.dataset.casierGrpRetourCap) || 24;
       const filterArticle = grpRetourBtn.dataset.casierGrpRetourArticle || "";
-      const maxCasiers = casiersForSite().filter((c) => {
+      const totalVides = casiersForSite().filter((c) => {
         const stockIt = stockItemForArticle(c.article);
         const cBr = normalizeBrasserieName(stockIt?.brasserie || "");
         return cBr === br &&
           Math.max(1, Number(c.capacite) || 1) === cap &&
           (!filterArticle || (c.article || "") === filterArticle) &&
-          Math.max(0, Number(c.bouteillesVides) || 0) >= cap;
-      }).length;
+          (Number(c.quantiteActuelle) || 0) === 0 &&
+          (Number(c.bouteillesVides) || 0) > 0;
+      }).reduce((s, c) => s + (Number(c.bouteillesVides) || 0), 0);
+      const maxCasiers = Math.floor(totalVides / cap);
       if (maxCasiers < 1) { showToast("Pas de casier complet de vides à retourner."); return; }
       const label = filterArticle ? `${br} · B${cap} · ${filterArticle}` : `${br} · B${cap}`;
       const raw = window.prompt(
