@@ -2613,11 +2613,22 @@ function casierIsAvailableEmptyForOrder(casier) {
   return Math.max(0, Number(casier.quantiteActuelle) || 0) === 0;
 }
 
+/**
+ * Résout la clé brasserie d'un casier, que c.article soit un nom de brasserie
+ * (casiers créés via UI) ou un nom d'article du catalogue (casiers auto-sync).
+ */
+function casierBrasserieKey(casier) {
+  const art = String(casier?.article || "").trim();
+  const stockIt = stockItemForArticle(art);
+  if (stockIt) return brasserieMatchKey(normalizeBrasserieName(stockIt.brasserie || ""));
+  return brasserieMatchKey(art);
+}
+
 function availableEmptyCasiersCount(brasserie, cap, siteId = currentSiteId()) {
   const brK = brasserieMatchKey(brasserie);
   const c = Math.max(1, Number(cap) || 24);
   return casiersForSite().filter((x) =>
-    brasserieMatchKey(x.article || "") === brK
+    casierBrasserieKey(x) === brK
     && Math.max(1, Number(x.capacite) || 24) === c
     && casierIsAvailableEmptyForOrder(x)
   ).length;
@@ -2682,7 +2693,7 @@ function reserveEmptyCasiersForPurchaseOrder(po) {
     const needed = Math.max(0, Math.ceil((Number(neededRaw) || 0) - 1e-9));
     const candidates = casiersForSite()
       .filter((c) => rowMatchesSite(c, siteId, multiSiteActive()))
-      .filter((c) => brasserieMatchKey(c.article || "") === brK)
+      .filter((c) => casierBrasserieKey(c) === brK)
       .filter((c) => Math.max(1, Number(c.capacite) || 24) === cap)
       .filter((c) => casierIsAvailableEmptyForOrder(c))
       .sort((a, b) => String(a.code || "").localeCompare(String(b.code || ""), "fr"));
@@ -2864,9 +2875,10 @@ function supplierNamesForCurrentSite() {
 function physicallyAvailableEmptyCasiersForPurchaseBr(cap, brasserieRaw) {
   const brGrp = normalizeBrasserieName(String(brasserieRaw || "").trim());
   if (!brGrp || !catalogueHasCasierConsigneForPurchaseBr(brGrp)) return 0;
+  const brK = brasserieMatchKey(brGrp);
   const capN = Math.max(1, Math.floor(Number(cap) || 24));
   return casiersForSite().filter((c) =>
-    brasserieMatchKey(c.article || "") === brasserieMatchKey(brGrp)
+    casierBrasserieKey(c) === brK
     && Math.max(1, Number(c.capacite) || 24) === capN
     && physicalCasierCountsForPurchaseVides(c)
     && casierIsAvailableEmptyForOrder(c),
@@ -2877,8 +2889,9 @@ function physicallyAvailableEmptyCasiersForPurchaseBr(cap, brasserieRaw) {
 function physicallyAvailableEmptyCasiersForPurchaseBrand(brasserieRaw) {
   const brGrp = normalizeBrasserieName(String(brasserieRaw || "").trim());
   if (!brGrp || !catalogueHasCasierConsigneForPurchaseBr(brGrp)) return 0;
+  const brK = brasserieMatchKey(brGrp);
   return casiersForSite().filter((c) =>
-    brasserieMatchKey(c.article || "") === brasserieMatchKey(brGrp)
+    casierBrasserieKey(c) === brK
     && physicalCasierCountsForPurchaseVides(c)
     && casierIsAvailableEmptyForOrder(c),
   ).length;
@@ -16390,6 +16403,14 @@ Continuer la réception pour les ${fmt(bottlesAdded)} bouteille(s) reconnues ?`,
   po.chargeId = chargeId;
   po.lines = linesReceived;
   po.total = receivedTotal;
+  // Libérer les réservations de casiers pour cette commande : après réception,
+  // les casiers vides réservés redeviennent disponibles pour les prochaines commandes.
+  (state.casiers || []).forEach((c) => {
+    if (Number(c.reservedByPoId) === po.id) {
+      delete c.reservedByPoId;
+      delete c.reservedAt;
+    }
+  });
   po.status = "Reçue";
   po.receivedAt = receptionIso;
   po.receivedBy = sessionUser || "system";
