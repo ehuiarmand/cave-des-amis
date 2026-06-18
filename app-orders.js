@@ -3149,9 +3149,22 @@ function recordsForSite(list) {
 function findStockItemForSite(article, siteId) {
   const multi = multiSiteActive();
   const key = String(article || "").trim().toLowerCase();
-  return (state.stock || []).find((s) =>
-    rowMatchesSite(s, siteId, multi) && String(s.article || "").trim().toLowerCase() === key,
-  ) || null;
+  const stock = state.stock || [];
+
+  // 1. Correspondance exacte
+  const exact = stock.find(
+    (s) => rowMatchesSite(s, siteId, multi) && String(s.article || "").trim().toLowerCase() === key,
+  );
+  if (exact) return exact;
+
+  // 2. Fallback : nom stock est un préfixe du nom PO suivi d'un code format sans espace
+  //    ex. "Carré d'or" (stock) → "Carré d'or B16" (commande)
+  return stock.find((s) => {
+    if (!rowMatchesSite(s, siteId, multi)) return false;
+    const stockKey = String(s.article || "").trim().toLowerCase();
+    const suffix = key.slice(stockKey.length);
+    return suffix.startsWith(" ") && /^\s\S+$/.test(suffix);
+  }) || null;
 }
 
 function purchaseLineBottles(line, stockItem) {
@@ -16264,6 +16277,41 @@ async function applyPurchaseReceipt(po, linesReceived, opts = {}) {
   const receptionIso = po.receivedAt || new Date().toISOString();
   const receptionDate = String((receptionIso || po.date || today())).slice(0, 10);
 
+  // Auto-créer les articles absents du stock avant la réception
+  if (!state.nextId.stock || Number.isNaN(Number(state.nextId.stock))) {
+    const maxId = (state.stock || []).reduce((m, s) => Math.max(m, Number(s.id) || 0), 0);
+    state.nextId.stock = Math.max(100, maxId + 1);
+  }
+  const missingForReceipt = linesReceived.filter(
+    (l) => (Number(l.cases) || 0) > 0 && !findStockItemForSite(l.article, siteId),
+  );
+  if (missingForReceipt.length > 0) {
+    const names = missingForReceipt.map((l) => String(l.article || "").trim()).join("\n• ");
+    const ok = window.confirm(
+      `Article(s) absent(s) du catalogue stock :\n• ${names}\n\nCréer automatiquement et continuer la réception ?`,
+    );
+    if (!ok) return false;
+    missingForReceipt.forEach((l) => {
+      const cs = Number(l.caseSize) || 24;
+      const newItem = {
+        id: state.nextId.stock++,
+        siteId,
+        article: String(l.article || "").trim(),
+        cat: "Autres",
+        caseSize: cs,
+        packSize: 1,
+        entrees: 0, sorties: 0, frigo: 0, reserve: 0,
+        init: 0, initCases: 0, seuilMin: 0,
+        prixAchat: Number(l.unitPrice) || 0,
+        prixVenteInt: 0, prixVenteExt: 0, prixBouteille: 0,
+        prixKitInt: 0, prixKitExt: 0,
+        createdAt: new Date().toISOString(),
+        createdBy: sessionUser || "system",
+      };
+      state.stock.push(newItem);
+    });
+  }
+
   linesReceived.forEach((line) => {
     const cases = Number(line.cases) || 0;
     if (cases <= 0) return;
@@ -16621,6 +16669,35 @@ async function repairReceivedPurchaseOrderStock(poId) {
     const key = String(e.article || "").toLowerCase();
     appliedByArticle.set(key, (appliedByArticle.get(key) || 0) + (Number(e.qty) || 0));
   });
+  // Auto-créer les articles absents du stock avant la réparation
+  if (!state.nextId.stock || Number.isNaN(Number(state.nextId.stock))) {
+    const maxId = (state.stock || []).reduce((m, s) => Math.max(m, Number(s.id) || 0), 0);
+    state.nextId.stock = Math.max(100, maxId + 1);
+  }
+  const missingForRepair = (po.lines || []).filter((l) => !findStockItemForSite(l.article, siteId));
+  if (missingForRepair.length > 0) {
+    const names = missingForRepair.map((l) => String(l.article || "").trim()).join("\n• ");
+    if (!window.confirm(`Article(s) absent(s) du stock :\n• ${names}\n\nCréer automatiquement et réparer ?`)) return;
+    missingForRepair.forEach((l) => {
+      const cs = Number(l.caseSize) || 24;
+      state.stock.push({
+        id: state.nextId.stock++,
+        siteId,
+        article: String(l.article || "").trim(),
+        cat: "Autres",
+        caseSize: cs,
+        packSize: 1,
+        entrees: 0, sorties: 0, frigo: 0, reserve: 0,
+        init: 0, initCases: 0, seuilMin: 0,
+        prixAchat: Number(l.unitPrice) || 0,
+        prixVenteInt: 0, prixVenteExt: 0, prixBouteille: 0,
+        prixKitInt: 0, prixKitExt: 0,
+        createdAt: new Date().toISOString(),
+        createdBy: sessionUser || "system",
+      });
+    });
+  }
+
   let bottlesAdded = 0;
   const skippedArticles = [];
   (po.lines || []).forEach((line) => {
