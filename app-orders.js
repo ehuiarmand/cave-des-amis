@@ -11952,7 +11952,7 @@ async function changeInvoiceDate(factureNumber) {
   const ventes = (state.ventes || []).filter((v) => v.factureNumber === factureNumber && (v.siteId || siteId) === siteId);
   if (!ventes.length) { showToast("Facture introuvable."); return; }
   const currentDate = String(ventes[0].date || "").slice(0, 10);
-  const newDateRaw = window.prompt(`Nouvelle date comptable pour ${factureNumber}\n(format JJ-MM-AAAA) :`, formatDateDdMmYyyy(currentDate));
+  const newDateRaw = await askTextPrompt("Modifier la date comptable", `Nouvelle date comptable pour ${factureNumber} (format JJ-MM-AAAA) :`, { defaultValue: formatDateDdMmYyyy(currentDate) });
   if (!newDateRaw) return;
   const parts = newDateRaw.trim().split(/[-\/]/);
   let newDate;
@@ -13043,7 +13043,7 @@ async function resetUserPassword(username) {
     showToast("Les gérantes peuvent uniquement réinitialiser le mot de passe des serveuses.");
     return;
   }
-  const newPwd = window.prompt(`Nouveau mot de passe pour "${username}" (min. 6 caractères) :`);
+  const newPwd = await askTextPrompt("Réinitialiser le mot de passe", `Nouveau mot de passe pour "${username}" (min. 6 caractères) :`);
   if (newPwd === null) return;
   if (!newPwd || newPwd.length < 6) { showToast("Mot de passe trop court (min. 6 caractères)."); return; }
   const newUsers = users.map((u) => u.username === username ? { ...u, password: newPwd, mustChangePassword: true } : u);
@@ -13502,9 +13502,8 @@ function searchFactureForDeletion() {
 }
 
 async function deleteFactureDoublon(factureNum, ventes) {
-  const motif = window.prompt(`Motif de suppression de la facture ${factureNum} :`);
+  const motif = await askTextPrompt("Suppression de facture", `Motif de suppression de la facture ${factureNum} :`, { required: true });
   if (motif === null) return;
-  if (!String(motif).trim()) { showToast("Veuillez saisir un motif."); return; }
   if (!window.confirm(`Supprimer définitivement la facture ${factureNum} (${ventes.length} ligne(s)) et restituer le stock ?\n\nMotif : ${motif}`)) return;
   const siteId = currentSiteId();
   ventes.forEach((v) => {
@@ -13554,9 +13553,8 @@ async function deleteFactureDoublon(factureNum, ventes) {
 }
 
 async function deleteCommandeOrpheline(factureNum, commande) {
-  const motif = window.prompt(`Motif de suppression de la commande orpheline ${factureNum} :`);
+  const motif = await askTextPrompt("Suppression de commande orpheline", `Motif de suppression de la commande orpheline ${factureNum} :`, { required: true });
   if (motif === null) return;
-  if (!String(motif).trim()) { showToast("Veuillez saisir un motif."); return; }
   if (!window.confirm(`Supprimer définitivement la commande orpheline ${factureNum} ?`)) return;
   const siteId = currentSiteId();
   state.commandes = (state.commandes || []).filter(
@@ -16275,7 +16273,9 @@ async function applyPurchaseReceipt(po, linesReceived, opts = {}) {
   let bottlesAdded = 0;
   const skippedArticles = [];
   const receptionIso = po.receivedAt || new Date().toISOString();
-  const receptionDate = String((receptionIso || po.date || today())).slice(0, 10);
+  // Journée comptable (pas date calendaire) : une réception à 1h du matin appartient encore
+  // à la journée de la veille si celle-ci n'est pas clôturée (maquis de nuit, cf. workingDate()).
+  const receptionDate = workingDate();
 
   // Auto-créer les articles absents du stock avant la réception
   if (!state.nextId.stock || Number.isNaN(Number(state.nextId.stock))) {
@@ -19787,6 +19787,52 @@ function openModal(id) {
   }
 }
 
+/**
+ * Remplace window.prompt(), qui ne s'affiche pas de façon fiable en mode PWA
+ * (application ajoutée à l'écran d'accueil) sur certains navigateurs mobiles.
+ * Résout avec le texte saisi (trimé), ou null si annulé.
+ */
+function askTextPrompt(title, message, { defaultValue = "", required = false, requiredMsg = "Veuillez saisir un motif." } = {}) {
+  return new Promise((resolve) => {
+    const overlay = document.getElementById("modal-text-prompt");
+    const titleEl = document.getElementById("text-prompt-title");
+    const msgEl = document.getElementById("text-prompt-message");
+    const input = document.getElementById("text-prompt-input");
+    const okBtn = document.getElementById("text-prompt-ok-btn");
+    if (!overlay || !titleEl || !msgEl || !input || !okBtn) {
+      resolve(window.prompt(message, defaultValue));
+      return;
+    }
+    titleEl.textContent = title || "Saisie";
+    msgEl.textContent = message || "";
+    input.value = defaultValue || "";
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      okBtn.removeEventListener("click", onOk);
+      overlay.removeEventListener("click", onOverlayClick);
+      closeModal("modal-text-prompt");
+      resolve(value);
+    };
+    const onOk = () => {
+      const val = input.value.trim();
+      if (required && !val) {
+        showToast(requiredMsg);
+        return;
+      }
+      finish(val);
+    };
+    const onOverlayClick = (event) => {
+      if (event.target.closest(".close-modal")) finish(null);
+    };
+    okBtn.addEventListener("click", onOk);
+    overlay.addEventListener("click", onOverlayClick);
+    openModal("modal-text-prompt");
+    setTimeout(() => input.focus(), 50);
+  });
+}
+
 function closeModal(id) {
   const el = document.getElementById(id);
   if (el) {
@@ -22709,7 +22755,7 @@ function attachEvents() {
     }
   });
   // Actions par ligne (table casiers physiques)
-  document.getElementById("casier-phys-list")?.addEventListener("click", (e) => {
+  document.getElementById("casier-phys-list")?.addEventListener("click", async (e) => {
     const inBtn = e.target.closest("[data-casier-phys-in]");
     if (inBtn) { openCasierPhysMoveModal("entree", Number(inBtn.dataset.casierPhysIn)); return; }
     const outBtn = e.target.closest("[data-casier-phys-out]");
@@ -22721,7 +22767,7 @@ function attachEvents() {
       if (!c) return;
       const max = Math.max(0, Number(c.quantiteActuelle) || 0);
       if (max <= 0) { showToast("Casier vide."); return; }
-      const raw = window.prompt(`Combien de bouteilles transférer au frigo depuis ${c.code} ? (max ${max})`, String(max));
+      const raw = await askTextPrompt("Transfert vers le frigo", `Combien de bouteilles transférer au frigo depuis ${c.code} ? (max ${max})`, { defaultValue: String(max) });
       const qty = Math.max(0, Math.floor(Number(raw) || 0));
       if (qty <= 0) return;
       casierSortie(id, qty, { motif: "frigo", commentaire: "Transfert vers frigo" })
@@ -22753,9 +22799,10 @@ function attachEvents() {
       const maxCasiers = Math.floor(totalVides / cap);
       if (maxCasiers < 1) { showToast("Pas de casier complet de vides à retourner."); return; }
       const label = filterArticle ? `${br} · B${cap} · ${filterArticle}` : `${br} · B${cap}`;
-      const raw = window.prompt(
-        `Combien de casiers vides à retourner au fournisseur ?\n${label}\n(max ${fmt(maxCasiers)} casier(s))`,
-        String(maxCasiers)
+      const raw = await askTextPrompt(
+        "Retour de casiers vides",
+        `Combien de casiers vides à retourner au fournisseur ? ${label} (max ${fmt(maxCasiers)} casier(s))`,
+        { defaultValue: String(maxCasiers) }
       );
       const nb = Math.max(0, Math.min(maxCasiers, Math.floor(Number(raw) || 0)));
       if (!nb) return;
@@ -22773,11 +22820,11 @@ function attachEvents() {
       const vides = Math.max(0, Number(c.bouteillesVides) || 0);
       const maxCasiers = Math.floor(vides / cap);
       if (maxCasiers < 1) { showToast("Pas encore un casier complet de vides à retourner."); return; }
-      const raw = window.prompt(
-        `Combien de casiers vides à retourner au fournisseur ?\n` +
-        `Casier ${c.code} · ${c.article} · ${fmt(cap)} btl/casier\n` +
+      const raw = await askTextPrompt(
+        "Retour de casiers vides",
+        `Combien de casiers vides à retourner au fournisseur ? Casier ${c.code} · ${c.article} · ${fmt(cap)} btl/casier ` +
         `(max ${fmt(maxCasiers)} casier(s) = ${fmt(maxCasiers * cap)} btl)`,
-        String(maxCasiers)
+        { defaultValue: String(maxCasiers) }
       );
       const nbCasiers = Math.max(0, Math.min(maxCasiers, Math.floor(Number(raw) || 0)));
       if (!nbCasiers) return;

@@ -2478,6 +2478,25 @@
     </div>
   </div>
 
+  <!-- SAISIE MOTIF : remplace window.prompt (non fiable en mode PWA/écran d'accueil) -->
+  <div id="modal-text-prompt" class="modal-overlay" aria-hidden="true">
+    <div class="modal">
+      <div class="modal-handle"></div>
+      <div class="section-head">
+        <h3 id="text-prompt-title">Saisie</h3>
+        <button class="icon-btn close-modal" data-close="modal-text-prompt" type="button">Fermer</button>
+      </div>
+      <p id="text-prompt-message" class="muted" style="margin-bottom:10px"></p>
+      <div class="form-group">
+        <textarea id="text-prompt-input" rows="3" style="width:100%;padding:8px 10px;border:1px solid #ccc;border-radius:6px;font-size:1rem"></textarea>
+      </div>
+      <div class="button-stack">
+        <button id="text-prompt-cancel-btn" class="btn btn-outline close-modal" data-close="modal-text-prompt" type="button">Annuler</button>
+        <button id="text-prompt-ok-btn" class="btn btn-primary" type="button">Valider</button>
+      </div>
+    </div>
+  </div>
+
   <!-- SUPPLEMENT ENCAISSEMENT : différence de prix après remplacement d'article -->
   <div id="modal-supplement" class="modal-overlay" aria-hidden="true">
     <div class="modal">
