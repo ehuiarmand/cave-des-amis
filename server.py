@@ -3899,7 +3899,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                     "ventes", "stock", "commandes", "stockChecks", "dayBooks",
                     "purchaseOrders", "supplierPrices", "casiers", "casierMouvements",
                     "creditRecoveries", "clientAvoirs", "loyaltyClients", "consignes", "charges", "staffAuditLog",
-                    "stockEntrees", "stockLosses", "restaurantMenu", "ingredientStock",
+                    "stockEntrees", "stockLosses", "restaurantMenu", "ingredientStock", "serviceRelay",
                 ]
                 _old_sc_snap_g: dict[str, dict[str, Any]] = (
                     {str(r.get("id", "")): copy.deepcopy(r) for r in (current.get("stockChecks") or []) if isinstance(r, dict) and r.get("id")}
