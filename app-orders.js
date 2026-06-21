@@ -16200,6 +16200,102 @@ function recalculatePurchaseOrderTotal(po) {
   po.total = Math.round((po.lines || []).reduce((sum, l) => sum + (Number(l.amount) || 0), 0));
 }
 
+async function deletePurchaseOrderCompletely(id) {
+  if (!(canAnyAdmin() || canManage())) {
+    showToast("Suppression des commandes reservee aux responsables.");
+    return;
+  }
+  const po = (state.purchaseOrders || []).find((p) => p.id === id);
+  if (!po) return;
+  const received = purchaseOrderIsReceived(po);
+  const label = `${po.supplier || "Fournisseur"} · ${po.date ? formatDateDdMmYyyy(po.date) : ""} · ${fmt(po.total || 0)} FCFA`;
+  const motif = await askTextPrompt(
+    "Suppression de commande fournisseur",
+    `Motif de suppression de la commande ${label}${received ? " (déjà reçue — le stock, les casiers et la charge associée seront annulés)" : ""} :`,
+    { required: true },
+  );
+  if (motif === null) return;
+  if (!window.confirm(`Supprimer definitivement cette commande ?\n\n${label}\n\nMotif : ${motif}\n\nAction irreversible.`)) return;
+
+  const siteId = po.siteId || currentSiteId();
+
+  if (received) {
+    const entrees = stockEntreesForPurchaseOrder(po, siteId);
+    entrees.forEach((e) => {
+      const item = findStockItemForSite(e.article, siteId);
+      if (item) {
+        const qty = Number(e.qty) || 0;
+        item.entrees = Math.max(0, (Number(item.entrees) || 0) - qty);
+        item.reserve = Math.max(0, (Number(item.reserve) || 0) - qty);
+      }
+    });
+    const entreeIds = new Set(entrees.map((e) => e.id));
+    state.stockEntrees = (state.stockEntrees || []).filter((e) => !entreeIds.has(e.id));
+
+    // Lien par purchaseOrderId si present (receptions recentes), sinon rattachement best-effort
+    // par fournisseur/date/article pour les anciennes receptions sans ce champ.
+    const mvts = (state.casierMouvements || []).filter((m) =>
+      Number(m.purchaseOrderId) === po.id
+      || (
+        !m.purchaseOrderId
+        && m.type === "entree"
+        && m.source === "fournisseur"
+        && m.commentaire === `Réception ${po.supplier || "fournisseur"}`
+        && String(m.date || "") === String(po.date || "")
+        && String(m.siteId || "") === String(siteId)
+        && (po.lines || []).some((l) => String(l.article || "").toLowerCase() === String(m.article || "").toLowerCase())
+      ),
+    );
+    mvts.forEach((m) => {
+      const casier = (state.casiers || []).find((c) => c.id === m.casierId);
+      if (casier) {
+        casier.quantiteActuelle = Math.max(0, (Number(casier.quantiteActuelle) || 0) - (Number(m.quantite) || 0));
+        recomputeCasierStatus(casier);
+      }
+    });
+    const newlyCreatedCasierIds = new Set(
+      mvts.filter((m) => /^Création \+ réception/.test(m.commentaire || "")).map((m) => m.casierId),
+    );
+    state.casiers = (state.casiers || []).filter((c) => {
+      if (!newlyCreatedCasierIds.has(c.id)) return true;
+      return (Number(c.quantiteActuelle) || 0) > 0 || (Number(c.bouteillesVides) || 0) > 0;
+    });
+    const mvtIds = new Set(mvts.map((m) => m.id));
+    state.casierMouvements = (state.casierMouvements || []).filter((m) => !mvtIds.has(m.id));
+
+    if (po.chargeId != null) {
+      state.charges = (state.charges || []).filter((c) => c.id !== po.chargeId);
+    } else {
+      state.charges = (state.charges || []).filter((c) => Number(c.purchaseOrderId) !== po.id);
+    }
+  } else {
+    releaseReservedCasiersForPurchaseOrder(po.id);
+  }
+
+  state.purchaseOrders = (state.purchaseOrders || []).filter((p) => p.id !== po.id);
+  recordStaffAudit(
+    "delete",
+    "achat_fournisseur",
+    `Commande supprimee · ${po.supplier}`,
+    `${label}${received ? " · stock/casiers/charge annules" : ""} · motif: ${motif}`,
+  );
+  await persistState({
+    purchaseOrders: state.purchaseOrders,
+    stock: state.stock,
+    stockEntrees: state.stockEntrees,
+    charges: state.charges,
+    casiers: state.casiers,
+    casierMouvements: state.casierMouvements,
+  });
+  renderPurchaseOrders();
+  renderStock();
+  refreshCreanciersIfVisible();
+  populateSupplierList();
+  if (currentPage === "stock" && stockSubTab === "casiers") renderCasiers();
+  renderDashboard();
+  showToast("Commande fournisseur supprimee.");
+}
+
 async function cancelPurchaseOrder(id) {
   const po = (state.purchaseOrders || []).find((p) => p.id === id);
   if (!po || po.status === "Reçue" || po.status === "Annulée") return;
@@ -16371,6 +16467,7 @@ async function applyPurchaseReceipt(po, linesReceived, opts = {}) {
           role: currentRole || "-",
           date: po.date || today(),
           createdAt: new Date().toISOString(),
+          purchaseOrderId: po.id,
         });
         remaining -= add;
         casiersUsed++;
@@ -16403,6 +16500,7 @@ async function applyPurchaseReceipt(po, linesReceived, opts = {}) {
           role: currentRole || "-",
           date: po.date || today(),
           createdAt: new Date().toISOString(),
+          purchaseOrderId: po.id,
         });
         remaining -= fill;
         casiersUsed++;
@@ -16440,6 +16538,7 @@ async function applyPurchaseReceipt(po, linesReceived, opts = {}) {
           user: sessionUser || "system",
           role: currentRole || "-",
           date: po.date || today(),
+          purchaseOrderId: po.id,
           createdAt: new Date().toISOString(),
         });
         remaining -= fill;
@@ -16836,6 +16935,7 @@ function renderPurchaseOrders() {
           ${pending ? `<button type="button" class="mini-btn" data-purchase-receive="${po.id}">Réceptionner</button>
           <button type="button" class="mini-btn" style="border-color:rgba(197,79,65,0.6);color:#ff8e82" data-purchase-cancel="${po.id}">Annuler</button>` : ""}
           ${received && (canAnyAdmin() || canManage()) ? `<button type="button" class="${repairBtnClass}" data-purchase-repair-stock="${po.id}">Appliquer au stock</button>` : ""}
+          ${(canAnyAdmin() || canManage()) ? `<button type="button" class="mini-btn" style="border-color:rgba(197,79,65,0.6);color:#ff8e82" data-purchase-delete="${po.id}">Supprimer</button>` : ""}
         </div>
       </div>
       <div class="customer-order-lines" style="min-width:0">
@@ -23528,6 +23628,11 @@ document.getElementById("fab-btn").addEventListener("click", () => {
     const cancelPo = event.target.closest("[data-purchase-cancel]");
     if (cancelPo) {
       cancelPurchaseOrder(Number(cancelPo.dataset.purchaseCancel)).catch(handleApiError);
+      return;
+    }
+    const deletePo = event.target.closest("[data-purchase-delete]");
+    if (deletePo) {
+      deletePurchaseOrderCompletely(Number(deletePo.dataset.purchaseDelete)).catch(handleApiError);
       return;
     }
   });
