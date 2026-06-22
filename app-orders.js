@@ -2048,7 +2048,11 @@ async function deleteCreditRecovery(recoveryId) {
     `Suppression versement credit · ${debtorDisplayKey(row.debiteur)}`,
     `${fmt(row.montant)} FCFA · ${row.paiement || ""} · id ${id}`,
   );
-  await persistState({ creditRecoveries: state.creditRecoveries, staffAuditLog: state.staffAuditLog, nextId: state.nextId });
+  await persistState({
+    creditRecoveries: withDeletionTombstones(state.creditRecoveries, [id], row.siteId || currentSiteId()),
+    staffAuditLog: state.staffAuditLog,
+    nextId: state.nextId,
+  });
   closeModal("modal-credit-detail");
   renderCreditRecovery();
   renderDashboard();
@@ -11257,8 +11261,12 @@ async function reutiliseConsigne(id) {
 }
 
 async function deleteConsigne(id) {
-  state.consignes = (state.consignes || []).filter((c) => c.id !== Number(id) && c.id !== id);
-  await persistState({ consignes: state.consignes });
+  const before = state.consignes || [];
+  const removed = before.find((c) => c.id === Number(id) || c.id === id);
+  state.consignes = before.filter((c) => c.id !== Number(id) && c.id !== id);
+  await persistState({
+    consignes: withDeletionTombstones(state.consignes, [id], (removed && removed.siteId) || currentSiteId()),
+  });
   renderConsignes();
 }
 
@@ -14993,6 +15001,9 @@ function buildStatePutBody(overrides = {}) {
     body.auth = { users: state.auth?.users || [] };
     body.casiers = state.casiers ?? [];
     body.casierMouvements = state.casierMouvements ?? [];
+    TOMBSTONE_KEYS.forEach((key) => {
+      if (Object.prototype.hasOwnProperty.call(body, key)) body[key] = applyPendingTombstones(key, body[key]);
+    });
     return body;
   }
 
@@ -15008,6 +15019,9 @@ function buildStatePutBody(overrides = {}) {
   if (Object.prototype.hasOwnProperty.call(o, "workShiftsScopedSnapshot")) {
     body.workShiftsScopedSnapshot = Boolean(o.workShiftsScopedSnapshot);
   }
+  TOMBSTONE_KEYS.forEach((key) => {
+    if (Object.prototype.hasOwnProperty.call(body, key)) body[key] = applyPendingTombstones(key, body[key]);
+  });
   return body;
 }
 
@@ -15137,6 +15151,52 @@ async function purgeMaquisDataViaStatePut(siteId, keepStockCatalog) {
   await persistState(overrides);
 }
 
+// Le serveur ignore une ligne simplement absente du tableau envoyé (merge
+// "delta-safe" côté serveur : sert à fusionner des deltas sans perdre le
+// reste). Pour supprimer réellement une ligne sur une collection fusionnée
+// ainsi (purchaseOrders, supplierPrices, casiers, casierMouvements,
+// creditRecoveries, clientAvoirs, loyaltyClients, consignes, charges,
+// staffAuditLog, stockEntrees, stockLosses, restaurantMenu, ingredientStock),
+// il faut envoyer un tombstone explicite en plus du tableau réduit, sinon la
+// ligne réapparaît à la prochaine synchronisation.
+function withDeletionTombstones(remainingRows, removedIds, siteId) {
+  const ids = Array.isArray(removedIds) ? removedIds : Array.from(removedIds || []);
+  if (!ids.length) return remainingRows || [];
+  const tombstones = ids.map((id) => ({ id, siteId, _deleted: true }));
+  return (remainingRows || []).concat(tombstones);
+}
+
+// Registre global des suppressions en attente d'envoi, pour les endroits où
+// reconstruire manuellement la liste des ids supprimés (diff avant/après)
+// serait fastidieux ou risqué d'oubli. Appeler markRowDeleted(key, id, siteId)
+// juste après avoir retiré la ligne de state[key] ; le tombstone est ajouté
+// automatiquement à la prochaine sauvegarde de cette clé (buildStatePutBody),
+// puis purgé une fois la sauvegarde confirmée par le serveur.
+const TOMBSTONE_KEYS = new Set([
+  "purchaseOrders", "supplierPrices", "casiers", "casierMouvements",
+  "creditRecoveries", "clientAvoirs", "loyaltyClients", "consignes",
+  "charges", "staffAuditLog", "stockEntrees", "stockLosses",
+  "restaurantMenu", "ingredientStock",
+]);
+const _pendingDeletions = {};
+TOMBSTONE_KEYS.forEach((k) => { _pendingDeletions[k] = new Map(); });
+
+function markRowDeleted(key, id, siteId) {
+  if (!TOMBSTONE_KEYS.has(key) || id == null) return;
+  _pendingDeletions[key].set(String(id), { id, siteId: siteId ?? null, _deleted: true });
+}
+
+function applyPendingTombstones(key, rows) {
+  const pending = _pendingDeletions[key];
+  if (!pending || !pending.size) return rows;
+  return (rows || []).concat(Array.from(pending.values()));
+}
+
+function clearPendingTombstones(key) {
+  const pending = _pendingDeletions[key];
+  if (pending) pending.clear();
+}
+
 async function persistState(overrides = {}) {
   const _stockChecks = overrides.stockChecks ?? state.stockChecks ?? [];
   if (overrides.commandes !== undefined || !Object.keys(overrides || {}).length) {
@@ -15158,6 +15218,7 @@ async function persistState(overrides = {}) {
     if (incoming?.idempotent) return;
     state = mergeStateFromServerResponse(incoming, prev, patchedKeys);
     offlineSaveState(state);
+    (patchedKeys ? Array.from(patchedKeys) : Array.from(TOMBSTONE_KEYS)).forEach(clearPendingTombstones);
     applyPersistStateResponseExtras(overrides, _stockChecks);
   } catch (err) {
     if (_isNetworkError(err)) {
@@ -15208,6 +15269,7 @@ async function persistStatePatch(patch) {
   if (incoming?.idempotent) return;
   state = mergeStateFromServerResponse(incoming, prev, patchedKeys);
   offlineSaveState(state);
+  Array.from(patchedKeys).forEach(clearPendingTombstones);
   if (patchedKeys.has("commandes")) {
     pruneFinalizedCommandesFromState();
   }
@@ -16218,6 +16280,14 @@ async function deletePurchaseOrderCompletely(id) {
   if (!window.confirm(`Supprimer definitivement cette commande ?\n\n${label}\n\nMotif : ${motif}\n\nAction irreversible.`)) return;
 
   const siteId = po.siteId || currentSiteId();
+  // Le serveur ne supprime jamais une ligne juste parce qu'elle est absente
+  // du tableau envoyé (merge "delta-safe") : il faut un tombstone explicite
+  // {id, siteId, _deleted:true} pour chaque ligne réellement supprimée,
+  // sinon elle réapparaît à la prochaine synchronisation.
+  const removedEntreeIds = [];
+  const removedMvtIds = [];
+  const removedCasierIds = [];
+  const removedChargeIds = [];
 
   if (received) {
     const entrees = stockEntreesForPurchaseOrder(po, siteId);
@@ -16230,6 +16300,7 @@ async function deletePurchaseOrderCompletely(id) {
       }
     });
     const entreeIds = new Set(entrees.map((e) => e.id));
+    removedEntreeIds.push(...entreeIds);
     state.stockEntrees = (state.stockEntrees || []).filter((e) => !entreeIds.has(e.id));
 
     // Lien par purchaseOrderId si present (receptions recentes), sinon rattachement best-effort
@@ -16256,18 +16327,25 @@ async function deletePurchaseOrderCompletely(id) {
     const newlyCreatedCasierIds = new Set(
       mvts.filter((m) => /^Création \+ réception/.test(m.commentaire || "")).map((m) => m.casierId),
     );
+    const casiersBeforeIds = new Set((state.casiers || []).map((c) => c.id));
     state.casiers = (state.casiers || []).filter((c) => {
       if (!newlyCreatedCasierIds.has(c.id)) return true;
       return (Number(c.quantiteActuelle) || 0) > 0 || (Number(c.bouteillesVides) || 0) > 0;
     });
+    const casiersAfterIds = new Set(state.casiers.map((c) => c.id));
+    casiersBeforeIds.forEach((cid) => {
+      if (!casiersAfterIds.has(cid)) removedCasierIds.push(cid);
+    });
     const mvtIds = new Set(mvts.map((m) => m.id));
+    removedMvtIds.push(...mvtIds);
     state.casierMouvements = (state.casierMouvements || []).filter((m) => !mvtIds.has(m.id));
 
-    if (po.chargeId != null) {
-      state.charges = (state.charges || []).filter((c) => c.id !== po.chargeId);
-    } else {
-      state.charges = (state.charges || []).filter((c) => Number(c.purchaseOrderId) !== po.id);
-    }
+    const chargesBefore = state.charges || [];
+    const chargeMatch = po.chargeId != null
+      ? (c) => c.id === po.chargeId
+      : (c) => Number(c.purchaseOrderId) === po.id;
+    removedChargeIds.push(...chargesBefore.filter(chargeMatch).map((c) => c.id));
+    state.charges = chargesBefore.filter((c) => !chargeMatch(c));
   } else {
     releaseReservedCasiersForPurchaseOrder(po.id);
   }
@@ -16279,13 +16357,14 @@ async function deletePurchaseOrderCompletely(id) {
     `Commande supprimee · ${po.supplier}`,
     `${label}${received ? " · stock/casiers/charge annules" : ""} · motif: ${motif}`,
   );
+  const tombstone = (rid) => ({ id: rid, siteId, _deleted: true });
   await persistState({
-    purchaseOrders: state.purchaseOrders,
+    purchaseOrders: state.purchaseOrders.concat([tombstone(po.id)]),
     stock: state.stock,
-    stockEntrees: state.stockEntrees,
-    charges: state.charges,
-    casiers: state.casiers,
-    casierMouvements: state.casierMouvements,
+    stockEntrees: state.stockEntrees.concat(removedEntreeIds.map(tombstone)),
+    charges: state.charges.concat(removedChargeIds.map(tombstone)),
+    casiers: state.casiers.concat(removedCasierIds.map(tombstone)),
+    casierMouvements: state.casierMouvements.concat(removedMvtIds.map(tombstone)),
   });
   renderPurchaseOrders();
   renderStock();
@@ -20072,7 +20151,10 @@ async function deleteCharge(id) {
   }
   recordStaffAudit("delete", "charge", ch ? `${ch.lib} · ${fmt(ch.montant)} FCFA` : `Depense #${id}`, ch ? `${ch.cat} · ${formatDateDdMmYyyy(ch.date)} · ${ch.paiement}` : "");
   state.charges = state.charges.filter((item) => item.id !== id);
-  await persistState();
+  await persistState({
+    charges: withDeletionTombstones(state.charges, [id], (ch && ch.siteId) || currentSiteId()),
+    staffAuditLog: state.staffAuditLog,
+  });
   renderDashboard();
   renderCharges();
   showToast("Depense supprimee.");
@@ -20901,6 +20983,7 @@ function autoReturnCompletedVideCasiers(opts = {}) {
 
   if (idsToDelete.length) {
     state.casiers = state.casiers.filter((c) => !idsToDelete.includes(c.id));
+    idsToDelete.forEach((cid) => markRowDeleted("casiers", cid, siteId));
   }
   return returnedCount;
 }
@@ -21042,6 +21125,7 @@ async function purgerCasiersVides() {
   if (!confirm(`Supprimer ${phantoms.length} casier(s) entièrement vides (sans bouteilles pleines ni vides) ?`)) return;
   const ids = new Set(phantoms.map((c) => c.id));
   state.casiers = state.casiers.filter((c) => !ids.has(c.id));
+  ids.forEach((cid) => markRowDeleted("casiers", cid, siteId));
   recordStaffAudit("delete", "casier_purge", `Purge ${phantoms.length} casier(s) vides`, `Casiers sans bouteilles pleines ni vides supprimés.`);
   try {
     await persistStatePatch({ casiers: state.casiers, nextId: state.nextId });
@@ -21087,7 +21171,9 @@ async function syncCasiersManquants(opts = {}) {
   }
 
   // Supprime TOUS les casiers du site et recrée depuis le stock
+  const _removedCasierIds = state.casiers.filter((c) => rowMatchesSite(c, siteId, multiSiteActive())).map((c) => c.id);
   state.casiers = state.casiers.filter((c) => !rowMatchesSite(c, siteId, multiSiteActive()));
+  _removedCasierIds.forEach((cid) => markRowDeleted("casiers", cid, siteId));
   target.forEach(({ item, btl, cap }) => {
     const fullCount = Math.floor(btl / cap);
     const remainder = btl % cap;
@@ -21141,7 +21227,9 @@ async function syncCasiersFromStockEtVentes() {
   if (!state.nextId.casier) state.nextId.casier = 1;
 
   // Supprimer les casiers du site courant
+  const _removedCasierIds2 = state.casiers.filter((c) => rowMatchesSite(c, siteId, multiSiteActive())).map((c) => c.id);
   state.casiers = state.casiers.filter((c) => !rowMatchesSite(c, siteId, multiSiteActive()));
+  _removedCasierIds2.forEach((cid) => markRowDeleted("casiers", cid, siteId));
 
   const now = new Date().toISOString();
   let createdPleins = 0;
@@ -21549,6 +21637,7 @@ async function deleteCasier(casierId) {
   }
   if (!window.confirm(`Supprimer le casier ${casier.code} (${casier.article}) ?`)) return false;
   state.casiers = (state.casiers || []).filter((c) => Number(c.id) !== Number(casierId));
+  markRowDeleted("casiers", casier.id, casier.siteId);
   recordStaffAudit("delete", "casier", `Suppression casier ${casier.code}`, `${casier.code} · ${casier.article} · emplacement ${casier.emplacement || "-"}`);
   await persistStatePatch({ casiers: state.casiers });
   return true;
@@ -21609,6 +21698,7 @@ async function _retourVidesLot(matchingVides, cap, label, maxCasiers) {
   });
   if (idsToDelete.length > 0) {
     state.casiers = state.casiers.filter((c) => !idsToDelete.includes(c.id));
+    idsToDelete.forEach((cid) => markRowDeleted("casiers", cid, siteId));
   }
   lsSaveCasiers();
   recordStaffAudit("create", "casier_retour_vide",
@@ -21678,6 +21768,7 @@ async function retourVidesCasier(casierId, qty) {
   // Casier complètement rendu (vide) : supprimer de l'inventaire (reparti chez le fournisseur)
   if ((Number(casier.bouteillesVides) || 0) === 0 && (Number(casier.quantiteActuelle) || 0) === 0) {
     state.casiers = state.casiers.filter((c) => c.id !== casier.id);
+    markRowDeleted("casiers", casier.id, casier.siteId);
   }
   await persistStatePatch({ casiers: state.casiers, casierMouvements: state.casierMouvements, nextId: state.nextId });
   return true;

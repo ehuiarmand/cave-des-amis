@@ -2290,6 +2290,12 @@ def merge_scoped_rows(
     allowed: set[str],
     site_ids: list[str],
 ) -> list[dict[str, Any]]:
+    """Upsert partiel et sûr : une ligne de `current` absente de `incoming` est
+    conservée (permet d'envoyer un delta sans perdre le reste). Pour supprimer
+    réellement une ligne, le client doit envoyer un tombstone explicite
+    {"id": X, "siteId": ..., "_deleted": true} — sinon la ligne réapparaît à
+    la prochaine synchronisation (bug constaté avec la suppression de
+    commandes fournisseur : un tableau juste « réduit » ne supprime rien)."""
     current_list = [r for r in (current or []) if isinstance(r, dict) and r.get("id") is not None]
     incoming_list = [r for r in (incoming or []) if isinstance(r, dict) and r.get("id") is not None]
 
@@ -2301,7 +2307,9 @@ def merge_scoped_rows(
         return es is not None and es in allowed
 
     incoming_for_scope = [r for r in incoming_list if in_allowed_scope(r)]
-    incoming_ids = {row_id_norm(r) for r in incoming_for_scope}
+    deleted_ids = {row_id_norm(r) for r in incoming_for_scope if r.get("_deleted")}
+    upsert_for_scope = [r for r in incoming_for_scope if not r.get("_deleted")]
+    incoming_ids = {row_id_norm(r) for r in upsert_for_scope} | deleted_ids
     kept: list[dict[str, Any]] = []
     for r in current_list:
         if not in_allowed_scope(r):
@@ -2310,7 +2318,7 @@ def merge_scoped_rows(
         if row_id_norm(r) in incoming_ids:
             continue
         kept.append(r)
-    kept.extend(incoming_for_scope)
+    kept.extend(upsert_for_scope)
     return kept
 
 
