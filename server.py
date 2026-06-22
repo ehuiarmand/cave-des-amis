@@ -141,6 +141,15 @@ try:
     BACKUP_KEEP_COUNT = max(3, min(100, _env_int_first(30, "MAQUIS_MANAGER_BACKUP_KEEP", "TDB_BAR_BACKUP_KEEP")))
 except ValueError:
     BACKUP_KEEP_COUNT = 30
+# Intervalle minimum (secondes) entre deux écritures du backup JSON complet sur
+# disque + purge du dossier backups/ + miroir data.json. La persistance "réelle"
+# (Postgres/SQLite/JSON principal) a lieu à chaque écriture, sans throttle ;
+# seul ce filet de sécurité secondaire est espacé pour éviter de re-sérialiser
+# tout l'historique sur chaque transaction.
+try:
+    BACKUP_MIN_INTERVAL_SECONDS = max(0, _env_int_first(120, "MAQUIS_MANAGER_BACKUP_INTERVAL_SECONDS", "TDB_BAR_BACKUP_INTERVAL_SECONDS"))
+except ValueError:
+    BACKUP_MIN_INTERVAL_SECONDS = 120
 
 SESSION_ABSOLUTE_SECONDS = _env_int_first(
     SESSION_TTL_SECONDS,
@@ -2787,6 +2796,7 @@ class DataStore:
         self._pg_enabled = STORAGE_MODE == "postgres"
         # True si PostgreSQL était inaccessible au démarrage → bloque toute écriture
         self._pg_startup_failed = False
+        self._last_backup_ts = 0.0
         self._state = self._load()
         self._last_etag = self._compute_etag()
         self._rev = int(self._state.get("_meta", {}).get("rev") or self._rev or 1)
@@ -3173,6 +3183,15 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                 except OSError:
                     pass
 
+    def _backup_due(self) -> bool:
+        """True au plus une fois par BACKUP_MIN_INTERVAL_SECONDS (filet de sécurité
+        secondaire ; la persistance primaire n'est jamais throttlée)."""
+        now = time.time()
+        if now - self._last_backup_ts < BACKUP_MIN_INTERVAL_SECONDS:
+            return False
+        self._last_backup_ts = now
+        return True
+
     def _write(self, payload: dict[str, Any], changed_keys: set | None = None) -> None:
         BACKUP_DIR.mkdir(parents=True, exist_ok=True)
         # Update meta
@@ -3190,42 +3209,45 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                 print(f"[postgres] ERREUR ECRITURE: {type(_pg_exc).__name__}: {_pg_exc}", flush=True)
                 _tb.print_exc()
                 raise
-            # Sauvegarde JSON automatique (rollback possible)
-            try:
-                stamp = time.strftime("%Y%m%d-%H%M%S")
-                backup_path = BACKUP_DIR / f"data-{stamp}.json"
-                backup_path.write_text(body, encoding="utf-8")
-                backups = sorted(BACKUP_DIR.glob("data-*.json"), key=lambda p: p.name, reverse=True)
-                for old in backups[BACKUP_KEEP_COUNT:]:
-                    try:
-                        old.unlink()
-                    except OSError:
-                        pass
-            except OSError:
-                pass
-            try:
-                self._mirror_json_file(body)
-            except OSError as _mirror_exc:
-                print(f"[startup] Miroir data.json ignore : {_mirror_exc}", flush=True)
+            # Sauvegarde JSON automatique (rollback possible) — throttlee, la
+            # persistance reelle (Postgres) ci-dessus n'est jamais throttlee.
+            if self._backup_due():
+                try:
+                    stamp = time.strftime("%Y%m%d-%H%M%S")
+                    backup_path = BACKUP_DIR / f"data-{stamp}.json"
+                    backup_path.write_text(body, encoding="utf-8")
+                    backups = sorted(BACKUP_DIR.glob("data-*.json"), key=lambda p: p.name, reverse=True)
+                    for old in backups[BACKUP_KEEP_COUNT:]:
+                        try:
+                            old.unlink()
+                        except OSError:
+                            pass
+                except OSError:
+                    pass
+                try:
+                    self._mirror_json_file(body)
+                except OSError as _mirror_exc:
+                    print(f"[startup] Miroir data.json ignore : {_mirror_exc}", flush=True)
             self._last_etag = self._compute_etag()
             return
 
         if self._sqlite_enabled:
             self._sqlite_set("state", body)
-            # Lightweight rolling backups (copy the DB file).
-            try:
-                stamp = time.strftime("%Y%m%d-%H%M%S") + f"-{int((time.time() % 1) * 1000):03d}"
-                backup_path = BACKUP_DIR / f"app-{stamp}.sqlite3"
-                if self._sqlite_path.exists():
-                    backup_path.write_bytes(self._sqlite_path.read_bytes())
-                backups = sorted(BACKUP_DIR.glob("app-*.sqlite3"), key=lambda p: p.name, reverse=True)
-                for old in backups[BACKUP_KEEP_COUNT:]:
-                    try:
-                        old.unlink()
-                    except OSError:
-                        pass
-            except OSError:
-                pass
+            # Lightweight rolling backups (copy the DB file) — throttlees.
+            if self._backup_due():
+                try:
+                    stamp = time.strftime("%Y%m%d-%H%M%S") + f"-{int((time.time() % 1) * 1000):03d}"
+                    backup_path = BACKUP_DIR / f"app-{stamp}.sqlite3"
+                    if self._sqlite_path.exists():
+                        backup_path.write_bytes(self._sqlite_path.read_bytes())
+                    backups = sorted(BACKUP_DIR.glob("app-*.sqlite3"), key=lambda p: p.name, reverse=True)
+                    for old in backups[BACKUP_KEEP_COUNT:]:
+                        try:
+                            old.unlink()
+                        except OSError:
+                            pass
+                except OSError:
+                    pass
             self._last_etag = self._compute_etag()
             return
 
@@ -3248,19 +3270,20 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                 except OSError:
                     pass
 
-        # Lightweight rolling backups (keep last 10 snapshots).
-        try:
-            stamp = time.strftime("%Y%m%d-%H%M%S") + f"-{int((time.time() % 1) * 1000):03d}"
-            backup_path = BACKUP_DIR / f"data-{stamp}.json"
-            backup_path.write_text(body, encoding="utf-8")
-            backups = sorted(BACKUP_DIR.glob("data-*.json"), key=lambda p: p.name, reverse=True)
-            for old in backups[BACKUP_KEEP_COUNT:]:
-                try:
-                    old.unlink()
-                except OSError:
-                    pass
-        except OSError:
-            pass
+        # Lightweight rolling backups (keep last N snapshots) — throttlees.
+        if self._backup_due():
+            try:
+                stamp = time.strftime("%Y%m%d-%H%M%S") + f"-{int((time.time() % 1) * 1000):03d}"
+                backup_path = BACKUP_DIR / f"data-{stamp}.json"
+                backup_path.write_text(body, encoding="utf-8")
+                backups = sorted(BACKUP_DIR.glob("data-*.json"), key=lambda p: p.name, reverse=True)
+                for old in backups[BACKUP_KEEP_COUNT:]:
+                    try:
+                        old.unlink()
+                    except OSError:
+                        pass
+            except OSError:
+                pass
 
         self._last_etag = self._compute_etag()
 
@@ -3272,37 +3295,33 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
         with self._lock:
             return {"rev": int(self._rev or 0), "updatedAt": self._updated_at}
 
-    def public_state(self) -> dict[str, Any]:
+    # Clés "lourdes" (collections potentiellement volumineuses) : quand `keys`
+    # est fourni, seules celles présentes y sont calculées/copiées. Sert à
+    # éviter un deepcopy + filtrage de tout l'historique sur chaque écriture
+    # (update_state) alors que la route HTTP ne renvoie au client que les clés
+    # qu'il a lui-même envoyées.
+    _HEAVY_STATE_KEYS = (
+        "ventes", "stock", "commandes", "stockChecks", "stockEntrees",
+        "stockLosses", "dayBooks", "purchaseOrders", "supplierPrices",
+        "casiers", "casierMouvements", "creditRecoveries", "clientAvoirs",
+        "loyaltyClients", "serviceRelay", "consignes", "charges",
+        "staffAuditLog", "workShifts", "restaurantMenu", "ingredientStock",
+    )
+
+    def public_state(self, keys: set[str] | None = None) -> dict[str, Any]:
         with self._lock:
             s = self._state
-            return {
+
+            def inc(k: str) -> bool:
+                return keys is None or k in keys
+
+            out: dict[str, Any] = {
                 "meta": {**self.meta()},
                 "sites": copy.deepcopy(s["sites"]),
                 "activeSiteId": s["activeSiteId"],
-                "ventes": copy.deepcopy(s["ventes"]),
-                "stock": copy.deepcopy(s["stock"]),
-                "commandes": copy.deepcopy(s.get("commandes", [])),
-                "stockChecks": copy.deepcopy(s.get("stockChecks", [])),
-                "stockEntrees": copy.deepcopy(s.get("stockEntrees", [])),
-                "stockLosses": copy.deepcopy(s.get("stockLosses", [])),
-                "dayBooks": copy.deepcopy(s.get("dayBooks", [])),
                 "pdjWorkDateBySite": copy.deepcopy(s.get("pdjWorkDateBySite", {})),
-                "purchaseOrders": copy.deepcopy(s.get("purchaseOrders", [])),
-                "supplierPrices": copy.deepcopy(s.get("supplierPrices", [])),
-                "casiers": copy.deepcopy(s.get("casiers", [])),
-                "casierMouvements": copy.deepcopy(s.get("casierMouvements", [])),
-                "creditRecoveries": copy.deepcopy(s.get("creditRecoveries", [])),
-                "clientAvoirs": copy.deepcopy(s.get("clientAvoirs", [])),
-                "loyaltyClients": copy.deepcopy(s.get("loyaltyClients", [])),
-                "serviceRelay": copy.deepcopy(s.get("serviceRelay", [])),
-                "consignes": copy.deepcopy(s.get("consignes", [])),
                 "categories": copy.deepcopy(s.get("categories", DEFAULT_STATE["categories"])),
-                "charges": copy.deepcopy(s["charges"]),
                 "nextId": copy.deepcopy(s["nextId"]),
-                "staffAuditLog": copy.deepcopy(s.get("staffAuditLog", [])),
-                "workShifts": copy.deepcopy(s.get("workShifts", [])),
-                "restaurantMenu": copy.deepcopy(s.get("restaurantMenu", [])),
-                "ingredientStock": copy.deepcopy(s.get("ingredientStock", [])),
                 "auth": {
                     "users": [
                         {
@@ -3318,10 +3337,16 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                     ],
                 },
             }
+            for k in self._HEAVY_STATE_KEYS:
+                if inc(k):
+                    out[k] = copy.deepcopy(s.get(k, []))
+            return out
 
-    def public_state_for_session(self, session: dict[str, Any]) -> dict[str, Any]:
+    def public_state_for_session(
+        self, session: dict[str, Any], keys: set[str] | None = None
+    ) -> dict[str, Any]:
         with self._lock:
-            full = self.public_state()
+            full = self.public_state(keys=keys)
             site_ids = [str(s["id"]) for s in self._state["sites"] if s.get("id")]
             if session_is_superadmin(session, all_site_ids=site_ids):
                 payload = dict(full)
@@ -3362,41 +3387,34 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
             pdj_full = self._state.get("pdjWorkDateBySite", {}) or {}
             pdj_filtered = {k: v for k, v in pdj_full.items() if str(k) in allowed_set}
 
-            payload = {
+            def inc(k: str) -> bool:
+                return keys is None or k in keys
+
+            payload: dict[str, Any] = {
                 "meta": full["meta"],
                 "sites": json.loads(json.dumps(sites)),
                 "activeSiteId": aid,
-                "ventes": filter_site_rows(self._state.get("ventes", [])),
-                "stock": filter_site_rows(self._state.get("stock", [])),
-                "commandes": filter_site_rows(self._state.get("commandes", [])),
-                "stockChecks": filter_site_rows(self._state.get("stockChecks", [])),
-                "stockEntrees": filter_site_rows(self._state.get("stockEntrees", [])),
-                "stockLosses": filter_site_rows(self._state.get("stockLosses", [])),
-                "dayBooks": filter_site_rows(self._state.get("dayBooks", [])),
                 "pdjWorkDateBySite": json.loads(json.dumps(pdj_filtered)),
-                "purchaseOrders": filter_site_rows(self._state.get("purchaseOrders", [])),
-                "supplierPrices": filter_site_rows(self._state.get("supplierPrices", [])),
-                "casiers": filter_site_rows(self._state.get("casiers", [])),
-                "casierMouvements": filter_site_rows(self._state.get("casierMouvements", [])),
-                "creditRecoveries": filter_site_rows(self._state.get("creditRecoveries", [])),
-                "clientAvoirs": filter_site_rows(self._state.get("clientAvoirs", [])),
-                "loyaltyClients": filter_site_rows(self._state.get("loyaltyClients", [])),
-                "serviceRelay": filter_site_rows(self._state.get("serviceRelay", [])),
-                "consignes": filter_site_rows(self._state.get("consignes", [])),
                 "categories": full["categories"],
-                "charges": filter_site_rows(self._state.get("charges", [])),
                 "nextId": full["nextId"],
-                "staffAuditLog": filter_site_rows(self._state.get("staffAuditLog", [])),
-                "workShifts": filter_work_shifts_for_session(
+                "auth": {"users": users_out},
+            }
+            for k in (
+                "ventes", "stock", "commandes", "stockChecks", "stockEntrees",
+                "stockLosses", "dayBooks", "purchaseOrders", "supplierPrices",
+                "casiers", "casierMouvements", "creditRecoveries", "clientAvoirs",
+                "loyaltyClients", "serviceRelay", "consignes", "charges",
+                "staffAuditLog", "restaurantMenu", "ingredientStock",
+            ):
+                if inc(k):
+                    payload[k] = filter_site_rows(self._state.get(k, []))
+            if inc("workShifts"):
+                payload["workShifts"] = filter_work_shifts_for_session(
                     self._state.get("workShifts", []),
                     session,
                     site_ids,
                     allowed,
-                ),
-                "restaurantMenu": filter_site_rows(self._state.get("restaurantMenu", [])),
-                "ingredientStock": filter_site_rows(self._state.get("ingredientStock", [])),
-                "auth": {"users": users_out},
-            }
+                )
             bs = resolve_backup_session(session, self)
             if session_can_manage_maquis_backups(bs, all_site_ids=site_ids):
                 if session_is_superadmin(bs, all_site_ids=site_ids):
@@ -4011,7 +4029,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                     _trigger_stockcheck_wa_notifications(current.get("stockChecks") or [], _old_sc_snap_g, _sites_by_id_g, _auth_g, current.get("ventes") or [], current.get("stock") or [])
                 if "stock" in payload:
                     _trigger_stock_alert_wa_notifications(current.get("stock") or [], _old_stock_snap_g, _sites_by_id_g, _auth_g)
-                return self.public_state()
+                return self.public_state(keys=set(payload.keys()))
 
             allowed = session_allowed_sites(session, sid_list)
             if not allowed:
@@ -4183,7 +4201,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                 _trigger_stockcheck_wa_notifications(current.get("stockChecks") or [], _old_sc_snap, _sites_by_id, _auth_u, current.get("ventes") or [], current.get("stock") or [])
             if "stock" in payload:
                 _trigger_stock_alert_wa_notifications(current.get("stock") or [], _old_stock_snap, _sites_by_id, _auth_u)
-            return self.public_state_for_session(session)
+            return self.public_state_for_session(session, keys=set(payload.keys()))
 
     def reset(self) -> dict[str, Any]:
         with self._lock:
