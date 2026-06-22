@@ -196,6 +196,17 @@ _PG_TABLES: dict[str, tuple[str, str]] = {
     "restaurantMenu":   ("restaurant_menu",  "int"),
     "ingredientStock":  ("ingredient_stock", "int"),
 }
+# Colonnes clés + types SQL pour la contrainte unique par table (cf. _pg_ensure_unique_constraints).
+# Permet à _pg_write de faire un UPSERT ciblé au lieu d'un DELETE+INSERT complet de la table.
+_PG_KEY_COLUMNS: dict[str, tuple[tuple[str, str], tuple[str, str]]] = {}
+for _key, (_table, _id_type) in _PG_TABLES.items():
+    if _id_type == "int":
+        _PG_KEY_COLUMNS[_table] = (("item_id", "site_id"), ("BIGINT", "TEXT"))
+    elif _id_type == "text":
+        _PG_KEY_COLUMNS[_table] = (("item_id", "site_id"), ("TEXT", "TEXT"))
+    elif _id_type == "date_site":
+        _PG_KEY_COLUMNS[_table] = (("site_id", "date_col"), ("TEXT", "TEXT"))
+del _key, _table, _id_type
 _PG_SKIP_SETTINGS = set(STATE_PUT_LIST_KEYS) | {"auth", "sites", "categories", "_meta"}
 # Plafond par collection. Relevé pour ne pas bloquer la sauvegarde après plusieurs années
 # d'activité (le vrai correctif long terme = archivage + sauvegardes incrémentales, cf. audit).
@@ -2881,6 +2892,66 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
         with conn.cursor() as cur:
             cur.execute(sql)
         conn.commit()
+        self._pg_ensure_unique_constraints(conn)
+
+    def _pg_ensure_unique_constraints(self, conn: Any) -> None:
+        """Pose une contrainte unique (clé métier) sur chaque table de liste, en
+        dédupliquant d'abord les éventuels doublons hérités (le code d'écriture
+        les ignorait silencieusement avant l'ajout de cette contrainte). Idempotent
+        et peu coûteux une fois la contrainte posée (simple lookup catalogue) —
+        nécessaire pour permettre l'UPSERT ciblé de _pg_write (cf. _pg_upsert_and_prune)
+        au lieu d'un DELETE+INSERT complet de la table à chaque sauvegarde."""
+        for table, (cols, _types) in _PG_KEY_COLUMNS.items():
+            col_a, col_b = cols
+            constraint_name = f"uq_{table}_{col_a}_{col_b}"
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1 FROM pg_constraint WHERE conname = %s", (constraint_name,))
+                    if cur.fetchone():
+                        continue
+                    cur.execute(
+                        f"DELETE FROM {table} a USING {table} b "
+                        f"WHERE a.{col_a} = b.{col_a} AND a.{col_b} = b.{col_b} "
+                        f"AND a.{col_a} IS NOT NULL AND a.{col_b} IS NOT NULL "
+                        f"AND a.row_id < b.row_id"
+                    )
+                    cur.execute(
+                        f"ALTER TABLE {table} ADD CONSTRAINT {constraint_name} UNIQUE ({col_a}, {col_b})"
+                    )
+                conn.commit()
+            except Exception as exc:
+                conn.rollback()
+                print(f"[postgres] contrainte unique {constraint_name} non posée : {exc}", flush=True)
+
+    def _pg_upsert_and_prune(
+        self,
+        cur: Any,
+        table: str,
+        rows: list[tuple[Any, Any, str]],
+    ) -> None:
+        """UPSERT ciblé : insère/met à jour uniquement les lignes fournies (no-op si
+        la donnée est inchangée) puis supprime uniquement les lignes absentes de
+        `rows` — remplace l'ancien DELETE FROM {table} + ré-INSERT intégral, qui
+        réécrivait toute la table à chaque sauvegarde même pour 1 ligne modifiée."""
+        col_a, col_b = _PG_KEY_COLUMNS[table][0]
+        type_a, type_b = _PG_KEY_COLUMNS[table][1]
+        if not rows:
+            cur.execute(f"DELETE FROM {table}")
+            return
+        psycopg2.extras.execute_values(
+            cur,
+            f"INSERT INTO {table}({col_a}, {col_b}, data) VALUES %s "
+            f"ON CONFLICT ({col_a}, {col_b}) DO UPDATE SET data = EXCLUDED.data "
+            f"WHERE {table}.data IS DISTINCT FROM EXCLUDED.data",
+            rows,
+        )
+        temp_name = f"_sync_keys_{table}"
+        cur.execute(f"CREATE TEMP TABLE {temp_name} ({col_a} {type_a}, {col_b} {type_b}) ON COMMIT DROP")
+        psycopg2.extras.execute_values(cur, f"INSERT INTO {temp_name} VALUES %s", [(r[0], r[1]) for r in rows])
+        cur.execute(
+            f"DELETE FROM {table} t WHERE NOT EXISTS "
+            f"(SELECT 1 FROM {temp_name} k WHERE k.{col_a} = t.{col_a} AND k.{col_b} = t.{col_b})"
+        )
 
     def _pg_load(self) -> dict[str, Any]:
         conn = self._pg_connect()
@@ -2964,15 +3035,15 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                     for uname in existing_users - new_users:
                         cur.execute("DELETE FROM users WHERE username = %s", (uname,))
 
-                    # --- Listes : DELETE + INSERT dans la transaction ---
+                    # --- Listes : UPSERT ciblé + suppression des lignes disparues ---
                     # changed_keys fourni = patch partiel : ne traiter que les tables modifiées.
+                    # _pg_upsert_and_prune ne réécrit que les lignes nouvelles/modifiées/supprimées,
+                    # au lieu de réécrire toute la table à chaque sauvegarde (cf. contrainte unique
+                    # posée par _pg_ensure_unique_constraints).
                     for key, (table, id_type) in _PG_TABLES.items():
                         if changed_keys is not None and key not in changed_keys:
                             continue
                         items = payload.get(key, [])
-                        cur.execute(f"DELETE FROM {table}")
-                        if not items:
-                            continue
                         if id_type == "int":
                             seen_int: set = set()
                             rows = []
@@ -2983,11 +3054,6 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                                     continue
                                 seen_int.add(k)
                                 rows.append((item.get("id"), item.get("siteId"), json.dumps(item, ensure_ascii=False)))
-                            psycopg2.extras.execute_values(
-                                cur,
-                                f"INSERT INTO {table}(item_id, site_id, data) VALUES %s",
-                                rows,
-                            )
                         elif id_type == "text":
                             seen_txt: set = set()
                             rows = []
@@ -2998,11 +3064,6 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                                     continue
                                 seen_txt.add(k)
                                 rows.append((str(item.get("id", "")), item.get("siteId"), json.dumps(item, ensure_ascii=False)))
-                            psycopg2.extras.execute_values(
-                                cur,
-                                f"INSERT INTO {table}(item_id, site_id, data) VALUES %s",
-                                rows,
-                            )
                         elif id_type == "date_site":
                             seen_ds: set = set()
                             rows = []
@@ -3017,11 +3078,9 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                                     str(item.get("date", ""))[:10],
                                     json.dumps(item, ensure_ascii=False),
                                 ))
-                            psycopg2.extras.execute_values(
-                                cur,
-                                f"INSERT INTO {table}(site_id, date_col, data) VALUES %s",
-                                rows,
-                            )
+                        else:
+                            continue
+                        self._pg_upsert_and_prune(cur, table, rows)
         finally:
             conn.close()
 

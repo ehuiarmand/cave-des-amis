@@ -189,3 +189,21 @@ CREATE TABLE IF NOT EXISTS work_shifts (
 CREATE INDEX IF NOT EXISTS idx_work_shifts_site_id ON work_shifts (site_id);
 CREATE INDEX IF NOT EXISTS idx_work_shifts_date    ON work_shifts ((data->>'date'));
 CREATE INDEX IF NOT EXISTS idx_work_shifts_user    ON work_shifts ((data->>'username'));
+
+-- Menu restaurant
+CREATE TABLE IF NOT EXISTS restaurant_menu (
+    row_id  BIGSERIAL PRIMARY KEY,
+    item_id BIGINT,
+    site_id TEXT,
+    data    JSONB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_restaurant_menu_site_id ON restaurant_menu (site_id);
+
+-- Stock d'ingrédients (restaurant)
+CREATE TABLE IF NOT EXISTS ingredient_stock (
+    row_id  BIGSERIAL PRIMARY KEY,
+    item_id BIGINT,
+    site_id TEXT,
+    data    JSONB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ingredient_stock_site_id ON ingredient_stock (site_id);
