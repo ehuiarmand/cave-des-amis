@@ -46,6 +46,7 @@ DEBUG_SESSION_LOG_ENABLED = os.environ.get("MAQUIS_MANAGER_DEBUG_LOG", "") == "1
 
 
 def _dbg_session(msg: str, hypothesis_id: str, data: dict[str, Any]) -> None:
+    """Log de debug désactivé par défaut (actif seulement si MAQUIS_MANAGER_DEBUG_LOG=1)."""
     # #region agent log
     if not DEBUG_SESSION_LOG_ENABLED:
         return
@@ -121,6 +122,7 @@ def _env_first(*names: str, default: str = "") -> str:
 
 
 def _env_int_first(default: int, *names: str) -> int:
+    """Première variable d'environnement entière non vide parmi `names`, sinon `default`."""
     for name in names:
         raw = os.environ.get(name)
         if raw is None or str(raw).strip() == "":
@@ -215,6 +217,7 @@ MAX_STATE_LIST_ROWS = 150_000
 
 
 def validate_state_put_payload(payload: Any) -> None:
+    """Rejette les payloads PUT /api/state trop volumineux et corrige les valeurs numériques négatives."""
     if not isinstance(payload, dict):
         raise ValueError("Payload invalide.")
     for key in STATE_PUT_LIST_KEYS:
@@ -286,11 +289,13 @@ TOTP_APP_LABEL = (
 
 
 def privileged_role_requires_2fa_policy(role: str) -> bool:
+    """Vrai si le rôle donné est soumis à l'obligation de double authentification."""
     r = str(role or "").strip().lower()
     return r in ("superadmin", "admin", "manager")
 
 
 def session_missing_required_2fa(session: dict[str, Any], auth_users: list[dict[str, Any]]) -> bool:
+    """Vrai si la session a un rôle privilégié nécessitant la 2FA mais ne l'a pas activée."""
     if not REQUIRE_2FA_FOR_PRIVILEGED:
         return False
     if not privileged_role_requires_2fa_policy(str(session.get("role", ""))):
@@ -302,6 +307,7 @@ def session_missing_required_2fa(session: dict[str, Any], auth_users: list[dict[
 
 
 def monthly_password_change_required() -> bool:
+    """Indique si la politique de renouvellement mensuel du mot de passe est active."""
     return _env_first("MAQUIS_MANAGER_REQUIRE_MONTHLY_PASSWORD", default="1").lower() not in (
         "0",
         "false",
@@ -311,6 +317,7 @@ def monthly_password_change_required() -> bool:
 
 
 def current_password_month_ym() -> str:
+    """Retourne le mois courant (UTC) au format yyyy-mm, référence du cycle de renouvellement."""
     return datetime.now(timezone.utc).strftime("%Y-%m")
 
 
@@ -335,6 +342,7 @@ def grandfather_password_month_if_needed(user: dict[str, Any] | None) -> bool:
 
 
 def auth_user_row_by_username(username: str, auth_users: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Recherche l'utilisateur correspondant au nom d'utilisateur donné."""
     un = str(username or "").strip()
     if not un:
         return None
@@ -342,6 +350,7 @@ def auth_user_row_by_username(username: str, auth_users: list[dict[str, Any]]) -
 
 
 def password_policy_fields(user: dict[str, Any] | None) -> dict[str, Any]:
+    """Construit les champs de politique de mot de passe à exposer au client."""
     return {
         "mustChangePassword": password_change_required_for_user(user),
         "passwordMonth": current_password_month_ym(),
@@ -349,11 +358,13 @@ def password_policy_fields(user: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def session_password_change_required(session: dict[str, Any], auth_users: list[dict[str, Any]]) -> bool:
+    """Vrai si l'utilisateur de la session doit changer son mot de passe mensuel."""
     u = next((x for x in auth_users if x.get("username") == session.get("username")), None)
     return password_change_required_for_user(u)
 
 
 def _today_iso_local() -> str:
+    """Retourne la date du jour (heure locale du serveur) au format ISO yyyy-mm-dd."""
     return time.strftime("%Y-%m-%d", time.localtime())
 
 
@@ -415,6 +426,7 @@ def _merge_pdj_work_date_map_session(
 
 
 def session_timing_fields(sess: dict[str, Any]) -> dict[str, Any]:
+    """Extrait les champs de durée/expiration de session à renvoyer au client."""
     out: dict[str, Any] = {}
     for key in (
         "sessionCreatedAt",
@@ -429,6 +441,7 @@ def session_timing_fields(sess: dict[str, Any]) -> dict[str, Any]:
 
 
 def cookie_secure_flag() -> bool:
+    """Indique si le cookie de session doit être marqué Secure (HTTPS)."""
     return _env_first("MAQUIS_MANAGER_COOKIE_SECURE", "TDB_BAR_COOKIE_SECURE", default="").lower() in (
         "1",
         "true",
@@ -459,15 +472,16 @@ def public_order_rate_limit_check(ip: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# TOTP (RFC 6238) — no third-party deps, Python stdlib only
+# TOTP (RFC 6238) — sans dépendance tierce, uniquement la stdlib Python
 # ---------------------------------------------------------------------------
 
 def generate_totp_secret() -> str:
-    """Return a 20-byte random secret encoded as base32 (no padding)."""
+    """Retourne un secret aléatoire de 20 octets encodé en base32 (sans padding)."""
     return base64.b32encode(secrets.token_bytes(20)).decode().rstrip("=")
 
 
 def _totp_at(secret_b32: str, counter: int) -> str:
+    """Calcule le code TOTP à 6 chiffres pour un secret et un compteur de temps donnés."""
     padded = secret_b32.upper()
     pad = (8 - len(padded) % 8) % 8
     key = base64.b32decode(padded + "=" * pad)
@@ -479,13 +493,13 @@ def _totp_at(secret_b32: str, counter: int) -> str:
 
 
 def verify_totp(secret_b32: str, user_code: str) -> bool:
-    """Accept ±1 time step (30 s each) to handle clock drift."""
+    """Accepte ±1 pas de temps (30 s chacun) pour tolérer une dérive d'horloge."""
     t = int(time.time()) // 30
     return any(_totp_at(secret_b32, t + delta) == user_code.strip() for delta in (-1, 0, 1))
 
 
 # ---------------------------------------------------------------------------
-# Pre-auth tokens (5-minute TTL, consumed once)
+# Jetons pré-authentification (TTL 5 minutes, consommés une seule fois)
 # ---------------------------------------------------------------------------
 
 _pre_auth_tokens: dict[str, dict[str, Any]] = {}
@@ -531,6 +545,7 @@ def _wa_otp_verify(username: str, otp: str) -> bool:
 
 
 def create_pre_auth_token(username: str) -> str:
+    """Crée un jeton temporaire (5 min) attestant la 1ère étape de connexion (avant 2FA)."""
     token = secrets.token_urlsafe(32)
     with _pre_auth_lock:
         _pre_auth_tokens[token] = {"username": username, "expiresAt": int(time.time()) + 300}
@@ -538,6 +553,7 @@ def create_pre_auth_token(username: str) -> str:
 
 
 def consume_pre_auth_token(token: str) -> str | None:
+    """Récupère et invalide le jeton de pré-authentification, retourne l'utilisateur associé."""
     with _pre_auth_lock:
         data = _pre_auth_tokens.pop(token, None)
     if data and data["expiresAt"] > time.time():
@@ -579,6 +595,7 @@ _reauth_lock = threading.Lock()
 
 
 def create_reauth_token(username: str, session_token: str) -> str:
+    """Crée un jeton de réauthentification à usage unique pour les opérations destructrices."""
     tok = secrets.token_urlsafe(32)
     with _reauth_lock:
         _reauth_tokens[tok] = {
@@ -590,6 +607,7 @@ def create_reauth_token(username: str, session_token: str) -> str:
 
 
 def consume_reauth_token(token: str, session_token: str) -> bool:
+    """Valide et consomme un jeton de réauthentification lié à la session courante."""
     with _reauth_lock:
         data = _reauth_tokens.pop(token, None)
     if not data:
@@ -606,6 +624,7 @@ _audit_lock = threading.Lock()
 
 
 def audit_log(event: str, details: dict[str, Any]) -> None:
+    """Ajoute une ligne JSON au fichier de journal d'audit."""
     try:
         row = {
             "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -613,24 +632,25 @@ def audit_log(event: str, details: dict[str, Any]) -> None:
             "details": details,
         }
         with _audit_lock:
-            # Opening with "a" creates the file if missing.
+            # L'ouverture en mode "a" crée le fichier s'il n'existe pas.
             with AUDIT_LOG_FILE.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(row, ensure_ascii=False) + "\n")
     except OSError:
         return
 
 
-# Naive in-memory rate limiter for /api/login (per IP + username)
+# Limiteur de débit simple en mémoire pour /api/login (par IP + nom d'utilisateur)
 _login_attempts: dict[str, dict[str, Any]] = {}
 _login_attempts_lock = threading.Lock()
 
 
 def _rl_key(ip: str, username: str) -> str:
+    """Construit la clé de limitation de débit à partir de l'IP et du nom d'utilisateur."""
     return f"{ip}::{username}".lower()
 
 
 def login_rate_limit_check(ip: str, username: str) -> tuple[bool, int]:
-    """Return (allowed, retry_after_seconds)."""
+    """Retourne (autorisé, secondes_avant_nouvelle_tentative)."""
     now = time.time()
     key = _rl_key(ip, username)
     with _login_attempts_lock:
@@ -641,12 +661,13 @@ def login_rate_limit_check(ip: str, username: str) -> tuple[bool, int]:
 
 
 def login_rate_limit_fail(ip: str, username: str) -> None:
+    """Incrémente le compteur d'échecs et applique un backoff exponentiel si besoin."""
     now = time.time()
     key = _rl_key(ip, username)
     with _login_attempts_lock:
         entry = _login_attempts.get(key) or {"fails": 0, "blocked_until": 0}
         entry["fails"] = int(entry.get("fails") or 0) + 1
-        # Exponential backoff with cap (roughly: 0,0,2,4,8,16,...)
+        # Backoff exponentiel plafonné (environ : 0,0,2,4,8,16,...)
         if entry["fails"] >= 3:
             backoff = min(300, 2 ** min(8, entry["fails"] - 2))
             entry["blocked_until"] = now + backoff
@@ -654,6 +675,7 @@ def login_rate_limit_fail(ip: str, username: str) -> None:
 
 
 def login_rate_limit_success(ip: str, username: str) -> None:
+    """Réinitialise le compteur d'échecs après une connexion réussie."""
     key = _rl_key(ip, username)
     with _login_attempts_lock:
         _login_attempts.pop(key, None)
@@ -666,8 +688,8 @@ DEFAULT_STATE: dict[str, Any] = {
     },
     "params": {
         "nom": "Mon Bar Chez Moi",
-        "ville": "Douala",
-        "pays": "Cameroun",
+        "ville": "Abidjan",
+        "pays": "Cote d'Ivoire",
         "gerant": "",
         "objectifCA": 500000,
         "seuilStock": 5,
@@ -736,12 +758,14 @@ DEFAULT_STATE: dict[str, Any] = {
 
 
 def hash_password(password: str) -> str:
+    """Hache un mot de passe avec PBKDF2-SHA256 et un sel aléatoire."""
     salt = secrets.token_hex(16)
     digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("ascii"), PASSWORD_ITERATIONS)
     return f"{PASSWORD_ALGO}${PASSWORD_ITERATIONS}${salt}${digest.hex()}"
 
 
 def verify_password(password: str, stored_hash: str) -> bool:
+    """Vérifie un mot de passe contre son hash stocké (nouveau format ou legacy SHA-256)."""
     parts = str(stored_hash or "").split("$")
     if len(parts) == 4 and parts[0] == PASSWORD_ALGO:
         _, raw_iterations, salt, digest = parts
@@ -756,6 +780,7 @@ def verify_password(password: str, stored_hash: str) -> bool:
 
 
 def password_needs_upgrade(stored_hash: str) -> bool:
+    """Vrai si le hash stocké utilise un algorithme/nombre d'itérations obsolète."""
     return not str(stored_hash or "").startswith(f"{PASSWORD_ALGO}${PASSWORD_ITERATIONS}$")
 
 
@@ -770,6 +795,7 @@ def make_site(
     prefixe_facture: str = "FAC",
     dual_zone_pricing: bool = True,
 ) -> dict[str, Any]:
+    """Construit le dictionnaire représentant un maquis avec ses paramètres par défaut."""
     return {
         "id": site_id,
         "nom": nom,
@@ -793,10 +819,12 @@ def site_uses_dual_zone_pricing(site: dict[str, Any] | None) -> bool:
 
 
 def _qr_order_total_fcfa(order: dict[str, Any]) -> float:
+    """Calcule le montant total en FCFA des lignes d'une commande QR."""
     return sum(float(line.get("prix") or 0) * float(line.get("qty") or 0) for line in order.get("lignes") or [])
 
 
 def _qr_order_alert_message(site: dict[str, Any], order: dict[str, Any]) -> str:
+    """Compose le texte d'alerte SMS/WhatsApp pour une nouvelle commande QR."""
     nom = str(site.get("nom") or "Maquis")
     tid = order.get("id")
     tbl = str(order.get("table") or "")
@@ -808,6 +836,7 @@ def _qr_order_alert_message(site: dict[str, Any], order: dict[str, Any]) -> str:
 
 
 def _normalize_international_phone(raw: str) -> str:
+    """Nettoie et met en forme un numéro de téléphone au format international +XXX."""
     s = "".join(str(raw).split())
     if not s:
         return ""
@@ -818,12 +847,14 @@ def _normalize_international_phone(raw: str) -> str:
 
 
 def _alert_phone_for_qr_orders(site: dict[str, Any]) -> str:
+    """Retourne le numéro d'alerte SMS pour les commandes QR (site ou variable d'env en repli)."""
     a = _normalize_international_phone(str(site.get("smsQrAlert") or "").strip())
     b = _normalize_international_phone(os.environ.get("GESTION_CAVE_QR_ALERT_SMS_TO", "").strip())
     return a or b
 
 
 def _post_qr_alert_webhook(url: str, site: dict[str, Any], order: dict[str, Any], body: str, alert_phone: str) -> None:
+    """Notifie un webhook externe d'une nouvelle commande QR."""
     payload = {
         "event": "qr_order",
         "siteId": site.get("id"),
@@ -841,6 +872,7 @@ def _post_qr_alert_webhook(url: str, site: dict[str, Any], order: dict[str, Any]
 
 
 def _twilio_send_sms(to_e164: str, body: str) -> None:
+    """Envoie un SMS via l'API Twilio si les identifiants sont configurés."""
     sid = os.environ.get("TWILIO_ACCOUNT_SID", "").strip()
     token = os.environ.get("TWILIO_AUTH_TOKEN", "").strip()
     frm = os.environ.get("TWILIO_FROM_NUMBER", "").strip()
@@ -866,6 +898,7 @@ def _twilio_send_sms(to_e164: str, body: str) -> None:
 # --- WhatsApp Cloud API (Meta) ---
 
 def _whatsapp_send(to_e164: str, body: str, *, force_text: bool = False) -> None:
+    """Envoie un message WhatsApp via l'API Cloud Meta (template ou texte libre)."""
     phone_id = os.environ.get("WHATSAPP_PHONE_NUMBER_ID", "").strip()
     token = os.environ.get("WHATSAPP_ACCESS_TOKEN", "").strip()
     if not phone_id:
@@ -931,6 +964,7 @@ def _whatsapp_send(to_e164: str, body: str, *, force_text: bool = False) -> None
 
 
 def _wa_phones_for_site(site: dict[str, Any], event: str) -> list[str]:
+    """Retourne les numéros WhatsApp du maquis abonnés à cet événement."""
     events_enabled = site.get("waEvents") or []
     if isinstance(events_enabled, list) and event not in events_enabled:
         return []
@@ -946,12 +980,14 @@ def _wa_phones_for_site(site: dict[str, Any], event: str) -> list[str]:
 
 
 def _whatsapp_notify_event_async(site: dict[str, Any], event: str, message: str) -> None:
+    """Déclenche l'envoi WhatsApp d'un événement maquis dans un thread séparé."""
     phones = _wa_phones_for_site(site, event)
     if not phones:
         return
     site_id = site.get("id", "?")
 
     def run() -> None:
+        """Envoie le message à tous les numéros en arrière-plan, sans bloquer la requête."""
         for phone in phones:
             try:
                 _whatsapp_send(phone, message)
@@ -962,6 +998,7 @@ def _whatsapp_notify_event_async(site: dict[str, Any], event: str, message: str)
 
 
 def _wa_stock_check_message(site: dict[str, Any], check: dict[str, Any], event: str) -> str:
+    """Compose le texte du message WhatsApp pour un événement de pointage de caisse."""
     nom = str(site.get("nom") or site.get("name") or site.get("id") or "Maquis")
     date_str = str(check.get("date") or "")[:10]
     by = str(check.get("managerConfirmedBy") or check.get("closedBy") or "")
@@ -976,6 +1013,7 @@ def _wa_stock_check_message(site: dict[str, Any], check: dict[str, Any], event: 
 
 
 def _wa_phone_for_user(username: str, auth_users: list[dict[str, Any]]) -> str:
+    """Retourne le numéro WhatsApp normalisé de l'utilisateur donné."""
     un = str(username or "").strip().lower()
     for u in auth_users:
         if not isinstance(u, dict):
@@ -1044,6 +1082,7 @@ def _wa_user_phones_for_event(
     seen: set[str] = set()
 
     def add(p: str) -> None:
+        """Ajoute un numéro à la liste de résultats en évitant les doublons."""
         if p and p not in seen:
             seen.add(p)
             phones.append(p)
@@ -1098,6 +1137,7 @@ def _wa_upload_media(pdf_bytes: bytes, filename: str) -> str:
 
 
 def _wa_send_document(to_e164: str, media_id: str, caption: str, filename: str) -> None:
+    """Envoie un document déjà uploadé (media_id) via l'API WhatsApp Business."""
     phone_id = os.environ.get("WHATSAPP_PHONE_NUMBER_ID", "").strip()
     token = os.environ.get("WHATSAPP_ACCESS_TOKEN", "").strip()
     if not (phone_id and token):
@@ -1135,6 +1175,7 @@ def _generate_cloture_pdf(
     ventes: list[dict[str, Any]],
     stock_rows: list[dict[str, Any]],
 ) -> bytes:
+    """Génère le PDF du rapport de clôture journalière (ventes, caisse, alertes stock) pour un maquis."""
     if not _FPDF_AVAILABLE:
         raise RuntimeError("fpdf2 non installe (pip install fpdf2).")
 
@@ -1192,6 +1233,7 @@ def _generate_cloture_pdf(
             })
 
     def fmt_f(n: int) -> str:
+        """Formate un montant entier en groupes de 3 chiffres pour l'affichage PDF (style FCFA)."""
         s = str(abs(n))
         groups: list[str] = []
         while len(s) > 3:
@@ -1392,6 +1434,7 @@ def _send_cloture_report_wa_async(
     seen: set[str] = set()
 
     def add_p(p: str) -> None:
+        """Ajoute un numéro à la liste des destinataires sans doublon."""
         if p and p not in seen:
             seen.add(p)
             phones.append(p)
@@ -1410,6 +1453,7 @@ def _send_cloture_report_wa_async(
     _check = dict(check)
 
     def run() -> None:
+        """Formate et envoie en arrière-plan le rapport de clôture texte à chaque destinataire."""
         print(f"[WA RAPPORT] Envoi rapport texte site={site_id} destinataires={phones}", flush=True)
         try:
             msg = _format_cloture_text(_site, _check, _ventes, _stock)
@@ -1436,6 +1480,7 @@ def _trigger_stockcheck_wa_notifications(
     ventes: list[dict[str, Any]] | None = None,
     stock_rows: list[dict[str, Any]] | None = None,
 ) -> None:
+    """Détecte fin de service / clôture journée sur les stockChecks modifiés et déclenche les notifications WhatsApp."""
     _auth = auth_users or []
     _ventes = ventes or []
     _stock = stock_rows or []
@@ -1497,6 +1542,7 @@ def _trigger_stock_alert_wa_notifications(
     sites_by_id: dict[str, dict[str, Any]],
     auth_users: list[dict[str, Any]] | None = None,
 ) -> None:
+    """Compare l'ancien et le nouveau stock et notifie par WhatsApp les passages sous seuil ou en rupture."""
     by_site: dict[str, list[str]] = {}
     for item in new_stock:
         if not isinstance(item, dict):
@@ -1547,6 +1593,7 @@ def notify_qr_order_created_async(
     _work_shifts = work_shifts or []
 
     def run() -> None:
+        """Envoie en arrière-plan les alertes webhook/SMS/WhatsApp pour une commande QR créée."""
         site_id = str(site.get("id", ""))
         alert_phone = _alert_phone_for_qr_orders(site)
         msg = _qr_order_alert_message(site, order)
@@ -1599,6 +1646,7 @@ def _is_builtin_demo_state(payload: dict[str, Any]) -> bool:
 
 
 def build_default_state() -> dict[str, Any]:
+    """Construit l'état initial multi-site avec comptes par défaut (installation vierge)."""
     legacy = json.loads(json.dumps(DEFAULT_STATE))
     return {
         "auth": {
@@ -1657,6 +1705,7 @@ def build_default_state() -> dict[str, Any]:
 
 
 def migrate_state(payload: dict[str, Any]) -> dict[str, Any]:
+    """Fait évoluer un état persisté vers le schéma courant (versions successives, multi-site, etc.)."""
     default = build_default_state()
     meta = payload.setdefault("_meta", {})
     schema_version = int(meta.get("schemaVersion") or 1)
@@ -1674,7 +1723,7 @@ def migrate_state(payload: dict[str, Any]) -> dict[str, Any]:
                     break
         meta["schemaVersion"] = 2
 
-    # Step 1 — migrate old single-site format to multi-site
+    # Étape 1 — migration de l'ancien format mono-site vers le multi-site
     if "sites" not in payload or "activeSiteId" not in payload:
         params = payload.get("params", DEFAULT_STATE.get("params", {}))
         site_id = "maquis-1"
@@ -1709,7 +1758,7 @@ def migrate_state(payload: dict[str, Any]) -> dict[str, Any]:
             "nextId": {**default["nextId"], **payload.get("nextId", {})},
         }
 
-    # Step 2 — migrate old managerUsername/serveuseUsername auth format to users list
+    # Étape 2 — migration de l'ancien format auth managerUsername/serveuseUsername vers la liste users
     auth = payload.get("auth", {})
     if "users" not in auth:
         all_site_ids = [s["id"] for s in payload.get("sites", [])]
@@ -1756,10 +1805,12 @@ _SITE_SCOPED_ROW_KEYS: tuple[str, ...] = (
 
 
 def _valid_work_date(s: str) -> bool:
+    """Vrai si la chaîne respecte le format date AAAA-MM-JJ."""
     return bool(re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(s or "").strip()))
 
 
 def _valid_work_time(s: str) -> bool:
+    """Vrai si la chaîne respecte le format heure HH:MM."""
     return bool(re.fullmatch(r"\d{2}:\d{2}", str(s or "").strip()))
 
 
@@ -1787,6 +1838,7 @@ def filter_work_shifts_for_session(
 
 
 def session_can_manage_team_schedule(session: dict[str, Any] | None) -> bool:
+    """Vrai si la session a le droit de modifier le planning d'équipe."""
     if not session:
         return False
     role = str(session.get("role", "")).strip().lower()
@@ -1802,6 +1854,7 @@ def validate_work_shift_row(
     site_ids: list[str],
     allowed: set[str],
 ) -> None:
+    """Valide un créneau de planning (maquis, utilisateur, rôle, affectation, date/heures) ou lève ValueError."""
     sid = str(row.get("siteId", "")).strip()
     if sid not in allowed or sid not in site_ids:
         raise ValueError(f"Maquis non autorise pour ce creneau (siteId={sid or '?'}).")
@@ -1839,12 +1892,14 @@ def merge_work_shifts_scoped(
     *,
     snapshot: bool = False,
 ) -> list[Any]:
+    """Valide les nouveaux créneaux puis fusionne le planning dans le périmètre autorisé de la session."""
     if not session_can_manage_team_schedule(session):
         raise ValueError("Modification du planning non autorisee.")
     if not isinstance(incoming, list):
         raise ValueError("Liste de creneaux invalide.")
     # Identifie les IDs deja presents dans le perimetre courant (re-envoi sans modification).
     def _in_scope(r: Any) -> bool:
+        """Vrai si le site effectif de la ligne fait partie des maquis autorisés."""
         if not isinstance(r, dict):
             return False
         es = row_effective_site_id(r, site_ids, allowed)
@@ -1878,6 +1933,7 @@ def merge_work_shifts_rows(
         incoming_list = [r for r in (incoming or []) if isinstance(r, dict) and r.get("id") is not None]
 
         def in_allowed_scope(row: dict[str, Any]) -> bool:
+            """Vrai si le site effectif de la ligne fait partie des maquis autorisés."""
             es = row_effective_site_id(row, site_ids, allowed)
             return es is not None and es in allowed
 
@@ -1907,6 +1963,7 @@ def _zero_stock_row_quantities(row: dict[str, Any]) -> None:
 
 
 def _safe_backup_filename(name_raw: str) -> str:
+    """Valide et nettoie un nom de fichier de sauvegarde contre la traversée de répertoire."""
     name = Path(name_raw).name.strip()
     if not name or "/" in name or "\\" in name or ".." in name:
         raise ValueError("Nom de fichier invalide.")
@@ -1980,6 +2037,7 @@ def session_is_superadmin(session: dict[str, Any] | None, *, all_site_ids: list[
 
 
 def session_allowed_sites(session: dict[str, Any], site_ids: list[str]) -> set[str]:
+    """Intersecte les maquis déclarés sur la session avec les maquis réellement connus."""
     sid_set = set(site_ids)
     return {str(s) for s in (session.get("allowedSiteIds") or []) if str(s) in sid_set}
 
@@ -2051,6 +2109,7 @@ def session_site_id_allowed_for_backup(
     site_id: str,
     all_site_ids: list[str],
 ) -> bool:
+    """Vrai si la session peut accéder à la sauvegarde de ce maquis précis."""
     sid = str(site_id or "").strip()
     if not sid or sid not in {str(x) for x in all_site_ids if x}:
         return False
@@ -2074,6 +2133,7 @@ def site_backup_filename_matches_site(filename: str, site_id: str) -> bool:
 
 
 def row_effective_site_id(row: dict[str, Any], site_ids: list[str], allowed: set[str]) -> str | None:
+    """Détermine le siteId effectif d'une ligne, en déduisant le site unique autorisé si absent."""
     site_set = {str(x) for x in site_ids}
     raw = row.get("siteId")
     sid_s = str(raw) if raw is not None and raw != "" else ""
@@ -2085,11 +2145,13 @@ def row_effective_site_id(row: dict[str, Any], site_ids: list[str], allowed: set
 
 
 def _order_status_finalized(status: Any) -> bool:
+    """Vrai si le statut de commande est terminal (payée ou annulée)."""
     s = str(status or "").strip().lower()
     return s in ("paye", "payé", "annule", "annulé")
 
 
 def _order_payment_fingerprint(order: dict[str, Any]) -> str:
+    """Empreinte de contenu (jour+client+table+lignes) pour détecter les doublons de commande."""
     client = str(order.get("client") or "").strip().lower()
     table = str(order.get("table") or order.get("client") or "").strip().lower()
     day = str(order.get("date") or "")[:10]
@@ -2102,6 +2164,7 @@ def _order_payment_fingerprint(order: dict[str, Any]) -> str:
 
 
 def _order_create_fingerprint(order: dict[str, Any]) -> str:
+    """Empreinte de déduplication à la création (clientRequestId en priorité, sinon contenu+mode+serveur)."""
     crid = str(order.get("clientRequestId") or "").strip()
     if crid:
         return f"crid|{crid}"
@@ -2111,6 +2174,7 @@ def _order_create_fingerprint(order: dict[str, Any]) -> str:
 
 
 def _stock_check_manager_confirmed(check: dict[str, Any]) -> bool:
+    """Vrai si la clôture stock n'a pas besoin (ou a déjà reçu) la confirmation du gérant."""
     if check.get("managerConfirmedAt"):
         return True
     role = str(check.get("closedByRole") or "").strip().lower()
@@ -2147,6 +2211,7 @@ def sanitize_stock_checks_for_session(
 
 
 def validate_serveuse_pdj_payload(session: dict[str, Any], payload: dict[str, Any]) -> None:
+    """Filtre côté serveuse les champs PDJ/caisse réservés au gérant (mutation en place du payload)."""
     role = str(session.get("role", "")).strip().lower()
     if role != "serveuse":
         return
@@ -2197,6 +2262,7 @@ def dedupe_commandes_list(
     list_unique = list(by_id.values())
 
     def is_active(o: dict[str, Any]) -> bool:
+        """Vrai si la commande n'est ni encaissée/finalisée ni déjà soldée par une vente."""
         try:
             oid = int(o.get("id"))
         except (TypeError, ValueError):
@@ -2229,6 +2295,30 @@ def dedupe_commandes_list(
     return [o for o in list_unique if int(o["id"]) not in drop]
 
 
+def merge_ventes_scoped(
+    current: list[Any],
+    incoming: list[Any],
+    allowed: set[str],
+    site_ids: list[str],
+) -> list[dict[str, Any]]:
+    """Remplace les ventes du perimetre autorise : absentes du payload = retirees
+    (suppression de facture en correction). Le client envoie toujours son etat
+    complet de ventes pour son perimetre, donc un remplacement total (et non un
+    upsert delta-safe) est sur et necessaire pour que les suppressions persistent."""
+    current_list = [r for r in (current or []) if isinstance(r, dict) and r.get("id") is not None]
+    incoming_list = [r for r in (incoming or []) if isinstance(r, dict) and r.get("id") is not None]
+
+    def in_allowed_scope(row: dict[str, Any]) -> bool:
+        """Vrai si le site effectif de la ligne fait partie des maquis autorisés."""
+        es = row_effective_site_id(row, site_ids, allowed)
+        return es is not None and es in allowed
+
+    incoming_for_scope = [r for r in incoming_list if in_allowed_scope(r)]
+    kept = [r for r in current_list if not in_allowed_scope(r)]
+    kept.extend(incoming_for_scope)
+    return kept
+
+
 def merge_commandes_scoped(
     current: list[Any],
     incoming: list[Any],
@@ -2241,6 +2331,7 @@ def merge_commandes_scoped(
     incoming_list = [r for r in (incoming or []) if isinstance(r, dict) and r.get("id") is not None]
 
     def in_allowed_scope(row: dict[str, Any]) -> bool:
+        """Vrai si le site effectif de la ligne fait partie des maquis autorisés."""
         es = row_effective_site_id(row, site_ids, allowed)
         return es is not None and es in allowed
 
@@ -2264,6 +2355,7 @@ def merge_service_relay_serveuse(
     kept = [copy.deepcopy(r) for r in (current or []) if isinstance(r, dict)]
 
     def in_scope(row: dict[str, Any]) -> bool:
+        """Vrai si le site effectif de la ligne fait partie des maquis autorisés."""
         es = row_effective_site_id(row, site_ids, allowed)
         return es is not None and es in allowed
 
@@ -2311,9 +2403,11 @@ def merge_scoped_rows(
     incoming_list = [r for r in (incoming or []) if isinstance(r, dict) and r.get("id") is not None]
 
     def row_id_norm(row: dict[str, Any]) -> str:
+        """Normalise l'id de ligne en chaîne pour comparaison stable."""
         return str(row.get("id"))
 
     def in_allowed_scope(row: dict[str, Any]) -> bool:
+        """Vrai si le site effectif de la ligne fait partie des maquis autorisés."""
         es = row_effective_site_id(row, site_ids, allowed)
         return es is not None and es in allowed
 
@@ -2334,6 +2428,7 @@ def merge_scoped_rows(
 
 
 def merge_next_id_dict(current: dict[str, Any], incoming: dict[str, Any] | None) -> dict[str, Any]:
+    """Fusionne deux dicts de compteurs d'ids en gardant le maximum par clé."""
     out = dict(current or {})
     for key, raw in (incoming or {}).items():
         try:
@@ -2345,6 +2440,7 @@ def merge_next_id_dict(current: dict[str, Any], incoming: dict[str, Any] | None)
 
 
 def user_visible_in_public_state(u: dict[str, Any], session: dict[str, Any], all_site_ids: list[str]) -> bool:
+    """Vrai si l'utilisateur `u` doit apparaître dans l'état public renvoyé à cette session."""
     if session_is_superadmin(session, all_site_ids=all_site_ids):
         return True
     if str(u.get("username", "")) == str(session.get("username", "")):
@@ -2367,6 +2463,7 @@ def merge_auth_users_scoped(
     payload_users: list[Any],
     site_ids: list[str],
 ) -> list[dict[str, Any]]:
+    """Fusionne les utilisateurs envoyés par le client dans la liste actuelle, en respectant le périmètre de la session."""
     site_set = set(site_ids)
     allowed = session_allowed_sites(session, site_ids)
     if not allowed:
@@ -2385,10 +2482,12 @@ def merge_auth_users_scoped(
     merged: dict[str, dict[str, Any]] = {u["username"]: json.loads(json.dumps(u)) for u in current_users}
 
     def clamp_sites(raw: Any) -> list[str]:
+        """Filtre les ids de sites invalides et retombe sur un site autorisé par défaut si la liste est vide."""
         xs = [str(x) for x in (raw or []) if str(x) in site_set]
         return xs if xs else sorted(allowed)[:1]
 
     def may_manage_target(exist: dict[str, Any]) -> bool:
+        """Vrai si la session courante a le droit de modifier ce compte utilisateur cible."""
         if str(exist.get("username", "")) == s_user:
             return True
         t_role = str(exist.get("role", ""))
@@ -2516,6 +2615,7 @@ def merge_auth_users_scoped(
 
 
 def session_state_etag(base_etag: str, session: dict[str, Any], *, all_site_ids: list[str] | None = None) -> str:
+    """Dérive un ETag spécifique à la session pour les superadmins scopés (évite de partager le cache)."""
     if session_is_superadmin(session, all_site_ids=all_site_ids):
         return base_etag
     raw = f"{session.get('username', '')}|{session.get('role', '')}|{','.join(sorted(str(x) for x in (session.get('allowedSiteIds') or [])))}"
@@ -2529,6 +2629,7 @@ def session_may_configure_2fa_for_other(
     *,
     all_site_ids: list[str] | None = None,
 ) -> bool:
+    """Vrai si la session peut configurer la 2FA d'un autre utilisateur (soi-même ou superadmin)."""
     if session_is_superadmin(session, all_site_ids=all_site_ids):
         return True
     if str(session.get("username", "")) == str(target_username):
@@ -2567,6 +2668,7 @@ def session_may_configure_2fa_for_other(
 
 
 def normalize_auth_users(payload: dict[str, Any]) -> None:
+    """Force admin/tanoh en superadmin global, sans recréer tanoh s'il a été supprimé."""
     sites = payload.get("sites", [])
     site_ids = [site.get("id") for site in sites if site.get("id")]
     auth = payload.setdefault("auth", {})
@@ -2587,6 +2689,7 @@ def normalize_auth_users(payload: dict[str, Any]) -> None:
 
 
 def sale_formats(item: dict[str, Any]) -> list[dict[str, int]]:
+    """Normalise et trie les formats de vente d'un article (multi-formats ou legacy)."""
     formats: list[dict[str, int]] = []
     for raw in item.get("formatsVente") or []:
         qty = int(raw.get("quantite") or raw.get("qty") or raw.get("packSize") or 1)
@@ -2604,24 +2707,29 @@ def sale_formats(item: dict[str, Any]) -> list[dict[str, int]]:
 
 
 def price_for_format(format_data: dict[str, int], location: str) -> int:
+    """Sélectionne le prix (intérieur/extérieur) d'un format de vente selon la zone."""
     if str(location).startswith("Ext"):
         return int(format_data.get("prixExterieur") or 0)
     return int(format_data.get("prixInterieur") or 0)
 
 
 def stock_legacy_total(item: dict[str, Any]) -> int:
+    """Calcule le stock selon l'ancien modèle : initial + entrées - sorties."""
     return max(0, int(item.get("init") or 0) + int(item.get("entrees") or 0) - int(item.get("sorties") or 0))
 
 
 def stock_frigo(item: dict[str, Any]) -> int:
+    """Quantité en stock au frigo, avec repli sur le calcul legacy si champ absent."""
     return max(0, int(item.get("frigo") if item.get("frigo") is not None else stock_legacy_total(item)))
 
 
 def stock_reserve(item: dict[str, Any]) -> int:
+    """Quantité en stock de réserve (hors frigo), avec repli sur le calcul legacy."""
     return max(0, int(item.get("reserve") if item.get("reserve") is not None else stock_legacy_total(item) - stock_frigo(item)))
 
 
 def stock_total(item: dict[str, Any]) -> int:
+    """Stock physique total : frigo + réserve si renseignés, sinon calcul legacy (init+entrées-sorties)."""
     # Stock actuel = frigo + réserve quand ces champs existent (stock physique réel)
     if "frigo" in item or "reserve" in item:
         return max(0, stock_frigo(item) + stock_reserve(item))
@@ -2629,10 +2737,12 @@ def stock_total(item: dict[str, Any]) -> int:
 
 
 def stock_available(item: dict[str, Any]) -> int:
+    """Stock disponible pour la vente (alias du stock total physique)."""
     return stock_total(item)
 
 
 def reserved_bottles_for_site(site_id: str, commandes: list[dict[str, Any]]) -> dict[str, int]:
+    """Cumule les bouteilles réservées par article via les commandes ouvertes d'un maquis."""
     reserved: dict[str, int] = {}
     for order in commandes or []:
         if order.get("siteId") != site_id:
@@ -2653,6 +2763,7 @@ def reserved_bottles_for_site(site_id: str, commandes: list[dict[str, Any]]) -> 
 
 
 def reserved_bottles_for_site_excluding_order(site_id: str, commandes: list[dict[str, Any]], exclude_order_id: int | None) -> dict[str, int]:
+    """Cumule les bouteilles réservées par article pour un maquis, en excluant une commande donnée (fusion)."""
     reserved: dict[str, int] = {}
     for order in commandes or []:
         if exclude_order_id is not None and order.get("id") == exclude_order_id:
@@ -2675,6 +2786,7 @@ def reserved_bottles_for_site_excluding_order(site_id: str, commandes: list[dict
 
 
 def stock_total_by_article(site_id: str, stock_rows: list[dict[str, Any]]) -> dict[str, int]:
+    """Cumule le stock disponible par article pour un maquis donné."""
     totals: dict[str, int] = {}
     for item in stock_rows:
         if item.get("siteId") != site_id:
@@ -2690,6 +2802,7 @@ class SessionManager:
     """Sessions avec limite absolue et fenetre d'inactivite (idle)."""
 
     def __init__(self, *, absolute_seconds: int, idle_seconds: int) -> None:
+        """Initialise le gestionnaire de sessions avec ses durées de vie absolue et d'inactivité."""
         self.absolute_seconds = max(300, int(absolute_seconds or SESSION_TTL_SECONDS))
         self.idle_seconds = max(0, int(idle_seconds or 0))
         self._sessions: dict[str, dict[str, Any]] = {}
@@ -2704,6 +2817,7 @@ class SessionManager:
         global_superadmin: bool = False,
         all_site_ids: list[str] | None = None,
     ) -> str:
+        """Crée une nouvelle session authentifiée et retourne son token."""
         token = secrets.token_urlsafe(32)
         now = int(time.time())
         gs = bool(global_superadmin)
@@ -2722,6 +2836,7 @@ class SessionManager:
         return token
 
     def _session_public_view(self, sess: dict[str, Any]) -> dict[str, Any]:
+        """Projette la session interne vers la vue exposable au client (sans secrets internes)."""
         now = int(time.time())
         created = int(sess.get("createdAt") or now)
         last = int(sess.get("lastActivityAt") or now)
@@ -2761,6 +2876,7 @@ class SessionManager:
             raw["globalSuperadmin"] = bool(bs.get("globalSuperadmin"))
 
     def get(self, token: str | None) -> dict[str, Any] | None:
+        """Récupère la session si valide (non expirée, absolue ou idle), sinon la purge et renvoie None."""
         if not token:
             return None
         now = int(time.time())
@@ -2784,12 +2900,14 @@ class SessionManager:
             return self._session_public_view(session)
 
     def clear(self, token: str | None) -> None:
+        """Supprime la session associée au token (déconnexion)."""
         if not token:
             return
         with self._lock:
             self._sessions.pop(token, None)
 
     def invalidate_all_for_username(self, username: str) -> None:
+        """Révoque toutes les sessions actives d'un utilisateur (changement de rôle, sécurité)."""
         un = str(username or "").strip().lower()
         if not un:
             return
@@ -2805,9 +2923,10 @@ class SessionManager:
 
 class DataStore:
     def __init__(self, path: Path) -> None:
+        """Initialise le magasin d'état : charge les données et calcule l'ETag/révision de départ."""
         self.path = path
         self._lock = threading.RLock()
-        # Meta defaults (must exist before any _write() during _load()).
+        # Valeurs meta par défaut (doivent exister avant tout _write() pendant _load()).
         self._rev = 0
         self._updated_at = ""
         self._sqlite_path = SQLITE_FILE
@@ -2822,10 +2941,12 @@ class DataStore:
         self._updated_at = str(self._state.get("_meta", {}).get("updatedAt") or self._updated_at or "")
 
     def all_site_ids(self) -> list[str]:
+        """Liste les identifiants de tous les maquis connus de l'état."""
         with self._lock:
             return [str(s.get("id")) for s in self._state.get("sites", []) if s.get("id")]
 
     def _sqlite_connect(self) -> sqlite3.Connection:
+        """Ouvre une connexion SQLite (mode WAL) et garantit l'existence de la table kv."""
         conn = sqlite3.connect(str(self._sqlite_path))
         conn.execute("PRAGMA journal_mode=WAL;")
         conn.execute("PRAGMA synchronous=NORMAL;")
@@ -2836,6 +2957,7 @@ class DataStore:
         return conn
 
     def _sqlite_get(self, key: str) -> str | None:
+        """Lit la valeur associée à une clé dans la table SQLite kv."""
         conn = self._sqlite_connect()
         try:
             row = conn.execute("SELECT v FROM kv WHERE k = ?", (key,)).fetchone()
@@ -2844,6 +2966,7 @@ class DataStore:
             conn.close()
 
     def _sqlite_set(self, key: str, value: str) -> None:
+        """Enregistre (upsert) une valeur clé-valeur dans la table SQLite kv."""
         conn = self._sqlite_connect()
         try:
             conn.execute("INSERT INTO kv(k, v) VALUES(?, ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", (key, value))
@@ -2854,6 +2977,7 @@ class DataStore:
     # ── PostgreSQL ────────────────────────────────────────────────────────────
 
     def _pg_connect(self):  # type: ignore[return]
+        """Ouvre une connexion PostgreSQL via psycopg2, en validant la disponibilité du driver et du DSN."""
         if not _PSYCOPG2_OK:
             raise RuntimeError("psycopg2 non installé. Exécutez : pip install psycopg2-binary")
         if not PG_DSN:
@@ -2861,6 +2985,7 @@ class DataStore:
         return psycopg2.connect(PG_DSN)
 
     def _pg_ensure_tables(self, conn: Any) -> None:
+        """Crée les tables PostgreSQL si absentes, depuis schema.sql ou un schéma minimal inline."""
         schema_file = BASE_DIR / "schema.sql"
         if schema_file.exists():
             sql = schema_file.read_text(encoding="utf-8")
@@ -2954,6 +3079,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
         )
 
     def _pg_load(self) -> dict[str, Any]:
+        """Recharge l'état complet depuis PostgreSQL (settings, sites, users, tables listées)."""
         conn = self._pg_connect()
         try:
             self._pg_ensure_tables(conn)
@@ -2982,6 +3108,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
             conn.close()
 
     def _pg_write(self, payload: dict[str, Any], changed_keys: set | None = None) -> None:
+        """Persiste l'état dans PostgreSQL via upsert ciblé par table (et tombstones de suppression)."""
         if self._pg_startup_failed:
             raise RuntimeError(
                 "[postgres] ÉCRITURE BLOQUÉE : PostgreSQL était inaccessible au démarrage. "
@@ -3085,18 +3212,20 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
             conn.close()
 
     def _compute_etag(self) -> str:
+        """Calcule l'ETag de l'état : révision logique en base, mtime/taille pour data.json."""
         if self._sqlite_enabled or self._pg_enabled:
-            # Based on logical revision.
+            # Basé sur la révision logique.
             return f'W/"rev-{int(self._rev or 0)}"'
         try:
             stat = self.path.stat()
-            # Weak ETag is enough for cache revalidation, cheap to compute.
+            # Un ETag faible suffit pour la revalidation cache, peu coûteux à calculer.
             return f'W/"{int(stat.st_mtime)}-{stat.st_size}"'
         except OSError:
             return 'W/"0-0"'
 
     @staticmethod
     def _merge_payload(payload: dict) -> dict:
+        """Fusionne un payload chargé avec l'état par défaut pour garantir toutes les clés attendues."""
         merged = build_default_state()
         merged.update({k: v for k, v in payload.items() if k in merged})
         merged["auth"]["users"] = payload.get("auth", {}).get("users", merged["auth"]["users"])
@@ -3159,6 +3288,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
         return None
 
     def _load(self) -> dict[str, Any]:
+        """Charge l'état initial depuis Postgres, SQLite ou data.json, avec migration et secours."""
         if self._pg_enabled:
             pg_load_ok = True
             try:
@@ -3206,7 +3336,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                     payload = build_default_state()
             else:
                 payload = build_default_state()
-                # Persist initial state (will set _meta)
+                # Persiste l'état initial (définira _meta)
                 self._write(payload)
                 return payload
 
@@ -3260,13 +3390,12 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
         return True
 
     def _write(self, payload: dict[str, Any], changed_keys: set | None = None) -> None:
+        """Persiste l'état (Postgres, SQLite ou data.json) et déclenche les sauvegardes glissantes."""
         BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-        # Update meta
+        # Met à jour les métadonnées
         self._rev = int(self._rev or 0) + 1
         self._updated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         payload["_meta"] = {"rev": self._rev, "updatedAt": self._updated_at}
-
-        body = json.dumps(payload, ensure_ascii=False, indent=2)
 
         if self._pg_enabled:
             try:
@@ -3278,7 +3407,10 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                 raise
             # Sauvegarde JSON automatique (rollback possible) — throttlee, la
             # persistance reelle (Postgres) ci-dessus n'est jamais throttlee.
+            # Le json.dumps (coûteux sur un état volumineux) n'est calculé que si une
+            # sauvegarde est effectivement due, pour ne pas payer ce coût à chaque écriture.
             if self._backup_due():
+                body = json.dumps(payload, ensure_ascii=False)
                 try:
                     stamp = time.strftime("%Y%m%d-%H%M%S")
                     backup_path = BACKUP_DIR / f"data-{stamp}.json"
@@ -3298,9 +3430,11 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
             self._last_etag = self._compute_etag()
             return
 
+        body = json.dumps(payload, ensure_ascii=False, indent=2)
+
         if self._sqlite_enabled:
             self._sqlite_set("state", body)
-            # Lightweight rolling backups (copy the DB file) — throttlees.
+            # Sauvegardes glissantes légères (copie du fichier DB) — throttlées.
             if self._backup_due():
                 try:
                     stamp = time.strftime("%Y%m%d-%H%M%S") + f"-{int((time.time() % 1) * 1000):03d}"
@@ -3355,10 +3489,12 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
         self._last_etag = self._compute_etag()
 
     def etag(self) -> str:
+        """Retourne l'ETag courant de l'état, calculé à la dernière écriture."""
         with self._lock:
             return self._last_etag
 
     def meta(self) -> dict[str, Any]:
+        """Retourne la révision courante et la date de dernière mise à jour de l'état."""
         with self._lock:
             return {"rev": int(self._rev or 0), "updatedAt": self._updated_at}
 
@@ -3376,10 +3512,12 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
     )
 
     def public_state(self, keys: set[str] | None = None) -> dict[str, Any]:
+        """Expose l'état complet en deepcopy, sans filtrage par périmètre maquis."""
         with self._lock:
             s = self._state
 
             def inc(k: str) -> bool:
+                """Vrai si la clé doit être incluse dans l'état public complet."""
                 return keys is None or k in keys
 
             out: dict[str, Any] = {
@@ -3412,6 +3550,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
     def public_state_for_session(
         self, session: dict[str, Any], keys: set[str] | None = None
     ) -> dict[str, Any]:
+        """Construit l'état public filtré selon le périmètre maquis (allowedSiteIds) de la session."""
         with self._lock:
             full = self.public_state(keys=keys)
             site_ids = [str(s["id"]) for s in self._state["sites"] if s.get("id")]
@@ -3425,6 +3564,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
             sites = [s for s in self._state["sites"] if str(s.get("id", "")) in allowed]
 
             def filter_site_rows(rows: list[Any]) -> list[Any]:
+                """Ne garde que les lignes dont le maquis effectif est dans le périmètre autorisé."""
                 out = []
                 for r in rows or []:
                     if not isinstance(r, dict):
@@ -3455,6 +3595,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
             pdj_filtered = {k: v for k, v in pdj_full.items() if str(k) in allowed_set}
 
             def inc(k: str) -> bool:
+                """Vrai si la clé doit être incluse dans le payload filtré par session."""
                 return keys is None or k in keys
 
             payload: dict[str, Any] = {
@@ -3519,7 +3660,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                     continue
                 if site_id and osid != site_id:
                     continue
-                # Focus on QR sourced orders (most frequent changes).
+                # Se concentre sur les commandes via QR (changements les plus fréquents).
                 if order.get("source") != "qr":
                     continue
                 updated = str(order.get("updatedAt") or order.get("createdAt") or "")
@@ -3620,6 +3761,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
             return self._apply_recovery_payload(payload)
 
     def public_menu(self, site_id: str, location: str = "Intérieur") -> dict[str, Any] | None:
+        """Construit le menu public (articles en stock, prix selon zone) consultable via QR code."""
         with self._lock:
             site = next((item for item in self._state["sites"] if item.get("id") == site_id), None)
             if not site:
@@ -3632,8 +3774,8 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                 for k in stock_by_article.keys()
             }
 
-            # De-duplicate menu items by key (article::packSize). This avoids duplicates when
-            # the stock contains the same article multiple times.
+            # Déduplique les articles du menu par clé (article::packSize). Évite les doublons
+            # quand le stock contient le même article plusieurs fois.
             by_key: dict[str, dict[str, Any]] = {}
             for item in self._state["stock"]:
                 if item.get("siteId") != site_id:
@@ -3646,7 +3788,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                     if prix <= 0:
                         continue
                     pack_size = max(1, int(format_data["quantite"]))
-                    # Only show items that can be served now (at least one unit/kit available).
+                    # N'affiche que les articles servables maintenant (au moins une unité/lot disponible).
                     if available_by_article.get(article_key, 0) < pack_size:
                         continue
                     key = f"{item.get('article', '')}::{pack_size}"
@@ -3661,7 +3803,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                         "availableBottles": int(available_by_article.get(article_key, 0)),
                     }
                     existing = by_key.get(key)
-                    # If duplicates exist, keep the highest price (safer than undercharging).
+                    # En cas de doublons, garde le prix le plus élevé (plus sûr que de sous-facturer).
                     if existing is None or float(candidate.get("prix") or 0) > float(existing.get("prix") or 0):
                         by_key[key] = candidate
 
@@ -3679,6 +3821,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
         location: str = "Intérieur",
         items: list[dict[str, Any]],
     ) -> dict[str, Any]:
+        """Crée ou fusionne une commande client via QR code, avec vérification de stock disponible."""
         # Bornes anti-abus : entrée publique non authentifiée (limiter le nombre de lignes
         # et la longueur des champs texte pour éviter charges/stockage abusifs).
         items = items[:50] if isinstance(items, list) else []
@@ -3760,7 +3903,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                     self._state.get("commandes", []) or [],
                     int(existing_order.get("id") or 0) or None,
                 )
-                # Ensure merged orders cannot exceed physical stock across duplicate rows / cumulative qty.
+                # Garantit que les commandes fusionnées ne dépassent pas le stock physique, même avec des lignes en double / quantités cumulées.
                 merge_requested = dict(requested)
                 for line in existing_order.get("lignes", []) or []:
                     k = str(line.get("article", "")).strip().lower()
@@ -3807,10 +3950,11 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
             return new_snap
 
     def public_orders(self, site_id: str, table_label: str, client: str = "") -> dict[str, Any]:
+        """Liste les commandes en cours et factures réglées d'un client identifié sur une table."""
         with self._lock:
             label = table_label.strip() or "Comptoir"
             client_label = client.strip()
-            # Client must be identified to see any orders
+            # Le client doit être identifié pour voir ses commandes
             if not client_label:
                 return {"orders": [], "totalDue": 0, "totalPaid": 0}
 
@@ -3820,7 +3964,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                     continue
                 if order.get("table") != label:
                     continue
-                # Strict client match only — never show another client's orders
+                # Correspondance client stricte uniquement — ne jamais montrer les commandes d'un autre client
                 if order.get("client") != client_label:
                     continue
                 total = sum((float(line.get("prix") or 0) * float(line.get("qty") or 0) - float(line.get("remise") or 0)) for line in order.get("lignes", []))
@@ -3852,7 +3996,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                     continue
                 sale_client = str(sale.get("client", ""))
                 sale_table = str(sale.get("table", ""))
-                # Strict match: table must match AND client must match
+                # Correspondance stricte : la table ET le client doivent correspondre
                 if sale_table != label or sale_client != client_label:
                     continue
                 key = sale.get("factureNumber") or f"VENTE-{sale.get('id')}"
@@ -3884,6 +4028,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
             return {"orders": json.loads(json.dumps(orders)), "totalDue": total_due, "totalPaid": total_paid}
 
     def verify_credentials(self, username: str, password: str) -> dict[str, Any] | None:
+        """Authentifie un utilisateur (mot de passe, promotion superadmin global) et renvoie son profil d'accès."""
         un_in = str(username or "").strip()
         key_in = un_in.casefold()
         with self._lock:
@@ -3932,6 +4077,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
         return None
 
     def update_state(self, payload: dict[str, Any], session: dict[str, Any]) -> dict[str, Any]:
+        """Applique une mise à jour partielle de l'état, filtrée selon le périmètre maquis de la session."""
         with self._lock:
             current = self._state
             site_ids = [site.get("id") for site in current["sites"] if site.get("id")]
@@ -4191,6 +4337,13 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                                 allowed,
                                 sid_list,
                             )
+                    elif _key == "ventes":
+                        current[_key] = merge_ventes_scoped(
+                            current.get(_key, []),
+                            payload[_key],
+                            allowed,
+                            sid_list,
+                        )
                     elif _key == "commandes":
                         current[_key] = merge_commandes_scoped(
                             current.get(_key, []),
@@ -4271,6 +4424,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
             return self.public_state_for_session(session, keys=set(payload.keys()))
 
     def reset(self) -> dict[str, Any]:
+        """Réinitialise complètement l'état applicatif aux valeurs par défaut."""
         with self._lock:
             self._state = build_default_state()
             self._write(self._state)
@@ -4291,6 +4445,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                 raise ValueError("Maquis introuvable.")
 
             def belongs_site(row: Any) -> bool:
+                """Prédicat : la ligne appartient-elle au maquis ciblé par la purge ?"""
                 if not isinstance(row, dict):
                     return False
                 raw_sid = row.get("siteId")
@@ -4299,6 +4454,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                 return str(raw_sid).strip() == sid
 
             def keep_row(row: Any) -> bool:
+                """Prédicat : conserver la ligne si elle n'appartient pas au maquis purgé."""
                 if not isinstance(row, dict):
                     return True
                 raw_sid = row.get("siteId")
@@ -4332,6 +4488,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
             return self.public_state()
 
     def list_backups_for_session(self, session: dict[str, Any]) -> dict[str, Any]:
+        """Filtre la liste des sauvegardes selon le périmètre maquis autorisé de la session."""
         full = self.list_backups()
         site_ids = [str(s["id"]) for s in self._state["sites"] if s.get("id")]
         if session_is_superadmin(session, all_site_ids=site_ids):
@@ -4347,6 +4504,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
             return scoped
 
         def json_visible(name: str) -> bool:
+            """Prédicat : la sauvegarde JSON nommée est-elle visible pour les maquis autorisés du superadmin scopé ?"""
             low = name.lower()
             if low.startswith("site-"):
                 return any(site_backup_filename_matches_site(name, sid) for sid in allowed)
@@ -4365,6 +4523,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
         return scoped
 
     def list_backups(self) -> dict[str, Any]:
+        """Liste toutes les sauvegardes disponibles (JSON et SQLite) sans filtrage par maquis."""
         BACKUP_DIR.mkdir(parents=True, exist_ok=True)
         json_rows: list[dict[str, Any]] = []
         sqlite_rows: list[dict[str, Any]] = []
@@ -4396,6 +4555,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
             raise ValueError("Maquis invalide.")
 
         def row_site(r: Any) -> str | None:
+            """Extrait le siteId d'une ligne, ou None si absent (pour cibler les lignes à restaurer pour ce maquis)."""
             if not isinstance(r, dict):
                 return None
             v = r.get("siteId")
@@ -4466,6 +4626,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
             raise ValueError("Maquis invalide.")
 
         def row_site(r: Any) -> str | None:
+            """Extrait le siteId d'une ligne, ou None si absent (pour filtrer les lignes du maquis sauvegardé)."""
             if not isinstance(r, dict):
                 return None
             v = r.get("siteId")
@@ -4510,6 +4671,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
         return {"ok": "true", "file": name, "siteId": sid}
 
     def _prune_manual_backups(self, keep: int) -> None:
+        """Supprime les sauvegardes manuelles excédentaires, n'en conserve que les plus récentes."""
         try:
             if self._sqlite_enabled:
                 paths = list(BACKUP_DIR.glob("app-*-manuel.sqlite3"))
@@ -4566,6 +4728,7 @@ class AppHandler(BaseHTTPRequestHandler):
     timeout = 30
 
     def _request_is_https(self) -> bool:
+        """Détecte si la requête d'origine est en HTTPS via les en-têtes de proxy (Cloudflare)."""
         proto = (self.headers.get("X-Forwarded-Proto") or "").strip().lower()
         if proto == "https":
             return True
@@ -4573,9 +4736,11 @@ class AppHandler(BaseHTTPRequestHandler):
         return '"scheme":"https"' in cf_visitor
 
     def _cookie_secure(self) -> str:
+        """Retourne l'attribut "; Secure" à ajouter au cookie si la connexion est en HTTPS."""
         return "; Secure" if (cookie_secure_flag() or self._request_is_https()) else ""
 
     def _send_security_headers(self) -> None:
+        """Ajoute les en-têtes HTTP de sécurité standard (anti-clickjacking, CSP, etc.) à la réponse."""
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("X-Frame-Options", "DENY")
@@ -4592,13 +4757,15 @@ class AppHandler(BaseHTTPRequestHandler):
         )
 
     def client_ip(self) -> str:
-        # If behind cloudflared, try CF-Connecting-IP.
+        """Détermine l'IP réelle du client, en tenant compte d'un éventuel proxy Cloudflare."""
+        # Si derrière cloudflared, essaie CF-Connecting-IP.
         ip = (self.headers.get("CF-Connecting-IP") or "").strip()
         if ip:
             return ip
         return (self.client_address[0] if self.client_address else "") or "unknown"
 
     def do_GET(self) -> None:
+        """Routeur principal des requêtes GET : API publique/privée ou fichiers statiques selon le chemin."""
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query)
         get_path = (parsed.path or "/").rstrip("/") or "/"
@@ -4696,6 +4863,7 @@ class AppHandler(BaseHTTPRequestHandler):
         self.serve_static(parsed.path)
 
     def do_POST(self) -> None:
+        """Routeur principal des requêtes POST : dispatche vers chaque endpoint API selon le chemin."""
         post_path = (urlparse(self.path).path or "/").rstrip("/") or "/"
         if post_path == "/api/admin/restore-from-json":
             session = self.require_session()
@@ -5330,6 +5498,7 @@ class AppHandler(BaseHTTPRequestHandler):
         self.send_error(HTTPStatus.NOT_FOUND)
 
     def do_OPTIONS(self) -> None:
+        """Répond aux requêtes CORS preflight."""
         self.send_response(HTTPStatus.NO_CONTENT)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, X-CSRF-Token")
@@ -5337,6 +5506,7 @@ class AppHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_PUT(self) -> None:
+        """Route PUT /api/state : valide session/CSRF/déduplication puis applique la mise à jour d'état."""
         parsed = urlparse(self.path)
         print(f"[PUT] {parsed.path} depuis {self.client_ip()}", flush=True)
         if parsed.path == "/api/state":
@@ -5387,6 +5557,7 @@ class AppHandler(BaseHTTPRequestHandler):
         self.send_error(HTTPStatus.NOT_FOUND)
 
     def serve_static(self, raw_path: str) -> None:
+        """Sert un fichier statique autorisé (HTML/CSS/JS/JSON/SVG) avec gestion ETag et gzip."""
         route = "/" if raw_path == "" else raw_path
         if route == "/":
             route = "/index.html"
@@ -5442,6 +5613,7 @@ class AppHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def require_session(self, *, allow_password_expired: bool = False) -> dict[str, Any] | None:
+        """Valide la session courante (existence, 2FA, expiration mot de passe) ou répond une erreur HTTP."""
         token = self.session_token()
         session = sessions.get(token)
         if session is None:
@@ -5479,6 +5651,7 @@ class AppHandler(BaseHTTPRequestHandler):
         return session
 
     def require_csrf(self, session: dict[str, Any]) -> bool:
+        """Valide le jeton CSRF de la requête contre celui de la session (fail-closed), journalise les rejets."""
         # Fail-closed : une session validee possede toujours un csrfToken (backfill cote serveur).
         # Si le jeton attendu est absent, on refuse (au lieu d'autoriser) pour ne pas creer de trou CSRF.
         expected = str(session.get("csrfToken") or "").strip()
@@ -5496,6 +5669,7 @@ class AppHandler(BaseHTTPRequestHandler):
         return False
 
     def session_token(self) -> str | None:
+        """Extrait le jeton de session depuis le cookie de la requête."""
         cookie_header = self.headers.get("Cookie")
         if not cookie_header:
             return None
@@ -5505,6 +5679,7 @@ class AppHandler(BaseHTTPRequestHandler):
         return morsel.value if morsel else None
 
     def read_json(self) -> dict[str, Any]:
+        """Lit et décode le corps JSON de la requête, retourne {} si invalide ou trop volumineux."""
         # Content-Length invalide / absent / négatif / hors borne → corps vide (pas de crash, pas de DoS).
         try:
             length = int(self.headers.get("Content-Length", "0") or "0")
@@ -5530,6 +5705,7 @@ class AppHandler(BaseHTTPRequestHandler):
         etag: str | None = None,
         cache_control: str = "no-store",
     ) -> None:
+        """Sérialise et envoie une réponse JSON (gzip si profitable, cookie de session optionnel)."""
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         accept_encoding = self.headers.get("Accept-Encoding", "")
         use_gzip = "gzip" in accept_encoding.lower() and len(body) > 1024
@@ -5559,6 +5735,7 @@ class AppHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def send_not_modified(self, etag: str) -> None:
+        """Répond 304 Not Modified avec l'ETag fourni (cache HTTP)."""
         self.send_response(HTTPStatus.NOT_MODIFIED)
         self._send_security_headers()
         self.send_header("ETag", etag)
@@ -5566,6 +5743,7 @@ class AppHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def guess_content_type(self, suffix: str) -> str:
+        """Déduit le Content-Type HTTP à partir de l'extension de fichier."""
         mapping = {
             ".html": "text/html; charset=utf-8",
             ".css": "text/css; charset=utf-8",
@@ -5576,6 +5754,7 @@ class AppHandler(BaseHTTPRequestHandler):
         return mapping.get(suffix, "application/octet-stream")
 
     def log_message(self, format: str, *args: Any) -> None:
+        """Désactive la journalisation HTTP par défaut sur la sortie standard."""
         return
 
 
@@ -5584,12 +5763,14 @@ class AppHandler(BaseHTTPRequestHandler):
 # ---------------------------------------------------------------------------
 
 def _stock_frigo_py(item: dict[str, Any]) -> float:
+    """Calcule le stock en frigo d'un article."""
     if item.get("frigo") is not None:
         return max(0.0, float(item["frigo"] or 0))
     return max(0.0, float(item.get("init", 0) or 0) + float(item.get("entrees", 0) or 0) - float(item.get("sorties", 0) or 0))
 
 
 def _stock_reserve_py(item: dict[str, Any]) -> float:
+    """Calcule le stock en réserve d'un article (hors frigo)."""
     if item.get("reserve") is not None:
         return max(0.0, float(item["reserve"] or 0))
     total = max(0.0, float(item.get("init", 0) or 0) + float(item.get("entrees", 0) or 0) - float(item.get("sorties", 0) or 0))
@@ -5597,12 +5778,14 @@ def _stock_reserve_py(item: dict[str, Any]) -> float:
 
 
 def _stock_actuel_py(item: dict[str, Any]) -> float:
+    """Calcule le stock total actuel (frigo + réserve) d'un article."""
     if item.get("frigo") is not None or item.get("reserve") is not None:
         return max(0.0, _stock_frigo_py(item) + _stock_reserve_py(item))
     return max(0.0, float(item.get("init", 0) or 0) + float(item.get("entrees", 0) or 0) - float(item.get("sorties", 0) or 0))
 
 
 def _add_calendar_days_iso(iso_date: str, days: int) -> str:
+    """Ajoute un nombre de jours calendaires à une date ISO et renvoie la date ISO résultante."""
     from datetime import date, timedelta
     y, m, d = iso_date[:10].split("-")
     return (date(int(y), int(m), int(d)) + timedelta(days=days)).isoformat()
@@ -5698,6 +5881,7 @@ def _server_auto_close_site(site_id: str, d_str: str) -> None:
         opened_at = str(day_book.get("openedAt") or "") if day_book else ""
 
         def _po_in_accounting_day(po: dict) -> bool:
+            """Prédicat : le bon de commande reçu appartient-il à la journée comptable en cours de clôture ?"""
             if str(po.get("status", "")) != "Reçue":
                 return False
             effective = str(po.get("receivedAt") or po.get("date", ""))
@@ -5872,6 +6056,7 @@ def _server_auto_close_site(site_id: str, d_str: str) -> None:
 def _auto_cloture_check() -> None:
     """Vérifie toutes les minutes si une clôture automatique est due."""
     def _to_mins(hhmm: str) -> int:
+        """Convertit une heure "HH:MM" en minutes depuis minuit."""
         try:
             h, m = hhmm[:5].split(":")
             return int(h) * 60 + int(m)
@@ -5961,7 +6146,9 @@ def _purge_expired_inmemory() -> None:
 
 
 def _start_auto_cloture_thread() -> None:
+    """Lance le thread d'arrière-plan qui vérifie périodiquement les clôtures automatiques."""
     def loop() -> None:
+        """Boucle de fond : vérifie chaque minute les clôtures dues et purge les sessions expirées."""
         while True:
             time.sleep(60)
             _auto_cloture_check()
@@ -5971,6 +6158,7 @@ def _start_auto_cloture_thread() -> None:
 
 
 def main() -> None:
+    """Démarre le serveur HTTP : choix du port libre, planificateur de clôture, boucle d'écoute."""
     host = _env_first("MAQUIS_MANAGER_HOST", "TDB_BAR_HOST", default="0.0.0.0")
     requested_port = int(_env_first("MAQUIS_MANAGER_PORT", "TDB_BAR_PORT", default="8000"))
     candidate_ports = []

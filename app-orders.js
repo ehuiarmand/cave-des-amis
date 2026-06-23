@@ -13582,27 +13582,29 @@ async function deleteCommandeOrpheline(factureNum, commande) {
 }
 
 /** Construit le texte d'info prix pour un article (formats kit + prix). */
-function corrBuildPriceInfo(articleName, siteId, fallbackPrix) {
+function corrBuildPriceInfo(articleName, siteId, fallbackPrix, location) {
   const item = stockItemForArticle(articleName, siteId || currentSiteId());
   if (!item) {
     return fallbackPrix ? `${fmt(fallbackPrix)} FCFA / u (prix original)` : "Prix non disponible";
   }
+  const isExt = String(location || "").startsWith("Ext");
   const formats = normalizeSaleFormats(item);
   if (formats.length) {
     return formats.map((f) => {
       const pack = Number(f.quantite) || 1;
-      const prix = fmt(f.prixInterieur);
+      const prix = fmt(isExt ? (Number(f.prixExterieur) || f.prixInterieur) : f.prixInterieur);
       return pack > 1
         ? `<strong>${prix} FCFA</strong> / kit de ${pack} btl`
         : `<strong>${prix} FCFA</strong> / btl`;
     }).join(" &nbsp;·&nbsp; ");
   }
-  const { prixInt } = resolveItemPrices(item);
+  const { prixInt, prixExt } = resolveItemPrices(item);
+  const prix = isExt ? prixExt : prixInt;
   const pack = linePackSize({ article: articleName }, item);
-  if (prixInt) {
+  if (prix) {
     return pack > 1
-      ? `<strong>${fmt(prixInt)} FCFA</strong> / kit de ${pack} btl`
-      : `<strong>${fmt(prixInt)} FCFA</strong> / u`;
+      ? `<strong>${fmt(prix)} FCFA</strong> / kit de ${pack} btl`
+      : `<strong>${fmt(prix)} FCFA</strong> / u`;
   }
   return fallbackPrix ? `${fmt(fallbackPrix)} FCFA / u` : "Prix non disponible";
 }
@@ -13712,7 +13714,7 @@ function renderCorrectionResult(factureNum, ventes) {
   ventes.forEach((_, i) => {
     document.getElementById(`corr-art-${i}`)?.addEventListener("change", (e) => {
       const el = document.getElementById(`corr-prix-${i}`);
-      if (el) el.innerHTML = corrBuildPriceInfo(e.target.value, siteId, null);
+      if (el) el.innerHTML = corrBuildPriceInfo(e.target.value, siteId, null, ventes[i]?.location);
     });
   });
 }
@@ -13892,9 +13894,14 @@ async function applyArticleCorrection(factureNum, originalVentes) {
       const c = idMap.get(v.id);
       if (!c) return v;
       const newItem = stockItemForArticle(c.newArticle, siteId);
-      // Utiliser le prix du format primaire (kit) plutôt que le prix bouteille brut
+      // Utiliser le prix du format primaire (kit) plutôt que le prix bouteille brut,
+      // en respectant le lieu (Intérieur/Extérieur) de la ligne d'origine.
       const newFormat = primarySaleFormat(newItem || {});
-      const newPrix = Number(newFormat?.prixInterieur) || resolveItemPrices(newItem || {}).prixInt || v.prix;
+      const newPrices = resolveItemPrices(newItem || {});
+      const isExt = String(v.location || "").startsWith("Ext");
+      const newPrix = (isExt
+        ? Number(newFormat?.prixExterieur) || newPrices.prixExt
+        : Number(newFormat?.prixInterieur) || newPrices.prixInt) || v.prix;
       const newTotal = (Number(v.qty) || 0) * newPrix;
       const updated = { ...v, article: c.newArticle, prix: newPrix, total: newTotal };
       syncVentePaymentDetails(updated, calcNet(updated));
