@@ -13582,7 +13582,7 @@ async function deleteCommandeOrpheline(factureNum, commande) {
 }
 
 /** Construit le texte d'info prix pour un article (formats kit + prix). */
-function corrBuildPriceInfo(articleName, siteId, fallbackPrix, location) {
+function corrBuildPriceInfo(articleName, siteId, fallbackPrix, location, wantedPack) {
   const item = stockItemForArticle(articleName, siteId || currentSiteId());
   if (!item) {
     return fallbackPrix ? `${fmt(fallbackPrix)} FCFA / u (prix original)` : "Prix non disponible";
@@ -13593,9 +13593,11 @@ function corrBuildPriceInfo(articleName, siteId, fallbackPrix, location) {
     return formats.map((f) => {
       const pack = Number(f.quantite) || 1;
       const prix = fmt(isExt ? (Number(f.prixExterieur) || f.prixInterieur) : f.prixInterieur);
-      return pack > 1
+      const isRetenu = wantedPack && pack === Number(wantedPack);
+      const label = pack > 1
         ? `<strong>${prix} FCFA</strong> / kit de ${pack} btl`
         : `<strong>${prix} FCFA</strong> / btl`;
+      return isRetenu ? `${label} <em>(retenu)</em>` : label;
     }).join(" &nbsp;·&nbsp; ");
   }
   const { prixInt, prixExt } = resolveItemPrices(item);
@@ -13714,7 +13716,9 @@ function renderCorrectionResult(factureNum, ventes) {
   ventes.forEach((_, i) => {
     document.getElementById(`corr-art-${i}`)?.addEventListener("change", (e) => {
       const el = document.getElementById(`corr-prix-${i}`);
-      if (el) el.innerHTML = corrBuildPriceInfo(e.target.value, siteId, null, ventes[i]?.location);
+      const v = ventes[i];
+      const wantedPack = linePackSize(v, stockItemForArticle(v?.article, siteId));
+      if (el) el.innerHTML = corrBuildPriceInfo(e.target.value, siteId, null, v?.location, wantedPack);
     });
   });
 }
@@ -13893,17 +13897,21 @@ async function applyArticleCorrection(factureNum, originalVentes) {
     state.ventes = (state.ventes || []).map((v) => {
       const c = idMap.get(v.id);
       if (!c) return v;
+      const oldItem = stockItemForArticle(c.oldArticle, siteId);
       const newItem = stockItemForArticle(c.newArticle, siteId);
-      // Utiliser le prix du format primaire (kit) plutôt que le prix bouteille brut,
-      // en respectant le lieu (Intérieur/Extérieur) de la ligne d'origine.
-      const newFormat = primarySaleFormat(newItem || {});
+      // Le prix doit correspondre au même format (unité ou kit) que la ligne
+      // d'origine, pas systématiquement au format primaire de l'article,
+      // et respecter le lieu (Intérieur/Extérieur) de la ligne.
+      const wantedPack = linePackSize(v, oldItem);
+      const newFormats = normalizeSaleFormats(newItem || {});
+      const newFormat = newFormats.find((f) => Number(f.quantite) === wantedPack) || primarySaleFormat(newItem || {});
       const newPrices = resolveItemPrices(newItem || {});
       const isExt = String(v.location || "").startsWith("Ext");
       const newPrix = (isExt
         ? Number(newFormat?.prixExterieur) || newPrices.prixExt
         : Number(newFormat?.prixInterieur) || newPrices.prixInt) || v.prix;
       const newTotal = (Number(v.qty) || 0) * newPrix;
-      const updated = { ...v, article: c.newArticle, prix: newPrix, total: newTotal };
+      const updated = { ...v, article: c.newArticle, formatQuantite: wantedPack, prix: newPrix, total: newTotal };
       syncVentePaymentDetails(updated, calcNet(updated));
       return updated;
     });
