@@ -2853,6 +2853,22 @@ def credit_outstanding_for_debtor(state: dict[str, Any], site_id: str, debtor_ke
     return total if total > 0.001 else 0.0
 
 
+def order_verify_status(state: dict[str, Any], site_id: str, order_id: int) -> dict[str, Any] | None:
+    """Statut courant d'une commande pour la verification QR du ticket :
+    - encore presente dans `commandes` → son statut (En attente / Servi / ...), non payee
+    - absente mais reliee a une vente (sourceOrderId) → payee (facture emise)
+    - absente sans vente correspondante → probablement annulee/supprimee"""
+    for o in state.get("commandes", []) or []:
+        if str(o.get("siteId", "")) == site_id and int(o.get("id") or -1) == order_id:
+            return {"paid": False, "status": str(o.get("status") or "En attente"), "factureNumber": None}
+    for v in state.get("ventes", []) or []:
+        if str(v.get("siteId", "")) != site_id:
+            continue
+        if v.get("sourceOrderId") is not None and int(v.get("sourceOrderId")) == order_id:
+            return {"paid": True, "status": "Payé", "factureNumber": v.get("factureNumber")}
+    return {"paid": False, "status": "Introuvable (annulée ou supprimée)", "factureNumber": None}
+
+
 def qr_verify_token(secret: str, site_id: str, debtor_key: str) -> str:
     """Jeton signe (HMAC) protegeant le lien public de verification de solde — empeche de
     deviner/enumerer des debiteurs sans avoir d'abord obtenu le lien via une session authentifiee."""
@@ -2890,6 +2906,41 @@ def _verify_solde_html(site_name: str | None, debtor_key: str, outstanding: floa
         f"<p>Débiteur : <strong>{escape_html(debtor_key)}</strong></p>"
         f"<div class=\"status\">{status_label}</div>{detail}"
         "<p class=\"meta\">Solde calculé en temps réel à l'instant du scan.</p>"
+        "</div></body></html>"
+    )
+
+
+def _verify_commande_html(site_name: str | None, order_id: int, info: dict[str, Any] | None) -> str:
+    """Page HTML mobile-friendly affichee au scan du QR de verification d'un ticket de commande."""
+    if info is None:
+        return (
+            "<!DOCTYPE html><html lang=\"fr\"><head><meta charset=\"utf-8\">"
+            "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+            "<title>Verification</title><style>body{font-family:Arial,sans-serif;padding:32px;"
+            "text-align:center;color:#111}.box{max-width:360px;margin:0 auto;border:2px solid #c54f41;"
+            "border-radius:14px;padding:24px}</style></head><body><div class=\"box\">"
+            "<h1>Lien invalide</h1><p>Ce lien de verification est invalide ou a expire.</p>"
+            "</div></body></html>"
+        )
+    paid = bool(info.get("paid"))
+    status_label = "PAYÉ" if paid else str(info.get("status") or "EN ATTENTE").upper()
+    status_color = "#2e7d32" if paid else "#c54f41"
+    facture = info.get("factureNumber")
+    detail = f"<p class=\"amount\">Facture : {escape_html(str(facture))}</p>" if paid and facture else ""
+    return (
+        "<!DOCTYPE html><html lang=\"fr\"><head><meta charset=\"utf-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        f"<title>Verification — Commande #{order_id}</title>"
+        "<style>body{font-family:Arial,sans-serif;padding:32px;text-align:center;color:#111}"
+        ".box{max-width:360px;margin:0 auto;border:2px solid #ddd;border-radius:14px;padding:24px}"
+        f".status{{display:inline-block;padding:8px 22px;border-radius:24px;font-weight:800;"
+        f"font-size:18px;color:#fff;background:{status_color};margin:12px 0}}"
+        ".amount{font-size:14px;font-weight:700;color:#555}"
+        ".meta{color:#666;font-size:13px;margin-top:16px}</style></head><body><div class=\"box\">"
+        f"<h1>{escape_html(site_name or '')}</h1>"
+        f"<p>Commande : <strong>#{order_id}</strong></p>"
+        f"<div class=\"status\">{escape_html(status_label)}</div>{detail}"
+        "<p class=\"meta\">Statut calculé en temps réel à l'instant du scan.</p>"
         "</div></body></html>"
     )
 
@@ -3870,6 +3921,16 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                 return None
             outstanding = credit_outstanding_for_debtor(self._state, site_id, debtor_key)
             return {"siteName": str(site.get("nom") or ""), "outstanding": outstanding}
+
+    def order_verify_info(self, site_id: str, order_id: int) -> dict[str, Any] | None:
+        """Lecture seule : statut de paiement courant d'une commande, pour la page de
+        verification publique scannee depuis le QR code du ticket (cf. order_verify_status)."""
+        with self._lock:
+            site = next((s for s in self._state.get("sites", []) if str(s.get("id")) == site_id), None)
+            if site is None:
+                return None
+            info = order_verify_status(self._state, site_id, order_id)
+            return {"siteName": str(site.get("nom") or ""), **(info or {})}
 
     def public_menu(self, site_id: str, location: str = "Intérieur") -> dict[str, Any] | None:
         """Construit le menu public (articles en stock, prix selon zone) consultable via QR code."""
@@ -4999,6 +5060,42 @@ class AppHandler(BaseHTTPRequestHandler):
                 self.send_html(HTTPStatus.NOT_FOUND, _verify_solde_html(None, debtor_key, None))
                 return
             self.send_html(HTTPStatus.OK, _verify_solde_html(info["siteName"], debtor_key, info["outstanding"]))
+            return
+        if get_path == "/api/order-verify-link":
+            session = self.require_session()
+            if session is None:
+                return
+            site_id = str((query.get("site") or [""])[0]).strip()
+            try:
+                order_id = int((query.get("order") or [""])[0])
+            except (TypeError, ValueError):
+                self.send_json(HTTPStatus.BAD_REQUEST, {"error": "Parametres manquants."})
+                return
+            if not site_id:
+                self.send_json(HTTPStatus.BAD_REQUEST, {"error": "Parametres manquants."})
+                return
+            if not session_is_superadmin(session, all_site_ids=store.all_site_ids()) and site_id not in (session.get("allowedSiteIds") or []):
+                self.send_json(HTTPStatus.FORBIDDEN, {"error": "Maquis non autorisé pour cette session."})
+                return
+            token = qr_verify_token(store.qr_verify_secret(), site_id, f"order:{order_id}")
+            self.send_json(HTTPStatus.OK, {"token": token, "site": site_id, "order": order_id})
+            return
+        if get_path == "/verify-commande":
+            site_id = str((query.get("site") or [""])[0]).strip()
+            try:
+                order_id = int((query.get("order") or [""])[0])
+            except (TypeError, ValueError):
+                order_id = None
+            token = str((query.get("t") or [""])[0]).strip()
+            expected = qr_verify_token(store.qr_verify_secret(), site_id, f"order:{order_id}") if site_id and order_id is not None else ""
+            if not expected or not hmac.compare_digest(expected, token):
+                self.send_html(HTTPStatus.FORBIDDEN, _verify_commande_html(None, order_id or 0, None))
+                return
+            info = store.order_verify_info(site_id, order_id)
+            if info is None:
+                self.send_html(HTTPStatus.NOT_FOUND, _verify_commande_html(None, order_id, None))
+                return
+            self.send_html(HTTPStatus.OK, _verify_commande_html(info["siteName"], order_id, info))
             return
         self.serve_static(parsed.path)
 
