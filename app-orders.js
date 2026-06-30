@@ -19439,11 +19439,11 @@ function printOrderTicket(orderId = activeOrderId) {
     showToast("Impossible d'ouvrir la fenetre d'impression.");
     return;
   }
-  ticketWindow.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>Ticket ${escapeHtml(order.client)}</title><style>@page{size:55mm auto;margin:0}*{box-sizing:border-box}body{font-family:'Courier New',Consolas,monospace;width:55mm;margin:0;padding:2mm;color:#000;font-size:12px;line-height:1.4}h1{font-size:14px;text-align:center;text-transform:uppercase;margin:0 0 3px}p{margin:0 0 4px;font-size:11px}table{width:100%;border-collapse:collapse;margin-top:6px}td,th{padding:2px 0;border-bottom:1px dashed #000;text-align:left;font-size:11px}th:last-child,td:last-child{text-align:right}.total{margin-top:8px;font-size:14px;font-weight:700;border-top:1px dashed #000;padding-top:4px}.muted{color:#000;font-size:10px}</style></head><body><h1>${escapeHtml(site?.nom || "Maquis")}</h1><p>${escapeHtml(site?.ville || "")} ${escapeHtml(site?.pays || "")}</p><p class="muted">Client: ${escapeHtml(order.client || "Comptoir")} · Date: ${escapeHtml(formatDateDdMmYyyy(order.date))}</p><table><thead><tr><th>Article</th><th>Qté</th><th>Montant</th></tr></thead><tbody>${order.lignes.map((line) => `<tr><td>${escapeHtml(line.article)}</td><td>${escapeHtml(lineQtyLabel(line, stockItemForArticle(line.article)))}</td><td>${fmt(calcNet(line))} FCFA</td></tr>`).join("")}</tbody></table><p class="total">Total: ${fmt(total)} FCFA</p><p class="muted">${escapeHtml(order.note || "")}</p><script>window.onload=function(){window.print();}</script></body></html>`);
+  ticketWindow.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>Ticket ${escapeHtml(order.client)}</title><style>@page{size:58mm auto;margin:0}*{box-sizing:border-box}html,body{margin:0;padding:0}body{font-family:Arial,Helvetica,sans-serif;width:58mm;padding:1.5mm 2mm;color:#000;font-size:12px;line-height:1.35;word-wrap:break-word;overflow-wrap:break-word}h1{font-size:15px;font-weight:900;text-align:center;text-transform:uppercase;margin:0 0 3px}p{margin:0 0 4px;font-size:11px}table{width:100%;border-collapse:collapse;margin-top:6px;table-layout:fixed}td,th{padding:2px 0;border-bottom:1px dashed #000;text-align:left;font-size:10.5px;word-wrap:break-word;overflow-wrap:break-word;vertical-align:top}th:nth-child(1),td:nth-child(1){width:52%}th:nth-child(2),td:nth-child(2){width:16%;text-align:center}th:nth-child(3),td:nth-child(3){width:32%;text-align:right}.total{margin-top:8px;font-size:14px;font-weight:700;border-top:1px dashed #000;padding-top:4px}.muted{color:#000;font-size:10px}.date{font-weight:900;font-size:11.5px}</style></head><body><h1>${escapeHtml(site?.nom || "Maquis")}</h1><p>${escapeHtml(site?.ville || "")} ${escapeHtml(site?.pays || "")}</p><p class="muted">Client: ${escapeHtml(order.client || "Comptoir")}</p><p class="date">Date: ${escapeHtml(formatDateDdMmYyyy(order.date))}</p><table><thead><tr><th>Article</th><th>Qté</th><th>Montant</th></tr></thead><tbody>${order.lignes.map((line) => `<tr><td>${escapeHtml(line.article)}</td><td>${escapeHtml(lineQtyLabel(line, stockItemForArticle(line.article)))}</td><td>${fmt(calcNet(line))}</td></tr>`).join("")}</tbody></table><p class="total">Total: ${fmt(total)} FCFA</p><p class="muted">${escapeHtml(order.note || "")}</p><script>window.onload=function(){window.print();}</script></body></html>`);
   ticketWindow.document.close();
 }
 
-function printInvoice(factureNumber) {
+async function printInvoice(factureNumber) {
   const lignes = recordsForSite(state.ventes).filter((item) => item.factureNumber === factureNumber);
   if (!lignes.length) {
     showToast("Facture introuvable.");
@@ -19452,11 +19452,6 @@ function printInvoice(factureNumber) {
   const site = currentSite();
   const total = lignes.reduce((sum, line) => sum + calcNet(line), 0);
   const client = lignes[0].client || "Client comptoir";
-  const ticketWindow = window.open("", "_blank", "width=900,height=1000");
-  if (!ticketWindow) {
-    showToast("Impossible d'ouvrir la fenetre d'impression.");
-    return;
-  }
   const allDetails = paymentTotals(lignes);
   const paymentEntries = Object.entries(allDetails);
   const isMixed = paymentEntries.length > 1;
@@ -19468,7 +19463,28 @@ function printInvoice(factureNumber) {
   const creditSection = debiteur
     ? `<p style="color:#c54f41"><span>Débiteur</span><span>${escapeHtml(debiteur)}</span></p>${creditIssuerPrint ? `<p class="meta"><span>Crédit accordé par</span><span>${escapeHtml(creditIssuerPrint)}</span></p>` : ""}`
     : "";
-  ticketWindow.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>Facture ${escapeHtml(factureNumber)}</title><style>body{font-family:Arial,sans-serif;padding:32px;color:#111;background:#fff}header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #222;padding-bottom:16px;margin-bottom:18px}h1,h2,p{margin:0 0 8px}table{width:100%;border-collapse:collapse;margin-top:14px}th,td{padding:10px 8px;border-bottom:1px solid #ddd;text-align:left}th:last-child,td:last-child{text-align:right}.meta{color:#555}.totals{margin-top:18px;display:flex;justify-content:flex-end}.totals-box{min-width:300px;border:1px solid #111;padding:16px}.totals-box p{display:flex;justify-content:space-between;margin-bottom:6px}.grand{font-size:20px;font-weight:700;border-top:1px solid #111;padding-top:8px;margin-top:8px}.footer{margin-top:26px;color:#666;font-size:12px}.pay-label{font-size:12px;color:#555;font-weight:700;text-transform:uppercase;margin-bottom:4px}</style></head><body><header><div><h1>${escapeHtml(site?.nom || "Maquis")}</h1><p>${escapeHtml(site?.ville || "")} - ${escapeHtml(site?.pays || "")}</p><p>Gerant: ${escapeHtml(site?.gerant || "-")}</p></div><div><h2>Facture</h2><p class="meta">Numero: ${escapeHtml(factureNumber)}</p><p class="meta">Date: ${escapeHtml(formatDateDdMmYyyy(lignes[0].date))}</p><p class="meta">Client: ${escapeHtml(client)}</p></div></header><table><thead><tr><th>Article</th><th>Qte</th><th>Prix unit.</th><th>Total</th></tr></thead><tbody>${lignes.map((line) => `<tr><td>${escapeHtml(line.article)}</td><td>${escapeHtml(lineQtyLabel(line, stockItemForArticle(line.article)))}</td><td>${fmt(line.prix)} FCFA</td><td>${fmt(calcNet(line))} FCFA</td></tr>`).join("")}</tbody></table><div class="totals"><div class="totals-box">${isMixed ? `<p class="pay-label" style="display:block">Paiement mixte</p>` : ""}${paymentSection}${creditSection}<p class="grand"><span>Total facture</span><span>${fmt(total)} FCFA</span></p></div></div><p class="footer">Merci pour votre visite.</p><script>window.onload=function(){window.print();}</script></body></html>`);
+  // Ouverture synchrone (avant tout await) pour eviter que le bloqueur de pop-up du
+  // navigateur considere l'appel comme hors du geste utilisateur d'origine.
+  const ticketWindow = window.open("", "_blank", "width=900,height=1000");
+  if (!ticketWindow) {
+    showToast("Impossible d'ouvrir la fenetre d'impression.");
+    return;
+  }
+  // QR de verification du solde : uniquement si la facture comporte un debiteur (vente a credit).
+  let qrSection = "";
+  if (debiteur) {
+    const debtorKey = debtorDisplayKey(debiteur);
+    const siteId = currentSiteId();
+    try {
+      const linkInfo = await apiRequest(`/api/credit-verify-link?site=${encodeURIComponent(siteId)}&debtor=${encodeURIComponent(debtorKey)}`);
+      const verifyUrl = `${window.location.origin}/verify-solde?site=${encodeURIComponent(siteId)}&debtor=${encodeURIComponent(debtorKey)}&t=${encodeURIComponent(linkInfo.token)}`;
+      const qrImage = `https://quickchart.io/qr?size=180&text=${encodeURIComponent(verifyUrl)}`;
+      qrSection = `<div class="qr-verify"><img src="${qrImage}" alt="QR verification solde"><p>Scannez pour verifier si le solde est regle</p></div>`;
+    } catch (err) {
+      console.error("Lien de verification QR indisponible :", err);
+    }
+  }
+  ticketWindow.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>Facture ${escapeHtml(factureNumber)}</title><style>body{font-family:Arial,sans-serif;padding:32px;color:#111;background:#fff}header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #222;padding-bottom:16px;margin-bottom:18px}h1,h2,p{margin:0 0 8px}table{width:100%;border-collapse:collapse;margin-top:14px}th,td{padding:10px 8px;border-bottom:1px solid #ddd;text-align:left}th:last-child,td:last-child{text-align:right}.meta{color:#555}.totals{margin-top:18px;display:flex;justify-content:flex-end;gap:18px;align-items:flex-start}.totals-box{min-width:300px;border:1px solid #111;padding:16px}.totals-box p{display:flex;justify-content:space-between;margin-bottom:6px}.grand{font-size:20px;font-weight:700;border-top:1px solid #111;padding-top:8px;margin-top:8px}.footer{margin-top:26px;color:#666;font-size:12px}.pay-label{font-size:12px;color:#555;font-weight:700;text-transform:uppercase;margin-bottom:4px}.qr-verify{text-align:center;border:1px solid #ddd;padding:12px;min-width:160px}.qr-verify img{width:140px;height:140px}.qr-verify p{font-size:10px;color:#666;margin:6px 0 0}</style></head><body><header><div><h1>${escapeHtml(site?.nom || "Maquis")}</h1><p>${escapeHtml(site?.ville || "")} - ${escapeHtml(site?.pays || "")}</p><p>Gerant: ${escapeHtml(site?.gerant || "-")}</p></div><div><h2>Facture</h2><p class="meta">Numero: ${escapeHtml(factureNumber)}</p><p class="meta">Date: ${escapeHtml(formatDateDdMmYyyy(lignes[0].date))}</p><p class="meta">Client: ${escapeHtml(client)}</p></div></header><table><thead><tr><th>Article</th><th>Qte</th><th>Prix unit.</th><th>Total</th></tr></thead><tbody>${lignes.map((line) => `<tr><td>${escapeHtml(line.article)}</td><td>${escapeHtml(lineQtyLabel(line, stockItemForArticle(line.article)))}</td><td>${fmt(line.prix)} FCFA</td><td>${fmt(calcNet(line))} FCFA</td></tr>`).join("")}</tbody></table><div class="totals">${qrSection}<div class="totals-box">${isMixed ? `<p class="pay-label" style="display:block">Paiement mixte</p>` : ""}${paymentSection}${creditSection}<p class="grand"><span>Total facture</span><span>${fmt(total)} FCFA</span></p></div></div><p class="footer">Merci pour votre visite.</p><script>window.onload=function(){window.print();}</script></body></html>`);
   ticketWindow.document.close();
 }
 

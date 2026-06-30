@@ -5,6 +5,7 @@ import copy
 import gzip
 import hashlib
 import hmac
+from html import escape as escape_html
 import json
 import os
 import re
@@ -14,6 +15,7 @@ import socket
 import struct
 import threading
 import time
+import unicodedata
 from datetime import datetime, timezone
 from http import HTTPStatus
 from http.cookies import SimpleCookie
@@ -1688,6 +1690,7 @@ def build_default_state() -> dict[str, Any]:
         "workShifts": [],
         "stockEntrees": [],
         "stockLosses": [],
+        "qrVerifySecret": secrets.token_hex(32),
         "nextId": {
             **legacy["nextId"],
             "site": 3,
@@ -1707,6 +1710,8 @@ def build_default_state() -> dict[str, Any]:
 def migrate_state(payload: dict[str, Any]) -> dict[str, Any]:
     """Fait évoluer un état persisté vers le schéma courant (versions successives, multi-site, etc.)."""
     default = build_default_state()
+    if not payload.get("qrVerifySecret"):
+        payload["qrVerifySecret"] = secrets.token_hex(32)
     meta = payload.setdefault("_meta", {})
     schema_version = int(meta.get("schemaVersion") or 1)
     if schema_version < 2:
@@ -2798,6 +2803,97 @@ def stock_total_by_article(site_id: str, stock_rows: list[dict[str, Any]]) -> di
     return totals
 
 
+def _normalize_payment_method_key(method: Any) -> str:
+    """Normalise une methode de paiement (minuscule, sans accent, espaces compactes) pour comparaison."""
+    s = unicodedata.normalize("NFD", str(method or "").lower())
+    s = "".join(ch for ch in s if not unicodedata.combining(ch))
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def _is_credit_client_method(method: Any) -> bool:
+    n = _normalize_payment_method_key(method)
+    return n == "credit client" or ("credit" in n and "client" in n)
+
+
+def _is_a_regler_paiement(paiement: Any) -> bool:
+    n = _normalize_payment_method_key(paiement).replace(" ", "")
+    return n == "aregler" or paiement == "A regler"
+
+
+def _calc_net(item: dict[str, Any]) -> float:
+    return (float(item.get("prix") or 0) * float(item.get("qty") or 0)) - float(item.get("remise") or 0)
+
+
+def _debtor_display_key(name: Any) -> str:
+    raw = str(name or "").strip()
+    return raw.upper() if raw else "CLIENT INCONNU"
+
+
+def credit_outstanding_for_debtor(state: dict[str, Any], site_id: str, debtor_key: str) -> float:
+    """Solde du dû par un debiteur sur un maquis : credit emis sur les ventes moins les recouvrements.
+    Reflet cote serveur de creditOutstandingMap() (app-orders.js), pour la verification QR des factures."""
+    total = 0.0
+    for v in state.get("ventes", []) or []:
+        if str(v.get("siteId", "")) != site_id:
+            continue
+        if _debtor_display_key(v.get("debiteur") or v.get("client") or "Client inconnu") != debtor_key:
+            continue
+        net = _calc_net(v)
+        details = v.get("paiementDetails") or [{"method": v.get("paiement") or "", "amount": net}]
+        credit_amount = sum(float(d.get("amount") or 0) for d in details if _is_credit_client_method(d.get("method")))
+        if not credit_amount and _is_a_regler_paiement(v.get("paiement")):
+            credit_amount = net
+        total += credit_amount
+    for p in state.get("creditRecoveries", []) or []:
+        if str(p.get("siteId", "")) != site_id:
+            continue
+        if _debtor_display_key(p.get("debiteur") or "Client inconnu") != debtor_key:
+            continue
+        total -= float(p.get("montant") or 0)
+    return total if total > 0.001 else 0.0
+
+
+def qr_verify_token(secret: str, site_id: str, debtor_key: str) -> str:
+    """Jeton signe (HMAC) protegeant le lien public de verification de solde — empeche de
+    deviner/enumerer des debiteurs sans avoir d'abord obtenu le lien via une session authentifiee."""
+    msg = f"{site_id}:{debtor_key}".encode("utf-8")
+    return hmac.new(secret.encode("utf-8"), msg, hashlib.sha256).hexdigest()[:24]
+
+
+def _verify_solde_html(site_name: str | None, debtor_key: str, outstanding: float | None) -> str:
+    """Page HTML mobile-friendly affichee au scan du QR de verification de solde d'une facture."""
+    if outstanding is None:
+        return (
+            "<!DOCTYPE html><html lang=\"fr\"><head><meta charset=\"utf-8\">"
+            "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+            "<title>Verification</title><style>body{font-family:Arial,sans-serif;padding:32px;"
+            "text-align:center;color:#111}.box{max-width:360px;margin:0 auto;border:2px solid #c54f41;"
+            "border-radius:14px;padding:24px}</style></head><body><div class=\"box\">"
+            "<h1>Lien invalide</h1><p>Ce lien de verification est invalide ou a expire.</p>"
+            "</div></body></html>"
+        )
+    settled = outstanding <= 0.001
+    status_label = "SOLDÉ" if settled else "NON SOLDÉ"
+    status_color = "#2e7d32" if settled else "#c54f41"
+    detail = "" if settled else f"<p class=\"amount\">Reste à payer : {outstanding:,.0f} FCFA</p>".replace(",", " ")
+    return (
+        "<!DOCTYPE html><html lang=\"fr\"><head><meta charset=\"utf-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        f"<title>Verification — {escape_html(debtor_key)}</title>"
+        "<style>body{font-family:Arial,sans-serif;padding:32px;text-align:center;color:#111}"
+        ".box{max-width:360px;margin:0 auto;border:2px solid #ddd;border-radius:14px;padding:24px}"
+        f".status{{display:inline-block;padding:8px 22px;border-radius:24px;font-weight:800;"
+        f"font-size:18px;color:#fff;background:{status_color};margin:12px 0}}"
+        ".amount{font-size:16px;font-weight:700;color:#c54f41}"
+        ".meta{color:#666;font-size:13px;margin-top:16px}</style></head><body><div class=\"box\">"
+        f"<h1>{escape_html(site_name or '')}</h1>"
+        f"<p>Débiteur : <strong>{escape_html(debtor_key)}</strong></p>"
+        f"<div class=\"status\">{status_label}</div>{detail}"
+        "<p class=\"meta\">Solde calculé en temps réel à l'instant du scan.</p>"
+        "</div></body></html>"
+    )
+
+
 class SessionManager:
     """Sessions avec limite absolue et fenetre d'inactivite (idle)."""
 
@@ -3759,6 +3855,21 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
             if not payload.get("sites"):
                 raise ValueError("Cette sauvegarde ne contient aucun maquis.")
             return self._apply_recovery_payload(payload)
+
+    def qr_verify_secret(self) -> str:
+        """Secret serveur (jamais expose au client) signant les liens de verification QR de solde."""
+        with self._lock:
+            return str(self._state.get("qrVerifySecret") or "")
+
+    def credit_verify_info(self, site_id: str, debtor_key: str) -> dict[str, Any] | None:
+        """Lecture seule : solde du dû actuel d'un debiteur sur un maquis, pour la page de
+        verification publique scannee depuis le QR code d'une facture (cf. credit_outstanding_for_debtor)."""
+        with self._lock:
+            site = next((s for s in self._state.get("sites", []) if str(s.get("id")) == site_id), None)
+            if site is None:
+                return None
+            outstanding = credit_outstanding_for_debtor(self._state, site_id, debtor_key)
+            return {"siteName": str(site.get("nom") or ""), "outstanding": outstanding}
 
     def public_menu(self, site_id: str, location: str = "Intérieur") -> dict[str, Any] | None:
         """Construit le menu public (articles en stock, prix selon zone) consultable via QR code."""
@@ -4860,6 +4971,35 @@ class AppHandler(BaseHTTPRequestHandler):
         if get_path == "/api/public/order":
             self.send_error(HTTPStatus.METHOD_NOT_ALLOWED)
             return
+        if get_path == "/api/credit-verify-link":
+            session = self.require_session()
+            if session is None:
+                return
+            site_id = str((query.get("site") or [""])[0]).strip()
+            debtor_key = _debtor_display_key((query.get("debtor") or [""])[0])
+            if not site_id or not debtor_key:
+                self.send_json(HTTPStatus.BAD_REQUEST, {"error": "Parametres manquants."})
+                return
+            if not session_is_superadmin(session, all_site_ids=store.all_site_ids()) and site_id not in (session.get("allowedSiteIds") or []):
+                self.send_json(HTTPStatus.FORBIDDEN, {"error": "Maquis non autorisé pour cette session."})
+                return
+            token = qr_verify_token(store.qr_verify_secret(), site_id, debtor_key)
+            self.send_json(HTTPStatus.OK, {"token": token, "site": site_id, "debtor": debtor_key})
+            return
+        if get_path == "/verify-solde":
+            site_id = str((query.get("site") or [""])[0]).strip()
+            debtor_key = _debtor_display_key((query.get("debtor") or [""])[0])
+            token = str((query.get("t") or [""])[0]).strip()
+            expected = qr_verify_token(store.qr_verify_secret(), site_id, debtor_key) if site_id and debtor_key else ""
+            if not expected or not hmac.compare_digest(expected, token):
+                self.send_html(HTTPStatus.FORBIDDEN, _verify_solde_html(None, debtor_key, None))
+                return
+            info = store.credit_verify_info(site_id, debtor_key)
+            if info is None:
+                self.send_html(HTTPStatus.NOT_FOUND, _verify_solde_html(None, debtor_key, None))
+                return
+            self.send_html(HTTPStatus.OK, _verify_solde_html(info["siteName"], debtor_key, info["outstanding"]))
+            return
         self.serve_static(parsed.path)
 
     def do_POST(self) -> None:
@@ -5741,6 +5881,17 @@ class AppHandler(BaseHTTPRequestHandler):
         self.send_header("ETag", etag)
         self.send_header("Cache-Control", "no-cache")
         self.end_headers()
+
+    def send_html(self, status: HTTPStatus, html: str) -> None:
+        """Envoie une page HTML autonome (pages de verification publique, sans app shell)."""
+        body = html.encode("utf-8")
+        self.send_response(status)
+        self._send_security_headers()
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
 
     def guess_content_type(self, suffix: str) -> str:
         """Déduit le Content-Type HTTP à partir de l'extension de fichier."""
