@@ -13581,6 +13581,25 @@ async function deleteCommandeOrpheline(factureNum, commande) {
   showToast(`Commande orpheline ${factureNum} supprimée.`);
 }
 
+/**
+ * Format (qty de pack) réellement vendu sur une ligne, pour une correction d'article.
+ * On redérive depuis le prix facturé vs les formats de l'article d'origine plutôt que
+ * de faire confiance à v.formatQuantite : une correction précédente l'a figé sur la ligne,
+ * ce qui verrouillait le format pour toutes les corrections suivantes même si le nouvel
+ * article n'a pas ce format (prix non conforme).
+ */
+function correctionWantedPack(line, oldItem) {
+  const linePrice = Number(line?.prix) || 0;
+  const matchingFormat = linePrice > 0 && oldItem
+    ? normalizeSaleFormats(oldItem)
+      .filter((format) => Number(format.quantite) > 1)
+      .sort((a, b) => Number(b.quantite) - Number(a.quantite))
+      .find((format) => Number(format.prixInterieur) === linePrice || Number(format.prixExterieur) === linePrice)
+    : null;
+  if (matchingFormat) return Number(matchingFormat.quantite);
+  return linePackSize(line, oldItem);
+}
+
 /** Construit le texte d'info prix pour un article (formats kit + prix). */
 function corrBuildPriceInfo(articleName, siteId, fallbackPrix, location, wantedPack) {
   const item = stockItemForArticle(articleName, siteId || currentSiteId());
@@ -13717,7 +13736,7 @@ function renderCorrectionResult(factureNum, ventes) {
     document.getElementById(`corr-art-${i}`)?.addEventListener("change", (e) => {
       const el = document.getElementById(`corr-prix-${i}`);
       const v = ventes[i];
-      const wantedPack = linePackSize(v, stockItemForArticle(v?.article, siteId));
+      const wantedPack = correctionWantedPack(v, stockItemForArticle(v?.article, siteId));
       if (el) el.innerHTML = corrBuildPriceInfo(e.target.value, siteId, null, v?.location, wantedPack);
     });
   });
@@ -13876,18 +13895,17 @@ async function applyArticleCorrection(factureNum, originalVentes) {
 
       const oldItem = stockItemForArticle(oldArticle, siteId);
       const newItem = stockItemForArticle(newArticle, siteId);
+      const wantedPack = correctionWantedPack(v, oldItem);
 
       if (oldItem) {
-        const oldPack = linePackSize(v, oldItem);
-        const oldBottles = qty * oldPack;
+        const oldBottles = qty * wantedPack;
         oldItem.sorties = Math.max(0, (Number(oldItem.sorties) || 0) - oldBottles);
         restorePhysicalStock(oldItem, oldBottles);
         restoreArticleCasiers(oldItem.article, oldBottles, { motif: "correction", commentaire: `Correction article ${factureNum} : → ${newArticle}` });
       }
 
       if (newItem) {
-        const newPack = linePackSize({ ...v, article: newArticle }, newItem);
-        const newBottles = qty * newPack;
+        const newBottles = qty * wantedPack;
         newItem.sorties = (Number(newItem.sorties) || 0) + newBottles;
         consumePhysicalStock(newItem, newBottles);
         drainArticleCasiers(newItem.article, newBottles, { motif: "correction", commentaire: `Correction article ${factureNum} : ${oldArticle} →` });
@@ -13902,7 +13920,7 @@ async function applyArticleCorrection(factureNum, originalVentes) {
       // Le prix doit correspondre au même format (unité ou kit) que la ligne
       // d'origine, pas systématiquement au format primaire de l'article,
       // et respecter le lieu (Intérieur/Extérieur) de la ligne.
-      const wantedPack = linePackSize(v, oldItem);
+      const wantedPack = correctionWantedPack(v, oldItem);
       const newFormats = normalizeSaleFormats(newItem || {});
       const newFormat = newFormats.find((f) => Number(f.quantite) === wantedPack) || primarySaleFormat(newItem || {});
       const newPrices = resolveItemPrices(newItem || {});
@@ -17332,6 +17350,7 @@ async function finalizeOrder(orderId = activeOrderId) {
       table: order.table || order.client,
       article: line.article,
       cat: line.cat,
+      location: line.location || "Intérieur",
       prix: line.prix,
       qty: line.qty,
       formatQuantite: linePackSize(line, stockItemForArticle(line.article, siteId)),
@@ -19420,7 +19439,7 @@ function printOrderTicket(orderId = activeOrderId) {
     showToast("Impossible d'ouvrir la fenetre d'impression.");
     return;
   }
-  ticketWindow.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>Ticket ${escapeHtml(order.client)}</title><style>body{font-family:Arial,sans-serif;padding:24px;color:#111}h1,h2,p{margin:0 0 8px}table{width:100%;border-collapse:collapse;margin-top:16px}td,th{padding:8px 0;border-bottom:1px solid #ddd;text-align:left}th:last-child,td:last-child{text-align:right}.total{margin-top:16px;font-size:20px;font-weight:700}.muted{color:#666;font-size:12px}</style></head><body><h1>${escapeHtml(site?.nom || "Maquis")}</h1><p>${escapeHtml(site?.ville || "")} ${escapeHtml(site?.pays || "")}</p><p class="muted">Client: ${escapeHtml(order.client || "Comptoir")} · Date: ${escapeHtml(formatDateDdMmYyyy(order.date))}</p><table><thead><tr><th>Article</th><th>Qté</th><th>Montant</th></tr></thead><tbody>${order.lignes.map((line) => `<tr><td>${escapeHtml(line.article)}</td><td>${escapeHtml(lineQtyLabel(line, stockItemForArticle(line.article)))}</td><td>${fmt(calcNet(line))} FCFA</td></tr>`).join("")}</tbody></table><p class="total">Total: ${fmt(total)} FCFA</p><p class="muted">${escapeHtml(order.note || "")}</p><script>window.onload=function(){window.print();}</script></body></html>`);
+  ticketWindow.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>Ticket ${escapeHtml(order.client)}</title><style>@page{size:55mm auto;margin:0}*{box-sizing:border-box}body{font-family:'Courier New',Consolas,monospace;width:55mm;margin:0;padding:2mm;color:#000;font-size:12px;line-height:1.4}h1{font-size:14px;text-align:center;text-transform:uppercase;margin:0 0 3px}p{margin:0 0 4px;font-size:11px}table{width:100%;border-collapse:collapse;margin-top:6px}td,th{padding:2px 0;border-bottom:1px dashed #000;text-align:left;font-size:11px}th:last-child,td:last-child{text-align:right}.total{margin-top:8px;font-size:14px;font-weight:700;border-top:1px dashed #000;padding-top:4px}.muted{color:#000;font-size:10px}</style></head><body><h1>${escapeHtml(site?.nom || "Maquis")}</h1><p>${escapeHtml(site?.ville || "")} ${escapeHtml(site?.pays || "")}</p><p class="muted">Client: ${escapeHtml(order.client || "Comptoir")} · Date: ${escapeHtml(formatDateDdMmYyyy(order.date))}</p><table><thead><tr><th>Article</th><th>Qté</th><th>Montant</th></tr></thead><tbody>${order.lignes.map((line) => `<tr><td>${escapeHtml(line.article)}</td><td>${escapeHtml(lineQtyLabel(line, stockItemForArticle(line.article)))}</td><td>${fmt(calcNet(line))} FCFA</td></tr>`).join("")}</tbody></table><p class="total">Total: ${fmt(total)} FCFA</p><p class="muted">${escapeHtml(order.note || "")}</p><script>window.onload=function(){window.print();}</script></body></html>`);
   ticketWindow.document.close();
 }
 
