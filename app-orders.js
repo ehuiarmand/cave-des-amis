@@ -22745,23 +22745,14 @@ function takeOverOrder(orderId) {
     showToast("Commande introuvable.");
     return;
   }
-  activeOrderId = order.id;
   clearQrAlert();
-  if (currentPage === "ventes" && ventesSubTab !== "commandes") {
-    setVentesSubTab("commandes");
-    renderVentesPage();
+  if (currentPage !== "ventes" || ventesSubTab !== "commandes") {
+    navigate("ventes", { ventesSubtab: "commandes" });
   } else {
+    activeOrderId = order.id;
     renderOrders();
   }
-  syncVenteFormFromActiveOrder();
-  const label = order.client || `Commande #${order.id}`;
-  showToast(`${label} ouverte — ajoutez, remplacez ou retirez des articles ci-dessous.`);
-  window.requestAnimationFrame(() => {
-    document.getElementById("ventes-card-board")?.scrollIntoView({ behavior: "smooth", block: "start" });
-    window.requestAnimationFrame(() => {
-      document.querySelector(".order-card.active")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-    });
-  });
+  openOrderEditor(order.id);
 }
 
 /** Aligne le formulaire vente (hors modal) sur la commande active — utile apres « Ouvrir la commande ». */
