@@ -4315,9 +4315,16 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                 for _key in _GLOBAL_PATCH_KEYS:
                     if _key not in payload:
                         continue
+                    # Retire les tombstones {id, siteId, _deleted:true} envoyés par le client
+                    # (voir TOMBSTONE_KEYS côté front) : sinon ils seraient stockés comme de
+                    # vraies lignes fantômes pour les superadmins globaux (admin/tanoh).
+                    incoming_rows = [
+                        r for r in (payload[_key] or [])
+                        if not (isinstance(r, dict) and r.get("_deleted"))
+                    ]
                     if _key == "casiers":
                         sanitized = []
-                        for row in (payload["casiers"] or []):
+                        for row in incoming_rows:
                             if not isinstance(row, dict):
                                 continue
                             cap = max(1, int(row.get("capacite") or 24))
@@ -4328,7 +4335,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                             sanitized.append(row)
                         current["casiers"] = sanitized
                     else:
-                        current[_key] = payload[_key]
+                        current[_key] = incoming_rows
                 if "pdjWorkDateBySite" in payload:
                     current["pdjWorkDateBySite"] = _sanitize_pdj_work_date_map(
                         payload.get("pdjWorkDateBySite") or {},
