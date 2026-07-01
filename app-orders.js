@@ -10682,7 +10682,7 @@ async function submitSaisieRapide() {
         showToast(errors.length ? `Aucune ligne ajoutee : ${errors.join(", ")}` : "Aucune ligne valide.");
         return;
       }
-      await persistState();
+      await persistStatePatch({ commandes: state.commandes, staffAuditLog: state.staffAuditLog, nextId: state.nextId });
       closeModal("modal-saisie-rapide");
       srCart = [];
       const vSel = document.getElementById("v-order-select");
@@ -12519,7 +12519,7 @@ async function settleSupplierDebt() {
   const prev = btn ? btn.textContent : "";
   if (btn) { btn.disabled = true; btn.textContent = "Enregistrement…"; }
   try {
-    await persistState();
+    await persistStatePatch({ charges: state.charges, staffAuditLog: state.staffAuditLog });
     closeModal("modal-supplier-debt-settle");
     _settleSupplierDebtChargeId = null;
     renderCreanciers();
@@ -15049,6 +15049,7 @@ function buildStatePutBody(overrides = {}) {
   if (Object.prototype.hasOwnProperty.call(o, "nextId")) body.nextId = o.nextId;
   if (Object.prototype.hasOwnProperty.call(o, "auth")) body.auth = o.auth;
   if (Object.prototype.hasOwnProperty.call(o, "params")) body.params = o.params;
+  if (Object.prototype.hasOwnProperty.call(o, "_putDelta")) body._putDelta = o._putDelta;
   if (Object.prototype.hasOwnProperty.call(o, "workShiftsScopedSnapshot")) {
     body.workShiftsScopedSnapshot = Boolean(o.workShiftsScopedSnapshot);
   }
@@ -15061,7 +15062,7 @@ function buildStatePutBody(overrides = {}) {
 /** Clés réellement envoyées dans le corps PUT (hors activeSiteId). */
 function patchedKeysFromPutBody(body) {
   return new Set(
-    Object.keys(body || {}).filter((k) => k !== "activeSiteId" && k !== "params"),
+    Object.keys(body || {}).filter((k) => k !== "activeSiteId" && k !== "params" && k !== "_putDelta"),
   );
 }
 
@@ -17182,7 +17183,7 @@ async function saveOrderLine() {
   const prevSaveLineText = saveLineBtn ? saveLineBtn.textContent : "";
   if (saveLineBtn) { saveLineBtn.disabled = true; saveLineBtn.textContent = "Enregistrement…"; }
   try {
-    await persistState();
+    await persistStatePatch({ commandes: state.commandes, staffAuditLog: state.staffAuditLog, nextId: state.nextId });
     closeModal("modal-vente");
     resetOrderForm();
     renderVentesPage();
@@ -17235,6 +17236,28 @@ function splitPaymentDetails(details, lineTotal, orderTotal) {
     method: detail.method,
     amount: Math.round((Number(detail.amount) || 0) * lineTotal / orderTotal),
   })).filter((detail) => detail.amount > 0);
+}
+
+
+function rowsChangedSince(beforeRows, afterRows, siteId, idKey = "id") {
+  const sid = String(siteId || "");
+  const beforeById = new Map(
+    (beforeRows || []).filter((r) => String(r.siteId || "") === sid).map((r) => [r[idKey], r]),
+  );
+  const changed = [];
+  for (const r of afterRows || []) {
+    if (String(r.siteId || "") !== sid) continue;
+    const b = beforeById.get(r[idKey]);
+    if (!b || JSON.stringify(b) !== JSON.stringify(r)) changed.push(r);
+  }
+  return changed;
+}
+
+function newRowsPrepended(beforeRows, afterRows) {
+  const prevLen = (beforeRows || []).length;
+  const cur = afterRows || [];
+  if (cur.length <= prevLen) return [];
+  return cur.slice(0, cur.length - prevLen);
 }
 
 async function finalizeOrder(orderId = activeOrderId) {
@@ -17369,9 +17392,11 @@ async function finalizeOrder(orderId = activeOrderId) {
     }));
     state.ventes = [...ventes, ...state.ventes];
 
+    const touchedStockIds = new Set();
     order.lignes.forEach((line) => {
       const stockItem = stockItemForArticle(line.article, siteId);
       if (stockItem) {
+        touchedStockIds.add(stockItem.id);
         const bottles = lineBottleQty(line, stockItem);
         stockItem.sorties = (Number(stockItem.sorties) || 0) + bottles;
         stockItem.lastSortieAt = new Date().toISOString();
@@ -17426,15 +17451,25 @@ async function finalizeOrder(orderId = activeOrderId) {
     }
 
     pruneFinalizedCommandesFromState();
-    await persistStatePatch({
-      ventes: state.ventes,
+    const encaissementPatch = {
+      _putDelta: {
+        ventes: true,
+        stock: true,
+        casiers: true,
+        casierMouvements: true,
+      },
+      ventes,
       commandes: state.commandes,
-      stock: state.stock,
+      stock: state.stock.filter((s) => touchedStockIds.has(s.id)),
       nextId: state.nextId,
-      casiers: state.casiers,
-      casierMouvements: state.casierMouvements,
-      clientAvoirs: state.clientAvoirs,
-    });
+      casiers: rowsChangedSince(rollback.casiers, state.casiers, siteId),
+      casierMouvements: newRowsPrepended(rollback.casierMouvements, state.casierMouvements),
+    };
+    if (avoirUsedRaw > 0 && paymentMix.creditName) {
+      encaissementPatch._putDelta.clientAvoirs = true;
+      encaissementPatch.clientAvoirs = newRowsPrepended(rollback.clientAvoirs, state.clientAvoirs);
+    }
+    await persistStatePatch(encaissementPatch);
 
     closeModal("modal-vente");
     closeModal("modal-finalize");
@@ -17519,7 +17554,7 @@ async function advanceOrder(orderId) {
   if (!window.confirm(`Passer la commande au statut "${next}" ?`)) return;
   order.status = next;
   recordStaffAudit("update", "commande_statut", `Commande #${order.id} : ${next}`, order.client || "");
-  await persistState();
+  await persistStatePatch({ commandes: state.commandes, staffAuditLog: state.staffAuditLog });
   renderVentesPage();
   showToast(`Commande #${order.id} : ${next}.`);
 }
@@ -18917,7 +18952,7 @@ async function saveCharge() {
   const prevChargeText = chargeBtn ? chargeBtn.textContent : "";
   if (chargeBtn) { chargeBtn.disabled = true; chargeBtn.textContent = "Enregistrement…"; }
   try {
-    await persistState();
+    await persistStatePatch({ charges: state.charges, staffAuditLog: state.staffAuditLog, nextId: state.nextId });
     closeModal("modal-charge");
     document.getElementById("c-date").value = today();
     document.getElementById("c-lib").value = "";
@@ -19353,7 +19388,7 @@ async function importStockExcel(file) {
           created++;
         }
       }
-      await persistState();
+      await persistStatePatch({ stock: state.stock, nextId: state.nextId });
       renderStock();
       showToast(`Import termine : ${created} ajout(s), ${updated} mise(s) a jour.${skipped ? ` ${skipped} ligne(s) ignoree(s).` : ""}`);
     } catch (err) {
@@ -20138,7 +20173,7 @@ async function removeOrderLine(orderId, lineId) {
     state.commandes = state.commandes.filter((item) => item.id !== orderId);
     if (activeOrderId === orderId) activeOrderId = null;
   }
-  await persistState();
+  await persistStatePatch({ commandes: state.commandes, staffAuditLog: state.staffAuditLog });
   renderVentesPage();
   showToast("Ligne retiree de la commande.");
 }
@@ -20152,7 +20187,7 @@ async function removeOrder(orderId) {
   recordStaffAudit("delete", "commande", `Commande annulee #${orderId} · ${order.client || ""}`, formatCommandeAuditDetail(order));
   state.commandes = state.commandes.filter((item) => item.id !== orderId);
   if (activeOrderId === orderId) activeOrderId = null;
-  await persistState();
+  await persistStatePatch({ commandes: state.commandes, staffAuditLog: state.staffAuditLog });
   renderVentesPage();
   showToast("Commande annulee.");
 }
@@ -20195,7 +20230,7 @@ async function deleteStockItem(id) {
     return;
   }
   state.stock = state.stock.filter((item) => item.id !== id);
-  await persistState();
+  await persistStatePatch({ stock: state.stock });
   renderDashboard();
   renderStock();
   showToast("Article supprime.");
@@ -20315,7 +20350,7 @@ async function autoFillFridge(itemId) {
   item.lastReapproAt = new Date().toISOString();
   item.lastReapproBy = sessionUser || "-";
   recordStaffAudit("update", "frigo", `Reserve vers frigo · ${item.article}`, `${fmt(bottles)} btl`);
-  await persistState();
+  await persistStatePatch({ stock: state.stock, staffAuditLog: state.staffAuditLog });
   renderVentesPage();
   renderStock();
   renderDashboard();
@@ -20347,7 +20382,7 @@ async function saveReappro() {
     recordStaffAudit("update", "reappro", `Reserve vers frigo · ${item.article}`, `${fmt(bottles)} btl`);
     if (reapproBtn) { reapproBtn.disabled = true; reapproBtn.textContent = "Enregistrement…"; }
     try {
-      await persistState();
+      await persistStatePatch({ stock: state.stock, staffAuditLog: state.staffAuditLog });
       closeModal("modal-reappro");
       renderVentesPage();
       renderStock();

@@ -4251,6 +4251,10 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
     def update_state(self, payload: dict[str, Any], session: dict[str, Any]) -> dict[str, Any]:
         """Applique une mise à jour partielle de l'état, filtrée selon le périmètre maquis de la session."""
         with self._lock:
+            put_delta: dict[str, bool] = {}
+            raw_delta = payload.pop("_putDelta", None)
+            if isinstance(raw_delta, dict):
+                put_delta = {str(k): bool(v) for k, v in raw_delta.items()}
             current = self._state
             site_ids = [site.get("id") for site in current["sites"] if site.get("id")]
             sid_list = [str(s) for s in site_ids]
@@ -4326,7 +4330,33 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                             row["quantiteActuelle"] = max(0, min(qte, cap))
                             row["capacite"] = cap
                             sanitized.append(row)
-                        current["casiers"] = sanitized
+                        if put_delta.get("casiers"):
+                            current["casiers"] = merge_scoped_rows(
+                                current.get("casiers", []),
+                                sanitized,
+                                set(sid_list),
+                                sid_list,
+                            )
+                        else:
+                            current["casiers"] = sanitized
+                    elif _key == "ventes" and put_delta.get("ventes"):
+                        current[_key] = merge_scoped_rows(
+                            current.get(_key, []),
+                            payload[_key],
+                            set(sid_list),
+                            sid_list,
+                        )
+                    elif put_delta.get(_key) and _key in (
+                        "stock", "casiers", "casierMouvements", "clientAvoirs",
+                        "creditRecoveries", "loyaltyClients", "consignes", "charges",
+                        "stockEntrees", "stockLosses", "purchaseOrders", "supplierPrices",
+                    ):
+                        current[_key] = merge_scoped_rows(
+                            current.get(_key, []),
+                            payload[_key],
+                            set(sid_list),
+                            sid_list,
+                        )
                     else:
                         current[_key] = payload[_key]
                 if "pdjWorkDateBySite" in payload:
@@ -4510,12 +4540,20 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                                 sid_list,
                             )
                     elif _key == "ventes":
-                        current[_key] = merge_ventes_scoped(
-                            current.get(_key, []),
-                            payload[_key],
-                            allowed,
-                            sid_list,
-                        )
+                        if put_delta.get("ventes"):
+                            current[_key] = merge_scoped_rows(
+                                current.get(_key, []),
+                                payload[_key],
+                                allowed,
+                                sid_list,
+                            )
+                        else:
+                            current[_key] = merge_ventes_scoped(
+                                current.get(_key, []),
+                                payload[_key],
+                                allowed,
+                                sid_list,
+                            )
                     elif _key == "commandes":
                         current[_key] = merge_commandes_scoped(
                             current.get(_key, []),
@@ -5759,7 +5797,13 @@ class AppHandler(BaseHTTPRequestHandler):
                 self.send_json(HTTPStatus.OK, {"meta": store.meta(), "idempotent": True})
                 return
             payload = self.read_json()
+            put_delta_resp: dict[str, bool] = {}
+            if isinstance(payload, dict) and isinstance(payload.get("_putDelta"), dict):
+                put_delta_resp = {str(k): bool(v) for k, v in payload["_putDelta"].items()}
             print(f"[PUT] payload recu, cles={sorted((payload or {}).keys())[:12]}", flush=True)
+            if put_delta_resp:
+                v_n = len(payload.get("ventes") or []) if isinstance(payload.get("ventes"), list) else 0
+                print(f"[PUT] delta mode: {sorted(k for k, v in put_delta_resp.items() if v)} ventes_in={v_n}", flush=True)
             try:
                 validate_state_put_payload(payload)
                 updated = store.update_state(payload, session)
@@ -5786,6 +5830,10 @@ class AppHandler(BaseHTTPRequestHandler):
             # Renvoyer uniquement les clés modifiées + meta/activeSiteId.
             # Le client fusionne localement (patchedKeys guard dans mergeStateFromServerResponse).
             _resp_keys = set((payload or {}).keys()) | {"meta", "activeSiteId"}
+            _resp_keys.discard("_putDelta")
+            for _dk, _dv in put_delta_resp.items():
+                if _dv:
+                    _resp_keys.discard(_dk)
             self.send_json(HTTPStatus.OK, {k: v for k, v in updated.items() if k in _resp_keys})
             return
         if parsed.path.startswith("/api/"):
