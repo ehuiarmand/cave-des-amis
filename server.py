@@ -3556,24 +3556,36 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
             # persistance reelle (Postgres) ci-dessus n'est jamais throttlee.
             # Le json.dumps (coûteux sur un état volumineux) n'est calculé que si une
             # sauvegarde est effectivement due, pour ne pas payer ce coût à chaque écriture.
+            _HOT_PATCH_KEYS = frozenset({
+                "ventes", "stock", "commandes", "casiers", "casierMouvements",
+                "clientAvoirs", "nextId", "activeSiteId", "pdjWorkDateBySite",
+            })
             if self._backup_due():
-                body = json.dumps(payload, ensure_ascii=False)
-                try:
-                    stamp = time.strftime("%Y%m%d-%H%M%S")
-                    backup_path = BACKUP_DIR / f"data-{stamp}.json"
-                    backup_path.write_text(body, encoding="utf-8")
-                    backups = sorted(BACKUP_DIR.glob("data-*.json"), key=lambda p: p.name, reverse=True)
-                    for old in backups[BACKUP_KEEP_COUNT:]:
-                        try:
-                            old.unlink()
-                        except OSError:
-                            pass
-                except OSError:
-                    pass
-                try:
-                    self._mirror_json_file(body)
-                except OSError as _mirror_exc:
-                    print(f"[startup] Miroir data.json ignore : {_mirror_exc}", flush=True)
+                _hot_patch = (
+                    changed_keys is not None
+                    and changed_keys
+                    and changed_keys <= _HOT_PATCH_KEYS
+                )
+                if _hot_patch:
+                    print("[backup] patch chaud → sauvegarde JSON différée (Postgres OK)", flush=True)
+                else:
+                    body = json.dumps(payload, ensure_ascii=False)
+                    try:
+                        stamp = time.strftime("%Y%m%d-%H%M%S")
+                        backup_path = BACKUP_DIR / f"data-{stamp}.json"
+                        backup_path.write_text(body, encoding="utf-8")
+                        backups = sorted(BACKUP_DIR.glob("data-*.json"), key=lambda p: p.name, reverse=True)
+                        for old in backups[BACKUP_KEEP_COUNT:]:
+                            try:
+                                old.unlink()
+                            except OSError:
+                                pass
+                    except OSError:
+                        pass
+                    try:
+                        self._mirror_json_file(body)
+                    except OSError as _mirror_exc:
+                        print(f"[startup] Miroir data.json ignore : {_mirror_exc}", flush=True)
             self._last_etag = self._compute_etag()
             return
 
@@ -4346,6 +4358,13 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                             set(sid_list),
                             sid_list,
                         )
+                    elif _key == "commandes" and put_delta.get("commandes"):
+                        current[_key] = merge_scoped_rows(
+                            current.get(_key, []),
+                            payload[_key],
+                            set(sid_list),
+                            sid_list,
+                        )
                     elif put_delta.get(_key) and _key in (
                         "stock", "casiers", "casierMouvements", "clientAvoirs",
                         "creditRecoveries", "loyaltyClients", "consignes", "charges",
@@ -4555,13 +4574,21 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                                 sid_list,
                             )
                     elif _key == "commandes":
-                        current[_key] = merge_commandes_scoped(
-                            current.get(_key, []),
-                            payload[_key],
-                            allowed,
-                            sid_list,
-                            ventes=current.get("ventes", []),
-                        )
+                        if put_delta.get("commandes"):
+                            current[_key] = merge_scoped_rows(
+                                current.get(_key, []),
+                                payload[_key],
+                                allowed,
+                                sid_list,
+                            )
+                        else:
+                            current[_key] = merge_commandes_scoped(
+                                current.get(_key, []),
+                                payload[_key],
+                                allowed,
+                                sid_list,
+                                ventes=current.get("ventes", []),
+                            )
                     elif _key == "stockChecks":
                         incoming_sc = sanitize_stock_checks_for_session(
                             payload[_key], session
