@@ -4343,6 +4343,7 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                             row["capacite"] = cap
                             sanitized.append(row)
                         if put_delta.get("casiers"):
+                            # merge_scoped_rows a besoin des tombstones {_deleted} pour supprimer.
                             current["casiers"] = merge_scoped_rows(
                                 current.get("casiers", []),
                                 sanitized,
@@ -4350,7 +4351,9 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                                 sid_list,
                             )
                         else:
-                            current["casiers"] = sanitized
+                            # Remplacement complet : retirer les tombstones, sinon la ligne
+                            # {id, siteId, _deleted:true} persiste comme casier fantôme (cap 24).
+                            current["casiers"] = [r for r in sanitized if not r.get("_deleted")]
                     elif _key == "ventes" and put_delta.get("ventes"):
                         current[_key] = merge_scoped_rows(
                             current.get(_key, []),
@@ -4377,7 +4380,20 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                             sid_list,
                         )
                     else:
-                        current[_key] = payload[_key]
+                        # Remplacement complet (superadmin global : admin/tanoh) : le
+                        # client a déjà retiré la ligne du tableau et ajoute un tombstone
+                        # explicite {id, siteId, _deleted:true} pour forcer la suppression.
+                        # Sans le retirer ici, il persisterait comme ligne fantôme corrompue
+                        # (charge/consigne/recouvrement/etc. sans montant ni libellé), puis
+                        # reviendrait à chaque synchro. Le branchement scopé le retire déjà
+                        # via merge_scoped_rows ; on aligne le branchement global.
+                        _val = payload[_key]
+                        if isinstance(_val, list):
+                            _val = [
+                                r for r in _val
+                                if not (isinstance(r, dict) and r.get("_deleted"))
+                            ]
+                        current[_key] = _val
                 if "pdjWorkDateBySite" in payload:
                     current["pdjWorkDateBySite"] = _sanitize_pdj_work_date_map(
                         payload.get("pdjWorkDateBySite") or {},
