@@ -17451,16 +17451,21 @@ async function finalizeOrder(orderId = activeOrderId) {
     }
 
     pruneFinalizedCommandesFromState();
+    // Note : commandes est volontairement envoyé en remplacement complet (pas de
+    // delta). persistStatePatch réécrit patch.commandes = state.commandes ; un delta
+    // avec _putDelta.commandes serait alors un upsert qui NE supprime PAS la commande
+    // encaissée (elle réapparaîtrait comme commande ouverte). Le remplacement complet
+    // (merge_commandes_scoped) retire bien la commande encaissée, comme pour toutes les
+    // autres mutations de commandes (création, ligne, annulation).
     const encaissementPatch = {
       _putDelta: {
         ventes: true,
         stock: true,
         casiers: true,
         casierMouvements: true,
-        commandes: true,
       },
       ventes,
-      commandes: [{ id: oid, siteId: order.siteId || siteId, _deleted: true }],
+      commandes: state.commandes,
       stock: state.stock.filter((s) => touchedStockIds.has(s.id)),
       nextId: state.nextId,
       casiers: rowsChangedSince(rollback.casiers, state.casiers, siteId),
