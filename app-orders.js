@@ -3166,6 +3166,7 @@ function findStockItemForSite(article, siteId) {
   return stock.find((s) => {
     if (!rowMatchesSite(s, siteId, multi)) return false;
     const stockKey = String(s.article || "").trim().toLowerCase();
+    if (!stockKey || !key.startsWith(stockKey)) return false;
     const suffix = key.slice(stockKey.length);
     return suffix.startsWith(" ") && /^\s\S+$/.test(suffix);
   }) || null;
@@ -16919,7 +16920,7 @@ async function repairReceivedPurchaseOrderStock(poId) {
       return;
     }
     const expectedBottles = purchaseLineBottles(line, item);
-    const key = String(line.article || "").toLowerCase();
+    const key = String(item.article || "").toLowerCase();
     const alreadyApplied = appliedByArticle.get(key) || 0;
     const missing = expectedBottles - alreadyApplied;
     if (missing <= 0) return;
