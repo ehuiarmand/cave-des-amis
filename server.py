@@ -2864,18 +2864,20 @@ def order_verify_status(state: dict[str, Any], site_id: str, order_id: int) -> d
     items: list[dict[str, Any]] = []
     facture_number = None
     total = 0.0
+    date = None
     for v in state.get("ventes", []) or []:
         if str(v.get("siteId", "")) != site_id:
             continue
         if v.get("sourceOrderId") is not None and int(v.get("sourceOrderId")) == order_id:
             facture_number = v.get("factureNumber")
+            date = date or v.get("date")
             qty = float(v.get("qty") or 0)
             prix = float(v.get("prix") or 0)
             montant = qty * prix - float(v.get("remise") or 0)
-            items.append({"article": str(v.get("article") or ""), "qty": qty, "montant": montant})
+            items.append({"article": str(v.get("article") or ""), "qty": qty, "prix": prix, "montant": montant})
             total += montant
     if items:
-        return {"paid": True, "status": "Payé", "factureNumber": facture_number, "items": items, "total": total}
+        return {"paid": True, "status": "Payé", "factureNumber": facture_number, "date": date, "items": items, "total": total}
     for o in state.get("commandes", []) or []:
         if str(o.get("siteId", "")) == site_id and int(o.get("id") or -1) == order_id:
             pending_items: list[dict[str, Any]] = []
@@ -2884,12 +2886,13 @@ def order_verify_status(state: dict[str, Any], site_id: str, order_id: int) -> d
                 qty = float(l.get("qty") or 0)
                 prix = float(l.get("prix") or 0)
                 montant = qty * prix - float(l.get("remise") or 0)
-                pending_items.append({"article": str(l.get("article") or ""), "qty": qty, "montant": montant})
+                pending_items.append({"article": str(l.get("article") or ""), "qty": qty, "prix": prix, "montant": montant})
                 pending_total += montant
             return {
                 "paid": False,
                 "status": str(o.get("status") or "En attente"),
                 "factureNumber": None,
+                "date": o.get("date"),
                 "items": pending_items,
                 "total": pending_total,
             }
@@ -2962,19 +2965,34 @@ def _verify_commande_html(site_name: str | None, order_id: int, info: dict[str, 
         n = float(n or 0)
         return f"{n:.0f}" if n == int(n) else f"{n:g}"
 
+    def fmt_date(raw: Any) -> str:
+        s = str(raw or "").strip()[:10]
+        parts = s.split("-")
+        if len(parts) == 3 and all(p.isdigit() for p in parts):
+            y, m, d = parts
+            return f"{d}-{m}-{y}"
+        return s
+
+    date_html = f"<p>Date : <strong>{escape_html(fmt_date(info.get('date')))}</strong></p>" if info.get("date") else ""
+
     items_html = ""
     items = info.get("items") or []
     if items:
         rows = "".join(
             "<tr>"
-            f"<td class=\"art\">{escape_html(str(it.get('article') or ''))} × {fmt_qty(it.get('qty'))}</td>"
-            f"<td class=\"amt\">{fmt_amount(it.get('montant'))} FCFA</td>"
+            f"<td class=\"art\">{escape_html(str(it.get('article') or ''))}</td>"
+            f"<td class=\"qty\">{fmt_qty(it.get('qty'))}</td>"
+            f"<td class=\"pu\">{fmt_amount(it.get('prix'))}</td>"
+            f"<td class=\"amt\">{fmt_amount(it.get('montant'))}</td>"
             "</tr>"
             for it in items
         )
         total_label = "Total" if paid else "Total (en cours)"
         items_html = (
-            "<table class=\"items\">" + rows + "</table>"
+            "<table class=\"items\"><thead><tr>"
+            "<th class=\"art\">Article</th><th class=\"qty\">Qté</th>"
+            "<th class=\"pu\">Prix unit.</th><th class=\"amt\">Total</th>"
+            "</tr></thead><tbody>" + rows + "</tbody></table>"
             f"<p class=\"total\">{total_label} : {fmt_amount(info.get('total'))} FCFA</p>"
         )
     return (
@@ -2986,13 +3004,16 @@ def _verify_commande_html(site_name: str | None, order_id: int, info: dict[str, 
         f".status{{display:inline-block;padding:8px 22px;border-radius:24px;font-weight:800;"
         f"font-size:18px;color:#fff;background:{status_color};margin:12px 0}}"
         ".amount{font-size:14px;font-weight:700;color:#555}"
-        ".items{width:100%;border-collapse:collapse;margin-top:16px;text-align:left;font-size:13px}"
+        ".items{width:100%;border-collapse:collapse;margin-top:16px;text-align:left;font-size:12px}"
+        ".items th{padding:4px 2px;border-bottom:2px solid #ccc;font-size:11px;color:#666;text-transform:uppercase}"
         ".items td{padding:6px 2px;border-bottom:1px solid #eee}"
-        ".items td.amt{text-align:right;white-space:nowrap;font-weight:600}"
+        ".items td.qty,.items th.qty,.items td.pu,.items th.pu,.items td.amt,.items th.amt{text-align:right;white-space:nowrap}"
+        ".items td.amt{font-weight:600}"
         ".total{text-align:right;font-weight:800;margin-top:8px;font-size:14px}"
         ".meta{color:#666;font-size:13px;margin-top:16px}</style></head><body><div class=\"box\">"
         f"<h1>{escape_html(site_name or '')}</h1>"
         f"<p>Commande : <strong>#{order_id}</strong></p>"
+        f"{date_html}"
         f"<div class=\"status\">{escape_html(status_label)}</div>{detail}"
         f"{items_html}"
         "<p class=\"meta\">Statut calculé en temps réel à l'instant du scan.</p>"
