@@ -5945,6 +5945,7 @@ function syncDualZonePricingUi() {
   if (currentPage === "ventes") {
     const q = document.getElementById("sr-search")?.value || "";
     renderSrMenu(q);
+    refreshSiteTablesDatalist();
     if (document.getElementById("qr-card-preview") && !document.getElementById("qr-card-preview").classList.contains("hidden")) {
       renderQrPreview();
     }
@@ -12095,6 +12096,30 @@ function qrRows() {
   });
 }
 
+/** Ajoute (sans les retirer) les tables generees au catalogue persiste du site — sert a
+ * peupler le choix de table lors de la creation d'une commande (voir siteTableNames()). */
+async function persistSiteTables(tableNames) {
+  const site = currentSite();
+  if (!site) return;
+  const current = Array.isArray(site.tables) ? site.tables : [];
+  const known = new Set(current.map((t) => String(t).trim().toLowerCase()));
+  const additions = tableNames.map((t) => String(t).trim()).filter((t) => t && !known.has(t.toLowerCase()));
+  if (!additions.length) return;
+  site.tables = [...current, ...additions];
+  await persistState({ sites: state.sites });
+  refreshSiteTablesDatalist();
+}
+
+function siteTableNames() {
+  return Array.isArray(currentSite()?.tables) ? currentSite().tables : [];
+}
+
+function refreshSiteTablesDatalist() {
+  const list = document.getElementById("site-tables-list");
+  if (!list) return;
+  list.innerHTML = siteTableNames().map((t) => `<option value="${escapeHtml(t)}"></option>`).join("");
+}
+
 function renderQrPreview() {
   const card = document.getElementById("qr-card-preview");
   const rows = qrRows();
@@ -12104,6 +12129,7 @@ function renderQrPreview() {
     card.classList.add("hidden");
     return;
   }
+  persistSiteTables(rows.map((row) => row.table)).catch((err) => console.error("persistSiteTables:", err));
   const siteName = currentSite()?.nom || "Maquis";
   const dual = siteUsesDualZonePricing();
   const list = document.getElementById("qr-table-list");
@@ -12117,7 +12143,10 @@ function renderQrPreview() {
           <h3>${escapeHtml(row.table)}</h3>
           <p class="list-item-sub">${escapeHtml(siteName)}</p>
         </div>
-        <button type="button" class="mini-btn" data-print-qr-table="${escapeHtml(row.table)}">Imprimer cette table</button>
+        <div class="button-stack">
+          <button type="button" class="mini-btn" data-print-qr-table="${escapeHtml(row.table)}">Imprimer cette table</button>
+          <button type="button" class="mini-btn" data-print-table-bill="${escapeHtml(row.table)}">QR Facture (addition en direct)</button>
+        </div>
       </div>
       <div class="${colsClass}">
         <div class="qr-location-card">
@@ -12168,6 +12197,29 @@ function printQrTable(table) {
   const row = qrRows().find((item) => item.table === table);
   if (!row) return;
   printAllQrTables([row]);
+}
+
+/** QR "addition en direct" d'une table : a coller sur la table (a part du QR menu/commande).
+ * Scanne, il liste les commandes en cours sur cette table pour que chaque client retrouve
+ * la sienne (utile si plusieurs clients qui ne se connaissent pas partagent la meme table). */
+async function printTableBillQr(table) {
+  const site = currentSite();
+  if (!site) return;
+  // Ouverture synchrone (avant tout await) pour eviter le bloqueur de pop-up.
+  const ticketWindow = window.open("", "_blank", "width=800,height=900");
+  if (!ticketWindow) { showToast("Impossible d'ouvrir l'impression."); return; }
+  try {
+    const siteId = currentSiteId();
+    const linkInfo = await apiRequest(`/api/table-verify-link?site=${encodeURIComponent(siteId)}&table=${encodeURIComponent(table)}`);
+    const verifyUrl = `${window.location.origin}/verify-table?site=${encodeURIComponent(siteId)}&table=${encodeURIComponent(table)}&t=${encodeURIComponent(linkInfo.token)}`;
+    const qrImage = `https://quickchart.io/qr?size=320&text=${encodeURIComponent(verifyUrl)}`;
+    ticketWindow.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>QR Facture - ${escapeHtml(table)}</title><style>body{font-family:Arial,sans-serif;padding:32px;text-align:center;color:#111}img{width:320px;height:320px;background:#fff;padding:12px;border-radius:18px}h1,p{margin:0 0 12px}.box{border:2px solid #111;border-radius:22px;padding:24px;max-width:520px;margin:0 auto}.loc{display:inline-block;background:#c54f41;color:#fff;padding:4px 18px;border-radius:20px;font-size:14px;margin-bottom:12px}</style></head><body><div class="box"><h1>${escapeHtml(site.nom || "Maquis")}</h1><div class="loc">Addition en direct</div><p>Table: ${escapeHtml(table)}</p><img src="${qrImage}" alt="QR facture table"><p>Scannez pour voir votre facture en temps reel — chaque client retrouve la sienne dans la liste.</p></div><script>window.onload=function(){window.print();}</script></body></html>`);
+    ticketWindow.document.close();
+  } catch (err) {
+    console.error("Lien de verification QR table indisponible :", err);
+    ticketWindow.close();
+    showToast("Impossible de generer le QR facture pour cette table.");
+  }
 }
 
 function printAllQrTables(rowsOverride = null) {
@@ -24011,6 +24063,11 @@ document.getElementById("fab-btn").addEventListener("click", () => {
     const printQrTableBtn = event.target.closest("[data-print-qr-table]");
     if (printQrTableBtn) {
       printQrTable(printQrTableBtn.dataset.printQrTable);
+      return;
+    }
+    const printTableBillBtn = event.target.closest("[data-print-table-bill]");
+    if (printTableBillBtn) {
+      printTableBillQr(printTableBillBtn.dataset.printTableBill).catch(handleApiError);
       return;
     }
     const advanceOrderBtn = event.target.closest("[data-advance-order]");
