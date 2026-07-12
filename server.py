@@ -2899,6 +2899,70 @@ def order_verify_status(state: dict[str, Any], site_id: str, order_id: int) -> d
     return {"paid": False, "status": "Introuvable (annulée ou supprimée)", "factureNumber": None, "items": []}
 
 
+# Fenetre de rattachement des ventes deja encaissees a la table (au-dela, on considere
+# que ce n'est plus la meme visite — evite d'exhumer un vieil historique sur une table reutilisee).
+TABLE_VERIFY_RECENT_SECONDS = 20 * 60 * 60
+
+
+def table_verify_entries(state: dict[str, Any], site_id: str, table: str) -> list[dict[str, Any]]:
+    """Liste des commandes (ouvertes ou recemment facturees) rattachees a une table, pour la
+    page de verification QR de table : chaque client present sur la table retrouve la sienne
+    sans voir le detail de celles des autres (juste nom/heure/statut, cf. _verify_table_html)."""
+    table_key = str(table or "").strip().lower()
+    if not table_key:
+        return []
+    entries: list[dict[str, Any]] = []
+    seen_order_ids: set[int] = set()
+    for o in state.get("commandes", []) or []:
+        if str(o.get("siteId", "")) != site_id:
+            continue
+        if str(o.get("table") or o.get("client") or "").strip().lower() != table_key:
+            continue
+        oid = int(o.get("id") or -1)
+        if oid < 0 or oid in seen_order_ids:
+            continue
+        seen_order_ids.add(oid)
+        entries.append({
+            "orderId": oid,
+            "client": str(o.get("client") or ""),
+            "time": str(o.get("createdAt") or ""),
+            "status": str(o.get("status") or "En attente"),
+            "paid": False,
+        })
+    cutoff = time.time() - TABLE_VERIFY_RECENT_SECONDS
+    by_order: dict[int, dict[str, Any]] = {}
+    for v in state.get("ventes", []) or []:
+        if str(v.get("siteId", "")) != site_id:
+            continue
+        if str(v.get("table") or v.get("client") or "").strip().lower() != table_key:
+            continue
+        oid_raw = v.get("sourceOrderId")
+        if oid_raw is None:
+            continue
+        oid = int(oid_raw)
+        if oid in seen_order_ids:
+            continue
+        sold_at = str(v.get("soldAt") or "")
+        try:
+            ts = datetime.fromisoformat(sold_at.replace("Z", "+00:00")).timestamp() if sold_at else 0.0
+        except ValueError:
+            ts = 0.0
+        if ts < cutoff:
+            continue
+        row = by_order.get(oid)
+        if row is None:
+            by_order[oid] = {
+                "orderId": oid,
+                "client": str(v.get("client") or ""),
+                "time": sold_at,
+                "status": "Payé",
+                "paid": True,
+            }
+    entries.extend(by_order.values())
+    entries.sort(key=lambda e: str(e.get("time") or ""), reverse=True)
+    return entries
+
+
 def qr_verify_token(secret: str, site_id: str, debtor_key: str) -> str:
     """Jeton signe (HMAC) protegeant le lien public de verification de solde — empeche de
     deviner/enumerer des debiteurs sans avoir d'abord obtenu le lien via une session authentifiee."""
@@ -3017,6 +3081,63 @@ def _verify_commande_html(site_name: str | None, order_id: int, info: dict[str, 
         f"<div class=\"status\">{escape_html(status_label)}</div>{detail}"
         f"{items_html}"
         "<p class=\"meta\">Statut calculé en temps réel à l'instant du scan.</p>"
+        "</div></body></html>"
+    )
+
+
+def _verify_table_html(site_name: str | None, table: str, entries: list[dict[str, Any]] | None) -> str:
+    """Page HTML mobile-friendly affichee au scan du QR d'une table : liste les commandes en
+    cours/recemment facturees sur cette table (nom, heure, statut — pas de montant) pour que
+    chaque client retrouve la sienne sans voir le detail de celles des autres."""
+    if entries is None:
+        return (
+            "<!DOCTYPE html><html lang=\"fr\"><head><meta charset=\"utf-8\">"
+            "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+            "<title>Verification</title><style>body{font-family:Arial,sans-serif;padding:32px;"
+            "text-align:center;color:#111}.box{max-width:360px;margin:0 auto;border:2px solid #c54f41;"
+            "border-radius:14px;padding:24px}</style></head><body><div class=\"box\">"
+            "<h1>Lien invalide</h1><p>Ce lien de verification est invalide ou a expire.</p>"
+            "</div></body></html>"
+        )
+
+    def fmt_time(raw: Any) -> str:
+        s = str(raw or "")
+        return s[11:16] if len(s) >= 16 and "T" in s else ""
+
+    if entries:
+        rows = "".join(
+            f"<a class=\"row\" href=\"/verify-commande?site={quote(str(e.get('_siteId') or ''))}"
+            f"&order={e.get('orderId')}&t={quote(str(e.get('_token') or ''))}\">"
+            f"<span class=\"name\">{escape_html(str(e.get('client') or 'Client'))}</span>"
+            f"<span class=\"time\">{escape_html(fmt_time(e.get('time')))}</span>"
+            f"<span class=\"badge {'paid' if e.get('paid') else 'pending'}\">"
+            f"{escape_html('PAYÉ' if e.get('paid') else str(e.get('status') or '').upper())}</span>"
+            "</a>"
+            for e in entries
+        )
+        list_html = f"<div class=\"rows\">{rows}</div>"
+    else:
+        list_html = "<p class=\"meta\">Aucune commande en cours sur cette table pour le moment.</p>"
+
+    return (
+        "<!DOCTYPE html><html lang=\"fr\"><head><meta charset=\"utf-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        f"<title>Verification — {escape_html(table)}</title>"
+        "<style>body{font-family:Arial,sans-serif;padding:32px;text-align:center;color:#111}"
+        ".box{max-width:360px;margin:0 auto;border:2px solid #ddd;border-radius:14px;padding:24px}"
+        ".rows{margin-top:16px;text-align:left}"
+        ".row{display:flex;align-items:center;gap:8px;padding:12px 10px;border:1px solid #eee;"
+        "border-radius:12px;margin-bottom:8px;text-decoration:none;color:#111}"
+        ".row .name{flex:1;font-weight:700;font-size:14px}"
+        ".row .time{color:#888;font-size:12px}"
+        ".badge{display:inline-block;padding:3px 10px;border-radius:14px;font-weight:800;"
+        "font-size:11px;color:#fff;white-space:nowrap}"
+        ".badge.paid{background:#2e7d32}.badge.pending{background:#c54f41}"
+        ".meta{color:#666;font-size:13px;margin-top:16px}</style></head><body><div class=\"box\">"
+        f"<h1>{escape_html(site_name or '')}</h1>"
+        f"<p>Table : <strong>{escape_html(table)}</strong></p>"
+        f"{list_html}"
+        "<p class=\"meta\">Touchez votre nom pour voir le detail de votre facture. Mise a jour en temps réel.</p>"
         "</div></body></html>"
     )
 
@@ -4019,6 +4140,16 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                 return None
             info = order_verify_status(self._state, site_id, order_id)
             return {"siteName": str(site.get("nom") or ""), **(info or {})}
+
+    def table_verify_info(self, site_id: str, table: str) -> dict[str, Any] | None:
+        """Lecture seule : commandes en cours/recemment facturees sur une table, pour la page
+        de verification QR de table (cf. table_verify_entries)."""
+        with self._lock:
+            site = next((s for s in self._state.get("sites", []) if str(s.get("id")) == site_id), None)
+            if site is None:
+                return None
+            entries = table_verify_entries(self._state, site_id, table)
+            return {"siteName": str(site.get("nom") or ""), "entries": entries}
 
     def public_menu(self, site_id: str, location: str = "Intérieur") -> dict[str, Any] | None:
         """Construit le menu public (articles en stock, prix selon zone) consultable via QR code."""
@@ -5237,6 +5368,40 @@ class AppHandler(BaseHTTPRequestHandler):
                 self.send_html(HTTPStatus.NOT_FOUND, _verify_commande_html(None, order_id, None))
                 return
             self.send_html(HTTPStatus.OK, _verify_commande_html(info["siteName"], order_id, info))
+            return
+        if get_path == "/api/table-verify-link":
+            session = self.require_session()
+            if session is None:
+                return
+            site_id = str((query.get("site") or [""])[0]).strip()
+            table = str((query.get("table") or [""])[0]).strip()
+            if not site_id or not table:
+                self.send_json(HTTPStatus.BAD_REQUEST, {"error": "Parametres manquants."})
+                return
+            if not session_is_superadmin(session, all_site_ids=store.all_site_ids()) and site_id not in (session.get("allowedSiteIds") or []):
+                self.send_json(HTTPStatus.FORBIDDEN, {"error": "Maquis non autorisé pour cette session."})
+                return
+            token = qr_verify_token(store.qr_verify_secret(), site_id, f"table:{table.lower()}")
+            self.send_json(HTTPStatus.OK, {"token": token, "site": site_id, "table": table})
+            return
+        if get_path == "/verify-table":
+            site_id = str((query.get("site") or [""])[0]).strip()
+            table = str((query.get("table") or [""])[0]).strip()
+            token = str((query.get("t") or [""])[0]).strip()
+            expected = qr_verify_token(store.qr_verify_secret(), site_id, f"table:{table.lower()}") if site_id and table else ""
+            if not expected or not hmac.compare_digest(expected, token):
+                self.send_html(HTTPStatus.FORBIDDEN, _verify_table_html(None, table, None))
+                return
+            info = store.table_verify_info(site_id, table)
+            if info is None:
+                self.send_html(HTTPStatus.NOT_FOUND, _verify_table_html(None, table, None))
+                return
+            secret = store.qr_verify_secret()
+            entries = [
+                {**e, "_siteId": site_id, "_token": qr_verify_token(secret, site_id, f"order:{e['orderId']}")}
+                for e in info["entries"]
+            ]
+            self.send_html(HTTPStatus.OK, _verify_table_html(info["siteName"], table, entries))
             return
         self.serve_static(parsed.path)
 
