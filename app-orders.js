@@ -10637,14 +10637,17 @@ async function submitSaisieRapide() {
       const existingOrder = selectedOrderId
         ? recordsForSite(state.commandes).find((item) => item.id === selectedOrderId)
         : null;
-      const srClientTrim = (document.getElementById("sr-client")?.value ?? "").trim();
-      if (!assertNomClientQrCommandeOuToast(srClientTrim, existingOrder)) return;
+      const srTableValue = (document.getElementById("sr-table")?.value ?? "").trim() || "Table 1";
+      const srClientNameValue = (document.getElementById("sr-client-name")?.value ?? "").trim();
+      const srCombinedClient = srClientNameValue || srTableValue;
+      if (!assertNomClientQrCommandeOuToast(srCombinedClient, existingOrder)) return;
       const order = ensureOrder(
-        document.getElementById("sr-client")?.value ?? "",
+        srCombinedClient,
         date,
         document.getElementById("sr-note")?.value ?? "",
         selectedOrderId,
       );
+      order.table = srTableValue;
       const errors = [];
       let added = 0;
       for (const item of srCart) {
@@ -10693,7 +10696,7 @@ async function submitSaisieRapide() {
       const vDate = document.getElementById("v-date");
       if (vDate) vDate.value = document.getElementById("sr-date")?.value || "";
       const vClient = document.getElementById("v-client");
-      if (vClient) vClient.value = document.getElementById("sr-client")?.value || "";
+      if (vClient) vClient.value = order.client || "";
       const vNote = document.getElementById("v-note");
       if (vNote) vNote.value = document.getElementById("sr-note")?.value || "";
       syncFinalizeButtonJournalState();
@@ -10705,7 +10708,9 @@ async function submitSaisieRapide() {
 
     const date = pdjCalendarDate();
     if (!assertCanSellOrToast(date, currentSiteId())) return;
-    const tableLabel = document.getElementById("sr-client")?.value?.trim() || "Comptoir";
+    const srClientNameForNewOrder = document.getElementById("sr-client-name")?.value?.trim() || "";
+    const tableLabel = document.getElementById("sr-table")?.value?.trim() || "Table 1";
+    const clientLabel = srClientNameForNewOrder || tableLabel;
     state.nextId = state.nextId || {};
     const clientRequestId = srPendingClientRequestId || newOrderClientRequestId();
     srPendingClientRequestId = clientRequestId;
@@ -10722,7 +10727,7 @@ async function submitSaisieRapide() {
         id: srPendingOrderId,
         siteId: currentSiteId(),
         table: tableLabel,
-        client: tableLabel,
+        client: clientLabel,
         saisieMode: "Saisie rapide",
         date,
         createdAt: new Date().toISOString(),
@@ -10737,7 +10742,7 @@ async function submitSaisieRapide() {
       srPendingOrderId = order.id;
       order.clientRequestId = clientRequestId;
       order.table = tableLabel;
-      order.client = tableLabel;
+      order.client = clientLabel;
       order.date = date;
       order.lignes = [];
       if (!String(order.server || order.serveur || "").trim()) {
@@ -12118,6 +12123,24 @@ function refreshSiteTablesDatalist() {
   const list = document.getElementById("site-tables-list");
   if (!list) return;
   list.innerHTML = siteTableNames().map((t) => `<option value="${escapeHtml(t)}"></option>`).join("");
+}
+
+/** Noms de table proposes dans le select "Table" de la saisie rapide — "Table 1" est
+ * toujours disponible (et choisi par defaut) meme si aucun QR de table n'a encore ete genere. */
+function srTableOptionNames() {
+  const known = siteTableNames();
+  return known.includes("Table 1") ? known : ["Table 1", ...known];
+}
+
+/** Peuple #sr-table et selectionne `selected` si fourni, sinon "Table 1" par defaut. */
+function refreshSrTableSelect(selected = "") {
+  const sel = document.getElementById("sr-table");
+  if (!sel) return;
+  const names = srTableOptionNames();
+  const want = String(selected || "").trim();
+  const finalNames = want && !names.includes(want) ? [want, ...names] : names;
+  sel.innerHTML = finalNames.map((t) => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("");
+  sel.value = want || "Table 1";
 }
 
 function renderQrPreview() {
@@ -14199,7 +14222,7 @@ function openSaisieRapideModal({
   title = "Saisie rapide",
   submitLabel = "Valider la commande",
   clientReadonly = false,
-  focusElId = "sr-client",
+  focusElId = "sr-client-name",
 } = {}) {
   const ctx = document.getElementById("sr-order-context-wrap");
   if (ctx) ctx.classList.remove("hidden");
@@ -14207,12 +14230,15 @@ function openSaisieRapideModal({
   if (titleEl) titleEl.textContent = title;
   const srDate = document.getElementById("sr-date");
   if (srDate) srDate.value = order?.date || pdjCalendarDate();
-  const srClient = document.getElementById("sr-client");
-  if (srClient) {
-    srClient.value = order?.client || "";
-    srClient.readOnly = Boolean(clientReadonly);
-    srClient.style.opacity = clientReadonly ? "0.85" : "";
+  const orderTable = order ? String(order.table || order.client || "") : "";
+  refreshSrTableSelect(orderTable);
+  const srTable = document.getElementById("sr-table");
+  const srClientName = document.getElementById("sr-client-name");
+  if (srClientName) {
+    srClientName.value = order && order.client && order.client !== orderTable ? order.client : "";
   }
+  if (srTable) srTable.disabled = Boolean(clientReadonly);
+  if (srClientName) srClientName.disabled = Boolean(clientReadonly);
   const srOrderSel = document.getElementById("sr-order-select");
   if (srOrderSel) srOrderSel.value = order ? String(order.id) : "";
   const srNote = document.getElementById("sr-note");
@@ -14246,7 +14272,7 @@ function openOrderEditor(orderId = null) {
     return;
   }
   if (!orderId) {
-    openSaisieRapideModal({ title: "Saisie rapide", focusElId: "sr-client" });
+    openSaisieRapideModal({ title: "Saisie rapide", focusElId: "sr-client-name" });
     return;
   }
   openSaisieRapideModal({
@@ -20176,11 +20202,10 @@ function closeModal(id) {
   if (id === "modal-finalize") resetFinalizeModalUi();
   if (id === "modal-saisie-rapide") {
     srCart = [];
-    const srClient = document.getElementById("sr-client");
-    if (srClient) {
-      srClient.readOnly = false;
-      srClient.style.opacity = "";
-    }
+    const srTable = document.getElementById("sr-table");
+    if (srTable) srTable.disabled = false;
+    const srClientName = document.getElementById("sr-client-name");
+    if (srClientName) srClientName.disabled = false;
     const submitBtn = document.getElementById("sr-submit-btn");
     if (submitBtn) submitBtn.textContent = "Valider la commande";
   }
@@ -22944,18 +22969,22 @@ function attachEvents() {
     activeOrderId = id;
     if (vSel) vSel.value = srSel.value;
     const order = id ? recordsForSite(state.commandes).find((o) => o.id === id) : null;
-    const srClient = document.getElementById("sr-client");
+    const srTable = document.getElementById("sr-table");
+    const srClientName = document.getElementById("sr-client-name");
     const srDate = document.getElementById("sr-date");
     const srNote = document.getElementById("sr-note");
-    if (order && srClient && srDate && srNote) {
-      srClient.value = order.client || srClient.value;
+    let orderTable = "";
+    if (order && srTable && srClientName && srDate && srNote) {
+      orderTable = String(order.table || order.client || "");
+      refreshSrTableSelect(orderTable);
+      srClientName.value = order.client && order.client !== orderTable ? order.client : "";
       srDate.value = order.date || srDate.value;
       srNote.value = order.note != null ? order.note : srNote.value;
     }
     const vDate = document.getElementById("v-date");
     if (vDate && srDate) vDate.value = srDate.value || vDate.value;
     const vClient = document.getElementById("v-client");
-    if (vClient && srClient) vClient.value = srClient.value;
+    if (vClient) vClient.value = order?.client || "";
     const vNote = document.getElementById("v-note");
     if (vNote && srNote) vNote.value = srNote.value;
     syncFinalizeButtonJournalState();
