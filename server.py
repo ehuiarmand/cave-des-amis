@@ -2855,12 +2855,11 @@ def credit_outstanding_for_debtor(state: dict[str, Any], site_id: str, debtor_ke
 
 def order_verify_status(state: dict[str, Any], site_id: str, order_id: int) -> dict[str, Any] | None:
     """Statut courant d'une commande pour la verification QR du ticket :
-    - encore presente dans `commandes` → son statut (En attente / Servi / ...), non payee
-    - absente mais reliee a une vente (sourceOrderId) → payee (facture emise), avec le detail des articles
-    - absente sans vente correspondante → probablement annulee/supprimee"""
-    for o in state.get("commandes", []) or []:
-        if str(o.get("siteId", "")) == site_id and int(o.get("id") or -1) == order_id:
-            return {"paid": False, "status": str(o.get("status") or "En attente"), "factureNumber": None, "items": []}
+    - reliee a une vente (sourceOrderId) → payee (facture emise), avec le detail des articles.
+      Verifie en premier : une commande peut rester dans `commandes` (ex. statut "Servi")
+      meme apres avoir ete facturee, et la facturation prime toujours sur le statut de service.
+    - sinon encore presente dans `commandes` → son statut (En attente / Servi / ...), non payee
+    - sinon introuvable → probablement annulee/supprimee"""
     items: list[dict[str, Any]] = []
     facture_number = None
     total = 0.0
@@ -2876,6 +2875,9 @@ def order_verify_status(state: dict[str, Any], site_id: str, order_id: int) -> d
             total += montant
     if items:
         return {"paid": True, "status": "Payé", "factureNumber": facture_number, "items": items, "total": total}
+    for o in state.get("commandes", []) or []:
+        if str(o.get("siteId", "")) == site_id and int(o.get("id") or -1) == order_id:
+            return {"paid": False, "status": str(o.get("status") or "En attente"), "factureNumber": None, "items": []}
     return {"paid": False, "status": "Introuvable (annulée ou supprimée)", "factureNumber": None, "items": []}
 
 
