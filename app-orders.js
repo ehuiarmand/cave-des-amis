@@ -11583,7 +11583,7 @@ async function confirmKit() {
         location,
         formatQuantite: 1,
         packSize: 1,
-        prix: idx === 0 ? price : 0,
+        prix: price / size,
         qty: part.qty,
         remise: 0,
         paiement: "A regler",
