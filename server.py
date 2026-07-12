@@ -2856,17 +2856,27 @@ def credit_outstanding_for_debtor(state: dict[str, Any], site_id: str, debtor_ke
 def order_verify_status(state: dict[str, Any], site_id: str, order_id: int) -> dict[str, Any] | None:
     """Statut courant d'une commande pour la verification QR du ticket :
     - encore presente dans `commandes` → son statut (En attente / Servi / ...), non payee
-    - absente mais reliee a une vente (sourceOrderId) → payee (facture emise)
+    - absente mais reliee a une vente (sourceOrderId) → payee (facture emise), avec le detail des articles
     - absente sans vente correspondante → probablement annulee/supprimee"""
     for o in state.get("commandes", []) or []:
         if str(o.get("siteId", "")) == site_id and int(o.get("id") or -1) == order_id:
-            return {"paid": False, "status": str(o.get("status") or "En attente"), "factureNumber": None}
+            return {"paid": False, "status": str(o.get("status") or "En attente"), "factureNumber": None, "items": []}
+    items: list[dict[str, Any]] = []
+    facture_number = None
+    total = 0.0
     for v in state.get("ventes", []) or []:
         if str(v.get("siteId", "")) != site_id:
             continue
         if v.get("sourceOrderId") is not None and int(v.get("sourceOrderId")) == order_id:
-            return {"paid": True, "status": "Payé", "factureNumber": v.get("factureNumber")}
-    return {"paid": False, "status": "Introuvable (annulée ou supprimée)", "factureNumber": None}
+            facture_number = v.get("factureNumber")
+            qty = float(v.get("qty") or 0)
+            prix = float(v.get("prix") or 0)
+            montant = qty * prix - float(v.get("remise") or 0)
+            items.append({"article": str(v.get("article") or ""), "qty": qty, "montant": montant})
+            total += montant
+    if items:
+        return {"paid": True, "status": "Payé", "factureNumber": facture_number, "items": items, "total": total}
+    return {"paid": False, "status": "Introuvable (annulée ou supprimée)", "factureNumber": None, "items": []}
 
 
 def qr_verify_token(secret: str, site_id: str, debtor_key: str) -> str:
@@ -2927,6 +2937,28 @@ def _verify_commande_html(site_name: str | None, order_id: int, info: dict[str, 
     status_color = "#2e7d32" if paid else "#c54f41"
     facture = info.get("factureNumber")
     detail = f"<p class=\"amount\">Facture : {escape_html(str(facture))}</p>" if paid and facture else ""
+
+    def fmt_amount(n: Any) -> str:
+        return f"{float(n or 0):,.0f}".replace(",", " ")
+
+    def fmt_qty(n: Any) -> str:
+        n = float(n or 0)
+        return f"{n:.0f}" if n == int(n) else f"{n:g}"
+
+    items_html = ""
+    items = info.get("items") or []
+    if paid and items:
+        rows = "".join(
+            "<tr>"
+            f"<td class=\"art\">{escape_html(str(it.get('article') or ''))} × {fmt_qty(it.get('qty'))}</td>"
+            f"<td class=\"amt\">{fmt_amount(it.get('montant'))} FCFA</td>"
+            "</tr>"
+            for it in items
+        )
+        items_html = (
+            "<table class=\"items\">" + rows + "</table>"
+            f"<p class=\"total\">Total : {fmt_amount(info.get('total'))} FCFA</p>"
+        )
     return (
         "<!DOCTYPE html><html lang=\"fr\"><head><meta charset=\"utf-8\">"
         "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
@@ -2936,10 +2968,15 @@ def _verify_commande_html(site_name: str | None, order_id: int, info: dict[str, 
         f".status{{display:inline-block;padding:8px 22px;border-radius:24px;font-weight:800;"
         f"font-size:18px;color:#fff;background:{status_color};margin:12px 0}}"
         ".amount{font-size:14px;font-weight:700;color:#555}"
+        ".items{width:100%;border-collapse:collapse;margin-top:16px;text-align:left;font-size:13px}"
+        ".items td{padding:6px 2px;border-bottom:1px solid #eee}"
+        ".items td.amt{text-align:right;white-space:nowrap;font-weight:600}"
+        ".total{text-align:right;font-weight:800;margin-top:8px;font-size:14px}"
         ".meta{color:#666;font-size:13px;margin-top:16px}</style></head><body><div class=\"box\">"
         f"<h1>{escape_html(site_name or '')}</h1>"
         f"<p>Commande : <strong>#{order_id}</strong></p>"
         f"<div class=\"status\">{escape_html(status_label)}</div>{detail}"
+        f"{items_html}"
         "<p class=\"meta\">Statut calculé en temps réel à l'instant du scan.</p>"
         "</div></body></html>"
     )
