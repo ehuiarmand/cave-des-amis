@@ -2858,7 +2858,8 @@ def order_verify_status(state: dict[str, Any], site_id: str, order_id: int) -> d
     - reliee a une vente (sourceOrderId) → payee (facture emise), avec le detail des articles.
       Verifie en premier : une commande peut rester dans `commandes` (ex. statut "Servi")
       meme apres avoir ete facturee, et la facturation prime toujours sur le statut de service.
-    - sinon encore presente dans `commandes` → son statut (En attente / Servi / ...), non payee
+    - sinon encore presente dans `commandes` → son statut (En attente / Servi / ...), non payee,
+      avec le detail des lignes en cours (peut evoluer tant que la commande n'est pas facturee).
     - sinon introuvable → probablement annulee/supprimee"""
     items: list[dict[str, Any]] = []
     facture_number = None
@@ -2877,7 +2878,21 @@ def order_verify_status(state: dict[str, Any], site_id: str, order_id: int) -> d
         return {"paid": True, "status": "Payé", "factureNumber": facture_number, "items": items, "total": total}
     for o in state.get("commandes", []) or []:
         if str(o.get("siteId", "")) == site_id and int(o.get("id") or -1) == order_id:
-            return {"paid": False, "status": str(o.get("status") or "En attente"), "factureNumber": None, "items": []}
+            pending_items: list[dict[str, Any]] = []
+            pending_total = 0.0
+            for l in o.get("lignes", []) or []:
+                qty = float(l.get("qty") or 0)
+                prix = float(l.get("prix") or 0)
+                montant = qty * prix - float(l.get("remise") or 0)
+                pending_items.append({"article": str(l.get("article") or ""), "qty": qty, "montant": montant})
+                pending_total += montant
+            return {
+                "paid": False,
+                "status": str(o.get("status") or "En attente"),
+                "factureNumber": None,
+                "items": pending_items,
+                "total": pending_total,
+            }
     return {"paid": False, "status": "Introuvable (annulée ou supprimée)", "factureNumber": None, "items": []}
 
 
@@ -2949,7 +2964,7 @@ def _verify_commande_html(site_name: str | None, order_id: int, info: dict[str, 
 
     items_html = ""
     items = info.get("items") or []
-    if paid and items:
+    if items:
         rows = "".join(
             "<tr>"
             f"<td class=\"art\">{escape_html(str(it.get('article') or ''))} × {fmt_qty(it.get('qty'))}</td>"
@@ -2957,9 +2972,10 @@ def _verify_commande_html(site_name: str | None, order_id: int, info: dict[str, 
             "</tr>"
             for it in items
         )
+        total_label = "Total" if paid else "Total (en cours)"
         items_html = (
             "<table class=\"items\">" + rows + "</table>"
-            f"<p class=\"total\">Total : {fmt_amount(info.get('total'))} FCFA</p>"
+            f"<p class=\"total\">{total_label} : {fmt_amount(info.get('total'))} FCFA</p>"
         )
     return (
         "<!DOCTYPE html><html lang=\"fr\"><head><meta charset=\"utf-8\">"
