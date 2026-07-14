@@ -12267,6 +12267,46 @@ function printAllQrTables(rowsOverride = null) {
   ticketWindow.document.close();
 }
 
+
+/** Impression groupee de tous les QR addition en direct (une carte par table). */
+async function printAllTableBillQrs(rowsOverride = null) {
+  const site = currentSite();
+  if (!site) return;
+  const rows = rowsOverride || qrRows();
+  if (!rows.length) { showToast("Aucun QR Facture a imprimer."); return; }
+  // Ouverture synchrone pour eviter le bloqueur de pop-up.
+  const ticketWindow = window.open("", "_blank", "width=1000,height=900");
+  if (!ticketWindow) { showToast("Impossible d'ouvrir l'impression."); return; }
+  ticketWindow.document.write("<!DOCTYPE html><html lang=\"fr\"><head><meta charset=\"utf-8\"><title>QR Facture — generation…</title></head><body style=\"font-family:Arial,sans-serif;padding:32px;text-align:center\"><p>Generation des QR Facture…</p></body></html>");
+  ticketWindow.document.close();
+  const siteId = currentSiteId();
+  const origin = window.location.origin;
+  try {
+    const cards = [];
+    for (const row of rows) {
+      const table = row.table;
+      const linkInfo = await apiRequest(`/api/table-verify-link?site=${encodeURIComponent(siteId)}&table=${encodeURIComponent(table)}`);
+      const verifyUrl = `${origin}/verify-table?site=${encodeURIComponent(siteId)}&table=${encodeURIComponent(table)}&t=${encodeURIComponent(linkInfo.token)}`;
+      const qrImage = `https://quickchart.io/qr?size=260&text=${encodeURIComponent(verifyUrl)}`;
+      cards.push(`
+        <section class="table-block">
+          <h2>${escapeHtml(site.nom || "Maquis")} — ${escapeHtml(table)}</h2>
+          <div class="loc">Addition en direct</div>
+          <img src="${qrImage}" alt="QR facture ${escapeHtml(table)}">
+          <p>Scannez pour voir votre facture en temps reel — chaque client retrouve la sienne dans la liste.</p>
+        </section>
+      `);
+    }
+    ticketWindow.document.open();
+    ticketWindow.document.write(`<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>QR Facture — addition en direct</title><style>body{font-family:Arial,sans-serif;color:#111;padding:22px}.table-block{break-inside:avoid;page-break-inside:avoid;border:2px solid #111;border-radius:18px;padding:18px;margin:0 0 18px;text-align:center}h2{margin:0 0 12px}.loc{display:inline-block;background:#c54f41;color:#fff;padding:4px 18px;border-radius:20px;font-size:14px;margin-bottom:12px}img{display:block;width:260px;height:260px;margin:10px auto;background:#fff;padding:8px;border:1px solid #ddd;border-radius:14px}p{margin:8px 0 0}@media print{body{padding:0}.table-block{page-break-inside:avoid}}</style></head><body>${cards.join("")}<script>window.onload=function(){window.print();}</script></body></html>`);
+    ticketWindow.document.close();
+  } catch (err) {
+    console.error("Impression groupee QR Facture impossible :", err);
+    try { ticketWindow.close(); } catch (_) { /* ignore */ }
+    showToast("Impossible de generer les QR Facture.");
+  }
+}
+
 function renderStock() {
   const allItems = recordsForSite(state.stock).slice().sort((a, b) => a.article.localeCompare(b.article, "fr"));
   const site = currentSite();
@@ -23296,6 +23336,9 @@ function attachEvents() {
   });
   document.getElementById("generate-qr-btn").addEventListener("click", renderQrPreview);
   document.getElementById("print-all-qr-btn").addEventListener("click", () => printAllQrTables());
+  document.getElementById("print-all-bill-qr-btn")?.addEventListener("click", () => {
+    printAllTableBillQrs().catch(handleApiError);
+  });
   document.getElementById("print-qr-int-btn").addEventListener("click", () => printQrCard("Intérieur"));
   document.getElementById("print-qr-ext-btn").addEventListener("click", () => printQrCard("Extérieur"));
   document.getElementById("new-site-single-br-enabled")?.addEventListener("change", syncSingleBreweryUi);
