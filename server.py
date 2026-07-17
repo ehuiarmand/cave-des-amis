@@ -112,6 +112,8 @@ SESSION_TTL_SECONDS = 60 * 60 * 8
 SESSION_COOKIE = "maquis_manager_session"
 PASSWORD_ALGO = "pbkdf2_sha256"
 PASSWORD_ITERATIONS = 260_000
+PORTAL_SSO_SECRET = os.environ.get("PORTAL_SSO_SECRET", "portail-sso-dev-secret-change-in-production")
+PORTAIL_URL = os.environ.get("PORTAIL_URL", "http://localhost:9000")
 
 
 def _env_first(*names: str, default: str = "") -> str:
@@ -784,6 +786,27 @@ def verify_password(password: str, stored_hash: str) -> bool:
 def password_needs_upgrade(stored_hash: str) -> bool:
     """Vrai si le hash stocké utilise un algorithme/nombre d'itérations obsolète."""
     return not str(stored_hash or "").startswith(f"{PASSWORD_ALGO}${PASSWORD_ITERATIONS}$")
+
+
+def _verify_portal_sso_token(token: str) -> dict[str, Any] | None:
+    """Vérifie et décode un token SSO émis par le portail (HMAC-SHA256)."""
+    try:
+        dot = token.rfind(".")
+        if dot == -1:
+            return None
+        raw, sig = token[:dot], token[dot + 1:]
+        expected = hmac.new(PORTAL_SSO_SECRET.encode(), raw.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected, sig):
+            return None
+        padding = (4 - len(raw) % 4) % 4
+        payload: dict[str, Any] = json.loads(base64.urlsafe_b64decode(raw + "=" * padding))
+        if int(payload.get("exp", 0)) < int(time.time()):
+            return None
+        if str(payload.get("app", "")) != "cave":
+            return None
+        return payload
+    except Exception:
+        return None
 
 
 def make_site(
@@ -5228,6 +5251,54 @@ class AppHandler(BaseHTTPRequestHandler):
             client = str((query.get("client") or [""])[0]).strip()
             self.send_json(HTTPStatus.OK, store.public_orders(site_id, table, client))
             return
+        if get_path == "/sso":
+            token_raw = str((query.get("token") or [""])[0]).strip()
+            sso_user = _verify_portal_sso_token(token_raw)
+            if sso_user is None:
+                audit_log("sso_invalid_token", {"ip": self.client_ip()})
+                # Retour au portail (pas la 2e page login locale)
+                self.send_response(HTTPStatus.FOUND)
+                self._send_security_headers()
+                self.send_header("Location", PORTAIL_URL.rstrip("/") + "/?error=sso_invalid")
+                self.end_headers()
+                return
+            aids_sso = store.all_site_ids()
+            sso_allowed = [
+                sid for sid in (sso_user.get("allowedSiteIds") or aids_sso) if sid in aids_sso
+            ] or (aids_sso[:1] if aids_sso else [])
+            sso_role = str(sso_user.get("role", ""))
+            sso_username = str(sso_user.get("username", ""))
+            sso_gs = compute_global_superadmin(sso_username, sso_role, sso_allowed, aids_sso)
+            sess_token = sessions.create(
+                sso_username,
+                sso_role,
+                sso_allowed,
+                global_superadmin=sso_gs,
+                all_site_ids=aids_sso,
+            )
+            secure = self._cookie_secure()
+            audit_log("sso_login_success", {"ip": self.client_ip(), "username": sso_username})
+            # 200 + HTML : plus fiable que 302 pour stocker le cookie HttpOnly (Chrome/ports locaux)
+            body = (
+                "<!DOCTYPE html><html lang=fr><head><meta charset=utf-8>"
+                "<title>Connexion…</title></head><body>"
+                "<p>Connexion en cours…</p>"
+                "<script>setTimeout(function(){location.replace('/');},100);</script>"
+                "</body></html>"
+            ).encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self._send_security_headers()
+            self.send_header(
+                "Set-Cookie",
+                f"{SESSION_COOKIE}={sess_token}; Path=/; HttpOnly; SameSite=Lax{secure}; Max-Age={SESSION_ABSOLUTE_SECONDS}",
+            )
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
         if get_path == "/api/session":
             session = self.require_session(allow_password_expired=True)
             if session is None:
@@ -5891,7 +5962,7 @@ class AppHandler(BaseHTTPRequestHandler):
             if sess:
                 audit_log("logout", {"ip": self.client_ip(), "username": str(sess.get("username", ""))})
             sessions.clear(token)
-            self.send_json(HTTPStatus.OK, {"authenticated": False}, clear_cookie=True)
+            self.send_json(HTTPStatus.OK, {"authenticated": False, "portalUrl": PORTAIL_URL}, clear_cookie=True)
             return
 
         if post_path == "/api/account/password":
@@ -6114,6 +6185,15 @@ class AppHandler(BaseHTTPRequestHandler):
         route = "/" if raw_path == "" else raw_path
         if route == "/":
             route = "/index.html"
+        # Une seule page de connexion : l'app principale redirige vers le portail.
+        if route == "/index.html":
+            token = self.session_token()
+            if sessions.get(token) is None:
+                self.send_response(HTTPStatus.FOUND)
+                self._send_security_headers()
+                self.send_header("Location", PORTAIL_URL.rstrip("/") + "/")
+                self.end_headers()
+                return
         target = (BASE_DIR / route.lstrip("/")).resolve()
         if BASE_DIR not in target.parents and target != BASE_DIR / "index.html":
             self.send_error(HTTPStatus.FORBIDDEN)
@@ -6170,7 +6250,7 @@ class AppHandler(BaseHTTPRequestHandler):
         token = self.session_token()
         session = sessions.get(token)
         if session is None:
-            self.send_json(HTTPStatus.UNAUTHORIZED, {"authenticated": False, "error": "Session invalide ou expiree."}, clear_cookie=True)
+            self.send_json(HTTPStatus.UNAUTHORIZED, {"authenticated": False, "error": "Session invalide ou expiree.", "portalUrl": PORTAIL_URL}, clear_cookie=True)
             return None
         with store._lock:
             auth_users = list(store._state.get("auth", {}).get("users", []))
@@ -6189,7 +6269,7 @@ class AppHandler(BaseHTTPRequestHandler):
         sessions.sync_from_auth_user(token, store)
         session = sessions.get(token)
         if session is None:
-            self.send_json(HTTPStatus.UNAUTHORIZED, {"authenticated": False, "error": "Session invalide ou expiree."}, clear_cookie=True)
+            self.send_json(HTTPStatus.UNAUTHORIZED, {"authenticated": False, "error": "Session invalide ou expiree.", "portalUrl": PORTAIL_URL}, clear_cookie=True)
             return None
         if not allow_password_expired and session_password_change_required(session, auth_users):
             self.send_json(

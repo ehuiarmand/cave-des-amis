@@ -672,20 +672,20 @@ async function handleLoginSubmit(event) {
 }
 
 async function logout() {
+  let portalUrl = "http://localhost:9000";
   try {
-    await apiRequest(API.logout, {
+    const data = await apiRequest(API.logout, {
       method: "POST",
       body: JSON.stringify({}),
     });
+    if (data && data.portalUrl) portalUrl = data.portalUrl;
   } catch (error) {
     console.error(error);
   }
   sessionUser = null;
   csrfToken = null;
   state = null;
-  setAuthVisible(false);
-  document.getElementById("login-password").value = "";
-  showToast("Session fermee.");
+  window.location.href = portalUrl;
 }
 
 async function bootstrapAuthenticatedApp() {

@@ -184,7 +184,7 @@ def patch_server(text: str) -> str:
          '"creditRecoveries", "clientAvoirs", "loyaltyClients", "serviceRelay", "consignes", "charges", "staffAuditLog",\n                "stockEntrees"'),
     ]:
         text = text.replace(old, new, 1)
-    # migrate / merge blocks
+    # blocs de migration / fusion
     text = text.replace(
         '"loyaltyClients": [{**item, "siteId": item.get("siteId", site_id)} for item in payload.get("loyaltyClients", [])],\n',
         '"loyaltyClients": [{**item, "siteId": item.get("siteId", site_id)} for item in payload.get("loyaltyClients", [])],\n            "serviceRelay": [{**item, "siteId": item.get("siteId", site_id)} for item in payload.get("serviceRelay", [])],\n',

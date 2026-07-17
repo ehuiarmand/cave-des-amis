@@ -1,3 +1,4 @@
+"""Donne au compte « tanoh » les mêmes droits super-admin global que « admin »."""
 from pathlib import Path
 
 JS = Path(__file__).resolve().parent.parent / "app-orders.js"

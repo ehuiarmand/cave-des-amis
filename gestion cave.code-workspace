@@ -2,6 +2,12 @@
 	"folders": [
 		{
 			"path": "."
+		},
+		{
+			"path": "../../Users/Utilisateur/AndroidStudioProjects/ICGLApp"
+		},
+		{
+			"path": "../../Users/Utilisateur/OneDrive/Documents/2026/GESTION RESIDENCE"
 		}
 	],
 	"settings": {}

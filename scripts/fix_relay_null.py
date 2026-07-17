@@ -1,3 +1,4 @@
+"""Corrige le relais de vente : sans relais explicite, personne ne peut vendre (au lieu de tout le monde)."""
 from pathlib import Path
 
 p = Path(__file__).resolve().parent.parent / "app-orders.js"

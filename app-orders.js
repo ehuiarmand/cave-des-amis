@@ -2491,6 +2491,7 @@ async function apiRequest(url, options = {}) {
     const error = new Error(payload?.error || `HTTP ${response.status}`);
     error.status = response.status;
     if (payload?.mustChangePassword) error.mustChangePassword = true;
+    if (payload?.portalUrl) error.portalUrl = payload.portalUrl;
     throw error;
   }
   return payload;
@@ -10394,6 +10395,7 @@ function renderOrdersManagement() {
           <div class="order-actions-cell">
             <button type="button" class="mini-btn" data-order-details="${escapeHtml(order.id)}">Details</button>
             ${order._isPaid ? "" : `<button type="button" class="mini-btn" data-activate-order="${order.id}">Ouvrir</button>`}
+            ${order._isPaid ? "" : `<button type="button" class="mini-btn" data-change-order-table="${order.id}">Changer table / nom</button>`}
             ${order._isPaid ? "" : `<button type="button" class="mini-btn" data-kit-mix-order="${order.id}">Kit mixte</button>`}
             ${advanceBtn}
             ${encBlocked ? `<button type="button" class="mini-btn" disabled title="${encTitle}">Encaisser</button>` : ""}
@@ -10429,7 +10431,7 @@ function renderOrders() {
       return `<article class="order-card ${order.id === activeOrderId ? "active" : ""} ${highlightClass}">
         <div class="section-head">
           <div>
-            <h3>${escapeHtml(order.client || "Client sans nom")}</h3>
+            <h3>${escapeHtml(orderPhysicalTable(order))}${order.client && order.client !== orderPhysicalTable(order) ? ` · ${escapeHtml(order.client)}` : ""}</h3>
             <p class="list-item-sub">${escapeHtml(formatDateDdMmYyyy(order.date))}${order.note ? ` · ${escapeHtml(order.note)}` : ""}</p>
           </div>
           <div class="order-total">${fmt(total)} FCFA</div>
@@ -10439,6 +10441,7 @@ function renderOrders() {
         </div>
         <div class="order-actions">
           <button type="button" class="mini-btn" data-activate-order="${order.id}">Ouvrir la commande</button>
+          <button type="button" class="mini-btn" data-change-order-table="${order.id}">Changer table / nom</button>
           <button type="button" class="mini-btn" data-add-line-order="${order.id}">Ajouter un article</button>
           <button type="button" class="mini-btn" data-kit-mix-order="${order.id}">Kit mixte</button>
           <button type="button" class="mini-btn" data-print-order="${order.id}">Ticket</button>
@@ -14256,6 +14259,89 @@ function syncFinalizeButtonJournalState() {
   btn.disabled = !id || !allowJournal || !allowPlanning;
 }
 
+
+
+/** Remplit le select table du modal de correction (meme liste que saisie rapide). */
+function refreshChangeOrderTableSelect(selected = "") {
+  const sel = document.getElementById("change-order-table-select");
+  if (!sel) return;
+  const names = srTableOptionNames();
+  const want = String(selected || "").trim();
+  const finalNames = want && !names.includes(want) ? [want, ...names] : names;
+  sel.innerHTML = finalNames.map((t) => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("");
+  sel.value = want || "Table 1";
+}
+
+/** Ouvre le modal pour corriger table / nom d'une commande non encaissée. */
+function openChangeOrderTableModal(orderId) {
+  const order = recordsForSite(state.commandes).find((item) => item.id === Number(orderId));
+  if (!order) {
+    showToast("Commande introuvable.");
+    return;
+  }
+  if (order._isPaid || orderStatus(order) === "Paye") {
+    showToast("Impossible de changer la table d'une commande deja encaissee.");
+    return;
+  }
+  const tableNow = orderPhysicalTable(order) || "Table 1";
+  document.getElementById("change-order-table-id").value = String(order.id);
+  refreshChangeOrderTableSelect(tableNow);
+  const nameEl = document.getElementById("change-order-client-name");
+  if (nameEl) {
+    nameEl.value = order.client && order.client !== tableNow ? order.client : "";
+  }
+  const hint = document.getElementById("change-order-table-hint");
+  if (hint) {
+    hint.textContent = `Commande #${order.factureNumber || order.id} — table actuelle : ${tableNow}`;
+  }
+  openModal("modal-change-order-table");
+  window.requestAnimationFrame(() => document.getElementById("change-order-table-select")?.focus());
+}
+
+/** Enregistre la nouvelle table / le nouveau nom client. */
+async function submitChangeOrderTable() {
+  const orderId = Number(document.getElementById("change-order-table-id")?.value) || 0;
+  const order = recordsForSite(state.commandes).find((item) => item.id === orderId);
+  if (!order) {
+    showToast("Commande introuvable.");
+    return;
+  }
+  if (order._isPaid || orderStatus(order) === "Paye") {
+    showToast("Impossible de changer la table d'une commande deja encaissee.");
+    return;
+  }
+  const tableValue = (document.getElementById("change-order-table-select")?.value ?? "").trim() || "Table 1";
+  const clientNameValue = (document.getElementById("change-order-client-name")?.value ?? "").trim();
+  const clientValue = clientNameValue || tableValue;
+  if (!assertNomClientQrCommandeOuToast(clientValue, order)) return;
+  const prevTable = order.table || order.client || "";
+  const prevClient = order.client || "";
+  if (prevTable === tableValue && prevClient === clientValue) {
+    closeModal("modal-change-order-table");
+    showToast("Aucun changement.");
+    return;
+  }
+  const btn = document.getElementById("change-order-table-submit");
+  if (btn) btn.disabled = true;
+  try {
+    order.table = tableValue;
+    order.client = clientValue;
+    recordStaffAudit(
+      "update",
+      "commande_table",
+      `Table/nom modifies · commande #${order.id}`,
+      `${prevTable}/${prevClient} → ${tableValue}/${clientValue}`,
+    );
+    await persistStatePatch({ commandes: state.commandes, staffAuditLog: state.staffAuditLog });
+    closeModal("modal-change-order-table");
+    renderVentesPage();
+    showToast(`Table mise a jour : ${tableValue}${clientNameValue ? ` (${clientNameValue})` : ""}`);
+  } catch (err) {
+    handleApiError(err);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
 
 function openSaisieRapideModal({
   order = null,
@@ -22489,12 +22575,17 @@ async function disableTwoFactor(username) {
 
 async function enterAuthenticatedApp(sessionPayload) {
   applySessionFieldsFromApi(sessionPayload);
-  setAuthVisible(true);
+  setAuthVisible(true); // montrer l'app tout de suite (ne pas rester sur Ouverture...)
   if (mustChangePassword) {
     showMustChangePasswordOverlay();
     return;
   }
-  await bootstrapAuthenticatedApp();
+  try {
+    await bootstrapAuthenticatedApp();
+  } catch (err) {
+    console.error("bootstrapAuthenticatedApp", err);
+    showToast((err && err.message) || "Chargement partiel — reconnectez-vous si besoin.");
+  }
 }
 
 function showMustChangePasswordOverlay() {
@@ -22644,8 +22735,10 @@ async function handleLoginSubmit(event) {
 }
 
 async function logout() {
+  let portalUrl = "http://localhost:9000";
   try {
-    await apiRequest(API.logout, { method: "POST", body: JSON.stringify({}) });
+    const data = await apiRequest(API.logout, { method: "POST", body: JSON.stringify({}) });
+    if (data && data.portalUrl) portalUrl = data.portalUrl;
   } catch (error) {
     console.error(error);
   }
@@ -22668,13 +22761,7 @@ async function logout() {
   pendingWaUsername = null;
   qrAlertCount = 0;
   knownQrOrderIds = new Set();
-  document.getElementById("totp-section").classList.add("hidden");
-  document.getElementById("login-totp").value = "";
-  document.getElementById("wa-otp-section")?.classList.add("hidden");
-  document.getElementById("login-wa-otp") && (document.getElementById("login-wa-otp").value = "");
-  document.querySelector("#login-form button[type=submit]").textContent = "Ouvrir le tableau de bord";
-  setAuthVisible(false);
-  showToast("Session fermee.");
+  window.location.href = portalUrl;
 }
 
 function migrateCasiersVidesBouteillesVides() {
@@ -23336,6 +23423,9 @@ function attachEvents() {
   });
   document.getElementById("generate-qr-btn").addEventListener("click", renderQrPreview);
   document.getElementById("print-all-qr-btn").addEventListener("click", () => printAllQrTables());
+  document.getElementById("change-order-table-submit")?.addEventListener("click", () => {
+    submitChangeOrderTable().catch(handleApiError);
+  });
   document.getElementById("print-all-bill-qr-btn")?.addEventListener("click", () => {
     printAllTableBillQrs().catch(handleApiError);
   });
@@ -24037,6 +24127,11 @@ document.getElementById("fab-btn").addEventListener("click", () => {
       takeOverOrder(Number(activateOrder.dataset.activateOrder));
       return;
     }
+    const changeOrderTable = event.target.closest("[data-change-order-table]");
+    if (changeOrderTable) {
+      openChangeOrderTableModal(Number(changeOrderTable.dataset.changeOrderTable));
+      return;
+    }
     const addLine = event.target.closest("[data-add-line-order]");
     if (addLine) {
       openOrderEditor(Number(addLine.dataset.addLineOrder));
@@ -24377,14 +24472,21 @@ function applyProductionUiGuards() {
 }
 
 async function init() {
-  attachEvents();
+  const portal = "http://localhost:9000";
   applyProductionUiGuards();
   setAuthVisible(false);
   try {
     const session = await apiRequest(API.session);
     await enterAuthenticatedApp(session);
   } catch (error) {
-    setAuthVisible(false);
+    console.error("init session", error);
+    window.location.replace((error && error.portalUrl) || portal);
+    return;
+  }
+  try {
+    attachEvents();
+  } catch (error) {
+    console.error("attachEvents", error);
   }
 }
 
