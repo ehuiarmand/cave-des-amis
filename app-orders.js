@@ -17351,8 +17351,13 @@ async function finalizeOrder(orderId = activeOrderId) {
     commandes: state.commandes,
     stock: JSON.parse(JSON.stringify(state.stock || [])),
     nextId: { ...(state.nextId || {}) },
-    casiers: state.casiers,
-    casierMouvements: state.casierMouvements,
+    // Snapshots réels (et non de simples références) : drainArticleCasiers mute
+    // les casiers en place et empile les mouvements via unshift. Sans copie,
+    // rollback.casiers/casierMouvements pointeraient sur les mêmes tableaux mutés
+    // que state.*, rendant le delta rowsChangedSince/newRowsPrepended toujours vide
+    // (décrément casier + mouvements jamais persistés côté serveur, perdus au resync).
+    casiers: JSON.parse(JSON.stringify(state.casiers || [])),
+    casierMouvements: (state.casierMouvements || []).slice(),
     clientAvoirs: state.clientAvoirs,
   };
 
