@@ -18,7 +18,7 @@
 </head>
 <body>
   <div id="offline-banner" style="display:none;position:fixed;top:0;left:0;right:0;z-index:9999;background:#b45309;color:#fff;text-align:center;padding:7px 12px;font-size:0.84rem;font-weight:600">
-    <span id="offline-banner-text">âš¡ Mode hors ligne â€” modifications en attente de synchronisation</span>
+    <span id="offline-banner-text">⚡ Mode hors ligne — modifications en attente de synchronisation</span>
     <button type="button" onclick="flushOfflineSync().catch(()=>{})" style="margin-left:12px;background:#fff3;border:none;color:#fff;border-radius:6px;padding:2px 10px;cursor:pointer;font-size:0.82rem">Synchroniser</button>
   </div>
   <div class="app-bg"></div>
@@ -101,8 +101,8 @@
           <span>Ventes</span>
         </button>
         <button class="nav-btn" data-page="loyalty" type="button">
-          <span class="nav-icon" aria-hidden="true">â˜…</span>
-          FidÃ©litÃ©
+          <span class="nav-icon" aria-hidden="true">★</span>
+          Fidélité
         </button>
         <button class="nav-btn" data-page="guide" type="button">
           <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5 1a2 2 0 0 0-2 2v11h10a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2H5zm1 3h6v1H6V4zm0 2h6v1H6V6zm0 2h4v1H6V8z"/></svg>
@@ -126,24 +126,24 @@
         </button>
         <button class="nav-btn" data-page="params" type="button">
           <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 4.754a3.246 3.246 0 1 0 0 6.492 3.246 3.246 0 0 0 0-6.492zM5.754 8a2.246 2.246 0 1 1 4.492 0 2.246 2.246 0 0 1-4.492 0z"/><path d="M9.796 1.343c-.527-1.79-3.065-1.79-3.592 0l-.094.319a.873.873 0 0 1-1.255.52l-.292-.16c-1.64-.892-3.433.902-2.54 2.541l.159.292a.873.873 0 0 1-.52 1.255l-.319.094c-1.79.527-1.79 3.065 0 3.592l.319.094a.873.873 0 0 1 .52 1.255l-.16.292c-.892 1.64.901 3.434 2.541 2.54l.292-.159a.873.873 0 0 1 1.255.52l.094.319c.527 1.79 3.065 1.79 3.592 0l.094-.319a.873.873 0 0 1 1.255-.52l.292.16c1.64.892 3.433-.902 2.54-2.541l-.159-.292a.873.873 0 0 1 .52-1.255l.319-.094c1.79-.527 1.79-3.065 0-3.592l-.319-.094a.873.873 0 0 1-.52-1.255l.16-.292c.892-1.64-.901-3.433-2.541-2.54l-.292.159a.873.873 0 0 1-1.255-.52l-.094-.319z"/></svg>
-          <span>ParamÃ¨tres</span>
+          <span>Paramètres</span>
         </button>
-        <!-- â”€â”€ MODULE RESTAURANT (visible si site.hasRestaurant) â”€â”€ -->
+        <!-- ── MODULE RESTAURANT (visible si site.hasRestaurant) ── -->
         <button class="nav-btn restaurant-module-nav hidden" data-page="menu-cuisine" type="button">
           <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M3 2a.5.5 0 0 1 .5.5v5a.5.5 0 0 1-1 0v-5A.5.5 0 0 1 3 2zm2 0a.5.5 0 0 1 .5.5v5a.5.5 0 0 1-1 0v-5A.5.5 0 0 1 5 2zM1 9a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v.5a.5.5 0 0 1-.5.5H5v3.5a.5.5 0 0 1-1 0V10H1.5A.5.5 0 0 1 1 9.5V9zm10-7a3 3 0 0 1 3 3v1.5a.5.5 0 0 1-.5.5H10.5v5.5a.5.5 0 0 1-1 0V6.5h-.5a.5.5 0 0 1 0-1H10V5a3 3 0 0 1 1-2.236V2.5a.5.5 0 0 1 1 0z"/></svg>
           <span>Menu</span>
         </button>
         <button class="nav-btn restaurant-module-nav hidden" data-page="stock-cuisine" type="button">
           <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1 2.5A1.5 1.5 0 0 1 2.5 1h3A1.5 1.5 0 0 1 7 2.5v3A1.5 1.5 0 0 1 5.5 7h-3A1.5 1.5 0 0 1 1 5.5v-3zm8 0A1.5 1.5 0 0 1 10.5 1h3A1.5 1.5 0 0 1 15 2.5v3A1.5 1.5 0 0 1 13.5 7h-3A1.5 1.5 0 0 1 9 5.5v-3zm-8 8A1.5 1.5 0 0 1 2.5 9h3A1.5 1.5 0 0 1 7 10.5v3A1.5 1.5 0 0 1 5.5 15h-3A1.5 1.5 0 0 1 1 13.5v-3zm8 0A1.5 1.5 0 0 1 10.5 9h3a1.5 1.5 0 0 1 1.5 1.5v3a1.5 1.5 0 0 1-1.5 1.5h-3A1.5 1.5 0 0 1 9 13.5v-3z"/></svg>
-          <span>IngrÃ©dients</span>
+          <span>Ingrédients</span>
         </button>
       </nav>
       </div>
 
       <div class="sidebar-session">
-        <span id="role-badge" class="badge badge-amber">gÃ©rant</span>
+        <span id="role-badge" class="badge badge-amber">gérant</span>
         <strong id="session-user" class="sidebar-username"></strong>
-        <button id="logout-btn" class="sidebar-logout" type="button">DÃ©connexion</button>
+        <button id="logout-btn" class="sidebar-logout" type="button">Déconnexion</button>
       </div>
     </aside>
 
@@ -152,11 +152,11 @@
       <header class="topbar">
         <div class="topbar-context">
           <p class="eyebrow">Vue generale</p>
-          <h3 id="hero-title">Le cÅ“ur de votre bar, en temps rÃ©el.</h3>
+          <h3 id="hero-title">Le cœur de votre bar, en temps réel.</h3>
           <p id="hero-copy" class="hero-copy">Suivez les ventes, le stock et les charges.</p>
         </div>
         <div class="topbar-actions">
-          <div class="topbar-live-clock" id="topbar-live-clock" title="Heure de cet appareil (fuseau systeme) â€” les horaires enregistres sont convertis pour ce fuseau.">
+          <div class="topbar-live-clock" id="topbar-live-clock" title="Heure de cet appareil (fuseau systeme) — les horaires enregistres sont convertis pour ce fuseau.">
             <span id="topbar-live-clock-time" class="topbar-live-clock-time" aria-live="polite">--:--:--</span>
             <span id="topbar-live-clock-zone" class="topbar-live-clock-zone"> </span>
             <span id="topbar-auto-cloture-countdown" class="topbar-auto-cloture-countdown hidden" role="status" aria-live="polite"></span>
@@ -166,14 +166,14 @@
           <select id="site-switcher" class="site-switcher" aria-label="Maquis actif"></select>
           <p id="header-site-scope" class="muted hidden" aria-hidden="true" style="font-size:0.72rem;margin:6px 0 0;text-align:right;max-width:260px;line-height:1.35"></p>
           <p id="top-session-expires" class="muted hidden" aria-hidden="true" style="font-size:0.7rem;margin:2px 0 0;text-align:right;max-width:260px;line-height:1.35"></p>
-          <div class="top-journal-block" id="top-journal-block" title="Date utilisÃ©e pour les ventes, le point du jour et les Ã©critures du maquis actif.">
-            <span class="top-journal-label">JournÃ©e comptable</span>
-            <span id="top-journal-date" class="top-journal-date" aria-live="polite">â€”</span>
+          <div class="top-journal-block" id="top-journal-block" title="Date utilisée pour les ventes, le point du jour et les écritures du maquis actif.">
+            <span class="top-journal-label">Journée comptable</span>
+            <span id="top-journal-date" class="top-journal-date" aria-live="polite">—</span>
             <span id="top-journal-diff" class="top-journal-diff hidden" aria-live="polite"></span>
-            <button type="button" id="top-journal-close-btn" class="top-journal-close-btn hidden manager-only" title="Aller au point du jour pour clÃ´turer">ClÃ´turer maintenant</button>
+            <button type="button" id="top-journal-close-btn" class="top-journal-close-btn hidden manager-only" title="Aller au point du jour pour clôturer">Clôturer maintenant</button>
             <div class="top-backup-strip manager-only">
-              <button type="button" id="top-backup-download-btn" class="top-backup-chip" title="TÃ©lÃ©charger une copie JSON sur cet appareil">JSON local</button>
-              <button type="button" id="top-backup-server-btn" class="top-backup-chip global-superadmin-only" title="Ã‰crire une copie dans le dossier backups/ du serveur (super administrateur global)">Sauvegarde serveur</button>
+              <button type="button" id="top-backup-download-btn" class="top-backup-chip" title="Télécharger une copie JSON sur cet appareil">JSON local</button>
+              <button type="button" id="top-backup-server-btn" class="top-backup-chip global-superadmin-only" title="Écrire une copie dans le dossier backups/ du serveur (super administrateur global)">Sauvegarde serveur</button>
             </div>
           </div>
         </div>
@@ -193,19 +193,19 @@
               <div id="pdj-consultation-banner" class="inline-card hidden" style="margin-top:8px;padding:10px 12px;font-size:0.82rem;line-height:1.45;border-left:3px solid var(--mm-primary);text-align:left;max-width:440px"></div>
               <button type="button" id="print-pdj-control-btn" class="btn btn-outline hidden" style="margin-top:10px" title="Imprimer le point du jour pour controle">Imprimer le point du jour</button>
               <div class="superadmin-only pdj-superadmin-date-banner" id="pdj-work-date-row">
-                <strong style="display:block;font-size:0.82rem;margin-bottom:6px;color:var(--mm-primary-dark)">Super administrateur â€” journÃ©e Ã  traiter</strong>
-                <label for="pdj-work-date" style="display:block;font-size:0.8rem;color:var(--muted);margin-bottom:6px">Date de la journÃ©e Ã  traiter</label>
+                <strong style="display:block;font-size:0.82rem;margin-bottom:6px;color:var(--mm-primary-dark)">Super administrateur — journée à traiter</strong>
+                <label for="pdj-work-date" style="display:block;font-size:0.8rem;color:var(--muted);margin-bottom:6px">Date de la journée à traiter</label>
                 <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">
                   <input id="pdj-work-date" type="date" style="min-height:40px">
                   <button type="button" class="mini-btn" id="pdj-apply-work-date">Appliquer</button>
                 </div>
-                <p class="muted" style="font-size:0.78rem;margin:8px 0 0;line-height:1.35">Choisissez la date puis cliquez <strong>Appliquer</strong> : toutes les sessions (gÃ©rant, serveuses) du <strong>maquis actif</strong> utiliseront cette journÃ©e pour les ventes et le PDJ, jusqu'Ã  clÃ´ture ou retour Ã  la date du jour. AprÃ¨s une rÃ©ouverture, choisissez la mÃªme date pour corriger puis reclÃ´turer.</p>
+                <p class="muted" style="font-size:0.78rem;margin:8px 0 0;line-height:1.35">Choisissez la date puis cliquez <strong>Appliquer</strong> : toutes les sessions (gérant, serveuses) du <strong>maquis actif</strong> utiliseront cette journée pour les ventes et le PDJ, jusqu'à clôture ou retour à la date du jour. Après une réouverture, choisissez la même date pour corriger puis reclôturer.</p>
               </div>
             </div>
           </div>
           <div class="tabs page-subtabs pdj-subtabs" role="tablist" aria-label="Point du jour">
-            <button type="button" class="tab active" data-subtab-pdj="synthese" role="tab" aria-selected="true">SynthÃ¨se</button>
-            <button type="button" class="tab" data-subtab-pdj="cloture" role="tab" aria-selected="false">ClÃ´ture</button>
+            <button type="button" class="tab active" data-subtab-pdj="synthese" role="tab" aria-selected="true">Synthèse</button>
+            <button type="button" class="tab" data-subtab-pdj="cloture" role="tab" aria-selected="false">Clôture</button>
             <button type="button" class="tab" data-subtab-pdj="ventes" role="tab" aria-selected="false">Ventes</button>
           </div>
           <div id="pdj-panel-synthese" class="pdj-panel">
@@ -217,7 +217,7 @@
               <strong id="pdj-ca" class="pdj-val amber">0 FCFA</strong>
             </div>
             <div class="pdj-kpi">
-              <span class="kpi-label">Reste Ã  recouvrer</span>
+              <span class="kpi-label">Reste à recouvrer</span>
               <strong id="pdj-creances" class="pdj-val red">0 FCFA</strong>
               <span id="pdj-creances-sub" class="muted hidden" style="display:block;font-size:0.72rem;margin-top:4px;line-height:1.3"></span>
             </div>
@@ -259,18 +259,18 @@
           <div id="pdj-serveuse-print-block" class="pdj-serveuse-print-only inline-card" style="margin-bottom:14px;padding:14px 16px">
             <p class="eyebrow" style="margin-bottom:6px">Rapport du jour</p>
             <p class="muted" style="font-size:0.88rem;line-height:1.45;margin:0 0 12px">
-              Imprimez la synthÃ¨se des ventes (consultation). Pendant votre crÃ©neau de service, vous pouvez aussi clÃ´turer la journÃ©e ci-dessous.
+              Imprimez la synthèse des ventes (consultation). Pendant votre créneau de service, vous pouvez aussi clôturer la journée ci-dessous.
             </p>
             <button type="button" id="print-pdj-serveuse-btn" class="btn btn-outline">Imprimer le point du jour</button>
           </div>
           <div id="pdj-closure-workflow" class="pdj-closure-workflow pdj-accounting-close-only">
             <div class="pdj-closure-toolbar">
               <div class="pdj-closure-toolbar-text">
-                <h3 class="pdj-detail-title">ClÃ´ture du jour</h3>
-                <p class="muted pdj-closure-hint">Caisse espÃ¨ces â†’ stock physique â†’ validation.</p>
+                <h3 class="pdj-detail-title">Clôture du jour</h3>
+                <p class="muted pdj-closure-hint">Caisse espèces → stock physique → validation.</p>
               </div>
               <div class="pdj-closure-actions">
-                <button id="close-day-btn" class="btn btn-danger" type="button">ClÃ´turer la journÃ©e</button>
+                <button id="close-day-btn" class="btn btn-danger" type="button">Clôturer la journée</button>
                 <button id="print-closure-btn" class="btn btn-outline hidden" type="button">Imprimer le rapport</button>
               </div>
             </div>
@@ -281,7 +281,7 @@
           </div>
           <div id="pdj-panel-ventes" class="pdj-panel hidden">
           <div class="section-head pdj-detail-head">
-            <h3 class="pdj-detail-title">DÃ©tail des ventes</h3>
+            <h3 class="pdj-detail-title">Détail des ventes</h3>
             <span id="pdj-ventes-count" class="section-meta">0 vente</span>
           </div>
           <div id="pdj-ventes-list"></div>
@@ -295,11 +295,11 @@
         <h2 class="dashboard-zone-title">Indicateurs</h2>
         <div class="dashboard-period-bar" style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin-bottom:14px">
           <div class="form-group" style="min-width:200px;margin:0">
-            <label for="dashboard-period-mode">PÃ©riode des indicateurs</label>
+            <label for="dashboard-period-mode">Période des indicateurs</label>
             <select id="dashboard-period-mode">
               <option value="month" selected>Mois en cours</option>
               <option value="week">Semaine en cours</option>
-              <option value="custom">PÃ©riode personnalisÃ©e</option>
+              <option value="custom">Période personnalisée</option>
               <option value="all">Tout l'historique</option>
             </select>
           </div>
@@ -314,33 +314,33 @@
             </div>
           </div>
           <p id="dashboard-period-label" class="muted" style="margin:0;font-size:0.82rem;flex:1;min-width:140px;padding-bottom:6px"></p>
-          <button type="button" class="mini-btn" id="dashboard-print-margins-btn" title="RÃ©capitulatif CA, marge et charges pour la pÃ©riode affichÃ©e">Imprimer le point</button>
+          <button type="button" class="mini-btn" id="dashboard-print-margins-btn" title="Récapitulatif CA, marge et charges pour la période affichée">Imprimer le point</button>
         </div>
         <p id="dashboard-kpi-period-foot" class="muted" style="font-size:0.8rem;margin:-6px 0 12px"></p>
         <p id="dashboard-kpi-margin-hint" class="muted hidden" style="font-size:0.78rem;margin:-4px 0 12px;line-height:1.45"></p>
         <div class="kpi-grid">
           <article class="kpi">
-            <p class="kpi-label" title="Somme des montants nets des ventes finalisÃ©es pour la pÃ©riode sÃ©lectionnÃ©e (prix Ã— quantitÃ© âˆ’ remise).">CA net</p>
+            <p class="kpi-label" title="Somme des montants nets des ventes finalisées pour la période sélectionnée (prix × quantité − remise).">CA net</p>
             <h3 id="kpi-ca" class="kpi-value amber">0</h3>
             <p class="kpi-foot">FCFA</p>
           </article>
           <article class="kpi">
-            <p class="kpi-label" title="Somme sur les ventes : montant net âˆ’ (prix dâ€™achat par bouteille Ã— bouteilles vendues), dâ€™aprÃ¨s le catalogue stock.">Marge brute</p>
+            <p class="kpi-label" title="Somme sur les ventes : montant net − (prix d’achat par bouteille × bouteilles vendues), d’après le catalogue stock.">Marge brute</p>
             <h3 id="kpi-marge-brute" class="kpi-value green">0</h3>
             <p class="kpi-foot">FCFA</p>
           </article>
           <article class="kpi">
-            <p class="kpi-label" title="Total des charges enregistrÃ©es pour la pÃ©riode sÃ©lectionnÃ©e.">Charges</p>
+            <p class="kpi-label" title="Total des charges enregistrées pour la période sélectionnée.">Charges</p>
             <h3 id="kpi-charges" class="kpi-value red">0</h3>
             <p class="kpi-foot">FCFA</p>
           </article>
           <article class="kpi">
-            <p class="kpi-label" title="Marge brute moins les charges (estimation, hors impÃ´ts et frais non saisis).">BÃ©nÃ©fice estimÃ©</p>
+            <p class="kpi-label" title="Marge brute moins les charges (estimation, hors impôts et frais non saisis).">Bénéfice estimé</p>
             <h3 id="kpi-benefice" class="kpi-value">0</h3>
             <p class="kpi-foot">FCFA</p>
           </article>
           <article class="kpi">
-            <p class="kpi-label" title="Nombre de ventes finalisÃ©es sur la pÃ©riode sÃ©lectionnÃ©e.">Transactions</p>
+            <p class="kpi-label" title="Nombre de ventes finalisées sur la période sélectionnée.">Transactions</p>
             <h3 id="kpi-nb" class="kpi-value amber">0</h3>
             <p class="kpi-foot">ventes</p>
           </article>
@@ -348,7 +348,7 @@
         <article class="card spotlight-card dashboard-objectif-card">
             <div class="card-head">
               <div>
-                <p class="eyebrow">Objectif mensuel <button type="button" class="info-tip-btn" id="obj-formula-tip" aria-label="Comment est calculÃ© l'objectif mensuel" title="Formule de calcul">?</button></p>
+                <p class="eyebrow">Objectif mensuel <button type="button" class="info-tip-btn" id="obj-formula-tip" aria-label="Comment est calculé l'objectif mensuel" title="Formule de calcul">?</button></p>
                 <h3 id="obj-pct">0%</h3>
               </div>
               <p id="obj-val" class="muted">/ 500 000 FCFA</p>
@@ -366,7 +366,7 @@
           <article class="card dashboard-alerts-card">
             <div class="section-head">
               <h3>Alertes stock</h3>
-              <span class="section-meta">TriÃ©es par gravitÃ©</span>
+              <span class="section-meta">Triées par gravité</span>
             </div>
             <div id="stock-alerts"></div>
           </article>
@@ -377,8 +377,8 @@
         <div class="dashboard-grid">
           <article class="card">
             <div class="section-head">
-              <h3>Ventes par catÃ©gorie</h3>
-              <span class="section-meta">RÃ©partition</span>
+              <h3>Ventes par catégorie</h3>
+              <span class="section-meta">Répartition</span>
             </div>
             <div id="cat-chart"></div>
           </article>
@@ -394,7 +394,7 @@
           <article class="card">
             <div class="section-head">
               <h3>Plus / moins vendues</h3>
-              <span class="section-meta">Par quantitÃ© (btl)</span>
+              <span class="section-meta">Par quantité (btl)</span>
             </div>
             <div id="dashboard-product-rank"></div>
           </article>
@@ -402,7 +402,7 @@
           <article class="card">
             <div class="section-head">
               <h3>Casiers physiques</h3>
-              <span class="section-meta">Ã‰tat du parc</span>
+              <span class="section-meta">État du parc</span>
             </div>
             <div id="dashboard-casier-kpis" class="stock-kpi-bar" style="margin-bottom:12px">
               <div class="stock-kpi"><span class="stock-kpi-label">Total</span><strong id="dash-casier-total" class="stock-kpi-val">0</strong></div>
@@ -416,7 +416,7 @@
           <article class="card">
             <div class="section-head">
               <h3>Modes de paiement</h3>
-              <span class="section-meta">EncaissÃ©s (hors crÃ©dit)</span>
+              <span class="section-meta">Encaissés (hors crédit)</span>
             </div>
             <div id="pay-chart"></div>
           </article>
@@ -434,7 +434,7 @@
         <div id="ventes-rest-day-gate" class="hidden" hidden style="margin:0 0 12px"></div>
         <nav id="ventes-mobile-subnav" class="ventes-mobile-subnav no-print" aria-label="Ventes mobile">
           <button type="button" class="ventes-mobile-subnav-btn" data-mobile-ventes="commandes">Commandes</button>
-          <button type="button" class="ventes-mobile-subnav-btn" data-mobile-ventes="caisse" data-mobile-caisse="recouvrement">CrÃ©dits</button>
+          <button type="button" class="ventes-mobile-subnav-btn" data-mobile-ventes="caisse" data-mobile-caisse="recouvrement">Crédits</button>
         </nav>
         <nav id="ventes-mobile-caisse-subnav" class="ventes-mobile-subnav ventes-mobile-caisse-subnav hidden no-print" aria-label="Caisse mobile">
           <button type="button" class="ventes-mobile-subnav-btn" data-mobile-caisse="recouvrement">Recouvrement</button>
@@ -488,8 +488,8 @@
               <div class="form-group form-group--zero" id="kit-location-wrap">
                 <label for="kit-location">Lieu</label>
                 <select id="kit-location">
-                  <option value="IntÃ©rieur">IntÃ©rieur</option>
-                  <option value="ExtÃ©rieur">ExtÃ©rieur</option>
+                  <option value="Intérieur">Intérieur</option>
+                  <option value="Extérieur">Extérieur</option>
                 </select>
               </div>
             </div>
@@ -557,7 +557,7 @@
               <button id="print-orders-management-btn" class="btn btn-outline" type="button">Imprimer la periode</button>
             </div>
           </div>
-          <p class="muted orders-mgmt-scroll-hint" style="font-size:0.8rem;margin:14px 0 0;line-height:1.4">Sur mobile : faites glisser le tableau vers la gauche â€” la colonne <strong>Actions</strong> (Encaisser) reste visible Ã  droite.</p>
+          <p class="muted orders-mgmt-scroll-hint" style="font-size:0.8rem;margin:14px 0 0;line-height:1.4">Sur mobile : faites glisser le tableau vers la gauche — la colonne <strong>Actions</strong> (Encaisser) reste visible à droite.</p>
           <div class="stock-table-wrap orders-mgmt-table-wrap">
             <table class="stock-table orders-mgmt-table">
               <thead>
@@ -600,7 +600,7 @@
               <input id="qr-count" type="number" min="1" max="200" value="1" placeholder="ex: 20">
             </div>
             <div class="form-group">
-              <label for="qr-prefix">PrÃ©fixe</label>
+              <label for="qr-prefix">Préfixe</label>
               <input id="qr-prefix" type="text" value="Table" placeholder="ex: Table">
             </div>
           </div>
@@ -613,26 +613,26 @@
             <div id="qr-table-list" class="qr-table-list"></div>
             <div class="qr-two-cols">
               <div class="qr-location-card">
-                <div class="qr-location-header">IntÃ©rieur (cave)</div>
+                <div class="qr-location-header">Intérieur (cave)</div>
                 <div class="qr-card-box">
                   <img id="qr-preview-image-int" alt="QR Interieur">
                   <div>
-                    <p id="qr-preview-title-int" class="list-item-title">Commande IntÃ©rieur</p>
+                    <p id="qr-preview-title-int" class="list-item-title">Commande Intérieur</p>
                     <a id="qr-preview-link-int" class="qr-link" href="#" target="_blank" rel="noopener noreferrer">Ouvrir</a>
                   </div>
                 </div>
-                <button type="button" class="btn btn-outline" id="print-qr-int-btn">Imprimer QR IntÃ©rieur</button>
+                <button type="button" class="btn btn-outline" id="print-qr-int-btn">Imprimer QR Intérieur</button>
               </div>
               <div class="qr-location-card">
-                <div class="qr-location-header">ExtÃ©rieur (terrasse)</div>
+                <div class="qr-location-header">Extérieur (terrasse)</div>
                 <div class="qr-card-box">
                   <img id="qr-preview-image-ext" alt="QR Exterieur">
                   <div>
-                    <p id="qr-preview-title-ext" class="list-item-title">Commande ExtÃ©rieur</p>
+                    <p id="qr-preview-title-ext" class="list-item-title">Commande Extérieur</p>
                     <a id="qr-preview-link-ext" class="qr-link" href="#" target="_blank" rel="noopener noreferrer">Ouvrir</a>
                   </div>
                 </div>
-                <button type="button" class="btn btn-outline" id="print-qr-ext-btn">Imprimer QR ExtÃ©rieur</button>
+                <button type="button" class="btn btn-outline" id="print-qr-ext-btn">Imprimer QR Extérieur</button>
               </div>
             </div>
           </div>
@@ -644,18 +644,18 @@
           <div class="section-head">
             <div>
               <h3>Consignes</h3>
-              <p class="muted">Cas frÃ©quent : la facture est payÃ©e mais le client n'a pas tout bu â€” la serveuse enregistre le <strong>reliquat</strong> (quantitÃ© / boisson) pour qu'il revienne consommer plus tard. L'autre cas est la <strong>consigne bouteille</strong> (dÃ©pÃ´t, retour physique).</p>
+              <p class="muted">Cas fréquent : la facture est payée mais le client n'a pas tout bu — la serveuse enregistre le <strong>reliquat</strong> (quantité / boisson) pour qu'il revienne consommer plus tard. L'autre cas est la <strong>consigne bouteille</strong> (dépôt, retour physique).</p>
             </div>
             <button id="new-consigne-btn" class="icon-btn" type="button">+ Nouvelle consigne</button>
           </div>
           <div class="pdj-kpis" style="margin-bottom:12px;flex-wrap:wrap">
-            <div class="pdj-kpi"><span class="kpi-label">Bouteilles â€” retour</span><strong id="consigne-kpi-encours" class="pdj-val amber">0</strong></div>
-            <div class="pdj-kpi"><span class="kpi-label">Reliquats Ã  servir</span><strong id="consigne-kpi-conserve" class="pdj-val blue">0</strong></div>
-            <div class="pdj-kpi"><span class="kpi-label">ClÃ´turÃ©es</span><strong id="consigne-kpi-rendues" class="pdj-val green">0</strong></div>
-            <div class="pdj-kpi"><span class="kpi-label">DÃ©pÃ´t bouteille dÃ»</span><strong id="consigne-kpi-montant" class="pdj-val">0 FCFA</strong></div>
+            <div class="pdj-kpi"><span class="kpi-label">Bouteilles — retour</span><strong id="consigne-kpi-encours" class="pdj-val amber">0</strong></div>
+            <div class="pdj-kpi"><span class="kpi-label">Reliquats à servir</span><strong id="consigne-kpi-conserve" class="pdj-val blue">0</strong></div>
+            <div class="pdj-kpi"><span class="kpi-label">Clôturées</span><strong id="consigne-kpi-rendues" class="pdj-val green">0</strong></div>
+            <div class="pdj-kpi"><span class="kpi-label">Dépôt bouteille dû</span><strong id="consigne-kpi-montant" class="pdj-val">0 FCFA</strong></div>
           </div>
           <div id="consigne-form-wrap" class="hidden" style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:14px">
-            <p class="eyebrow" style="margin-bottom:8px">Reliquat payÃ© ou consigne bouteille</p>
+            <p class="eyebrow" style="margin-bottom:8px">Reliquat payé ou consigne bouteille</p>
             <input type="hidden" id="consigne-source-vente-id" value="">
             <div class="form-grid two-cols">
               <div class="form-group form-group--zero">
@@ -668,40 +668,40 @@
               </div>
             </div>
             <div class="form-group">
-              <label for="consigne-facture-select">Facture concernÃ©e</label>
+              <label for="consigne-facture-select">Facture concernée</label>
               <select id="consigne-facture-select">
-                <option value="">â€” Saisie manuelle (sans facture) â€”</option>
+                <option value="">— Saisie manuelle (sans facture) —</option>
               </select>
-              <p class="muted" style="margin:6px 0 0;font-size:0.82rem">Liste limitÃ©e aux factures encaissÃ©es pour la <strong>journÃ©e comptable en cours</strong> (date PDJ du maquis). Pour un <strong>mÃ©lange</strong> : indiquez le nombre de bouteilles laissÃ©es par <strong>ligne</strong> (colonne Â« Reliquat Â»), puis <strong>Enregistrer</strong> â€” une consigne est crÃ©Ã©e par article. Le bouton Â« +1 Â» prÃ©remplit une ligne.</p>
+              <p class="muted" style="margin:6px 0 0;font-size:0.82rem">Liste limitée aux factures encaissées pour la <strong>journée comptable en cours</strong> (date PDJ du maquis). Pour un <strong>mélange</strong> : indiquez le nombre de bouteilles laissées par <strong>ligne</strong> (colonne « Reliquat »), puis <strong>Enregistrer</strong> — une consigne est créée par article. Le bouton « +1 » préremplit une ligne.</p>
             </div>
             <div id="consigne-facture-lines-wrap" class="hidden" style="margin-bottom:12px;border:1px solid var(--border);border-radius:8px;padding:10px;max-height:240px;overflow:auto">
               <p class="eyebrow" style="margin:0 0 8px;font-size:0.75rem">Lignes de la facture</p>
               <table class="data-table" style="width:100%;font-size:0.88rem">
-                <thead><tr><th>Article</th><th>QtÃ© fact.</th><th style="text-align:right">Prix / btl</th><th style="text-align:right">Total</th><th style="text-align:center">Reliquat (btl)</th><th></th></tr></thead>
+                <thead><tr><th>Article</th><th>Qté fact.</th><th style="text-align:right">Prix / btl</th><th style="text-align:right">Total</th><th style="text-align:center">Reliquat (btl)</th><th></th></tr></thead>
                 <tbody id="consigne-facture-lines"></tbody>
               </table>
             </div>
             <div class="form-group">
               <label for="consigne-article">Boisson / article (saisie manuelle ou hors facture)</label>
-              <input id="consigne-article" type="text" list="articles-list" placeholder="ex: Castel 65cl â€” quantitÃ© = bouteilles restantes" autocomplete="off">
+              <input id="consigne-article" type="text" list="articles-list" placeholder="ex: Castel 65cl — quantité = bouteilles restantes" autocomplete="off">
             </div>
             <div class="form-grid two-cols">
               <div class="form-group form-group--zero">
-                <label for="consigne-qty">QuantitÃ© (ex. bouteilles non bues)</label>
+                <label for="consigne-qty">Quantité (ex. bouteilles non bues)</label>
                 <input id="consigne-qty" type="number" value="1" min="1">
               </div>
               <div class="form-group form-group--zero">
                 <label for="consigne-montant">Prix unitaire (FCFA)</label>
-                <input id="consigne-montant" type="number" min="0" placeholder="prix vente d'une unitÃ© â€” optionnel">
+                <input id="consigne-montant" type="number" min="0" placeholder="prix vente d'une unité — optionnel">
               </div>
             </div>
             <div class="form-group">
-              <label for="consigne-note">Note (table, serveuseâ€¦)</label>
+              <label for="consigne-note">Note (table, serveuse…)</label>
               <input id="consigne-note" type="text" placeholder="ex: table 4, note sur la facture">
             </div>
             <div class="form-group" style="display:flex;align-items:flex-start;gap:10px;margin-top:4px">
               <input id="consigne-reliquat-prochaine-visite" type="checkbox" checked style="margin-top:4px">
-              <label for="consigne-reliquat-prochaine-visite" style="margin:0;font-weight:500;cursor:pointer">Reliquat payÃ© : le client reviendra boire ce qui reste (dÃ©cochez seulement pour une consigne <em>bouteille</em> avec dÃ©pÃ´t et retour physique)</label>
+              <label for="consigne-reliquat-prochaine-visite" style="margin:0;font-weight:500;cursor:pointer">Reliquat payé : le client reviendra boire ce qui reste (décochez seulement pour une consigne <em>bouteille</em> avec dépôt et retour physique)</label>
             </div>
             <div class="button-stack" style="flex-direction:row;gap:8px">
               <button id="save-consigne-btn" class="btn btn-primary" type="button">Enregistrer</button>
@@ -714,7 +714,7 @@
                 <th>Date</th><th>Client</th><th>Article</th>
                 <th style="text-align:right">Qte</th>
                 <th style="text-align:right">Prix/u</th>
-                <th style="text-align:right">Total (rÃ©f.)</th>
+                <th style="text-align:right">Total (réf.)</th>
                 <th>Statut</th><th>Actions</th>
               </tr></thead>
               <tbody id="consigne-list"></tbody>
@@ -727,30 +727,30 @@
             <div class="caisse-shell-intro">
               <p class="eyebrow">Caisse</p>
               <h3 class="caisse-shell-title">Caisse &amp; Paiement</h3>
-              <p class="muted caisse-shell-copy">Historique des factures encaissÃ©es Â· suivi des crÃ©dits et versements clients.</p>
+              <p class="muted caisse-shell-copy">Historique des factures encaissées · suivi des crédits et versements clients.</p>
             </div>
             <div class="tabs" style="margin-bottom:14px">
               <button type="button" class="tab manager-only" data-caisse-inner="historique" role="tab" aria-selected="false">Historique ventes</button>
-              <button type="button" class="tab active" data-caisse-inner="recouvrement" role="tab" aria-selected="true">Recouvrement crÃ©dit</button>
+              <button type="button" class="tab active" data-caisse-inner="recouvrement" role="tab" aria-selected="true">Recouvrement crédit</button>
               <button type="button" class="tab" data-caisse-inner="avoirs" role="tab" aria-selected="false">Avoirs clients</button>
             </div>
 
             <div id="ventes-caisse-panel-historique" class="caisse-inner-panel hidden" role="tabpanel" data-caisse-panel="historique" aria-hidden="true">
 
-              <!-- Remplacement d'article via sÃ©lecteur de facture -->
+              <!-- Remplacement d'article via sélecteur de facture -->
               <div style="border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:18px">
-                <p class="eyebrow" style="margin-bottom:10px">Remplacer un article encaissÃ©</p>
+                <p class="eyebrow" style="margin-bottom:10px">Remplacer un article encaissé</p>
                 <div class="form-group" style="margin-bottom:0">
-                  <label for="replace-facture-select">Facture concernÃ©e</label>
+                  <label for="replace-facture-select">Facture concernée</label>
                   <select id="replace-facture-select">
-                    <option value="">â€” SÃ©lectionnez une facture â€”</option>
+                    <option value="">— Sélectionnez une facture —</option>
                   </select>
-                  <p class="muted" style="margin:6px 0 0;font-size:0.82rem">Factures de la <strong>journÃ©e comptable en cours</strong>. SÃ©lectionnez une facture pour voir ses articles et cliquez <strong>Remplacer</strong> sur la ligne souhaitÃ©e.</p>
+                  <p class="muted" style="margin:6px 0 0;font-size:0.82rem">Factures de la <strong>journée comptable en cours</strong>. Sélectionnez une facture pour voir ses articles et cliquez <strong>Remplacer</strong> sur la ligne souhaitée.</p>
                 </div>
                 <div id="replace-facture-lines-wrap" class="hidden" style="margin-top:12px;border:1px solid var(--border);border-radius:8px;padding:10px;max-height:260px;overflow:auto">
                   <p class="eyebrow" style="margin:0 0 8px;font-size:0.75rem">Lignes de la facture</p>
                   <table class="data-table" style="width:100%;font-size:0.88rem">
-                    <thead><tr><th>Article</th><th>QtÃ©</th><th style="text-align:right">Prix unit.</th><th style="text-align:right">Total</th><th></th></tr></thead>
+                    <thead><tr><th>Article</th><th>Qté</th><th style="text-align:right">Prix unit.</th><th style="text-align:right">Total</th><th></th></tr></thead>
                     <tbody id="replace-facture-lines"></tbody>
                   </table>
                 </div>
@@ -758,7 +758,7 @@
 
               <div class="section-head">
                 <h3>Historique des ventes finalisees</h3>
-                <span class="section-meta">Factures clÃ´turÃ©es</span>
+                <span class="section-meta">Factures clôturées</span>
               </div>
               <div class="form-grid three-cols">
                 <div class="form-group">
@@ -782,16 +782,16 @@
               <div class="section-head credit-recovery-head">
                 <div>
                   <p class="eyebrow" style="margin-bottom:4px">Recouvrement</p>
-                  <h3>CrÃ©dits clients</h3>
-                  <p class="muted" style="margin-top:6px">Enregistrez les versements pour actualiser le reste Ã  payer.</p>
+                  <h3>Crédits clients</h3>
+                  <p class="muted" style="margin-top:6px">Enregistrez les versements pour actualiser le reste à payer.</p>
                 </div>
                 <div class="credit-recovery-kpis">
                   <div class="credit-recovery-kpi">
-                    <span class="muted" style="font-size:0.82rem">Total dÃ»</span>
+                    <span class="muted" style="font-size:0.82rem">Total dû</span>
                     <strong id="credit-total-due">0 FCFA</strong>
                   </div>
                   <div class="credit-recovery-kpi">
-                    <span class="muted" style="font-size:0.82rem">Total recouvrÃ©</span>
+                    <span class="muted" style="font-size:0.82rem">Total recouvré</span>
                     <strong id="credit-total-paid" style="color:#72d7a9">0 FCFA</strong>
                   </div>
                 </div>
@@ -799,18 +799,18 @@
 
               <div class="form-grid three-cols" style="margin-top:14px">
                 <div class="form-group">
-                  <label for="credit-name">Client (dÃ©biteur)</label>
-                  <input id="credit-name" type="text" placeholder="ex: M. KOFFI (affichÃ© en majuscules)" list="credit-names-list" autocomplete="name">
+                  <label for="credit-name">Client (débiteur)</label>
+                  <input id="credit-name" type="text" placeholder="ex: M. KOFFI (affiché en majuscules)" list="credit-names-list" autocomplete="name">
                   <datalist id="credit-names-list"></datalist>
                 </div>
                 <div class="form-group">
-                  <label for="credit-amount">Montant versÃ© (FCFA)</label>
+                  <label for="credit-amount">Montant versé (FCFA)</label>
                   <input id="credit-amount" type="number" min="0" step="1" placeholder="ex: 5000">
                 </div>
                 <div class="form-group">
                   <label for="credit-method">Mode de paiement</label>
                   <select id="credit-method">
-                    <option value="EspÃ¨ces">EspÃ¨ces</option>
+                    <option value="Espèces">Espèces</option>
                     <option value="Orange Money">Orange Money</option>
                     <option value="MTN MoMo">MTN MoMo</option>
                     <option value="Wave">Wave</option>
@@ -825,7 +825,7 @@
                 </div>
                 <div class="form-group">
                   <label for="credit-note">Note</label>
-                  <input id="credit-note" type="text" placeholder="optionnel â€” Â« PayÃ© Â» si vide">
+                  <input id="credit-note" type="text" placeholder="optionnel — « Payé » si vide">
                 </div>
               </div>
               <div class="credit-versement-actions">
@@ -840,11 +840,11 @@
                 <div>
                   <p class="eyebrow" style="margin-bottom:4px">Monnaie client</p>
                   <h3>Avoirs clients</h3>
-                  <p class="muted" style="margin-top:6px">Gardez la monnaie d'un client (faute de petite coupure) et rÃ©utilisez-la plus tard. L'argent reste en caisse.</p>
+                  <p class="muted" style="margin-top:6px">Gardez la monnaie d'un client (faute de petite coupure) et réutilisez-la plus tard. L'argent reste en caisse.</p>
                 </div>
                 <div class="credit-recovery-kpis">
                   <div class="credit-recovery-kpi">
-                    <span class="muted" style="font-size:0.82rem">Total dÃ» aux clients</span>
+                    <span class="muted" style="font-size:0.82rem">Total dû aux clients</span>
                     <strong id="avoir-total" style="color:#ffd479">0 FCFA</strong>
                   </div>
                 </div>
@@ -853,16 +853,16 @@
               <div class="form-grid three-cols" style="margin-top:14px">
                 <div class="form-group">
                   <label for="avoir-name">Client</label>
-                  <input id="avoir-name" type="text" placeholder="ex: M. KOFFI (affichÃ© en majuscules)" list="avoir-names-list" autocomplete="name">
+                  <input id="avoir-name" type="text" placeholder="ex: M. KOFFI (affiché en majuscules)" list="avoir-names-list" autocomplete="name">
                   <datalist id="avoir-names-list"></datalist>
                 </div>
                 <div class="form-group">
-                  <label for="avoir-amount">Monnaie gardÃ©e (FCFA)</label>
+                  <label for="avoir-amount">Monnaie gardée (FCFA)</label>
                   <input id="avoir-amount" type="number" min="0" step="1" placeholder="ex: 200">
                 </div>
                 <div class="form-group">
                   <label for="avoir-note">Note</label>
-                  <input id="avoir-note" type="text" placeholder="optionnel â€” ex: pas de monnaie">
+                  <input id="avoir-note" type="text" placeholder="optionnel — ex: pas de monnaie">
                 </div>
               </div>
               <div class="credit-versement-actions">
@@ -936,11 +936,11 @@
         <article class="card hidden manager-only" id="stock-card-inventaire" style="margin-bottom:14px">
           <div class="section-head">
             <div>
-              <p class="eyebrow">SynthÃ¨se pÃ©riode</p>
+              <p class="eyebrow">Synthèse période</p>
               <h3>Inventaire ventes &amp; stock</h3>
               <p class="muted" style="margin-top:6px;font-size:0.88rem;line-height:1.45">
-                Tout le catalogue du maquis : choisissez uniquement les dates (Du / Au). MÃªme jour = une journÃ©e.
-                Ex. le 25/05 : 15 Heineken en ouverture, +24 achetÃ©es, âˆ’20 vendues â†’ 19 en fin de journÃ©e.
+                Tout le catalogue du maquis : choisissez uniquement les dates (Du / Au). Même jour = une journée.
+                Ex. le 25/05 : 15 Heineken en ouverture, +24 achetées, −20 vendues → 19 en fin de journée.
               </p>
             </div>
             <span id="stock-inv-count" class="section-meta">0 article</span>
@@ -977,13 +977,13 @@
               <thead>
                 <tr>
                   <th>Article</th>
-                  <th class="th-orange stock-inv-th-num">Stock dÃ©but</th>
+                  <th class="th-orange stock-inv-th-num">Stock début</th>
                   <th class="stock-inv-th-num" style="color:#72d7a9">Achats</th>
                   <th class="th-blue stock-inv-th-num">Ventes</th>
                   <th class="stock-inv-th-num" style="color:#ff8e82">Pertes</th>
-                  <th class="stock-inv-th-num">Ã‰carts inexpliquÃ©s</th>
+                  <th class="stock-inv-th-num">Écarts inexpliqués</th>
                   <th class="stock-inv-th-num">Stk fin (th.)</th>
-                  <th class="stock-inv-th-num">Stk rÃ©conciliÃ©</th>
+                  <th class="stock-inv-th-num">Stk réconcilié</th>
                   <th class="stock-inv-th-num">Stk actuel</th>
                 </tr>
               </thead>
@@ -994,7 +994,7 @@
         <article class="card hidden" id="stock-card-mouvements" style="margin-bottom:14px">
           <div class="section-head">
             <div>
-              <p class="eyebrow">TraÃ§abilite</p>
+              <p class="eyebrow">Traçabilite</p>
               <h3>Historique des mouvements de stock</h3>
             </div>
             <span id="stock-movement-count" class="section-meta">0 mouvement</span>
@@ -1018,11 +1018,11 @@
             </div>
           </div>
           <div class="manager-only" id="stock-move-synth-toolbar" style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;align-items:center">
-            <button id="stock-move-print-btn" class="btn btn-primary" type="button" style="width:auto;font-size:0.88rem" title="Imprimer la synthÃ¨se par article selon le type choisi (entrÃ©es, sorties ou les deux)">Imprimer par article</button>
-            <span class="muted" style="font-size:0.82rem">Ã‰carts inexpliquÃ©s recalculÃ©s (sans double compter les achats). Lignes surlignÃ©es si rÃ©conciliÃ© â‰  actuel.</span>
+            <button id="stock-move-print-btn" class="btn btn-primary" type="button" style="width:auto;font-size:0.88rem" title="Imprimer la synthèse par article selon le type choisi (entrées, sorties ou les deux)">Imprimer par article</button>
+            <span class="muted" style="font-size:0.82rem">Écarts inexpliqués recalculés (sans double compter les achats). Lignes surlignées si réconcilié ≠ actuel.</span>
           </div>
           <div class="manager-only stock-table-wrap stock-inventaire-wrap" id="stock-move-article-summary-wrap" style="margin-top:14px">
-            <p class="eyebrow" style="margin:0 0 8px">SynthÃ¨se par article (pÃ©riode Â· selon type)</p>
+            <p class="eyebrow" style="margin:0 0 8px">Synthèse par article (période · selon type)</p>
             <table class="stock-table stock-inventaire-table stock-move-synth-table">
               <colgroup id="stock-move-article-cols">
                 <col class="stock-inv-col-article">
@@ -1033,7 +1033,7 @@
               <thead>
                 <tr id="stock-move-article-head">
                   <th>Article</th>
-                  <th class="th-orange stock-inv-th-num">Stock dÃ©but</th>
+                  <th class="th-orange stock-inv-th-num">Stock début</th>
                   <th class="th-blue stock-inv-th-num">Ventes</th>
                   <th class="stock-inv-th-num">Stock fin (th.)</th>
                 </tr>
@@ -1072,7 +1072,7 @@
               <div class="form-group">
                 <label for="purchase-supplier">Brasserie / fournisseur</label>
                 <select id="purchase-supplier" aria-label="Brasserie ou fournisseur">
-                  <option value="">ex: Brassivoire, Solibra, Castelâ€¦</option>
+                  <option value="">ex: Brassivoire, Solibra, Castel…</option>
                 </select>
               </div>
               <div class="form-group">
@@ -1095,13 +1095,13 @@
               <div class="form-group">
                 <label for="purchase-article">Format</label>
                 <select id="purchase-article">
-                  <option value="">â€” Choisir d'abord une brasserie â€”</option>
+                  <option value="">— Choisir d'abord une brasserie —</option>
                 </select>
               </div>
               <div class="form-group" id="purchase-article-detail-wrap" style="display:none">
                 <label for="purchase-article-detail">Article</label>
                 <select id="purchase-article-detail">
-                  <option value="">â€” Choisir un article â€”</option>
+                  <option value="">— Choisir un article —</option>
                 </select>
                 <p class="form-hint" id="purchase-article-detail-hint" style="margin-top:4px;font-size:0.82rem"></p>
               </div>
@@ -1142,12 +1142,12 @@
               <input id="purchase-period-month" type="month">
             </div>
             <div class="form-group" style="margin:0;min-width:200px">
-              <label for="purchase-period-mode">Ou pÃ©riode</label>
+              <label for="purchase-period-mode">Ou période</label>
               <select id="purchase-period-mode">
-                <option value="month">Mois sÃ©lectionnÃ©</option>
+                <option value="month">Mois sélectionné</option>
                 <option value="accounting">Mois comptable (PDJ)</option>
                 <option value="week">Semaine en cours</option>
-                <option value="custom">Dates personnalisÃ©es</option>
+                <option value="custom">Dates personnalisées</option>
                 <option value="all">Tout l'historique</option>
               </select>
             </div>
@@ -1166,8 +1166,8 @@
           <div id="purchase-period-kpi" class="inline-card" style="margin-bottom:12px;padding:12px 14px;display:grid;gap:6px"></div>
           <div id="purchase-repair-banner" class="any-admin" style="margin-bottom:12px">
             <div style="padding:12px 14px;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;background:rgba(255,142,130,0.08);border:1px solid rgba(255,142,130,0.25);border-radius:10px">
-              <p id="purchase-repair-banner-text" class="muted" style="margin:0;font-size:0.88rem">RÃ©ceptions Â« ReÃ§ue Â» sans entrÃ©es stock â€” corrigez en un clic.</p>
-              <button type="button" id="purchase-repair-all-btn" class="mini-btn btn-primary">RÃ©parer les rÃ©ceptions sans stock</button>
+              <p id="purchase-repair-banner-text" class="muted" style="margin:0;font-size:0.88rem">Réceptions « Reçue » sans entrées stock — corrigez en un clic.</p>
+              <button type="button" id="purchase-repair-all-btn" class="mini-btn btn-primary">Réparer les réceptions sans stock</button>
             </div>
           </div>
           <div id="purchase-list"></div>
@@ -1181,7 +1181,7 @@
           </div>
           <p class="muted" style="margin-bottom:14px">
             Ce sont les montants que vous devez encore aux fournisseurs (commandes ou receptions a credit).
-            Les clients qui vous doivent de l&apos;argent sont sous <strong>Ventes</strong> â†’ <strong>Caisse</strong> â†’ CrÃ©dits clients.
+            Les clients qui vous doivent de l&apos;argent sont sous <strong>Ventes</strong> → <strong>Caisse</strong> → Crédits clients.
           </p>
           <p class="muted" style="margin-bottom:14px;font-size:0.85rem">
             Le bouton <strong>+</strong> en bas a droite ouvre une <strong>nouvelle depense</strong> avec paiement Credit fournisseur (pour saisir une dette sans passer par Achats fournisseurs).
@@ -1219,20 +1219,20 @@
           </div>
           <div id="casier-view-lots">
             <p class="muted" style="margin-bottom:14px;font-size:0.85rem">
-              Stock exprime en <strong>lots</strong> (casiers ou cartons) par catÃ©gorie. La taille du lot se configure dans le catalogue (champ <strong>UnitÃ©s par lot</strong>).
+              Stock exprime en <strong>lots</strong> (casiers ou cartons) par catégorie. La taille du lot se configure dans le catalogue (champ <strong>Unités par lot</strong>).
             </p>
             <div class="button-stack" style="grid-template-columns:1fr 1fr;display:grid;margin:0 0 14px">
-              <button id="casiers-entree-btn" class="btn btn-primary" type="button">EntrÃ©e de lots</button>
+              <button id="casiers-entree-btn" class="btn btn-primary" type="button">Entrée de lots</button>
               <button id="casiers-sortie-btn" class="btn btn-outline" type="button">Sortie de lots</button>
             </div>
           </div>
           <div id="casier-view-physique" class="hidden">
             <p class="muted" style="margin-bottom:14px;font-size:0.85rem">
-              Suivi des casiers physiques (CAS-XXXX) avec emplacement et statut. Chaque mouvement (entrÃ©e / sortie) est tracÃ© dans l'audit.
+              Suivi des casiers physiques (CAS-XXXX) avec emplacement et statut. Chaque mouvement (entrée / sortie) est tracé dans l'audit.
             </p>
             <div class="button-stack" style="grid-template-columns:1fr 1fr 1fr;display:grid;margin:0 0 14px">
               <button id="casier-phys-new-btn" class="btn btn-primary manager-only" type="button">+ Nouveau casier</button>
-              <button id="casier-phys-move-in-btn" class="btn btn-outline" type="button">+ EntrÃ©e</button>
+              <button id="casier-phys-move-in-btn" class="btn btn-outline" type="button">+ Entrée</button>
               <button id="casier-phys-move-out-btn" class="btn btn-outline" type="button">- Sortie</button>
             </div>
             <div class="button-stack any-admin" style="grid-template-columns:1fr;display:grid;margin:-6px 0 14px">
@@ -1316,7 +1316,7 @@
               <div class="form-group">
                 <label for="brasserie-attach-name">Brasserie / fournisseur</label>
                 <select id="brasserie-attach-name" autocomplete="off" aria-label="Brasserie pour rattachement">
-                  <option value="">ex: Brassivoire, Solibra, Castelâ€¦</option>
+                  <option value="">ex: Brassivoire, Solibra, Castel…</option>
                 </select>
               </div>
               <div class="form-group">
@@ -1332,7 +1332,7 @@
           </div>
           <div id="casiers-kpi-bar" class="stock-kpi-bar" style="margin-bottom:16px">
             <div class="stock-kpi"><span class="stock-kpi-label">Total lots en stock</span><strong id="casiers-kpi-total" class="stock-kpi-val">0</strong></div>
-            <div class="stock-kpi"><span class="stock-kpi-label">Casiers consignÃ©s (lots)</span><strong id="casiers-kpi-consignes" class="stock-kpi-val blue">0</strong></div>
+            <div class="stock-kpi"><span class="stock-kpi-label">Casiers consignés (lots)</span><strong id="casiers-kpi-consignes" class="stock-kpi-val blue">0</strong></div>
             <div class="stock-kpi"><span class="stock-kpi-label">Articles en alerte</span><strong id="casiers-kpi-alerte" class="stock-kpi-val amber">0</strong></div>
             <div class="stock-kpi"><span class="stock-kpi-label">Articles epuises</span><strong id="casiers-kpi-epuise" class="stock-kpi-val red">0</strong></div>
           </div>
@@ -1346,14 +1346,14 @@
       <section id="page-performance" class="page">
         <article class="card" style="margin-bottom:12px">
           <div class="section-head"><h3>Analyse jour par jour</h3><span class="section-meta">Par jour</span></div>
-          <p class="muted" style="font-size:0.88rem;margin:0 0 12px">Chiffre d&apos;affaires net, nombre de ventes, marge brute et bÃ©nÃ©fice estimÃ© (marge âˆ’ charges) pour chaque jour de la pÃ©riode.</p>
+          <p class="muted" style="font-size:0.88rem;margin:0 0 12px">Chiffre d&apos;affaires net, nombre de ventes, marge brute et bénéfice estimé (marge − charges) pour chaque jour de la période.</p>
           <div class="form-grid two-cols" style="align-items:end;margin-bottom:10px;gap:12px">
             <div class="form-group" style="margin:0;min-width:200px">
-              <label for="performance-period-mode">PÃ©riode</label>
+              <label for="performance-period-mode">Période</label>
               <select id="performance-period-mode">
                 <option value="month" selected>Mois en cours</option>
                 <option value="week">Semaine en cours</option>
-                <option value="custom">PÃ©riode personnalisÃ©e</option>
+                <option value="custom">Période personnalisée</option>
                 <option value="all">Tout l&apos;historique</option>
               </select>
             </div>
@@ -1378,15 +1378,15 @@
           <div class="stock-kpi"><span class="stock-kpi-label">CA net total</span><strong id="perf-kpi-ca" class="stock-kpi-val amber">0 FCFA</strong></div>
           <div class="stock-kpi"><span class="stock-kpi-label">Ventes</span><strong id="perf-kpi-ventes" class="stock-kpi-val">0</strong></div>
           <div class="stock-kpi"><span class="stock-kpi-label">Marge brute</span><strong id="perf-kpi-marge" class="stock-kpi-val green">0 FCFA</strong></div>
-          <div class="stock-kpi"><span class="stock-kpi-label">BÃ©nÃ©fice estimÃ©</span><strong id="perf-kpi-benefice" class="stock-kpi-val">0 FCFA</strong></div>
+          <div class="stock-kpi"><span class="stock-kpi-label">Bénéfice estimé</span><strong id="perf-kpi-benefice" class="stock-kpi-val">0 FCFA</strong></div>
         </div>
         <p id="performance-margin-hint" class="muted hidden" style="font-size:0.78rem;margin:0 0 12px;line-height:1.45"></p>
         <article class="card" style="margin-bottom:12px">
-          <h4 style="margin:0 0 10px">CA par jour (31 derniers jours affichÃ©s)</h4>
+          <h4 style="margin:0 0 10px">CA par jour (31 derniers jours affichés)</h4>
           <div id="performance-ca-chart" class="perf-ca-chart"></div>
         </article>
         <article class="card">
-          <div class="section-head"><h3>DÃ©tail journalier</h3></div>
+          <div class="section-head"><h3>Détail journalier</h3></div>
           <div class="stock-table-wrap perf-daily-wrap">
             <table class="stock-table perf-daily-table">
               <thead>
@@ -1396,7 +1396,7 @@
                   <th style="text-align:right">Ventes</th>
                   <th style="text-align:right">Marge brute</th>
                   <th style="text-align:right">Charges</th>
-                  <th style="text-align:right">BÃ©nÃ©fice est.</th>
+                  <th style="text-align:right">Bénéfice est.</th>
                 </tr>
               </thead>
               <tbody id="performance-daily-body"></tbody>
@@ -1409,11 +1409,11 @@
         <div class="charges-period-bar card" style="padding:12px 14px;margin-bottom:12px">
           <div class="form-grid two-cols" style="align-items:end;margin:0;gap:12px">
             <div class="form-group" style="margin:0;min-width:200px">
-              <label for="charges-period-mode">PÃ©riode affichÃ©e</label>
+              <label for="charges-period-mode">Période affichée</label>
               <select id="charges-period-mode">
                 <option value="month" selected>Mois en cours</option>
                 <option value="week">Semaine en cours</option>
-                <option value="custom">PÃ©riode personnalisÃ©e</option>
+                <option value="custom">Période personnalisée</option>
                 <option value="all">Tout l'historique</option>
               </select>
             </div>
@@ -1441,35 +1441,35 @@
 
       <section id="page-loyalty" class="page">
         <article class="card" style="margin-bottom:12px">
-          <div class="section-head"><h3>FidÃ©litÃ© clients</h3><span class="section-meta">RÃ©guliers &amp; VIP</span></div>
-          <p class="muted" style="font-size:0.88rem;margin:0 0 12px">Classement automatique Ã  partir des <strong>ventes encaissÃ©es</strong> (hors crÃ©dit non payÃ©). Les serveuses voient le statut Ã  la saisie client.</p>
+          <div class="section-head"><h3>Fidélité clients</h3><span class="section-meta">Réguliers &amp; VIP</span></div>
+          <p class="muted" style="font-size:0.88rem;margin:0 0 12px">Classement automatique à partir des <strong>ventes encaissées</strong> (hors crédit non payé). Les serveuses voient le statut à la saisie client.</p>
           <div class="stock-kpi-bar" style="margin-bottom:12px">
-            <div class="stock-kpi"><span class="stock-kpi-label">RÃ©guliers</span><strong id="loyalty-kpi-regular" class="stock-kpi-val">0</strong></div>
+            <div class="stock-kpi"><span class="stock-kpi-label">Réguliers</span><strong id="loyalty-kpi-regular" class="stock-kpi-val">0</strong></div>
             <div class="stock-kpi"><span class="stock-kpi-label">VIP</span><strong id="loyalty-kpi-vip" class="stock-kpi-val amber">0</strong></div>
-            <div class="stock-kpi"><span class="stock-kpi-label">Ã‰ligibles</span><strong id="loyalty-kpi-eligible" class="stock-kpi-val">0</strong></div>
+            <div class="stock-kpi"><span class="stock-kpi-label">Éligibles</span><strong id="loyalty-kpi-eligible" class="stock-kpi-val">0</strong></div>
           </div>
           <div class="form-grid two-cols" style="align-items:end;margin-bottom:8px">
-            <div class="form-group" style="margin:0"><label for="loyalty-period-select">PÃ©riode d&apos;analyse</label>
+            <div class="form-group" style="margin:0"><label for="loyalty-period-select">Période d&apos;analyse</label>
               <select id="loyalty-period-select"><option value="30">30 jours</option><option value="90" selected>90 jours</option><option value="180">180 jours</option><option value="365">12 mois</option></select>
             </div>
             <div class="form-group" style="margin:0"><label for="loyalty-tier-filter">Filtrer</label>
-              <select id="loyalty-tier-filter"><option value="eligible">RÃ©guliers + VIP</option><option value="all">Tous les clients</option><option value="vip">VIP seulement</option><option value="regular">RÃ©guliers seulement</option></select>
+              <select id="loyalty-tier-filter"><option value="eligible">Réguliers + VIP</option><option value="all">Tous les clients</option><option value="vip">VIP seulement</option><option value="regular">Réguliers seulement</option></select>
             </div>
           </div>
           <p id="loyalty-period-label" class="muted" style="font-size:0.82rem;margin:0"></p>
         </article>
         <article class="card manager-only" style="margin-bottom:12px">
-          <h4 style="margin:0 0 10px">RÃ¨gles du programme</h4>
+          <h4 style="margin:0 0 10px">Règles du programme</h4>
           <div class="form-grid three-cols">
-            <div class="form-group"><label for="loyalty-cfg-period">Jours analysÃ©s</label><input id="loyalty-cfg-period" type="number" min="30" max="365"></div>
-            <div class="form-group"><label for="loyalty-cfg-regular-visits">RÃ©gulier â€” visites min.</label><input id="loyalty-cfg-regular-visits" type="number" min="1"></div>
-            <div class="form-group"><label for="loyalty-cfg-regular-ca">RÃ©gulier â€” CA min. (FCFA)</label><input id="loyalty-cfg-regular-ca" type="number" min="0" step="1000"></div>
-            <div class="form-group"><label for="loyalty-cfg-vip-visits">VIP â€” visites min.</label><input id="loyalty-cfg-vip-visits" type="number" min="1"></div>
-            <div class="form-group"><label for="loyalty-cfg-vip-ca">VIP â€” CA min. (FCFA)</label><input id="loyalty-cfg-vip-ca" type="number" min="0" step="1000"></div>
-            <div class="form-group"><label for="loyalty-cfg-regular-disc">Remise rÃ©gulier (%)</label><input id="loyalty-cfg-regular-disc" type="number" min="0" max="50"></div>
+            <div class="form-group"><label for="loyalty-cfg-period">Jours analysés</label><input id="loyalty-cfg-period" type="number" min="30" max="365"></div>
+            <div class="form-group"><label for="loyalty-cfg-regular-visits">Régulier — visites min.</label><input id="loyalty-cfg-regular-visits" type="number" min="1"></div>
+            <div class="form-group"><label for="loyalty-cfg-regular-ca">Régulier — CA min. (FCFA)</label><input id="loyalty-cfg-regular-ca" type="number" min="0" step="1000"></div>
+            <div class="form-group"><label for="loyalty-cfg-vip-visits">VIP — visites min.</label><input id="loyalty-cfg-vip-visits" type="number" min="1"></div>
+            <div class="form-group"><label for="loyalty-cfg-vip-ca">VIP — CA min. (FCFA)</label><input id="loyalty-cfg-vip-ca" type="number" min="0" step="1000"></div>
+            <div class="form-group"><label for="loyalty-cfg-regular-disc">Remise régulier (%)</label><input id="loyalty-cfg-regular-disc" type="number" min="0" max="50"></div>
             <div class="form-group"><label for="loyalty-cfg-vip-disc">Remise VIP (%)</label><input id="loyalty-cfg-vip-disc" type="number" min="0" max="50"></div>
           </div>
-          <button type="button" class="btn btn-primary" id="loyalty-save-config-btn" style="margin-top:10px;width:auto">Enregistrer les rÃ¨gles</button>
+          <button type="button" class="btn btn-primary" id="loyalty-save-config-btn" style="margin-top:10px;width:auto">Enregistrer les règles</button>
         </article>
         <div id="loyalty-client-list"></div>
       </section>
@@ -1478,38 +1478,38 @@
         <article class="card">
           <div class="section-head">
             <h3>Guide d'utilisation</h3>
-            <span class="section-meta">Tous les rÃ´les</span>
+            <span class="section-meta">Tous les rôles</span>
           </div>
-          <p class="muted" style="margin-bottom:14px">Sommaire Ã  jour (inventaire, correction facture, avoirs, clÃ´ture PDJ, renouvellement mot de passeâ€¦). Pour un <strong>PDF</strong> : bouton ci-dessous puis <strong>Ctrl+P</strong> (ou Partager â†’ Imprimer sur mobile).</p>
+          <p class="muted" style="margin-bottom:14px">Sommaire à jour (inventaire, correction facture, avoirs, clôture PDJ, renouvellement mot de passe…). Pour un <strong>PDF</strong> : bouton ci-dessous puis <strong>Ctrl+P</strong> (ou Partager → Imprimer sur mobile).</p>
           <ol style="margin:0 0 18px;padding-left:1.35rem;line-height:1.75">
-            <li><a href="./guide.html#connexion" target="_blank" rel="noopener noreferrer">PremiÃ¨re connexion &amp; mot de passe mensuel</a></li>
-            <li><a href="./guide.html#navigation" target="_blank" rel="noopener noreferrer">Navigation gÃ©nÃ©rale</a></li>
+            <li><a href="./guide.html#connexion" target="_blank" rel="noopener noreferrer">Première connexion &amp; mot de passe mensuel</a></li>
+            <li><a href="./guide.html#navigation" target="_blank" rel="noopener noreferrer">Navigation générale</a></li>
             <li><a href="./guide.html#tableau-de-bord" target="_blank" rel="noopener noreferrer">Tableau de bord</a></li>
             <li><a href="./guide.html#point-du-jour" target="_blank" rel="noopener noreferrer">Point du jour</a></li>
-            <li><a href="./guide.html#pdj-cloture" target="_blank" rel="noopener noreferrer">ClÃ´ture et vÃ©rification stock</a></li>
+            <li><a href="./guide.html#pdj-cloture" target="_blank" rel="noopener noreferrer">Clôture et vérification stock</a></li>
             <li><a href="./guide.html#ventes" target="_blank" rel="noopener noreferrer">Ventes (commandes, caisse)</a></li>
             <li><a href="./guide.html#avoirs" target="_blank" rel="noopener noreferrer">Avoirs clients &amp; recouvrement</a></li>
-            <li><a href="./guide.html#remplacement-article" target="_blank" rel="noopener noreferrer">Remplacer un article encaissÃ©</a></li>
+            <li><a href="./guide.html#remplacement-article" target="_blank" rel="noopener noreferrer">Remplacer un article encaissé</a></li>
             <li><a href="./guide.html#consignes" target="_blank" rel="noopener noreferrer">Consignes</a></li>
-            <li><a href="./guide.html#stock" target="_blank" rel="noopener noreferrer">Stock â€” catalogue &amp; achats</a></li>
-            <li><a href="./guide.html#stock-inventaire" target="_blank" rel="noopener noreferrer">Inventaire (pÃ©riode)</a></li>
+            <li><a href="./guide.html#stock" target="_blank" rel="noopener noreferrer">Stock — catalogue &amp; achats</a></li>
+            <li><a href="./guide.html#stock-inventaire" target="_blank" rel="noopener noreferrer">Inventaire (période)</a></li>
             <li><a href="./guide.html#stock-mouvements" target="_blank" rel="noopener noreferrer">Mouvements &amp; impression par article</a></li>
             <li><a href="./guide.html#casiers" target="_blank" rel="noopener noreferrer">Gestion casiers</a></li>
             <li><a href="./guide.html#charges" target="_blank" rel="noopener noreferrer">Charges</a></li>
             <li><a href="./guide.html#planning" target="_blank" rel="noopener noreferrer">Planning</a></li>
             <li><a href="./guide.html#historique-ventes" target="_blank" rel="noopener noreferrer">Historique ventes (serveuse)</a></li>
-            <li><a href="./guide.html#parametres" target="_blank" rel="noopener noreferrer">ParamÃ¨tres</a></li>
+            <li><a href="./guide.html#parametres" target="_blank" rel="noopener noreferrer">Paramètres</a></li>
             <li><a href="./guide.html#correction-facture" target="_blank" rel="noopener noreferrer">Correction de facture</a></li>
-            <li><a href="./guide.html#telephone" target="_blank" rel="noopener noreferrer">TÃ©lÃ©phone</a></li>
+            <li><a href="./guide.html#telephone" target="_blank" rel="noopener noreferrer">Téléphone</a></li>
             <li><a href="./guide.html#bonnes-pratiques" target="_blank" rel="noopener noreferrer">Bonnes pratiques</a></li>
-            <li><a href="./guide.html#probleme" target="_blank" rel="noopener noreferrer">En cas de problÃ¨me</a></li>
+            <li><a href="./guide.html#probleme" target="_blank" rel="noopener noreferrer">En cas de problème</a></li>
           </ol>
           <div class="button-stack" style="margin-top:8px">
             <a class="btn btn-primary" href="./guide.html" target="_blank" rel="noopener noreferrer" style="text-align:center;text-decoration:none;display:inline-flex;justify-content:center;align-items:center">Ouvrir le guide complet</a>
-            <a class="btn btn-primary" href="./guide.pdf" download="Guide-Maquis-Manager.pdf" style="text-align:center;text-decoration:none;display:inline-flex;justify-content:center;align-items:center">TÃ©lÃ©charger le PDF</a>
+            <a class="btn btn-primary" href="./guide.pdf" download="Guide-Maquis-Manager.pdf" style="text-align:center;text-decoration:none;display:inline-flex;justify-content:center;align-items:center">Télécharger le PDF</a>
             <a class="btn btn-outline" href="./guide.html?print=1" target="_blank" rel="noopener noreferrer" style="text-align:center;text-decoration:none;display:inline-flex;justify-content:center;align-items:center">Imprimer depuis le navigateur</a>
           </div>
-          <p class="muted" style="margin-top:14px;font-size:0.86rem">PDF prÃ©-gÃ©nÃ©rÃ© : <code>guide.pdf</code> (rÃ©gÃ©nÃ©rer avec <code>scripts/generate-guide-pdf.ps1</code> aprÃ¨s mise Ã  jour du guide).</p>
+          <p class="muted" style="margin-top:14px;font-size:0.86rem">PDF pré-généré : <code>guide.pdf</code> (régénérer avec <code>scripts/generate-guide-pdf.ps1</code> après mise à jour du guide).</p>
         </article>
       </section>
 
@@ -1530,20 +1530,20 @@
             <button type="button" id="planning-range-today" class="btn btn-outline mini-btn">Aujourd&apos;hui</button>
             <button type="button" id="planning-range-week" class="btn btn-outline mini-btn">Cette semaine</button>
             <button type="button" id="planning-range-month" class="btn btn-outline mini-btn">Ce mois</button>
-            <button type="button" id="planning-range-prev" class="btn btn-outline mini-btn" aria-label="PÃ©riode prÃ©cÃ©dente">â†</button>
-            <button type="button" id="planning-range-next" class="btn btn-outline mini-btn" aria-label="PÃ©riode suivante">â†’</button>
+            <button type="button" id="planning-range-prev" class="btn btn-outline mini-btn" aria-label="Période précédente">←</button>
+            <button type="button" id="planning-range-next" class="btn btn-outline mini-btn" aria-label="Période suivante">→</button>
           </div>
         </div>
         <div class="tabs page-subtabs planning-subtabs" role="tablist" aria-label="Planning">
           <button type="button" class="tab active" data-subtab-planning="mine" role="tab" aria-selected="true">Mes horaires</button>
-          <button type="button" class="tab manager-only" data-subtab-planning="team" role="tab">Ã‰quipe</button>
+          <button type="button" class="tab manager-only" data-subtab-planning="team" role="tab">Équipe</button>
         </div>
 
         <div data-planning-panel="mine" class="planning-panel">
           <article class="card">
             <div class="section-head">
               <h3>Mes horaires</h3>
-              <span class="section-meta" id="planning-mine-week-label">PÃ©riode</span>
+              <span class="section-meta" id="planning-mine-week-label">Période</span>
             </div>
             <div id="planning-mine-summary" class="planning-summary muted"></div>
             <div id="planning-mine-list" class="stack-list planning-shift-list"></div>
@@ -1554,10 +1554,10 @@
           <article class="card">
             <div class="section-head">
               <h3>Programme de travail</h3>
-              <span class="section-meta" id="planning-team-week-label">PÃ©riode</span>
+              <span class="section-meta" id="planning-team-week-label">Période</span>
             </div>
             <p class="muted" style="font-size:0.86rem;margin:0 0 12px;line-height:1.45">
-              Planifiez les crÃ©neaux et validez les demandes de prise de service. Les personnes concernÃ©es voient leurs horaires dans l&apos;onglet <strong>Mes horaires</strong>. Utilisez la plage <strong>Du / Au</strong> en haut pour filtrer les jours affichÃ©s.
+              Planifiez les créneaux et validez les demandes de prise de service. Les personnes concernées voient leurs horaires dans l&apos;onglet <strong>Mes horaires</strong>. Utilisez la plage <strong>Du / Au</strong> en haut pour filtrer les jours affichés.
             </p>
             <div id="planning-team-relay-requests" class="hidden" style="margin-bottom:12px"></div>
             <div id="planning-team-service-now" style="margin-bottom:10px"></div>
@@ -1566,25 +1566,25 @@
 
           <article class="card manager-only">
             <div class="section-head">
-              <h3>GÃ©nÃ©rer une rotation</h3>
-              <span class="section-meta">PÃ©riode Du / Au</span>
+              <h3>Générer une rotation</h3>
+              <span class="section-meta">Période Du / Au</span>
             </div>
             <p class="muted" style="font-size:0.86rem;margin:0 0 12px;line-height:1.45">
-              La rotation utilise la plage <strong>Du / Au</strong> en haut de la page (bouton <strong>Ce mois</strong> pour tout le mois). Exemple : 2 jours travaillÃ©s, 2 jours de repos en alternance. Cochez l&apos;ordre de rotation.
+              La rotation utilise la plage <strong>Du / Au</strong> en haut de la page (bouton <strong>Ce mois</strong> pour tout le mois). Exemple : 2 jours travaillés, 2 jours de repos en alternance. Cochez l&apos;ordre de rotation.
             </p>
             <p id="ws-rotation-period-hint" class="planning-summary muted" style="margin:0 0 10px;font-size:0.88rem"></p>
             <div id="ws-rotation-staff-list" class="planning-rotation-staff" role="group" aria-label="Ordre de rotation"></div>
             <div class="form-grid two-cols" style="margin-top:12px">
               <div class="form-group">
-                <label for="ws-rotation-work-days">Jours travaillÃ©s d&apos;affilÃ©e</label>
+                <label for="ws-rotation-work-days">Jours travaillés d&apos;affilée</label>
                 <input id="ws-rotation-work-days" type="number" min="1" max="7" value="2" style="width:100%">
               </div>
               <div class="form-group">
                 <label for="ws-rotation-team-size">Personnes en service / jour</label>
-                <input id="ws-rotation-team-size" type="number" min="1" max="5" value="1" style="width:100%" title="1 = alternance classique 2j travail / 2j repos Ã  2 personnes">
+                <input id="ws-rotation-team-size" type="number" min="1" max="5" value="1" style="width:100%" title="1 = alternance classique 2j travail / 2j repos à 2 personnes">
               </div>
               <div class="form-group">
-                <label for="ws-rotation-start">Heure dÃ©but</label>
+                <label for="ws-rotation-start">Heure début</label>
                 <input id="ws-rotation-start" type="time" value="18:00" style="width:100%">
               </div>
               <div class="form-group">
@@ -1594,17 +1594,17 @@
             </div>
             <label class="planning-rotation-opt" style="display:flex;align-items:center;gap:8px;margin:12px 0;font-size:0.88rem">
               <input type="checkbox" id="ws-rotation-replace">
-              Remplacer les crÃ©neaux dÃ©jÃ  planifiÃ©s sur cette pÃ©riode (maquis actif)
+              Remplacer les créneaux déjà planifiés sur cette période (maquis actif)
             </label>
             <p id="ws-rotation-preview" class="planning-summary muted" style="margin-bottom:10px"></p>
             <div class="button-stack">
-              <button type="button" id="ws-rotation-generate" class="btn btn-primary">GÃ©nÃ©rer la rotation</button>
+              <button type="button" id="ws-rotation-generate" class="btn btn-primary">Générer la rotation</button>
             </div>
           </article>
 
           <article class="card manager-only">
             <div class="section-head">
-              <h3>Ajouter un crÃ©neau</h3>
+              <h3>Ajouter un créneau</h3>
               <span class="section-meta">Manuel</span>
             </div>
             <div class="form-grid two-cols">
@@ -1618,10 +1618,10 @@
               </div>
               <div class="form-group">
                 <label for="ws-date-end">Au (jour)</label>
-                <input id="ws-date-end" type="date" style="width:100%" title="MÃªme jour ou plusieurs jours : un crÃ©neau par jour">
+                <input id="ws-date-end" type="date" style="width:100%" title="Même jour ou plusieurs jours : un créneau par jour">
               </div>
               <div class="form-group">
-                <label for="ws-start">DÃ©but</label>
+                <label for="ws-start">Début</label>
                 <input id="ws-start" type="time" value="18:00" style="width:100%">
               </div>
               <div class="form-group">
@@ -1630,12 +1630,12 @@
               </div>
               <div class="form-group" style="grid-column:1/-1">
                 <label for="ws-note">Note (optionnel)</label>
-                <input id="ws-note" type="text" maxlength="200" placeholder="ex: terrasse, Ã©vÃ©nementâ€¦" style="width:100%">
+                <input id="ws-note" type="text" maxlength="200" placeholder="ex: terrasse, événement…" style="width:100%">
               </div>
             </div>
             <p id="ws-staff-hint" class="muted hidden" role="alert" style="font-size:0.86rem;margin:0 0 12px;line-height:1.45;padding:10px 12px;border-radius:10px;background:#fff8e6;border:1px solid #f0d78c"></p>
             <div class="button-stack">
-              <button type="button" id="ws-save-btn" class="btn btn-primary">Enregistrer le crÃ©neau</button>
+              <button type="button" id="ws-save-btn" class="btn btn-primary">Enregistrer le créneau</button>
               <button type="button" id="ws-cancel-edit-btn" class="btn btn-outline hidden">Annuler la modification</button>
             </div>
             <input type="hidden" id="ws-edit-id" value="">
@@ -1650,12 +1650,12 @@
               <p class="eyebrow">Serveuse</p>
               <h3>Mes ventes</h3>
               <p class="muted" style="margin:8px 0 0;font-size:0.88rem;line-height:1.45">
-                Factures que <strong>vous</strong> avez encaissÃ©es sur ce maquis â€” consultation et impression uniquement.
+                Factures que <strong>vous</strong> avez encaissées sur ce maquis — consultation et impression uniquement.
               </p>
             </div>
             <span id="srv-hist-count-meta" class="section-meta">0 facture</span>
           </div>
-          <div class="srv-hist-quick-period tabs" role="tablist" aria-label="PÃ©riode rapide">
+          <div class="srv-hist-quick-period tabs" role="tablist" aria-label="Période rapide">
             <button type="button" class="tab active" data-srv-hist-preset="today">Aujourd&apos;hui</button>
             <button type="button" class="tab" data-srv-hist-preset="7d">7 jours</button>
             <button type="button" class="tab" data-srv-hist-preset="month">Ce mois</button>
@@ -1671,7 +1671,7 @@
             </div>
             <div class="form-group">
               <label>&nbsp;</label>
-              <button id="print-srv-hist-btn" class="btn btn-outline" type="button">Imprimer la pÃ©riode</button>
+              <button id="print-srv-hist-btn" class="btn btn-outline" type="button">Imprimer la période</button>
             </div>
           </div>
           <div id="srv-hist-kpis" class="pdj-kpis" style="margin:14px 0 10px"></div>
@@ -1681,10 +1681,10 @@
       </section>
 
       <section id="page-params" class="page">
-        <div class="tabs page-subtabs params-subtabs" role="tablist" aria-label="Sous-menus paramÃ¨tres">
+        <div class="tabs page-subtabs params-subtabs" role="tablist" aria-label="Sous-menus paramètres">
           <button type="button" class="tab active" data-subtab-params="profil" role="tab" aria-selected="true">Profil</button>
-          <button type="button" class="tab any-admin" data-subtab-params="catalogue" role="tab">CatÃ©gories</button>
-          <button type="button" class="tab any-admin" data-subtab-params="acces" role="tab">AccÃ¨s</button>
+          <button type="button" class="tab any-admin" data-subtab-params="catalogue" role="tab">Catégories</button>
+          <button type="button" class="tab any-admin" data-subtab-params="acces" role="tab">Accès</button>
           <button type="button" class="tab maquis-backup-admin" data-subtab-params="sauvegarde" role="tab">Sauvegarde</button>
           <button type="button" class="tab any-admin" data-subtab-params="correction" role="tab">Correction</button>
           <button type="button" class="tab any-admin" data-subtab-params="admin" role="tab">Administration</button>
@@ -1697,7 +1697,7 @@
               <span class="section-meta">Profil personnel</span>
             </div>
             <p class="muted" style="font-size:0.86rem;margin:0 0 12px;line-height:1.45">
-              Nom affichÃ© sur l'interface, identifiant de connexion (non modifiable) et changement de mot de passe optionnel.
+              Nom affiché sur l'interface, identifiant de connexion (non modifiable) et changement de mot de passe optionnel.
             </p>
             <div class="form-grid two-cols">
               <div class="form-group">
@@ -1709,12 +1709,12 @@
                 <input id="ua-username" type="text" readonly autocomplete="username" class="muted" style="background:var(--mm-surface-2,#f5f5f5)">
               </div>
               <div class="form-group">
-                <label for="ua-wa-phone">TÃ©lÃ©phone WhatsApp</label>
+                <label for="ua-wa-phone">Téléphone WhatsApp</label>
                 <input id="ua-wa-phone" type="tel" placeholder="+2250700000000" autocomplete="tel">
-                <p class="muted" style="font-size:0.78rem;margin:4px 0 0;line-height:1.35">Format international : +225â€¦ Â· UtilisÃ© pour les notifications (commandes, clÃ´ture, alertes stock).</p>
+                <p class="muted" style="font-size:0.78rem;margin:4px 0 0;line-height:1.35">Format international : +225… · Utilisé pour les notifications (commandes, clôture, alertes stock).</p>
                 <label class="checkbox-label" style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:0.88rem;margin-top:8px">
                   <input id="ua-wa2fa" type="checkbox" style="width:auto">
-                  <span>Recevoir un code WhatsApp Ã  la connexion (2FA)</span>
+                  <span>Recevoir un code WhatsApp à la connexion (2FA)</span>
                 </label>
               </div>
               <div class="form-group">
@@ -1723,11 +1723,11 @@
               </div>
               <div class="form-group">
                 <label for="ua-password-confirm">Confirmer le mot de passe</label>
-                <input id="ua-password-confirm" type="password" autocomplete="new-password" placeholder="RÃ©pÃ©ter si changement">
+                <input id="ua-password-confirm" type="password" autocomplete="new-password" placeholder="Répéter si changement">
               </div>
             </div>
             <div id="ua-2fa-block" class="ua-2fa-block" style="margin-top:16px;padding-top:16px;border-top:1px solid var(--line)">
-              <p class="muted" style="font-size:0.86rem;margin:0 0 10px;line-height:1.45">SÃ©curitÃ© â€” authentification Ã  deux facteurs (application type Google Authenticator).</p>
+              <p class="muted" style="font-size:0.86rem;margin:0 0 10px;line-height:1.45">Sécurité — authentification à deux facteurs (application type Google Authenticator).</p>
               <div id="ua-2fa-actions" class="line-actions"></div>
             </div>
             <div class="button-stack">
@@ -1746,8 +1746,8 @@
                 <input id="p-nom" type="text" placeholder="Mon Bar">
               </div>
               <div class="form-group">
-                <label for="p-gerant">GÃ©rant</label>
-                <input id="p-gerant" type="text" placeholder="Nom du gÃ©rant">
+                <label for="p-gerant">Gérant</label>
+                <input id="p-gerant" type="text" placeholder="Nom du gérant">
               </div>
               <div class="form-group">
                 <label for="p-ville">Ville</label>
@@ -1775,33 +1775,33 @@
                 <input id="p-seuil" type="number" placeholder="5">
               </div>
               <div class="form-group">
-                <label for="p-reappro-mult">Cible rÃ©appro (Ã— seuil article)</label>
-                <input id="p-reappro-mult" type="number" min="1" max="10" step="0.5" placeholder="2" title="Stock cible = seuil Ã— ce multiplicateur (dÃ©faut 2)">
-                <p class="muted" style="font-size:0.82rem;margin-top:6px">Ex. 2 = remonter Ã  2Ã— le seuil minimum. ParamÃ©trable par maquis.</p>
+                <label for="p-reappro-mult">Cible réappro (× seuil article)</label>
+                <input id="p-reappro-mult" type="number" min="1" max="10" step="0.5" placeholder="2" title="Stock cible = seuil × ce multiplicateur (défaut 2)">
+                <p class="muted" style="font-size:0.82rem;margin-top:6px">Ex. 2 = remonter à 2× le seuil minimum. Paramétrable par maquis.</p>
               </div>
               <div class="form-group" style="grid-column:1/-1">
                 <label class="checkbox-label" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer">
                   <input id="p-stock-alert-inclusive-seuil" type="checkbox" style="margin-top:3px;width:auto">
-                  <span>Alerter dÃ¨s le seuil atteint (stock infÃ©rieur ou Ã©gal au seuil article)</span>
+                  <span>Alerter dès le seuil atteint (stock inférieur ou égal au seuil article)</span>
                 </label>
-                <p class="muted" style="font-size:0.82rem;margin:6px 0 0 28px">Par dÃ©faut : alerte seulement si le stock est <strong>strictement</strong> sous le seuil. Cochez pour Ãªtre averti dÃ¨s que le stock atteint le seuil (rÃ©appro plus tÃ´t).</p>
+                <p class="muted" style="font-size:0.82rem;margin:6px 0 0 28px">Par défaut : alerte seulement si le stock est <strong>strictement</strong> sous le seuil. Cochez pour être averti dès que le stock atteint le seuil (réappro plus tôt).</p>
               </div>
               <div class="form-group">
-                <label for="p-prefixe">PrÃ©fixe facture</label>
+                <label for="p-prefixe">Préfixe facture</label>
                 <input id="p-prefixe" type="text" placeholder="MBCM">
               </div>
               <div class="form-group" style="grid-column:1/-1">
-                <label for="p-sms-qr">SMS â€” tÃ©lÃ©phone alerte commande QR (optionnel)</label>
+                <label for="p-sms-qr">SMS — téléphone alerte commande QR (optionnel)</label>
                 <input id="p-sms-qr" type="tel" placeholder="+2250701020304 ou +337..." autocomplete="tel">
                 <p class="muted" style="font-size:0.82rem;margin-top:6px">
-                  NumÃ©ros au format international (E.164). Configurez cÃ´tÃ© serveur un <strong>webhook</strong> et/ou <strong>Twilio</strong>
+                  Numéros au format international (E.164). Configurez côté serveur un <strong>webhook</strong> et/ou <strong>Twilio</strong>
                   (<code>GESTION_CAVE_QR_ALERT_WEBHOOK</code>, variables <code>TWILIO_*</code>). Voir commentaire dans le code serveur.</p>
               </div>
               <div class="form-group" style="grid-column:1/-1">
-                <label for="p-wa-phones">WhatsApp â€” numÃ©ros Ã  notifier (optionnel)</label>
+                <label for="p-wa-phones">WhatsApp — numéros à notifier (optionnel)</label>
                 <input id="p-wa-phones" type="tel" placeholder="+2250701020304, +2250702030405" autocomplete="tel">
                 <p class="muted" style="font-size:0.82rem;margin-top:6px">
-                  Un ou plusieurs numÃ©ros sÃ©parÃ©s par des virgules (format international +225â€¦). Activez cÃ´tÃ© serveur les variables
+                  Un ou plusieurs numéros séparés par des virgules (format international +225…). Activez côté serveur les variables
                   <code>WHATSAPP_PHONE_NUMBER_ID</code> et <code>WHATSAPP_ACCESS_TOKEN</code> (API Cloud Meta).</p>
                 <div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:12px">
                   <label class="checkbox-label" style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:0.9rem">
@@ -1829,21 +1829,21 @@
               <div class="form-group" style="grid-column:1/-1">
                 <label class="checkbox-label" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer">
                   <input id="p-single-br-enabled" type="checkbox" style="margin-top:3px;width:auto">
-                  <span>Vente limitÃ©e Ã  une seule brasserie</span>
+                  <span>Vente limitée à une seule brasserie</span>
                 </label>
               </div>
               <div class="form-group hidden" id="p-single-br-wrap" style="grid-column:1/-1">
                 <label for="p-single-br-name">Brasserie / fournisseur</label>
                 <select id="p-single-br-name" autocomplete="off" aria-label="Brasserie unique du maquis">
-                  <option value="">ex: Brassivoire, Solibra, Castelâ€¦</option>
+                  <option value="">ex: Brassivoire, Solibra, Castel…</option>
                 </select>
               </div>
               <div class="form-group" style="grid-column:1/-1">
                 <label class="checkbox-label" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer">
                   <input id="p-has-restaurant" type="checkbox" style="margin-top:3px;width:auto">
-                  <span>Cet Ã©tablissement a un restaurant (module cuisine activÃ©)</span>
+                  <span>Cet établissement a un restaurant (module cuisine activé)</span>
                 </label>
-                <p class="muted" style="font-size:0.82rem;margin:6px 0 0 28px">Active la gestion du menu cuisine, du stock ingrÃ©dients et la saisie de plats dans les commandes.</p>
+                <p class="muted" style="font-size:0.82rem;margin:6px 0 0 28px">Active la gestion du menu cuisine, du stock ingrédients et la saisie de plats dans les commandes.</p>
               </div>
               <div class="form-group" style="grid-column:1/-1">
                 <label class="checkbox-label" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer">
@@ -1855,18 +1855,18 @@
               <div class="form-group" style="grid-column:1/-1">
                 <label class="checkbox-label" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer">
                   <input id="p-auto-cloture-enabled" type="checkbox" style="margin-top:3px;width:auto">
-                  <span>ClÃ´ture automatique de la journÃ©e</span>
+                  <span>Clôture automatique de la journée</span>
                 </label>
-                <p class="muted" style="font-size:0.82rem;margin:6px 0 0 28px">Si activÃ©e, la journÃ©e comptable est clÃ´turÃ©e automatiquement Ã  l'heure choisie (stock thÃ©orique, caisse thÃ©orique). Requiert que l'application soit ouverte.</p>
+                <p class="muted" style="font-size:0.82rem;margin:6px 0 0 28px">Si activée, la journée comptable est clôturée automatiquement à l'heure choisie (stock théorique, caisse théorique). Requiert que l'application soit ouverte.</p>
               </div>
               <div class="form-group hidden" id="p-auto-cloture-time-wrap" style="grid-column:1/-1">
-                <label for="p-auto-cloture-time">Heure de clÃ´ture automatique</label>
+                <label for="p-auto-cloture-time">Heure de clôture automatique</label>
                 <input id="p-auto-cloture-time" type="time" value="23:00" style="max-width:160px">
-                <p class="muted" style="font-size:0.82rem;margin-top:6px">La clÃ´ture se dÃ©clenche dÃ¨s que l'heure est atteinte (vÃ©rification chaque minute).</p>
+                <p class="muted" style="font-size:0.82rem;margin-top:6px">La clôture se déclenche dès que l'heure est atteinte (vérification chaque minute).</p>
               </div>
             </div>
             <div class="button-stack">
-              <button id="save-params-btn" class="btn btn-primary" type="button">Enregistrer les paramÃ¨tres</button>
+              <button id="save-params-btn" class="btn btn-primary" type="button">Enregistrer les paramètres</button>
             </div>
           </article>
           <article class="card manager-only" style="margin-top:14px">
@@ -1876,11 +1876,11 @@
             </div>
             <div class="export-period-bar" style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin-bottom:14px">
               <div class="form-group" style="min-width:200px;margin:0">
-                <label for="export-period-mode">PÃ©riode d'export</label>
+                <label for="export-period-mode">Période d'export</label>
                 <select id="export-period-mode">
                   <option value="month" selected>Mois en cours</option>
                   <option value="week">Semaine en cours</option>
-                  <option value="custom">PÃ©riode personnalisÃ©e</option>
+                  <option value="custom">Période personnalisée</option>
                   <option value="all">Tout l'historique</option>
                 </select>
               </div>
@@ -1903,14 +1903,14 @@
               <button id="export-compta-excel-btn" class="btn btn-outline" type="button">Exporter ventes + charges (Excel)</button>
               <button id="export-btn" class="btn btn-outline" type="button">Sauvegarde technique (JSON)</button>
             </div>
-            <p class="muted" style="font-size:0.82rem;margin-top:10px">Le rapport HTML s'ouvre dans n'importe quel navigateur et s'imprime en PDF. Les exports Excel respectent la pÃ©riode choisie. La sauvegarde JSON est pour la restauration technique.</p>
+            <p class="muted" style="font-size:0.82rem;margin-top:10px">Le rapport HTML s'ouvre dans n'importe quel navigateur et s'imprime en PDF. Les exports Excel respectent la période choisie. La sauvegarde JSON est pour la restauration technique.</p>
           </article>
         </div>
 
         <div data-params-panel="catalogue" class="params-panel hidden">
           <article class="card">
             <div class="section-head">
-              <h3>CatÃ©gories boissons</h3>
+              <h3>Catégories boissons</h3>
               <span class="section-meta">Une categorie par ligne</span>
             </div>
             <div class="form-group">
@@ -1927,7 +1927,7 @@
 
           <!-- Barre de commande -->
           <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
-            <input id="users-search" type="search" placeholder="Rechercher un utilisateurâ€¦" style="flex:1;min-width:160px;padding:10px 14px;border-radius:12px;border:1px solid var(--line);font-size:0.93rem;background:var(--mm-surface,#fff)">
+            <input id="users-search" type="search" placeholder="Rechercher un utilisateur…" style="flex:1;min-width:160px;padding:10px 14px;border-radius:12px;border:1px solid var(--line);font-size:0.93rem;background:var(--mm-surface,#fff)">
             <div id="users-stats" style="font-size:0.82rem;color:var(--muted,#888);white-space:nowrap"></div>
             <button id="toggle-add-user-form-btn" class="btn btn-primary" type="button" style="white-space:nowrap">+ Ajouter</button>
           </div>
@@ -1936,7 +1936,7 @@
           <input id="edit-user-username" type="hidden">
           <div id="users-list" style="display:grid;gap:10px;margin-bottom:16px"></div>
 
-          <!-- Formulaire ajout/modification (masquÃ© par dÃ©faut) -->
+          <!-- Formulaire ajout/modification (masqué par défaut) -->
           <article class="card" id="user-form-card" style="display:none;margin-top:4px">
             <div class="section-head">
               <h3 id="user-form-title">Nouvel utilisateur</h3>
@@ -1948,36 +1948,36 @@
                 <input id="new-user-username" type="text" placeholder="ex: marie" autocomplete="off">
               </div>
               <div class="form-group">
-                <label for="new-user-role">RÃ´le</label>
+                <label for="new-user-role">Rôle</label>
                 <select id="new-user-role">
                   <option value="serveuse">Serveuse</option>
-                  <option value="manager" class="any-admin">GÃ©rant</option>
+                  <option value="manager" class="any-admin">Gérant</option>
                   <option value="admin" class="admin-only">Administrateur de maquis</option>
                   <option value="superadmin" class="scoped-superadmin-option">Super administrateur</option>
                 </select>
               </div>
               <div class="form-group">
                 <label for="new-user-password">Mot de passe</label>
-                <input id="new-user-password" type="password" placeholder="Obligatoire Ã  la crÃ©ation" autocomplete="new-password">
+                <input id="new-user-password" type="password" placeholder="Obligatoire à la création" autocomplete="new-password">
               </div>
               <div class="form-group">
-                <label for="new-user-wa-phone">TÃ©lÃ©phone WhatsApp</label>
+                <label for="new-user-wa-phone">Téléphone WhatsApp</label>
                 <input id="new-user-wa-phone" type="tel" placeholder="+2250701020304" autocomplete="tel">
-                <p class="muted" style="font-size:0.78rem;margin-top:4px;line-height:1.35">Notifications : commandes QR (serveuse), clÃ´tures et alertes (gÃ©rant).</p>
+                <p class="muted" style="font-size:0.78rem;margin-top:4px;line-height:1.35">Notifications : commandes QR (serveuse), clôtures et alertes (gérant).</p>
                 <label class="checkbox-label" style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:0.88rem;margin-top:8px">
                   <input id="new-user-wa2fa" type="checkbox" style="width:auto">
-                  <span>Authentification par code WhatsApp (Ã  la place de l'app Authenticator)</span>
+                  <span>Authentification par code WhatsApp (à la place de l'app Authenticator)</span>
                 </label>
               </div>
             </div>
             <div id="new-user-sites-section" class="form-group" style="margin-top:12px">
-              <label>Maquis autorisÃ©s</label>
+              <label>Maquis autorisés</label>
               <div id="new-user-sites" class="checkbox-list" style="margin-top:8px"></div>
             </div>
             <div class="form-group" style="margin-top:14px">
-              <label>RÃ´le personnalisÃ© <span class="muted" style="font-size:0.8rem;font-weight:400">(optionnel â€” surcharge les permissions par dÃ©faut)</span></label>
+              <label>Rôle personnalisé <span class="muted" style="font-size:0.8rem;font-weight:400">(optionnel — surcharge les permissions par défaut)</span></label>
               <select id="new-user-custom-role" style="margin-top:6px">
-                <option value="">â€” Permissions par dÃ©faut du rÃ´le â€”</option>
+                <option value="">— Permissions par défaut du rôle —</option>
               </select>
             </div>
             <div class="form-group" style="margin-top:14px">
@@ -1990,17 +1990,17 @@
             </div>
           </article>
 
-          <!-- RÃ´les personnalisÃ©s par maquis -->
+          <!-- Rôles personnalisés par maquis -->
           <article class="card any-admin" style="margin-top:16px">
             <div class="section-head">
-              <h3>RÃ´les personnalisÃ©s</h3>
+              <h3>Rôles personnalisés</h3>
               <span class="section-meta" id="custom-roles-site-label">Maquis courant</span>
             </div>
-            <p class="muted" style="font-size:0.85rem;margin-bottom:12px;line-height:1.45">CrÃ©ez des modÃ¨les de permissions rÃ©utilisables pour ce maquis (ex: CaissiÃ¨re, Chef de rang).</p>
+            <p class="muted" style="font-size:0.85rem;margin-bottom:12px;line-height:1.45">Créez des modèles de permissions réutilisables pour ce maquis (ex: Caissière, Chef de rang).</p>
             <div id="custom-roles-list" style="display:grid;gap:8px;margin-bottom:14px"></div>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-              <input id="new-role-name" type="text" placeholder="Nom du rÃ´le (ex: CaissiÃ¨re)" style="flex:1;min-width:160px;padding:10px 14px;border-radius:12px;border:1px solid var(--line);font-size:0.93rem">
-              <button id="add-custom-role-btn" class="btn btn-primary" type="button">CrÃ©er le rÃ´le</button>
+              <input id="new-role-name" type="text" placeholder="Nom du rôle (ex: Caissière)" style="flex:1;min-width:160px;padding:10px 14px;border-radius:12px;border:1px solid var(--line);font-size:0.93rem">
+              <button id="add-custom-role-btn" class="btn btn-primary" type="button">Créer le rôle</button>
             </div>
           </article>
 
@@ -2013,7 +2013,7 @@
               <span class="section-meta">Par maquis</span>
             </div>
             <p class="muted" style="font-size:0.85rem;margin-bottom:10px;line-height:1.45">
-              CrÃ©ez une copie serveur de chaque maquis que vous administrez, puis restaurez-le en cas d&apos;erreur. Les autres maquis ne sont pas modifiÃ©s.
+              Créez une copie serveur de chaque maquis que vous administrez, puis restaurez-le en cas d&apos;erreur. Les autres maquis ne sont pas modifiés.
             </p>
             <p class="muted" id="restore-backup-info" style="font-size:0.85rem;margin-bottom:10px;line-height:1.45"></p>
             <div class="form-grid" style="margin-bottom:12px">
@@ -2033,7 +2033,7 @@
             </div>
             <div class="section-head" style="margin-top:18px">
               <h4 style="margin:0;font-size:0.95rem">Sauvegarder par maquis</h4>
-              <span class="section-meta">Cliquez pour crÃ©er un snapshot isolÃ©</span>
+              <span class="section-meta">Cliquez pour créer un snapshot isolé</span>
             </div>
             <div id="sites-list" class="stack-list"></div>
           </article>
@@ -2047,11 +2047,11 @@
               <span class="section-meta">Sans annulation</span>
             </div>
             <p class="muted" style="font-size:0.86rem;margin-bottom:14px;line-height:1.45">
-              Corrigez le <strong>moyen de paiement</strong> ou les <strong>quantitÃ©s</strong> d'une facture dÃ©jÃ  encaissÃ©e sans l'annuler.
-              Chaque correction est tracÃ©e dans le journal d'audit.
+              Corrigez le <strong>moyen de paiement</strong> ou les <strong>quantités</strong> d'une facture déjà encaissée sans l'annuler.
+              Chaque correction est tracée dans le journal d'audit.
             </p>
             <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
-              <input id="corr-facture-num" type="text" placeholder="NumÃ©ro de facture (ex: ROLY-0335)"
+              <input id="corr-facture-num" type="text" placeholder="Numéro de facture (ex: ROLY-0335)"
                      style="flex:1;min-width:180px;padding:11px 14px;border-radius:12px;border:1px solid var(--line);font-size:0.93rem">
               <button id="corr-search-btn" class="btn btn-primary" type="button">Rechercher</button>
             </div>
@@ -2061,14 +2061,14 @@
           <article class="card" style="margin-top:14px">
             <div class="section-head">
               <h3>Supprimer une facture en double</h3>
-              <span class="section-meta">IrrÃ©versible</span>
+              <span class="section-meta">Irréversible</span>
             </div>
             <p class="muted" style="font-size:0.86rem;margin-bottom:14px;line-height:1.45">
               Supprime toutes les lignes d'une facture et <strong>restitue le stock</strong>.
-              Ã€ utiliser uniquement pour les doublons de saisie.
+              À utiliser uniquement pour les doublons de saisie.
             </p>
             <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
-              <input id="del-facture-num" type="text" placeholder="NumÃ©ro de facture (ex: CDAYOP-0335)"
+              <input id="del-facture-num" type="text" placeholder="Numéro de facture (ex: CDAYOP-0335)"
                      style="flex:1;min-width:180px;padding:11px 14px;border-radius:12px;border:1px solid var(--line);font-size:0.93rem">
               <button id="del-facture-search-btn" class="btn btn-primary" type="button">Rechercher</button>
             </div>
@@ -2078,10 +2078,10 @@
           <article class="card" style="margin-top:14px">
             <div class="section-head">
               <h3>Historique des corrections</h3>
-              <span class="section-meta" id="corr-history-meta">â€”</span>
+              <span class="section-meta" id="corr-history-meta">—</span>
             </div>
             <p class="muted" style="font-size:0.86rem;margin-bottom:12px;line-height:1.45">
-              Corrections de paiement, de quantitÃ©s et d'article enregistrÃ©es pour ce maquis. Cliquez sur une facture pour la recharger ci-dessus.
+              Corrections de paiement, de quantités et d'article enregistrées pour ce maquis. Cliquez sur une facture pour la recharger ci-dessus.
             </p>
             <div id="corr-history"></div>
           </article>
@@ -2090,10 +2090,10 @@
         <div data-params-panel="admin" class="params-panel hidden">
           <article class="card any-admin">
             <div class="section-head">
-              <h3>Historique gÃ©rant &amp; serveuses</h3>
+              <h3>Historique gérant &amp; serveuses</h3>
               <span class="section-meta">Audit</span>
             </div>
-            <p class="muted" style="margin-bottom:12px">Journal des actions (crÃ©ations, modifications, suppressions) faites par les comptes <strong>gÃ©rant</strong> et <strong>serveuse</strong>.</p>
+            <p class="muted" style="margin-bottom:12px">Journal des actions (créations, modifications, suppressions) faites par les comptes <strong>gérant</strong> et <strong>serveuse</strong>.</p>
             <div id="staff-audit-list"></div>
           </article>
 
@@ -2106,24 +2106,24 @@
               <button id="restore-json-btn" class="btn btn-danger" type="button">Restaurer tout depuis data.json (secours)</button>
             </div>
             <div class="section-head" style="margin-top:8px">
-              <h3>DÃ©calage des journÃ©es comptables</h3>
+              <h3>Décalage des journées comptables</h3>
               <span class="section-meta">Correction</span>
             </div>
             <p class="muted" style="margin-bottom:12px;font-size:0.88rem;line-height:1.45">
-              DÃ©cale dâ€™exactement <strong>un jour calendaire</strong> toutes les dates utilisÃ©es pour le point du jour, les ventes, les commandes, les charges, les consignes, les achats fournisseur, les mouvements casiers, etc.
-              Ã€ utiliser si tout lâ€™historique a Ã©tÃ© saisi avec un jour de dÃ©calage par rapport Ã  la rÃ©alitÃ©. Pensez Ã  une <strong>sauvegarde</strong> (<code>backups/</code>) avant dâ€™appliquer.
+              Décale d’exactement <strong>un jour calendaire</strong> toutes les dates utilisées pour le point du jour, les ventes, les commandes, les charges, les consignes, les achats fournisseur, les mouvements casiers, etc.
+              À utiliser si tout l’historique a été saisi avec un jour de décalage par rapport à la réalité. Pensez à une <strong>sauvegarde</strong> (<code>backups/</code>) avant d’appliquer.
             </p>
             <div class="form-grid" style="margin-bottom:12px">
               <div class="form-group">
-                <label for="shift-journal-delta">Sens du dÃ©calage</label>
+                <label for="shift-journal-delta">Sens du décalage</label>
                 <select id="shift-journal-delta" style="width:100%;margin-top:4px;padding:12px;border-radius:12px;border:1px solid var(--line)">
-                  <option value="-1">Reculer dâ€™un jour (âˆ’1)</option>
-                  <option value="1">Avancer dâ€™un jour (+1)</option>
+                  <option value="-1">Reculer d’un jour (−1)</option>
+                  <option value="1">Avancer d’un jour (+1)</option>
                 </select>
               </div>
             </div>
-            <p class="muted" style="font-size:0.82rem;margin-bottom:10px">PÃ©rimÃ¨tre : maquis actif uniquement.</p>
-            <button id="shift-journal-day-btn" class="btn btn-danger" type="button">Appliquer le dÃ©calage dâ€™un jour</button>
+            <p class="muted" style="font-size:0.82rem;margin-bottom:10px">Périmètre : maquis actif uniquement.</p>
+            <button id="shift-journal-day-btn" class="btn btn-danger" type="button">Appliquer le décalage d’un jour</button>
           </article>
 
           <article class="card global-superadmin-only">
@@ -2136,7 +2136,7 @@
               <select id="purge-maquis-select" style="width:100%;margin-top:4px;padding:12px;border-radius:12px;border:1px solid var(--line)"></select>
               <label class="checkbox-label" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;margin-top:12px">
                 <input id="purge-maquis-keep-catalog" type="checkbox" checked style="margin-top:3px;width:auto">
-                <span><strong>Garder le catalogue articles</strong> (noms, prix, formats) â€” seules les quantitÃ©s passent Ã  zÃ©ro et l&apos;historique ventes/commandes/etc. est supprimÃ©.</span>
+                <span><strong>Garder le catalogue articles</strong> (noms, prix, formats) — seules les quantités passent à zéro et l&apos;historique ventes/commandes/etc. est supprimé.</span>
               </label>
               <p class="muted" style="font-size:0.8rem;margin:10px 0 0">
                 Sans cette case &nbsp;: les lignes <strong>stock</strong> (articles) pour ce maquis sont aussi effacees. Pour recuperer apres erreur utilisez une copie locale <code>backups/data-*.json</code> ou votre export Excel stock.
@@ -2149,17 +2149,17 @@
       </section>
 
       <!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-           MODULE RESTAURANT â€” pages additives
+           MODULE RESTAURANT — pages additives
            Visibles uniquement si site.hasRestaurant
       â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
       <section id="page-menu-cuisine" class="page" aria-label="Menu cuisine">
         <!-- Contenu rendu dynamiquement par rstRenderMenuPage() -->
-        <div style="padding:24px;color:#9e9e9e">Chargement du menu cuisineâ€¦</div>
+        <div style="padding:24px;color:#9e9e9e">Chargement du menu cuisine…</div>
       </section>
 
-      <section id="page-stock-cuisine" class="page" aria-label="Stock ingrÃ©dients">
+      <section id="page-stock-cuisine" class="page" aria-label="Stock ingrédients">
         <!-- Contenu rendu dynamiquement par rstRenderStockPage() -->
-        <div style="padding:24px;color:#9e9e9e">Chargement du stock ingrÃ©dientsâ€¦</div>
+        <div style="padding:24px;color:#9e9e9e">Chargement du stock ingrédients…</div>
       </section>
 
       </main>
@@ -2196,7 +2196,7 @@
         <span class="bottom-nav-icon-wrap">
           <svg class="nav-icon bottom-nav-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1.5 2A1.5 1.5 0 0 0 0 3.5v2h15v-2A1.5 1.5 0 0 0 13.5 2h-12zM15 7H1v5.5a1.5 1.5 0 0 0 1.5 1.5h11a1.5 1.5 0 0 0 1.5-1.5V7z"/></svg>
         </span>
-        <span class="bottom-nav-label staff-caisse-nav-label">CrÃ©dits</span>
+        <span class="bottom-nav-label staff-caisse-nav-label">Crédits</span>
       </button>
       <button type="button" class="nav-btn bottom-nav-item" data-page="stock" aria-current="false">
         <span class="bottom-nav-icon-wrap">
@@ -2231,13 +2231,13 @@
           </div>
           <button type="button" class="mobile-more-close" data-more-sheet-close aria-label="Fermer">&times;</button>
         </header>
-        <p class="mobile-more-sub">AccÃ¨s rapide aux outils hors barre du bas.</p>
+        <p class="mobile-more-sub">Accès rapide aux outils hors barre du bas.</p>
         <nav class="mobile-more-features" aria-label="Sections supplementaires">
           <button type="button" class="mobile-more-feature staff-caisse-more-nav" data-more-nav="caisse">
             <span class="mobile-more-feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M2 8h20v12H2z"/><path d="M2 12h20M6 16h4"/></svg></span>
             <span class="mobile-more-feature-copy">
-              <strong>CrÃ©dits &amp; avoirs</strong>
-              <span class="mobile-more-feature-desc">Recouvrement crÃ©dit client et avoirs (monnaie gardÃ©e).</span>
+              <strong>Crédits &amp; avoirs</strong>
+              <span class="mobile-more-feature-desc">Recouvrement crédit client et avoirs (monnaie gardée).</span>
             </span>
           </button>
           <button type="button" class="mobile-more-feature" data-more-nav="qr">
@@ -2251,12 +2251,12 @@
             <span class="mobile-more-feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M8 3h8l1 4H7L8 3z"/><path d="M7 7h10v12a2 2 0 01-2 2H9a2 2 0 01-2-2V7z"/><path d="M10 11h4M12 9v4"/></svg></span>
             <span class="mobile-more-feature-copy">
               <strong>Consignes</strong>
-              <span class="mobile-more-feature-desc">Reliquats payÃ©s et consignes bouteilles.</span>
+              <span class="mobile-more-feature-desc">Reliquats payés et consignes bouteilles.</span>
             </span>
           </button>
           <button type="button" class="mobile-more-feature" data-more-nav="loyalty">
             <span class="mobile-more-feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M12 2l2.4 7.4H22l-6 4.6 2.3 7L12 16.8 5.7 21l2.3-7-6-4.6h7.6L12 2z"/></svg></span>
-            <span class="mobile-more-feature-copy"><strong>FidÃ©litÃ© clients</strong><span class="mobile-more-feature-desc">Clients rÃ©guliers et VIP, remises suggÃ©rÃ©es.</span></span>
+            <span class="mobile-more-feature-copy"><strong>Fidélité clients</strong><span class="mobile-more-feature-desc">Clients réguliers et VIP, remises suggérées.</span></span>
           </button>
           <button type="button" class="mobile-more-feature" data-more-nav="guide">
             <span class="mobile-more-feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg></span>
@@ -2269,38 +2269,38 @@
             <span class="mobile-more-feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M6 2h12v20H6V2zM8 6h8M8 10h8M8 14h5"/></svg></span>
             <span class="mobile-more-feature-copy">
               <strong>Mes ventes</strong>
-              <span class="mobile-more-feature-desc">Historique de vos factures encaissÃ©es.</span>
+              <span class="mobile-more-feature-desc">Historique de vos factures encaissées.</span>
             </span>
           </button>
           <button type="button" class="mobile-more-feature staff-schedule-nav" data-more-nav="planning">
             <span class="mobile-more-feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M3.5 0a.5.5 0 0 1 .5.5V1h8V.5a.5.5 0 0 1 1 0V1h1a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2h1V.5a.5.5 0 0 1 .5-.5zM2 2a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1H2zm0 4h12v1H2V6z"/></svg></span>
             <span class="mobile-more-feature-copy">
               <strong>Planning</strong>
-              <span class="mobile-more-feature-desc">Mes horaires et programme Ã©quipe.</span>
+              <span class="mobile-more-feature-desc">Mes horaires et programme équipe.</span>
             </span>
           </button>
           <button type="button" class="mobile-more-feature manager-more-item" data-more-nav="performance">
             <span class="mobile-more-feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M4 19V5"/><path d="M4 19h16"/><path d="M8 17V9"/><path d="M12 17V6"/><path d="M16 17v-4"/></svg></span>
-            <span class="mobile-more-feature-copy"><strong>Analyse jour par jour</strong><span class="mobile-more-feature-desc">CA, ventes et bÃ©nÃ©fice par jour sur une pÃ©riode.</span></span>
+            <span class="mobile-more-feature-copy"><strong>Analyse jour par jour</strong><span class="mobile-more-feature-desc">CA, ventes et bénéfice par jour sur une période.</span></span>
           </button>
           <button type="button" class="mobile-more-feature manager-more-item" data-more-nav="charges">
             <span class="mobile-more-feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg></span>
             <span class="mobile-more-feature-copy">
               <strong>Charges</strong>
-              <span class="mobile-more-feature-desc">DÃ©penses, loyer et achats hors stock.</span>
+              <span class="mobile-more-feature-desc">Dépenses, loyer et achats hors stock.</span>
             </span>
           </button>
           <button type="button" class="mobile-more-feature" data-more-nav="params">
             <span class="mobile-more-feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg></span>
             <span class="mobile-more-feature-copy">
-              <strong>ParamÃ¨tres</strong>
+              <strong>Paramètres</strong>
               <span class="mobile-more-feature-desc">Maquis, utilisateurs et catalogue.</span>
             </span>
           </button>
           <button type="button" class="mobile-more-feature mobile-more-feature-danger" data-more-nav="logout">
             <span class="mobile-more-feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg></span>
             <span class="mobile-more-feature-copy">
-              <strong>DÃ©connexion</strong>
+              <strong>Déconnexion</strong>
               <span class="mobile-more-feature-desc">Fermer la session sur cet appareil.</span>
             </span>
           </button>
@@ -2346,7 +2346,7 @@
       </div>
       <div class="form-group">
         <label for="v-article-search">Rechercher un produit</label>
-        <input id="v-article-search" type="search" placeholder="Nom, categorie, mot-cleâ€¦" autocomplete="off" enterkeyhint="search">
+        <input id="v-article-search" type="search" placeholder="Nom, categorie, mot-cle…" autocomplete="off" enterkeyhint="search">
         <div id="v-article-picker" class="vente-article-picker" role="listbox" aria-label="Resultats du catalogue"></div>
         <label for="v-article" style="margin-top:10px;display:block">Article / boisson</label>
         <input id="v-article" type="text" placeholder="ex: Castel Beer 65cl" list="articles-list">
@@ -2358,8 +2358,8 @@
       <div class="form-group" id="v-location-wrap">
         <label for="v-location">Lieu de consommation</label>
         <select id="v-location">
-          <option value="IntÃ©rieur">IntÃ©rieur (cave)</option>
-          <option value="ExtÃ©rieur">ExtÃ©rieur (terrasse)</option>
+          <option value="Intérieur">Intérieur (cave)</option>
+          <option value="Extérieur">Extérieur (terrasse)</option>
         </select>
       </div>
       <div class="form-group">
@@ -2409,7 +2409,7 @@
       <div class="form-group">
         <label for="co-brasserie">Brasserie / fournisseur</label>
         <select id="co-brasserie" aria-label="Brasserie commande casier vide">
-          <option value="">ex: Brassivoire, Solibra, Castelâ€¦</option>
+          <option value="">ex: Brassivoire, Solibra, Castel…</option>
         </select>
       </div>
       <div class="form-grid two-cols">
@@ -2465,11 +2465,11 @@
       </div>
       <p id="replace-current-info" class="muted" style="margin-bottom:10px"></p>
       <div id="replace-qty-wrap" style="display:none;margin-bottom:12px">
-        <label for="replace-qty" style="font-size:0.87rem;font-weight:600;display:block;margin-bottom:4px">QuantitÃ© Ã  remplacer</label>
+        <label for="replace-qty" style="font-size:0.87rem;font-weight:600;display:block;margin-bottom:4px">Quantité à remplacer</label>
         <input id="replace-qty" type="number" min="1" value="1" inputmode="numeric" style="width:90px;text-align:center;padding:6px 10px;border:1.5px solid #90caf9;border-radius:8px;font-size:1rem;font-weight:700;color:#1565c0">
       </div>
       <div class="form-group">
-        <label for="replace-search">Nouveau produit â€” clic pour remplacer</label>
+        <label for="replace-search">Nouveau produit — clic pour remplacer</label>
         <input id="replace-search" type="search" placeholder="Nom, categorie..." autocomplete="off">
         <div id="replace-picker" class="vente-article-picker" style="margin-top:6px"></div>
       </div>
@@ -2479,7 +2479,7 @@
     </div>
   </div>
 
-  <!-- SAISIE MOTIF : remplace window.prompt (non fiable en mode PWA/Ã©cran d'accueil) -->
+  <!-- SAISIE MOTIF : remplace window.prompt (non fiable en mode PWA/écran d'accueil) -->
   <div id="modal-text-prompt" class="modal-overlay" aria-hidden="true">
     <div class="modal">
       <div class="modal-handle"></div>
@@ -2498,12 +2498,12 @@
     </div>
   </div>
 
-  <!-- SUPPLEMENT ENCAISSEMENT : diffÃ©rence de prix aprÃ¨s remplacement d'article -->
+  <!-- SUPPLEMENT ENCAISSEMENT : différence de prix après remplacement d'article -->
   <div id="modal-supplement" class="modal-overlay" aria-hidden="true">
     <div class="modal">
       <div class="modal-handle"></div>
       <div class="section-head">
-        <h3>SupplÃ©ment Ã  encaisser</h3>
+        <h3>Supplément à encaisser</h3>
         <button class="icon-btn close-modal" data-close="modal-supplement" type="button">Fermer</button>
       </div>
       <div class="inline-card inline-card--tight" style="margin-bottom:12px">
@@ -2512,7 +2512,7 @@
       </div>
       <div class="form-grid finalize-pay-grid">
         <div class="form-group form-group--zero">
-          <label for="supp-cash">EspÃ¨ces</label>
+          <label for="supp-cash">Espèces</label>
           <input id="supp-cash" class="supp-pay-input" type="number" min="0" placeholder="0" inputmode="numeric">
         </div>
         <div class="form-group form-group--zero">
@@ -2532,23 +2532,23 @@
           <input id="supp-card" class="supp-pay-input" type="number" min="0" placeholder="0" inputmode="numeric">
         </div>
         <div class="form-group form-group--zero">
-          <label for="supp-credit">CrÃ©dit</label>
+          <label for="supp-credit">Crédit</label>
           <input id="supp-credit" class="supp-pay-input" type="number" min="0" placeholder="0" inputmode="numeric">
         </div>
       </div>
       <div class="form-group form-group--zero form-group--credit">
-        <label for="supp-credit-name">DÃ©biteur (si crÃ©dit)</label>
-        <input id="supp-credit-name" type="text" placeholder="Obligatoire si crÃ©dit" autocomplete="name">
+        <label for="supp-credit-name">Débiteur (si crédit)</label>
+        <input id="supp-credit-name" type="text" placeholder="Obligatoire si crédit" autocomplete="name">
       </div>
       <div id="supp-reste" class="finalize-reste" style="margin-bottom:10px">Reste : 0 FCFA</div>
       <div class="button-stack button-stack--row finalize-flow-actions">
-        <button id="confirm-supplement-btn" class="btn btn-primary" type="button">Encaisser le supplÃ©ment</button>
+        <button id="confirm-supplement-btn" class="btn btn-primary" type="button">Encaisser le supplément</button>
         <button type="button" class="btn btn-outline close-modal" data-close="modal-supplement">Annuler</button>
       </div>
     </div>
   </div>
 
-  <!-- REMPLIR LE FRIGO : transfert rÃ©serve â†’ frigo, accessible Ã  toutes les serveuses -->
+  <!-- REMPLIR LE FRIGO : transfert réserve → frigo, accessible à toutes les serveuses -->
   <div id="modal-remplir-frigo" class="modal-overlay" aria-hidden="true">
     <div class="modal">
       <div class="modal-handle"></div>
@@ -2556,10 +2556,10 @@
         <h3>Remplir le frigo</h3>
         <button class="icon-btn close-modal" data-close="modal-remplir-frigo" type="button">Fermer</button>
       </div>
-      <p class="muted" style="margin-bottom:10px;font-size:0.88rem">TransfÃ©rez des bouteilles depuis la rÃ©serve vers le frigo. Seuls les articles ayant du stock en rÃ©serve sont listÃ©s.</p>
+      <p class="muted" style="margin-bottom:10px;font-size:0.88rem">Transférez des bouteilles depuis la réserve vers le frigo. Seuls les articles ayant du stock en réserve sont listés.</p>
       <div class="form-group">
         <label for="frigo-search">Rechercher un article</label>
-        <input id="frigo-search" type="search" placeholder="Nom, catÃ©gorieâ€¦" autocomplete="off">
+        <input id="frigo-search" type="search" placeholder="Nom, catégorie…" autocomplete="off">
       </div>
       <div id="frigo-picker" class="vente-article-picker" style="margin-top:6px;max-height:340px;overflow-y:auto"></div>
     </div>
@@ -2600,7 +2600,7 @@
         <h3 id="sr-modal-title">Saisie rapide</h3>
         <button class="icon-btn close-modal" data-close="modal-saisie-rapide" type="button">Fermer</button>
       </div>
-      <!-- Champs JS conservÃ©s (non affichÃ©s) -->
+      <!-- Champs JS conservés (non affichés) -->
       <div id="sr-order-context-wrap" class="hidden" aria-hidden="true">
         <input id="sr-date" type="hidden">
         <select id="sr-order-select" style="display:none"></select>
@@ -2624,13 +2624,13 @@
         <div class="form-group form-group--zero" id="sr-location-wrap">
           <label for="sr-location">Lieu de consommation</label>
           <select id="sr-location">
-            <option value="IntÃ©rieur">IntÃ©rieur (cave)</option>
-            <option value="ExtÃ©rieur">ExtÃ©rieur (terrasse)</option>
+            <option value="Intérieur">Intérieur (cave)</option>
+            <option value="Extérieur">Extérieur (terrasse)</option>
           </select>
         </div>
       </div>
       <div id="sr-body">
-        <!-- Panier affichÃ© en 1er sur mobile, aprÃ¨s les articles sur desktop -->
+        <!-- Panier affiché en 1er sur mobile, après les articles sur desktop -->
         <div id="sr-cart-section">
           <div id="sr-cart" style="margin-bottom:4px"></div>
           <div class="inline-card" style="margin-bottom:8px">
@@ -2660,7 +2660,7 @@
           <span class="muted">Total</span>
           <strong id="finalize-order-total" class="finalize-total-val">0 FCFA</strong>
         </div>
-        <p class="muted finalize-hint">Repartir le paiement â€” le total saisi doit egaler la commande.</p>
+        <p class="muted finalize-hint">Repartir le paiement — le total saisi doit egaler la commande.</p>
         <div class="form-grid finalize-pay-grid">
           <div class="form-group form-group--zero">
             <label for="pay-cash">Especes</label>
@@ -2733,7 +2733,7 @@
         <input id="c-lib" type="text" placeholder="ex: Loyer mensuel">
       </div>
       <div class="form-group">
-        <label for="c-cat">CatÃ©gorie</label>
+        <label for="c-cat">Catégorie</label>
         <select id="c-cat"></select>
       </div>
       <div class="form-group">
@@ -2758,7 +2758,7 @@
         <h3>Regler une dette fournisseur</h3>
         <button class="icon-btn close-modal" data-close="modal-supplier-debt-settle" type="button">Fermer</button>
       </div>
-      <p class="muted" style="margin:0 0 14px;font-size:0.88rem;line-height:1.45">Le montant reste comptabilise a la date de reception. Seul le paiement (date et mode) est ajoute â€” pas de nouvelle ligne de depense.</p>
+      <p class="muted" style="margin:0 0 14px;font-size:0.88rem;line-height:1.45">Le montant reste comptabilise a la date de reception. Seul le paiement (date et mode) est ajoute — pas de nouvelle ligne de depense.</p>
       <div class="inline-card" style="margin-bottom:14px">
         <p class="list-item-title" id="sd-settle-lib" style="margin:0 0 4px"></p>
         <p class="list-item-amount" id="sd-settle-amount" style="margin:0;color:#ff8e82"></p>
@@ -2798,7 +2798,7 @@
       </div>
       <label style="display:flex;align-items:center;gap:10px;margin-top:14px;font-size:0.88rem">
         <input type="checkbox" id="purchase-receive-ranger" checked>
-        <span>Ranger dans des casiers physiques (rÃ©partition automatique sur casiers existants partiels, sinon nouveaux casiers)</span>
+        <span>Ranger dans des casiers physiques (répartition automatique sur casiers existants partiels, sinon nouveaux casiers)</span>
       </label>
       <div class="button-stack" style="margin-top:18px">
         <button id="purchase-receive-confirm-btn" class="btn btn-primary" type="button">Valider la reception</button>
@@ -2820,23 +2820,23 @@
         <input id="s-article" type="text" placeholder="ex: Castel Beer 65cl">
       </div>
       <div class="form-group">
-        <label for="s-cat">CatÃ©gorie</label>
+        <label for="s-cat">Catégorie</label>
         <select id="s-cat"></select>
       </div>
       <div class="form-group">
         <label for="s-brasserie">Brasserie / fournisseur</label>
         <select id="s-brasserie" autocomplete="off" aria-label="Brasserie catalogue article">
-          <option value="">ex: Brassivoire, Solibra, Castelâ€¦</option>
+          <option value="">ex: Brassivoire, Solibra, Castel…</option>
         </select>
       </div>
       <div class="form-group">
         <label for="s-lot-type">Type de lot</label>
         <select id="s-lot-type">
-          <option value="casier" selected>Casier (consignÃ© / rÃ©utilisable)</option>
+          <option value="casier" selected>Casier (consigné / réutilisable)</option>
           <option value="carton">Carton (jetable)</option>
-          <option value="unite">UnitÃ© (pas de lot)</option>
+          <option value="unite">Unité (pas de lot)</option>
         </select>
-        <p class="form-hint">DÃ©termine lâ€™affichage dans lâ€™onglet Lots et les libellÃ©s (casier/carton). â€œUnitÃ©â€ nâ€™apparaÃ®t pas dans lâ€™inventaire par lots.</p>
+        <p class="form-hint">Détermine l’affichage dans l’onglet Lots et les libellés (casier/carton). “Unité” n’apparaît pas dans l’inventaire par lots.</p>
       </div>
       <div class="form-grid two-cols">
         <div class="form-group">
@@ -2844,9 +2844,9 @@
           <input id="s-init" type="number" value="0" min="0" step="1" placeholder="ex: 10">
         </div>
         <div class="form-group">
-          <label for="s-case-size">UnitÃ©s par lot</label>
+          <label for="s-case-size">Unités par lot</label>
           <select id="s-case-size">
-            <option value="1">1 unitÃ©</option>
+            <option value="1">1 unité</option>
             <option value="6">6 bouteilles</option>
             <option value="9">9 bouteilles</option>
             <option value="12">12 bouteilles</option>
@@ -2864,7 +2864,7 @@
         <div class="form-group">
           <label for="s-prix">Prix achat du casier (FCFA)</label>
           <input id="s-prix" type="number" placeholder="ex: 12000">
-          <p class="form-hint">Prix payÃ© pour le casier ou carton entier â€” le coÃ»t par bouteille est calculÃ© automatiquement.</p>
+          <p class="form-hint">Prix payé pour le casier ou carton entier — le coût par bouteille est calculé automatiquement.</p>
         </div>
       </div>
       <div id="stock-marge-preview" class="stock-marge-preview hidden" aria-live="polite"></div>
@@ -2891,8 +2891,8 @@
       <div class="form-group" id="stock-promotions-section">
         <div class="section-head compact-head">
           <div>
-            <label>Promotions programmÃ©es</label>
-            <p class="form-hint">Prix promo entre deux dates â€” le tarif catalogue reprend automatiquement aprÃ¨s la fin.</p>
+            <label>Promotions programmées</label>
+            <p class="form-hint">Prix promo entre deux dates — le tarif catalogue reprend automatiquement après la fin.</p>
           </div>
           <button id="add-stock-promo-btn" class="mini-btn" type="button">+ Promotion</button>
         </div>
@@ -2912,11 +2912,11 @@
           <input id="s-price-location-value" type="number" placeholder="ex: 700">
         </div>
         <div class="form-group">
-          <label for="s-prix-kit-int">Prix vente â€” cave (FCFA)</label>
+          <label for="s-prix-kit-int">Prix vente — cave (FCFA)</label>
           <input id="s-prix-kit-int" type="number" placeholder="ex: 700">
         </div>
         <div class="form-group">
-          <label for="s-prix-kit-ext">Prix vente â€” maquis (FCFA)</label>
+          <label for="s-prix-kit-ext">Prix vente — maquis (FCFA)</label>
           <input id="s-prix-kit-ext" type="number" placeholder="ex: 800">
         </div>
       </div>
@@ -3049,7 +3049,7 @@
         </div>
         <div class="form-group">
           <label>Btl / casier</label>
-          <p id="casier-move-case-info" style="padding:14px 15px;border-radius:14px;background:var(--mm-bg);border:1px solid var(--line);color:var(--mm-primary-dark);font-weight:700;font-family:Roboto,system-ui,sans-serif;margin-top:4px">â€”</p>
+          <p id="casier-move-case-info" style="padding:14px 15px;border-radius:14px;background:var(--mm-bg);border:1px solid var(--line);color:var(--mm-primary-dark);font-weight:700;font-family:Roboto,system-ui,sans-serif;margin-top:4px">—</p>
         </div>
       </div>
       <div class="form-group">
@@ -3079,29 +3079,29 @@
         </div>
         <div class="form-group">
           <label for="casier-edit-emplacement">Emplacement</label>
-          <input id="casier-edit-emplacement" type="text" placeholder="ex: RÃ©serve">
+          <input id="casier-edit-emplacement" type="text" placeholder="ex: Réserve">
         </div>
       </div>
       <div class="form-group">
         <label for="casier-edit-article">Brasserie / fournisseur</label>
         <select id="casier-edit-article" autocomplete="off" aria-label="Brasserie du casier">
-          <option value="">ex: Brassivoire, Solibra, Castelâ€¦</option>
+          <option value="">ex: Brassivoire, Solibra, Castel…</option>
         </select>
         <p class="form-hint" id="casier-edit-article-info"></p>
       </div>
       <div class="form-grid two-cols">
         <div class="form-group">
-          <label for="casier-edit-capacite">CapacitÃ© (bouteilles)</label>
+          <label for="casier-edit-capacite">Capacité (bouteilles)</label>
           <input id="casier-edit-capacite" type="number" min="1" step="1" value="24" placeholder="ex: 24">
         </div>
         <div class="form-group">
-          <label for="casier-edit-qty">Nombre de casiers Ã  crÃ©er</label>
+          <label for="casier-edit-qty">Nombre de casiers à créer</label>
           <input id="casier-edit-qty" type="number" min="1" step="1" value="1" placeholder="ex: 10">
-          <p class="form-hint">CrÃ©e plusieurs casiers vides (CAS-xxxx) d'un coup.</p>
+          <p class="form-hint">Crée plusieurs casiers vides (CAS-xxxx) d'un coup.</p>
         </div>
       </div>
       <div class="button-stack">
-        <button id="casier-edit-submit" class="btn btn-primary" type="button">CrÃ©er les casiers</button>
+        <button id="casier-edit-submit" class="btn btn-primary" type="button">Créer les casiers</button>
         <button class="btn btn-outline close-modal" data-close="modal-casier-edit" type="button">Annuler</button>
       </div>
     </div>
@@ -3122,7 +3122,7 @@
       </div>
       <div class="form-grid two-cols">
         <div class="form-group">
-          <label for="casier-phys-move-qty">QuantitÃ© (bouteilles)</label>
+          <label for="casier-phys-move-qty">Quantité (bouteilles)</label>
           <input id="casier-phys-move-qty" type="number" min="1" step="1" placeholder="ex: 12">
         </div>
         <div class="form-group" id="casier-phys-move-source-wrap">
@@ -3205,10 +3205,10 @@
     <div class="modal" style="max-width:520px">
       <div class="modal-handle"></div>
       <div class="section-head">
-        <h3 id="modal-credit-factures-title">Factures crÃ©dit du jour</h3>
+        <h3 id="modal-credit-factures-title">Factures crédit du jour</h3>
         <button class="icon-btn close-modal" data-close="modal-credit-factures" type="button">Fermer</button>
       </div>
-      <p class="muted" style="font-size:0.83rem;margin:0 0 12px">Cliquez sur une facture pour prÃ©-remplir le dÃ©biteur.</p>
+      <p class="muted" style="font-size:0.83rem;margin:0 0 12px">Cliquez sur une facture pour pré-remplir le débiteur.</p>
       <div id="modal-credit-factures-list" class="stack-list" style="max-height:60vh;overflow-y:auto"></div>
     </div>
   </div>
@@ -3220,21 +3220,21 @@
         <h3>Detail de l&apos;action</h3>
         <button class="icon-btn close-modal" data-close="modal-staff-audit-detail" type="button">Fermer</button>
       </div>
-      <p class="muted" style="margin-bottom:12px;font-size:0.88rem">Entree nÂ° <strong id="audit-detail-id">â€”</strong> â€” resume et detail en texte integral (defilement si necessaire).</p>
+      <p class="muted" style="margin-bottom:12px;font-size:0.88rem">Entree n° <strong id="audit-detail-id">—</strong> — resume et detail en texte integral (defilement si necessaire).</p>
       <dl class="audit-detail-dl">
-        <div><dt>Date</dt><dd id="audit-detail-date">â€”</dd></div>
-        <div><dt>Maquis</dt><dd id="audit-detail-site">â€”</dd></div>
-        <div><dt>Utilisateur</dt><dd id="audit-detail-actor">â€”</dd></div>
-        <div><dt>Action</dt><dd id="audit-detail-verb">â€”</dd></div>
-        <div><dt>Type</dt><dd id="audit-detail-entity">â€”</dd></div>
+        <div><dt>Date</dt><dd id="audit-detail-date">—</dd></div>
+        <div><dt>Maquis</dt><dd id="audit-detail-site">—</dd></div>
+        <div><dt>Utilisateur</dt><dd id="audit-detail-actor">—</dd></div>
+        <div><dt>Action</dt><dd id="audit-detail-verb">—</dd></div>
+        <div><dt>Type</dt><dd id="audit-detail-entity">—</dd></div>
       </dl>
       <div class="form-group" style="margin-top:14px">
         <label>Resume</label>
-        <div id="audit-detail-summary" class="audit-detail-block">â€”</div>
+        <div id="audit-detail-summary" class="audit-detail-block">—</div>
       </div>
       <div class="form-group">
         <label>Detail</label>
-        <pre id="audit-detail-detail" class="audit-detail-pre" tabindex="0">â€”</pre>
+        <pre id="audit-detail-detail" class="audit-detail-pre" tabindex="0">—</pre>
       </div>
       <div class="button-stack" style="grid-template-columns:1fr 1fr;display:grid">
         <button id="audit-detail-copy-btn" type="button" class="btn btn-outline">Copier le detail</button>
@@ -3264,7 +3264,7 @@
     <div class="modal" style="max-width:900px">
       <div class="modal-handle"></div>
       <div class="section-head">
-        <h3 id="credit-detail-title">Detail crÃ©dit</h3>
+        <h3 id="credit-detail-title">Detail crédit</h3>
         <button class="icon-btn close-modal" data-close="modal-credit-detail" type="button">Fermer</button>
       </div>
       <div id="credit-detail-body" class="credit-detail-body"></div>
@@ -3280,15 +3280,15 @@
 
   <div id="modal-loyalty-profile" class="modal-overlay" aria-hidden="true">
     <div class="modal">
-      <div class="section-head"><h3>Profil fidÃ©litÃ©</h3><button class="icon-btn close-modal" data-close="modal-loyalty-profile" type="button">Fermer</button></div>
+      <div class="section-head"><h3>Profil fidélité</h3><button class="icon-btn close-modal" data-close="modal-loyalty-profile" type="button">Fermer</button></div>
       <p id="loyalty-edit-stats" class="muted" style="font-size:0.85rem"></p>
       <div class="form-group"><label for="loyalty-edit-name">Nom client</label><input id="loyalty-edit-name" type="text"></div>
-      <div class="form-group"><label for="loyalty-edit-phone">TÃ©lÃ©phone</label><input id="loyalty-edit-phone" type="tel"></div>
-      <div class="form-group"><label for="loyalty-edit-tier">Statut forcÃ©</label>
-        <select id="loyalty-edit-tier"><option value="">Automatique (selon rÃ¨gles)</option><option value="regular">RÃ©gulier</option><option value="vip">VIP</option><option value="blocked">Exclu</option></select>
+      <div class="form-group"><label for="loyalty-edit-phone">Téléphone</label><input id="loyalty-edit-phone" type="tel"></div>
+      <div class="form-group"><label for="loyalty-edit-tier">Statut forcé</label>
+        <select id="loyalty-edit-tier"><option value="">Automatique (selon règles)</option><option value="regular">Régulier</option><option value="vip">VIP</option><option value="blocked">Exclu</option></select>
       </div>
-      <div class="form-group"><label for="loyalty-edit-discount">Remise % (vide = rÃ¨gle par dÃ©faut)</label><input id="loyalty-edit-discount" type="number" min="0" max="50" placeholder="ex: 5"></div>
-      <div class="form-group"><label for="loyalty-edit-note">Note</label><input id="loyalty-edit-note" type="text" placeholder="PrÃ©fÃ©rences, anniversaireâ€¦"></div>
+      <div class="form-group"><label for="loyalty-edit-discount">Remise % (vide = règle par défaut)</label><input id="loyalty-edit-discount" type="number" min="0" max="50" placeholder="ex: 5"></div>
+      <div class="form-group"><label for="loyalty-edit-note">Note</label><input id="loyalty-edit-note" type="text" placeholder="Préférences, anniversaire…"></div>
       <div class="button-stack"><button type="button" class="btn btn-primary" id="loyalty-save-profile-btn">Enregistrer</button><button type="button" class="btn btn-outline close-modal" data-close="modal-loyalty-profile">Annuler</button></div>
     </div>
   </div>
