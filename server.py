@@ -3658,10 +3658,32 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
         """Charge l'état initial depuis Postgres, SQLite ou data.json, avec migration et secours."""
         if self._pg_enabled:
             pg_load_ok = True
-            try:
-                payload = self._pg_load()
-            except Exception as exc:
-                print(f"[postgres] Échec du chargement ({exc}), état par défaut.", flush=True)
+            # PostgreSQL peut ne pas encore accepter de connexions juste apres un
+            # redemarrage simultane (systemd demarre les services dans l'ordre mais
+            # n'attend pas que Postgres soit reellement pret). On retente quelques
+            # fois avant d'abandonner et de bloquer les ecritures, pour eviter de
+            # figer le serveur en mode degrade a cause d'un simple decalage de
+            # quelques secondes au demarrage (cf. incident du 24/07/2026).
+            attempts = 5
+            delay_seconds = 3
+            payload: dict[str, Any] = {}
+            last_exc: Exception | None = None
+            for attempt in range(1, attempts + 1):
+                try:
+                    payload = self._pg_load()
+                    last_exc = None
+                    break
+                except Exception as exc:
+                    last_exc = exc
+                    if attempt < attempts:
+                        print(
+                            f"[postgres] Tentative {attempt}/{attempts} echouee ({exc}), "
+                            f"nouvel essai dans {delay_seconds}s...",
+                            flush=True,
+                        )
+                        time.sleep(delay_seconds)
+            if last_exc is not None:
+                print(f"[postgres] Échec du chargement après {attempts} tentatives ({last_exc}), état par défaut.", flush=True)
                 print("[postgres] PROTECTION : aucune écriture ne sera faite sur PostgreSQL jusqu'au redémarrage.", flush=True)
                 payload = {}
                 pg_load_ok = False

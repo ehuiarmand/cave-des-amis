@@ -9992,6 +9992,33 @@ function orderTime(order) {
   return "--:--";
 }
 
+/** Horodatage (ms epoch) d'une commande/vente pour le tri chronologique — meme logique que
+ * orderTime() mais renvoie une valeur numerique comparable au lieu d'un libelle HH:MM. */
+function orderSortTimestamp(order) {
+  if (order?._isPaid && Array.isArray(order.lignes) && order.lignes.length) {
+    const v = order.lignes[0];
+    const fromVente = String(v?.soldAt || v?.createdAt || "").trim();
+    if (fromVente.includes("T")) {
+      try {
+        const d = parseFlexibleDateTime(fromVente);
+        if (!Number.isNaN(d.getTime())) return d.getTime();
+      } catch (_) {
+        /* ignore */
+      }
+    }
+  }
+  const raw = String(order?.createdAt || order?.updatedAt || order?.date || "");
+  if (raw.includes("T")) {
+    try {
+      const d = parseFlexibleDateTime(raw);
+      if (!Number.isNaN(d.getTime())) return d.getTime();
+    } catch (_) {
+      /* ignore */
+    }
+  }
+  return 0;
+}
+
 /** Ventes déjà créées pour une commande (idempotence après échec réseau). */
 function ventesLinkedToOrder(orderId) {
   const oid = Number(orderId);
@@ -10325,7 +10352,7 @@ function computeOrdersManagementList() {
     const statusOk = status === "all" || orderStatus(order) === status;
     const typeOk = type === "all" || orderType(order) === type;
     return dateOk && statusOk && typeOk;
-  }).sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  }).sort((a, b) => orderSortTimestamp(b) - orderSortTimestamp(a));
   return { orders, start, end, status, type, activeOrders, salesToday, journalDay };
 }
 
