@@ -24506,6 +24506,11 @@ function applyProductionUiGuards() {
 }
 
 async function init() {
+  try {
+    attachEvents();
+  } catch (error) {
+    console.error("attachEvents", error);
+  }
   applyProductionUiGuards();
   setAuthVisible(false);
   try {
@@ -24519,12 +24524,6 @@ async function init() {
     if (error && error.portalUrl) {
       window.location.replace(error.portalUrl);
     }
-    return;
-  }
-  try {
-    attachEvents();
-  } catch (error) {
-    console.error("attachEvents", error);
   }
 }
 
