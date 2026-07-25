@@ -29,25 +29,46 @@
   </noscript>
 
   <section id="auth-screen" class="auth-screen mm-auth-screen">
-    <div class="mm-auth-stack" style="text-align:center;padding:48px 24px">
-      <div class="auth-logo mm-auth-logo" aria-hidden="true">MM</div>
-      <h1 class="mm-auth-app-title">Maquis Manager</h1>
-      <p class="mm-auth-subtitle" id="auth-loading-msg">Ouverture de la session…</p>
-      <p class="muted" style="margin-top:16px;font-size:0.9rem">
-        Connexion uniquement via le portail
-        (<a href="http://localhost:9000/" style="color:inherit">localhost:9000</a>).
-      </p>
-      <!-- Champs cachees pour eviter les erreurs JS des anciens listeners -->
-      <form id="login-form" class="hidden" aria-hidden="true" style="display:none">
-        <input id="login-username" name="username" type="text" tabindex="-1">
-        <input id="login-password" name="password" type="password" tabindex="-1">
-        <input id="login-totp" name="totp" type="text" tabindex="-1">
-        <input id="login-wa-otp" name="wa_otp" type="text" tabindex="-1">
-        <button type="submit" id="login-submit-hidden">ok</button>
+    <div class="mm-auth-stack">
+      <div class="mm-auth-heading">
+        <div class="auth-logo mm-auth-logo" aria-hidden="true">MM</div>
+        <h1 class="mm-auth-app-title">Maquis Manager</h1>
+        <p class="mm-auth-subtitle">Connexion</p>
+      </div>
+
+      <form id="login-form" class="auth-form mm-login-card">
+        <label for="login-username">Nom d'utilisateur</label>
+        <input id="login-username" name="username" type="text" placeholder="Nom d'utilisateur" autocomplete="username" required>
+
+        <label for="login-password">Mot de passe</label>
+        <div style="position:relative">
+          <input id="login-password" name="password" type="password" placeholder="Mot de passe" autocomplete="current-password" required style="width:100%;padding-right:44px;box-sizing:border-box">
+          <button type="button" id="toggle-login-password" aria-label="Afficher/masquer le mot de passe"
+            style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;padding:4px;color:var(--muted,#888);font-size:1.1rem;line-height:1">👁</button>
+        </div>
+        <p style="text-align:right;margin:4px 0 0">
+          <button type="button" id="forgot-password-btn" style="background:none;border:none;color:var(--primary,#b07d2e);font-size:0.83rem;cursor:pointer;padding:0;text-decoration:underline">Mot de passe oublié ?</button>
+        </p>
+        <div id="forgot-password-msg" class="hidden" style="background:#fef3c7;border-radius:8px;padding:10px 12px;font-size:0.85rem;margin-top:6px;line-height:1.5">
+          Contactez votre <strong>gérante ou administrateur</strong>.<br>
+          L'admin peut réinitialiser votre mot de passe dans <strong>Paramètres → Accès → Réinitialiser MDP</strong>.
+        </div>
+
+        <div id="totp-section" class="hidden">
+          <label for="login-totp">Code d'authentification (6 chiffres)</label>
+          <input id="login-totp" name="totp" type="text" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="one-time-code">
+        </div>
+
+        <div id="wa-otp-section" class="hidden">
+          <label for="login-wa-otp">Code WhatsApp reçu (6 chiffres)</label>
+          <input id="login-wa-otp" name="wa_otp" type="text" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="one-time-code">
+          <p class="muted" style="font-size:0.8rem;margin-top:4px">Un code valable 15 minutes vous a été envoyé par WhatsApp.</p>
+        </div>
+
+        <button type="submit" class="btn btn-primary mm-login-submit">SE CONNECTER</button>
+
+        <p id="login-error" class="auth-error" aria-live="polite"></p>
       </form>
-      <div id="totp-section" class="hidden"></div>
-      <div id="wa-otp-section" class="hidden"></div>
-      <p id="login-error" class="auth-error" aria-live="polite"></p>
     </div>
   </section>
 

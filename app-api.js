@@ -672,7 +672,7 @@ async function handleLoginSubmit(event) {
 }
 
 async function logout() {
-  let portalUrl = "http://localhost:9000";
+  let portalUrl = "";
   try {
     const data = await apiRequest(API.logout, {
       method: "POST",
@@ -685,7 +685,12 @@ async function logout() {
   sessionUser = null;
   csrfToken = null;
   state = null;
-  window.location.href = portalUrl;
+  // Portail externe non configure sur ce serveur : ecran de connexion local.
+  if (portalUrl) {
+    window.location.href = portalUrl;
+  } else {
+    window.location.reload();
+  }
 }
 
 async function bootstrapAuthenticatedApp() {

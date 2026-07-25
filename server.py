@@ -113,7 +113,12 @@ SESSION_COOKIE = "maquis_manager_session"
 PASSWORD_ALGO = "pbkdf2_sha256"
 PASSWORD_ITERATIONS = 260_000
 PORTAL_SSO_SECRET = os.environ.get("PORTAL_SSO_SECRET", "portail-sso-dev-secret-change-in-production")
+# Le portail externe est optionnel : tant que PORTAIL_URL n'est pas explicitement
+# configuree (deploiement du portail termine), l'app garde son propre ecran de
+# connexion au lieu de rediriger vers une adresse de dev (localhost) inatteignable
+# en production — sinon plus personne ne peut se connecter (incident du 25/07/2026).
 PORTAIL_URL = os.environ.get("PORTAIL_URL", "http://localhost:9000")
+PORTAIL_URL_CONFIGURED = bool(os.environ.get("PORTAIL_URL", "").strip())
 
 
 def _env_first(*names: str, default: str = "") -> str:
@@ -5984,7 +5989,11 @@ class AppHandler(BaseHTTPRequestHandler):
             if sess:
                 audit_log("logout", {"ip": self.client_ip(), "username": str(sess.get("username", ""))})
             sessions.clear(token)
-            self.send_json(HTTPStatus.OK, {"authenticated": False, "portalUrl": PORTAIL_URL}, clear_cookie=True)
+            self.send_json(
+                HTTPStatus.OK,
+                {"authenticated": False, **({"portalUrl": PORTAIL_URL} if PORTAIL_URL_CONFIGURED else {})},
+                clear_cookie=True,
+            )
             return
 
         if post_path == "/api/account/password":
@@ -6207,8 +6216,10 @@ class AppHandler(BaseHTTPRequestHandler):
         route = "/" if raw_path == "" else raw_path
         if route == "/":
             route = "/index.html"
-        # Une seule page de connexion : l'app principale redirige vers le portail.
-        if route == "/index.html":
+        # Une seule page de connexion : l'app principale redirige vers le portail
+        # une fois celui-ci deploye et configure (PORTAIL_URL) ; sinon, ecran de
+        # connexion local habituel.
+        if route == "/index.html" and PORTAIL_URL_CONFIGURED:
             token = self.session_token()
             if sessions.get(token) is None:
                 self.send_response(HTTPStatus.FOUND)
@@ -6272,7 +6283,15 @@ class AppHandler(BaseHTTPRequestHandler):
         token = self.session_token()
         session = sessions.get(token)
         if session is None:
-            self.send_json(HTTPStatus.UNAUTHORIZED, {"authenticated": False, "error": "Session invalide ou expiree.", "portalUrl": PORTAIL_URL}, clear_cookie=True)
+            self.send_json(
+                HTTPStatus.UNAUTHORIZED,
+                {
+                    "authenticated": False,
+                    "error": "Session invalide ou expiree.",
+                    **({"portalUrl": PORTAIL_URL} if PORTAIL_URL_CONFIGURED else {}),
+                },
+                clear_cookie=True,
+            )
             return None
         with store._lock:
             auth_users = list(store._state.get("auth", {}).get("users", []))
@@ -6291,7 +6310,15 @@ class AppHandler(BaseHTTPRequestHandler):
         sessions.sync_from_auth_user(token, store)
         session = sessions.get(token)
         if session is None:
-            self.send_json(HTTPStatus.UNAUTHORIZED, {"authenticated": False, "error": "Session invalide ou expiree.", "portalUrl": PORTAIL_URL}, clear_cookie=True)
+            self.send_json(
+                HTTPStatus.UNAUTHORIZED,
+                {
+                    "authenticated": False,
+                    "error": "Session invalide ou expiree.",
+                    **({"portalUrl": PORTAIL_URL} if PORTAIL_URL_CONFIGURED else {}),
+                },
+                clear_cookie=True,
+            )
             return None
         if not allow_password_expired and session_password_change_required(session, auth_users):
             self.send_json(

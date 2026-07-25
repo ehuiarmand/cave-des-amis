@@ -22762,7 +22762,7 @@ async function handleLoginSubmit(event) {
 }
 
 async function logout() {
-  let portalUrl = "http://localhost:9000";
+  let portalUrl = "";
   try {
     const data = await apiRequest(API.logout, { method: "POST", body: JSON.stringify({}) });
     if (data && data.portalUrl) portalUrl = data.portalUrl;
@@ -22788,7 +22788,14 @@ async function logout() {
   pendingWaUsername = null;
   qrAlertCount = 0;
   knownQrOrderIds = new Set();
-  window.location.href = portalUrl;
+  // Portail externe non configure sur ce serveur : on revient sur l'ecran de
+  // connexion local (rechargement) plutot que de rediriger vers une adresse
+  // de dev inatteignable.
+  if (portalUrl) {
+    window.location.href = portalUrl;
+  } else {
+    window.location.reload();
+  }
 }
 
 function migrateCasiersVidesBouteillesVides() {
@@ -24499,7 +24506,6 @@ function applyProductionUiGuards() {
 }
 
 async function init() {
-  const portal = "http://localhost:9000";
   applyProductionUiGuards();
   setAuthVisible(false);
   try {
@@ -24507,7 +24513,12 @@ async function init() {
     await enterAuthenticatedApp(session);
   } catch (error) {
     console.error("init session", error);
-    window.location.replace((error && error.portalUrl) || portal);
+    // Portail externe non configure sur ce serveur : on reste sur l'ecran de
+    // connexion local (deja affiche par setAuthVisible(false) ci-dessus) au
+    // lieu de rediriger vers une adresse de dev inatteignable.
+    if (error && error.portalUrl) {
+      window.location.replace(error.portalUrl);
+    }
     return;
   }
   try {
