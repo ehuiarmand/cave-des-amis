@@ -2330,30 +2330,31 @@ function venteUnitPricePerBottle(vente) {
 function stockItemForArticle(article, siteId = currentSiteId()) {
   const site = siteId ?? currentSiteId();
   const multi = multiSiteActive();
-  const target = String(article || "").toLowerCase();
+  const target = articleMatchKey(article);
+  if (!target) return null;
   const scoped = (state.stock || []).find((item) =>
     rowMatchesSite(item, site, multi)
-    && String(item.article || "").toLowerCase() === target
+    && articleMatchKey(item.article) === target
   ) || null;
   if (scoped) return scoped;
 
-  // Fallback compat: anciennes lignes sans siteId quand le multi-maquis est actif.
-  // Si l'article est unique dans le catalogue global, on le prend.
-  const allMatches = (state.stock || []).filter((item) =>
-    String(item.article || "").toLowerCase() === target
-  );
-  if (allMatches.length === 1) return allMatches[0];
-
-  // Si plusieurs, tenter de prioriser un match explicite siteId (même si rowMatchesSite a échoué).
-  const direct = allMatches.find((it) => String(it.siteId || "") === String(site || ""));
-  return direct || null;
+  // Fallback compat : anciennes lignes SANS siteId uniquement (jamais un autre maquis).
+  if (multi) {
+    const orphans = (state.stock || []).filter((item) =>
+      (item.siteId === undefined || item.siteId === null || item.siteId === "")
+      && articleMatchKey(item.article) === target
+    );
+    if (orphans.length === 1) return orphans[0];
+  }
+  return null;
 }
 
 function reservedBottlesForOpenOrders(article, excludeOrderId = null, excludeLineId = null, siteId = currentSiteId()) {
+  const target = articleMatchKey(article);
   return (state.commandes || [])
-    .filter((order) => order.siteId === siteId && order.id !== excludeOrderId)
+    .filter((order) => String(order.siteId || "") === String(siteId || "") && order.id !== excludeOrderId)
     .flatMap((order) => order.lignes || [])
-    .filter((line) => line.article.toLowerCase() === String(article || "").toLowerCase() && line.id !== excludeLineId)
+    .filter((line) => articleMatchKey(line.article) === target && line.id !== excludeLineId)
     .reduce((sum, line) => sum + lineBottleQty(line, stockItemForArticle(line.article, siteId)), 0);
 }
 
@@ -2582,14 +2583,9 @@ function populateCategorySelects() {
 
 const DEFAULT_BRASSERIES = ["Brassivoire", "Carré d'or", "Solibra"];
 
-/** Clé de comparaison brasserie / fournisseur : casse + accents (ex. Carré d'or ≈ Carre d'or). */
+/** Clé de comparaison brasserie / fournisseur (délègue à articleMatchKey). */
 function brasserieMatchKey(name) {
-  return String(name ?? "")
-    .trim()
-    .normalize("NFD")
-    .replace(/\p{M}/gu, "")
-    .replace(/\u2019/g, "'")
-    .toLowerCase();
+  return articleMatchKey(name);
 }
 
 function brasserieListForCurrentSite() {
@@ -3140,7 +3136,8 @@ function multiSiteActive() {
 /** Alignement avec les anciennes lignes sans siteId (un seul maquis). */
 function rowMatchesSite(item, siteId, multiSite) {
   if (!item || siteId == null) return false;
-  if (item.siteId === siteId) return true;
+  // Comparaison en String : évite les ratés number vs string (réceptions / ventes multi-maquis).
+  if (String(item.siteId ?? "") === String(siteId ?? "")) return true;
   if (!multiSite && (item.siteId === undefined || item.siteId === null || item.siteId === "")) return true;
   return false;
 }
@@ -3153,12 +3150,13 @@ function recordsForSite(list) {
 
 function findStockItemForSite(article, siteId) {
   const multi = multiSiteActive();
-  const key = String(article || "").trim().toLowerCase();
+  const key = articleMatchKey(article);
+  if (!key) return null;
   const stock = state.stock || [];
 
-  // 1. Correspondance exacte
+  // 1. Correspondance normalisée (apostrophes, accents, trim)
   const exact = stock.find(
-    (s) => rowMatchesSite(s, siteId, multi) && String(s.article || "").trim().toLowerCase() === key,
+    (s) => rowMatchesSite(s, siteId, multi) && articleMatchKey(s.article) === key,
   );
   if (exact) return exact;
 
@@ -3166,7 +3164,7 @@ function findStockItemForSite(article, siteId) {
   //    ex. "Carré d'or" (stock) → "Carré d'or B16" (commande)
   return stock.find((s) => {
     if (!rowMatchesSite(s, siteId, multi)) return false;
-    const stockKey = String(s.article || "").trim().toLowerCase();
+    const stockKey = articleMatchKey(s.article);
     if (!stockKey || !key.startsWith(stockKey)) return false;
     const suffix = key.slice(stockKey.length);
     return suffix.startsWith(" ") && /^\s\S+$/.test(suffix);
@@ -3209,34 +3207,26 @@ function purchaseOrderIsReceived(po) {
 }
 
 function legacyStockEntreesCoverPurchaseLine(po, line, siteId) {
-  const multi = multiSiteActive();
   const sid = siteId ?? po.siteId ?? currentSiteId();
-  const receptionDate = String((po.receivedAt || po.date || today())).slice(0, 10);
-  const articleLow = String(line.article || "").toLowerCase();
-  const stockItem = findStockItemForSite(line.article, sid);
-  const expectedBottles = purchaseLineBottles(line, stockItem);
-  if (expectedBottles <= 0) return true;
-  const legacyQty = (state.stockEntrees || [])
-    .filter((e) =>
-      !e.purchaseOrderId
-      && rowMatchesSite(e, sid, multi)
-      && String(e.article || "").toLowerCase() === articleLow
-      && String(e.date || "").slice(0, 10) === receptionDate,
-    )
-    .reduce((sum, e) => sum + (Number(e.qty) || 0), 0);
-  return legacyQty >= expectedBottles;
+  const cover = purchaseOrderCoveredBottles({
+    po: { ...po, lines: [line] },
+    stockEntrees: state.stockEntrees || [],
+    findStockItem: (article) => findStockItemForSite(article, sid),
+    siteId: sid,
+  });
+  return !cover.needsRepair;
 }
 
 function purchaseOrderNeedsStockRepair(po) {
   if (!purchaseOrderIsReceived(po)) return false;
-  const expected = purchaseOrderExpectedBottles(po);
-  if (expected <= 0) return false;
-  const applied = purchaseOrderStockAppliedBottles(po);
-  if (applied >= expected) return false;
   const siteId = po.siteId || currentSiteId();
-  const legacyCoversAll = (po.lines || []).every((line) => legacyStockEntreesCoverPurchaseLine(po, line, siteId));
-  if (legacyCoversAll) return false;
-  return applied < expected;
+  const cover = purchaseOrderCoveredBottles({
+    po,
+    stockEntrees: state.stockEntrees || [],
+    findStockItem: (article) => findStockItemForSite(article, siteId),
+    siteId,
+  });
+  return cover.needsRepair;
 }
 
 function countReceivedPurchaseOrdersNeedingRepair() {
@@ -15442,7 +15432,7 @@ const TOMBSTONE_KEYS = new Set([
   "purchaseOrders", "supplierPrices", "casiers", "casierMouvements",
   "creditRecoveries", "clientAvoirs", "loyaltyClients", "consignes",
   "charges", "staffAuditLog", "stockEntrees", "stockLosses",
-  "restaurantMenu", "ingredientStock",
+  "restaurantMenu", "ingredientStock", "stock",
 ]);
 const _pendingDeletions = {};
 TOMBSTONE_KEYS.forEach((k) => { _pendingDeletions[k] = new Map(); });
@@ -16946,9 +16936,9 @@ Continuer la réception pour les ${fmt(bottlesAdded)} bouteille(s) reconnues ?`,
   if (currentPage === "stock" && stockSubTab === "casiers") renderCasiers();
   renderDashboard();
   if (rangerCasiers && (casiersCreated + casiersUsed) > 0) {
-    showToast(`Commande receptionnee. ${casiersCreated} nouveau(x) casier(s), ${casiersUsed} casier(s) complete(s).`);
+    showToast(`Commande réceptionnée · ${fmt(bottlesAdded)} btl en réserve · ${casiersCreated} nouveau(x) casier(s), ${casiersUsed} casier(s) complété(s).`);
   } else {
-    showToast("Commande receptionnee selon les quantites livrees.");
+    showToast(`Commande réceptionnée · ${fmt(bottlesAdded)} bouteille(s) ajoutée(s) en réserve (pas en frigo).`);
   }
   return true;
   } finally {
@@ -17108,11 +17098,7 @@ async function repairReceivedPurchaseOrderStock(poId) {
     state.nextId.stockEntree = Math.max(100, maxE + 1);
   }
   const receptionDate = String((po.receivedAt || po.date || today())).slice(0, 10);
-  const appliedByArticle = new Map();
-  stockEntreesForPurchaseOrder(po, siteId).forEach((e) => {
-    const key = String(e.article || "").toLowerCase();
-    appliedByArticle.set(key, (appliedByArticle.get(key) || 0) + (Number(e.qty) || 0));
-  });
+
   // Auto-créer les articles absents du stock avant la réparation
   if (!state.nextId.stock || Number.isNaN(Number(state.nextId.stock))) {
     const maxId = (state.stock || []).reduce((m, s) => Math.max(m, Number(s.id) || 0), 0);
@@ -17120,9 +17106,17 @@ async function repairReceivedPurchaseOrderStock(poId) {
   }
   const missingForRepair = (po.lines || []).filter((l) => !findStockItemForSite(l.article, siteId));
   if (missingForRepair.length > 0) {
-    const names = missingForRepair.map((l) => String(l.article || "").trim()).join("\n• ");
-    if (!window.confirm(`Article(s) absent(s) du stock :\n• ${names}\n\nCréer automatiquement et réparer ?`)) return;
+    const seenMissing = new Set();
+    const uniqueMissing = [];
     missingForRepair.forEach((l) => {
+      const k = articleMatchKey(l.article);
+      if (!k || seenMissing.has(k)) return;
+      seenMissing.add(k);
+      uniqueMissing.push(l);
+    });
+    const names = uniqueMissing.map((l) => String(l.article || "").trim()).join("\n• ");
+    if (!window.confirm(`Article(s) absent(s) du stock :\n• ${names}\n\nCréer automatiquement et réparer ?`)) return;
+    uniqueMissing.forEach((l) => {
       const cs = Number(l.caseSize) || 24;
       state.stock.push({
         id: state.nextId.stock++,
@@ -17142,20 +17136,23 @@ async function repairReceivedPurchaseOrderStock(poId) {
     });
   }
 
+  const plan = computePurchaseStockRepairPlan({
+    po,
+    stockEntrees,
+    findStockItem: (article) => findStockItemForSite(article, siteId),
+    siteId,
+  });
+
+  // Rattacher les entrées legacy (évite le double comptage)
+  plan.linkEntrees.forEach((e) => {
+    e.purchaseOrderId = po.id;
+  });
+
   let bottlesAdded = 0;
-  const skippedArticles = [];
-  (po.lines || []).forEach((line) => {
-    const item = findStockItemForSite(line.article, siteId);
-    if (!item) {
-      skippedArticles.push(String(line.article || "").trim() || "?");
-      return;
-    }
-    const expectedBottles = purchaseLineBottles(line, item);
-    const key = String(item.article || "").toLowerCase();
-    const alreadyApplied = appliedByArticle.get(key) || 0;
-    const missing = expectedBottles - alreadyApplied;
-    if (missing <= 0) return;
-    const cs = Math.max(1, Number(line.caseSize) || caseSize(item));
+  const skippedArticles = [...plan.skippedArticles];
+  plan.additions.forEach(({ item, missing }) => {
+    if (!item || missing <= 0) return;
+    const cs = Math.max(1, Number(item.caseSize) || caseSize(item) || 24);
     item.entrees = (Number(item.entrees) || 0) + missing;
     item.reserve = Math.max(0, Number(item.reserve) || 0) + missing;
     item.lastReapproAt = new Date().toISOString();
@@ -17171,10 +17168,10 @@ async function repairReceivedPurchaseOrderStock(poId) {
       user: sessionUser || "system",
       purchaseOrderId: po.id,
     });
-    appliedByArticle.set(key, alreadyApplied + missing);
     bottlesAdded += missing;
   });
-  if (bottlesAdded <= 0) {
+
+  if (bottlesAdded <= 0 && plan.linkEntrees.length === 0) {
     showToast(
       skippedArticles.length
         ? `Réparation impossible — article(s) introuvable(s) : ${skippedArticles.join(", ")}`
@@ -17182,12 +17179,22 @@ async function repairReceivedPurchaseOrderStock(poId) {
     );
     return;
   }
+
   await persistState({ stock: stockItems, stockEntrees, nextId: state.nextId, purchaseOrders: state.purchaseOrders });
   renderStock();
   renderPurchaseOrders();
   refreshCreanciersIfVisible();
   renderDashboard();
-  showToast(`Stock réparé : ${fmt(bottlesAdded)} bouteille(s) ajoutée(s).`);
+  if (bottlesAdded > 0) {
+    const linkNote = plan.linkEntrees.length
+      ? ` · ${fmt(plan.legacyLinkedBottles)} btl déjà en stock rattachée(s)`
+      : "";
+    showToast(`Stock réparé : ${fmt(bottlesAdded)} bouteille(s) ajoutée(s) en réserve${linkNote}.`);
+  } else {
+    showToast(
+      `Réception rattachée aux entrées existantes (${fmt(plan.legacyLinkedBottles)} btl) — pas de double comptage.`,
+    );
+  }
 }
 
 async function repairAllReceivedPurchaseOrderStock() {
@@ -17200,25 +17207,53 @@ async function repairAllReceivedPurchaseOrderStock() {
     showToast("Aucune commande reçue.");
     return;
   }
-  let targets = allReceived.filter(purchaseOrderNeedsStockRepair);
-  if (!targets.length) targets = allReceived;
+  const targets = allReceived.filter(purchaseOrderNeedsStockRepair);
+  if (!targets.length) {
+    showToast("Aucune réception à réparer — stock déjà cohérent.");
+    renderPurchaseRepairBanner();
+    return;
+  }
   let totalBottles = 0;
   let repairedCount = 0;
   for (const po of targets) {
-    const before = purchaseOrderStockAppliedBottles(po);
+    const siteId = po.siteId || currentSiteId();
+    const before = purchaseOrderCoveredBottles({
+      po,
+      stockEntrees: state.stockEntrees || [],
+      findStockItem: (article) => findStockItemForSite(article, siteId),
+      siteId,
+    });
     await repairReceivedPurchaseOrderStock(po.id);
-    const after = purchaseOrderStockAppliedBottles(po);
-    const added = after - before;
-    if (added > 0) {
+    const after = purchaseOrderCoveredBottles({
+      po,
+      stockEntrees: state.stockEntrees || [],
+      findStockItem: (article) => findStockItemForSite(article, siteId),
+      siteId,
+    });
+    // Après rattachement, le legacy devient linked : bouteilles vraiment ajoutées =
+    // hausse de linked au-delà du legacy qui a été rattaché.
+    const newlyLinkedFromLegacy = Math.min(
+      before.legacy || 0,
+      Math.max(0, (after.linked || 0) - (before.linked || 0)),
+    );
+    const bottlesPhysicallyAdded = Math.max(
+      0,
+      (after.linked || 0) - (before.linked || 0) - newlyLinkedFromLegacy,
+    );
+    if (!after.needsRepair || bottlesPhysicallyAdded > 0 || (after.linked || 0) > (before.linked || 0)) {
       repairedCount += 1;
-      totalBottles += added;
+      totalBottles += bottlesPhysicallyAdded;
     }
   }
   renderPurchaseRepairBanner();
   if (repairedCount > 0) {
-    showToast(`Réparation terminée : ${fmt(repairedCount)} commande(s), ${fmt(totalBottles)} bouteille(s).`);
-  } else if (targets.length > 1) {
-    showToast("Le stock est déjà à jour pour toutes les réceptions.");
+    showToast(
+      totalBottles > 0
+        ? `Réparation terminée : ${fmt(repairedCount)} commande(s), ${fmt(totalBottles)} bouteille(s) ajoutée(s) en réserve.`
+        : `Réparation terminée : ${fmt(repairedCount)} commande(s) rattachée(s) sans double comptage.`,
+    );
+  } else {
+    showToast("Aucune quantité ajoutée — vérifiez les articles introuvables.");
   }
 }
 
@@ -17535,16 +17570,19 @@ async function finalizeOrder(orderId = activeOrderId) {
   const siteId = order.siteId || currentSiteId();
   const neededByArticle = {};
   for (const line of order.lignes) {
-    neededByArticle[line.article] = (neededByArticle[line.article] || 0) + lineBottleQty(line, stockItemForArticle(line.article, siteId));
+    const key = articleMatchKey(line.article) || String(line.article || "");
+    neededByArticle[key] = (neededByArticle[key] || 0) + lineBottleQty(line, stockItemForArticle(line.article, siteId));
   }
-  for (const [article, bottles] of Object.entries(neededByArticle)) {
-    const stockItem = stockItemForArticle(article, siteId);
+  for (const [articleKey, bottles] of Object.entries(neededByArticle)) {
+    const sampleLine = order.lignes.find((l) => (articleMatchKey(l.article) || String(l.article || "")) === articleKey);
+    const articleLabel = sampleLine?.article || articleKey;
+    const stockItem = stockItemForArticle(articleLabel, siteId);
     // Tenir compte du stock déjà réservé par les AUTRES commandes ouvertes (on exclut celle-ci)
     // pour éviter que deux encaissements concurrents ne consomment le même stock.
-    const reservedByOthers = reservedBottlesForOpenOrders(article, oid, null, siteId);
+    const reservedByOthers = reservedBottlesForOpenOrders(articleLabel, oid, null, siteId);
     const availableForOrder = stockItem ? Math.max(0, availableStock(stockItem) - reservedByOthers) : 0;
     if (!stockItem || availableForOrder < bottles) {
-      showToast(`Stock insuffisant pour ${article}. Disponible: ${fmt(availableForOrder)} bouteille(s).`);
+      showToast(`Stock insuffisant pour ${articleLabel}. Disponible: ${fmt(availableForOrder)} bouteille(s).`);
       return;
     }
   }
@@ -17625,6 +17663,7 @@ async function finalizeOrder(orderId = activeOrderId) {
     state.ventes = [...ventes, ...state.ventes];
 
     const touchedStockIds = new Set();
+    const missedStockArticles = [];
     order.lignes.forEach((line) => {
       const stockItem = stockItemForArticle(line.article, siteId);
       if (stockItem) {
@@ -17645,8 +17684,13 @@ async function finalizeOrder(orderId = activeOrderId) {
             stockItem.promotions[promoIdx].stockPromoRestant = Math.max(0, (Number(stockItem.promotions[promoIdx].stockPromoRestant) || 0) - casiersSold);
           }
         }
+      } else {
+        missedStockArticles.push(String(line.article || "").trim() || "?");
       }
     });
+    if (missedStockArticles.length) {
+      showToast(`Attention : stock non déduit pour ${missedStockArticles.join(", ")} (article introuvable au catalogue).`);
+    }
 
     state.commandes = state.commandes.filter((item) => item.id !== oid);
     if (activeOrderId === oid) activeOrderId = null;
@@ -20461,7 +20505,11 @@ async function deleteStockItem(id) {
     showToast("Suppression du catalogue reservee a un administrateur.");
     return;
   }
+  const removed = state.stock.find((item) => item.id === id);
   state.stock = state.stock.filter((item) => item.id !== id);
+  // Le stock est desormais fusionne par id cote serveur (jamais ecrase en bloc) :
+  // un tombstone explicite est necessaire pour que la suppression persiste reellement.
+  markRowDeleted("stock", id, removed?.siteId ?? null);
   await persistStatePatch({ stock: state.stock });
   renderDashboard();
   renderStock();

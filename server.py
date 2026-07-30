@@ -4622,8 +4622,22 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                             set(sid_list),
                             sid_list,
                         )
+                    elif _key == "stock":
+                        # Toujours fusionner par id (jamais d'ecrasement complet), meme sans
+                        # _putDelta : un superadmin qui envoie un instantane perime du stock
+                        # (ex. pendant qu'une vente ou une reception se termine sur un autre
+                        # poste) ne doit pas effacer silencieusement ces changements concurrents.
+                        # Coherent avec le comportement deja applique aux sessions scopees
+                        # (cf. branche non-superadmin plus bas). La suppression d'un article
+                        # doit passer par un tombstone {"id":X,"_deleted":true} (cf. TOMBSTONE_KEYS).
+                        current[_key] = merge_scoped_rows(
+                            current.get(_key, []),
+                            payload[_key],
+                            set(sid_list),
+                            sid_list,
+                        )
                     elif put_delta.get(_key) and _key in (
-                        "stock", "casiers", "casierMouvements", "clientAvoirs",
+                        "casiers", "casierMouvements", "clientAvoirs",
                         "creditRecoveries", "loyaltyClients", "consignes", "charges",
                         "stockEntrees", "stockLosses", "purchaseOrders", "supplierPrices",
                     ):
