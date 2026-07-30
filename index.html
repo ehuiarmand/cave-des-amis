@@ -999,7 +999,7 @@
             </div>
             <span id="stock-movement-count" class="section-meta">0 mouvement</span>
           </div>
-          <div class="form-grid three-cols">
+          <div class="form-grid four-cols">
             <div class="form-group">
               <label for="stock-move-start">Date debut</label>
               <input id="stock-move-start" type="date">
@@ -1014,6 +1014,12 @@
                 <option value="all">Tous</option>
                 <option value="entree">Entrees</option>
                 <option value="sortie">Sorties</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="stock-move-article">Article</label>
+              <select id="stock-move-article">
+                <option value="">Tous les articles</option>
               </select>
             </div>
           </div>
@@ -3298,7 +3304,7 @@
   <script src="./cave-components.js"></script>
   <script src="./cave-extras.js"></script>
   <script src="./cave-order-pad.js"></script>
-  <script src="./app-orders.js?v=399"></script>
+  <script src="./app-orders.js?v=400"></script>
   <script src="./restaurant-module.js"></script>
 </body>
 </html>

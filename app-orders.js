@@ -18872,13 +18872,30 @@ function renderStockMoveArticleSummary(startRaw, endRaw, moveType = "all") {
     : `<tr><td colspan="${colspan}" style="text-align:center;color:var(--muted);padding:24px">Aucun article dans le catalogue.</td></tr>`;
 }
 
+/** Options du filtre article (Mouvements) : catalogue du site courant, triees alphabetiquement. */
+function populateStockMoveArticleOptions() {
+  const select = document.getElementById("stock-move-article");
+  if (!select) return;
+  const current = select.value;
+  const articles = Array.from(new Set(
+    recordsForSite(state.stock || []).map((s) => String(s.article || "").trim()).filter(Boolean),
+  )).sort((a, b) => a.localeCompare(b, "fr"));
+  select.innerHTML = `<option value="">Tous les articles</option>${
+    articles.map((a) => `<option value="${escapeHtml(a)}">${escapeHtml(a)}</option>`).join("")
+  }`;
+  if (current && articles.includes(current)) select.value = current;
+}
+
 function renderStockMovements() {
+  populateStockMoveArticleOptions();
   const start = document.getElementById("stock-move-start")?.value || "";
   const end = document.getElementById("stock-move-end")?.value || "";
   const type = document.getElementById("stock-move-type")?.value || "all";
+  const articleFilter = document.getElementById("stock-move-article")?.value || "";
   renderStockMoveArticleSummary(start, end, stockMoveTypeFromUi());
   const inPeriod = (item) => {
     const date = stockMovementDateValue(item);
+    if (articleFilter && articleMatchKey(item.article) !== articleMatchKey(articleFilter)) return false;
     return (!start || date >= start) && (!end || date <= end);
   };
   const allInPeriod = stockMovements().filter(inPeriod);
@@ -24194,7 +24211,7 @@ document.getElementById("fab-btn").addEventListener("click", () => {
   ["sales-period-start", "sales-period-end"].forEach((id) => {
     document.getElementById(id).addEventListener("change", renderSalesHistory);
   });
-  ["stock-move-start", "stock-move-end", "stock-move-type"].forEach((id) => {
+  ["stock-move-start", "stock-move-end", "stock-move-type", "stock-move-article"].forEach((id) => {
     document.getElementById(id).addEventListener("change", renderStockMovements);
   });
   document.getElementById("stock-move-print-btn")?.addEventListener("click", printStockMovementsByArticle);
