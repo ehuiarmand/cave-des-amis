@@ -18955,7 +18955,10 @@ function renderStockMovements() {
   const allInPeriod = stockMovements().filter(inPeriod);
   const movements = allInPeriod
     .filter((item) => type === "all" || item.type === type)
-    .sort((a, b) => String(b.date).localeCompare(String(a.date)));
+    // Tri par sortTs (même ordre chronologique que stockMovementRunningBalances) : sinon,
+    // plusieurs mouvements le même jour peuvent s'afficher dans un ordre différent de celui
+    // utilisé pour calculer avant/après, cassant visuellement la chaîne des soldes.
+    .sort((a, b) => (Number(b.sortTs) || 0) - (Number(a.sortTs) || 0) || String(b.date).localeCompare(String(a.date)));
   const entreePeriod = allInPeriod.filter((item) => item.type === "entree").reduce((sum, item) => sum + item.qty, 0);
   const sortiePeriod = allInPeriod.filter((item) => item.type === "sortie").reduce((sum, item) => sum + item.qty, 0);
   document.getElementById("stock-movement-count").textContent = `${fmt(movements.length)} mouvement(s)`;
