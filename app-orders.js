@@ -18875,9 +18875,15 @@ function stockMovementRunningBalances(article) {
   // stockMovements() est déjà scopé au site courant (rowMatchesSite interne) — pas besoin
   // de siteId ici, uniquement filtrer par article.
   const key = articleMatchKey(article);
+  // Départage final par "key" (déterministe et stable) : deux lignes d'une même facture
+  // partagent souvent le même sortTs à la milliseconde près — sans ce tie-break identique
+  // des deux côtés, un tri ascendant (calcul) puis descendant (affichage) indépendant peut
+  // les remettre dans un ordre différent et casser visuellement la chaîne avant/après.
+  const cmp = (a, b) =>
+    (a.sortTs - b.sortTs) || String(a.date).localeCompare(String(b.date)) || String(a.key).localeCompare(String(b.key));
   const ordered = stockMovements()
     .filter((m) => articleMatchKey(m.article) === key)
-    .sort((a, b) => (a.sortTs - b.sortTs) || String(a.date).localeCompare(String(b.date)));
+    .sort(cmp);
   const balances = new Map();
   let running = 0;
   ordered.forEach((m) => {
@@ -18885,7 +18891,7 @@ function stockMovementRunningBalances(article) {
     running += m.type === "entree" ? m.qty : -m.qty;
     balances.set(m.key, { avant, apres: running });
   });
-  return { balances, finalTheoretical: running };
+  return { balances, finalTheoretical: running, ordered };
 }
 
 function renderStockMoveArticleSummary(startRaw, endRaw, moveType = "all") {
@@ -18953,23 +18959,16 @@ function renderStockMovements() {
     return (!start || date >= start) && (!end || date <= end);
   };
   const allInPeriod = stockMovements().filter(inPeriod);
-  const movements = allInPeriod
-    .filter((item) => type === "all" || item.type === type)
-    // Tri par sortTs (même ordre chronologique que stockMovementRunningBalances) : sinon,
-    // plusieurs mouvements le même jour peuvent s'afficher dans un ordre différent de celui
-    // utilisé pour calculer avant/après, cassant visuellement la chaîne des soldes.
-    .sort((a, b) => (Number(b.sortTs) || 0) - (Number(a.sortTs) || 0) || String(b.date).localeCompare(String(a.date)));
-  const entreePeriod = allInPeriod.filter((item) => item.type === "entree").reduce((sum, item) => sum + item.qty, 0);
-  const sortiePeriod = allInPeriod.filter((item) => item.type === "sortie").reduce((sum, item) => sum + item.qty, 0);
-  document.getElementById("stock-movement-count").textContent = `${fmt(movements.length)} mouvement(s)`;
 
   // Colonnes Stock avant/après + réconciliation : n'ont de sens que pour un seul article
   // (mélanger plusieurs produits dans un même solde cumulé n'aurait aucune signification).
   let balances = null;
+  let orderedForArticle = null;
   let reconKpi = "";
   if (articleFilter) {
-    const { balances: b, finalTheoretical } = stockMovementRunningBalances(articleFilter);
+    const { balances: b, finalTheoretical, ordered } = stockMovementRunningBalances(articleFilter);
     balances = b;
+    orderedForArticle = ordered;
     const item = findStockItemForSite(articleFilter, currentSiteId());
     const actual = item ? stockActuel(item) : null;
     if (actual != null) {
@@ -18980,6 +18979,24 @@ function renderStockMovements() {
         <div class="pdj-kpi"><span class="kpi-label">Écart non expliqué (historique)</span><strong class="pdj-val ${gap === 0 ? "green" : "red"}">${gap === 0 ? "OK" : (gap > 0 ? "+" : "") + fmt(gap)}</strong></div>`;
     }
   }
+  const entreePeriod = allInPeriod.filter((item) => item.type === "entree").reduce((sum, item) => sum + item.qty, 0);
+  const sortiePeriod = allInPeriod.filter((item) => item.type === "sortie").reduce((sum, item) => sum + item.qty, 0);
+  // Quand un article est filtré, repartir de la même liste ordonnée que le calcul des soldes
+  // (juste inversée) plutôt que de re-trier indépendamment : garantit que l'ordre affiché
+  // correspond exactement à la chaîne avant/après, même en cas d'égalité d'horodatage
+  // (ex. deux lignes d'une même facture).
+  const movements = orderedForArticle
+    ? (() => {
+        const keysInPeriod = new Set(allInPeriod.map((m) => m.key));
+        return orderedForArticle
+          .slice()
+          .reverse()
+          .filter((m) => keysInPeriod.has(m.key) && (type === "all" || m.type === type));
+      })()
+    : allInPeriod
+        .filter((item) => type === "all" || item.type === type)
+        .sort((a, b) => (Number(b.sortTs) || 0) - (Number(a.sortTs) || 0) || String(b.date).localeCompare(String(a.date)));
+  document.getElementById("stock-movement-count").textContent = `${fmt(movements.length)} mouvement(s)`;
   document.getElementById("stock-movement-summary").innerHTML = `
     <div class="pdj-kpi"><span class="kpi-label">Lignes affichées</span><strong class="pdj-val amber">${fmt(movements.length)}</strong></div>
     <div class="pdj-kpi"><span class="kpi-label">Entrées (période)</span><strong class="pdj-val amber">${fmt(entreePeriod)}</strong></div>
