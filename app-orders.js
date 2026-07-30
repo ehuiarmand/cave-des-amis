@@ -9010,12 +9010,17 @@ function renderDailyStockCheck() {
     if (domFrigo.has(idn)) frigoVal = Math.max(0, Number(domFrigo.get(idn)) || 0);
     if (domReserve.has(idn)) reserveVal = Math.max(0, Number(domReserve.get(idn)) || 0);
     const gap = (frigoVal + reserveVal) - theoretical;
+    // Empreinte du théorique au moment du rendu : si entrées/sorties/pertes changent
+    // (ex. réception appliquée pendant que ce formulaire est ouvert) avant la validation,
+    // closeAccountingDay() le détecte et bloque plutôt que de silencieusement absorber
+    // l'écart dans un "gap" jamais tracé comme perte (cf. bug récurrent stock/réceptions).
+    const checkSnapshot = `${entreesToday}|${sortiesToday}|${pertesToday}`;
     const frigoCell = gerantView
       ? `<td style="text-align:right">${fmt(stockFrigo(item))}</td>`
-      : `<td><input class="stock-check-input" type="number" min="0" data-check-frigo="${item.id}" value="${frigoVal}"></td>`;
+      : `<td><input class="stock-check-input" type="number" min="0" data-check-frigo="${item.id}" data-check-snapshot="${checkSnapshot}" value="${frigoVal}"></td>`;
     const reserveCell = gerantView
       ? `<td style="text-align:right">${fmt(stockReserve(item))}</td>`
-      : `<td><input class="stock-check-input" type="number" min="0" data-check-reserve="${item.id}" value="${reserveVal}"></td>`;
+      : `<td><input class="stock-check-input" type="number" min="0" data-check-reserve="${item.id}" data-check-snapshot="${checkSnapshot}" value="${reserveVal}"></td>`;
     const gapCell = gerantView
       ? `<td style="text-align:right;color:#72d7a9">OK</td>`
       : `<td style="text-align:right;color:${gap === 0 ? "#72d7a9" : "#ff8e82"}">${gap === 0 ? "OK" : fmt(gap)}</td>`;
@@ -19023,8 +19028,19 @@ async function closeAccountingDay() {
     return;
   }
 
+  // Rafraîchir avant validation : entreesToday/sortiesToday/frigo/reserve doivent refléter
+  // l'état serveur actuel, pas le cache client qui peut dater de l'ouverture de cette page
+  // (ex. réception appliquée entre-temps depuis un autre poste — cf. bug récurrent
+  // stock/réceptions absorbé silencieusement par la clôture).
+  try {
+    const freshState = await apiRequest(API.state, { cache: "no-store" });
+    if (freshState) state = mergeStateFromServerResponse(freshState, state, null);
+  } catch {
+    /* refetch impossible (hors ligne) : on continue avec le cache local */
+  }
+  const refreshedItems = recordsForSite(state.stock);
   const existingCloseCheck = stockCheckForSiteDate(dStr, currentSiteId());
-  const checkedItems = items.map((item) => {
+  const checkedItems = refreshedItems.map((item) => {
     const usesCatalogStock = isFinDeService || isGerantRole();
     const frigo = usesCatalogStock
       ? Math.max(0, stockFrigo(item))
@@ -19057,6 +19073,38 @@ async function closeAccountingDay() {
       stockApres: counted,
     };
   });
+  // Détection de péremption : le formulaire (admin, hors vue gérant/fin de service) pré-remplit
+  // frigo/réserve au rendu et préserve ensuite ces valeurs à chaque re-rendu (pour ne pas perdre
+  // une saisie en cours) — si une réception/vente/perte est enregistrée pendant que ce formulaire
+  // reste ouvert, les champs restent périmés et l'écart de clôture absorbe silencieusement la
+  // différence sans jamais la tracer comme perte (cf. bug récurrent stock/réceptions "Castel").
+  const staleArticles = [];
+  checkedItems.forEach((checked) => {
+    if (isFinDeService || isGerantRole()) return;
+    const frigoInput = document.querySelector(`[data-check-frigo="${checked.id}"]`);
+    const reserveInput = document.querySelector(`[data-check-reserve="${checked.id}"]`);
+    const snap = frigoInput?.dataset.checkSnapshot;
+    if (snap == null) return;
+    const freshSnap = `${checked.entreesToday}|${checked.sortiesToday}|${checked.pertesToday}`;
+    if (snap === freshSnap) return;
+    staleArticles.push(checked.article);
+    const item = state.stock.find((s) => s.id === checked.id);
+    if (item && frigoInput) {
+      frigoInput.value = Math.max(0, stockFrigo(item));
+      frigoInput.dataset.checkSnapshot = freshSnap;
+    }
+    if (item && reserveInput) {
+      reserveInput.value = Math.max(0, stockReserve(item));
+      reserveInput.dataset.checkSnapshot = freshSnap;
+    }
+  });
+  if (staleArticles.length) {
+    window.alert(
+      `Stock modifié depuis l'ouverture de cette page pour : ${staleArticles.join(", ")}\n(réception, vente ou perte enregistrée entre-temps).\n\nLes champs frigo/réserve de ces articles ont été remis à jour avec les valeurs actuelles — recomptez-les physiquement puis validez à nouveau la clôture.`,
+    );
+    return;
+  }
+
   const stockGaps = checkedItems.filter((item) => item.ecart !== 0);
   // Les ecarts sont acceptes et enregistres dans le stock (entrees/sorties)
   // Avertissement informatif uniquement pour les non-admins (pas pour la serveuse : le gérant vérifie)
