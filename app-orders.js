@@ -18875,15 +18875,55 @@ function stockMovementRunningBalances(article) {
   // stockMovements() est déjà scopé au site courant (rowMatchesSite interne) — pas besoin
   // de siteId ici, uniquement filtrer par article.
   const key = articleMatchKey(article);
-  // Départage final par "key" (déterministe et stable) : deux lignes d'une même facture
-  // partagent souvent le même sortTs à la milliseconde près — sans ce tie-break identique
-  // des deux côtés, un tri ascendant (calcul) puis descendant (affichage) indépendant peut
-  // les remettre dans un ordre différent et casser visuellement la chaîne avant/après.
+  // Tri par date COMPTABLE (item.date, celle affichée et utilisée par la clôture/stockCheck)
+  // en priorité — pas par horodatage réel (sortTs). Une vente peut avoir un soldAt réel après
+  // minuit un autre jour calendaire alors que sa journée comptable n'est pas encore clôturée
+  // (ex. vente à 15h le 27 mais date comptable "26-07" car la clôture du 26 n'était pas faite) :
+  // trier par sortTs seul intercalait cette ligne au milieu des lignes du 27, alors que sa date
+  // affichée dit 26 — incohérence visuelle. sortTs ne sert plus qu'à départager les mouvements
+  // d'une même journée comptable ; "key" reste le dernier départage pour la stabilité en cas
+  // d'égalité parfaite (ex. deux lignes d'une même facture).
   const cmp = (a, b) =>
-    (a.sortTs - b.sortTs) || String(a.date).localeCompare(String(b.date)) || String(a.key).localeCompare(String(b.key));
+    String(a.date).localeCompare(String(b.date)) || (a.sortTs - b.sortTs) || String(a.key).localeCompare(String(b.key));
   const ordered = stockMovements()
     .filter((m) => articleMatchKey(m.article) === key)
     .sort(cmp);
+
+  // Baseline pré-suivi : si la toute première clôture connue pour cet article indique un
+  // "stockAvant" que les mouvements bruts (achats/ventes/pertes/écarts) ne suffisent pas à
+  // expliquer, du stock existait déjà avant le début du suivi détaillé (ex. quantité saisie
+  // directement à la création de l'article, sans passer par le champ "init"). On l'expose
+  // comme une ligne explicite plutôt que de laisser un écart historique non attribuable à
+  // un évènement précis polluer la réconciliation.
+  const siteId = currentSiteId();
+  const multiSite = multiSiteActive();
+  const earliestCheck = (state.stockChecks || [])
+    .filter((c) => rowMatchesSite(c, siteId, multiSite))
+    .flatMap((c) => (c.items || [])
+      .filter((ci) => articleMatchKey(ci.article) === key)
+      .map((ci) => ({ date: c.date, stockAvant: ci.stockAvant })))
+    .filter((r) => r.date && Number.isFinite(Number(r.stockAvant)))
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)))[0];
+  if (earliestCheck) {
+    const explainedBefore = ordered
+      .filter((m) => String(m.date).localeCompare(String(earliestCheck.date)) < 0)
+      .reduce((sum, m) => sum + (m.type === "entree" ? m.qty : -m.qty), 0);
+    const baseline = Number(earliestCheck.stockAvant) - explainedBefore;
+    if (Math.abs(baseline) > 0.001) {
+      ordered.unshift({
+        key: `baseline-${key}`,
+        date: earliestCheck.date,
+        sortTs: -Infinity,
+        article,
+        type: baseline > 0 ? "entree" : "sortie",
+        qty: Math.abs(baseline),
+        unit: "Bouteille",
+        reason: "Stock initial (avant le début du suivi détaillé)",
+        user: "",
+      });
+    }
+  }
+
   const balances = new Map();
   let running = 0;
   ordered.forEach((m) => {
