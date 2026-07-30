@@ -18775,7 +18775,9 @@ function stockMovements() {
     const created = item.createdAt || today();
     if (Number(item.init) > 0) {
       movements.push({
+        key: `init-${item.id}`,
         date: created,
+        sortTs: Date.parse(created) || 0,
         article: item.article,
         type: "entree",
         qty: Number(item.init) || 0,
@@ -18791,7 +18793,9 @@ function stockMovements() {
     .forEach((e) => {
       const stockRow = (state.stock || []).find((s) => s.siteId === siteId && s.article === e.article) || {};
       movements.push({
+        key: `entree-${e.id}`,
         date: e.date,
+        sortTs: Date.parse(e.date) || 0,
         article: e.article,
         type: "entree",
         qty: e.qty,
@@ -18802,8 +18806,11 @@ function stockMovements() {
     });
 
   (state.stockLosses || []).filter((l) => rowMatchesSite(l, siteId, multiSite)).forEach((loss) => {
+    const d = loss.date || loss.createdAt || today();
     movements.push({
-      date: loss.date || loss.createdAt || today(),
+      key: `perte-${loss.id}`,
+      date: d,
+      sortTs: Date.parse(loss.createdAt || d) || 0,
       article: loss.article,
       type: "sortie",
       qty: loss.qty,
@@ -18821,8 +18828,11 @@ function stockMovements() {
     const seller = [vente.server, vente.serveur, vente.creditIssuedBy, fromAudit]
       .map((x) => String(x || "").trim())
       .find((x) => x && x !== "-" && x !== "—" && x !== "–") || "";
+    const d = vente.date || today();
     movements.push({
-      date: vente.date || today(),
+      key: `vente-${vente.id}`,
+      date: d,
+      sortTs: Date.parse(vente.soldAt || vente.createdAt || d) || 0,
       article: vente.article,
       type: "sortie",
       qty: lineBottleQty(vente, stockItem),
@@ -18831,7 +18841,51 @@ function stockMovements() {
       user: seller,
     });
   });
+
+  // Écarts de clôture (comptage physique ≠ théorique) : ils modifient directement
+  // item.entrees/sorties (cf. closeAccountingDay) sans jamais créer de stockEntree/stockLoss —
+  // sans cette entrée, le solde du grand livre ne peut pas expliquer le stock actuel.
+  (state.stockChecks || []).filter((c) => rowMatchesSite(c, siteId, multiSite)).forEach((check) => {
+    (check.items || []).forEach((ci) => {
+      const ecart = Number(ci.ecart) || 0;
+      if (!ecart) return;
+      movements.push({
+        key: `ecart-${check.id}-${ci.id}`,
+        date: check.date,
+        sortTs: (Date.parse(check.createdAt) || 0) + 1,
+        article: ci.article,
+        type: ecart > 0 ? "entree" : "sortie",
+        qty: Math.abs(ecart),
+        unit: "Bouteille",
+        reason: `Écart clôture (${ecart > 0 ? "gain" : "perte"} non tracé — compté ${fmt(ci.counted)} vs théorique ${fmt(ci.expected)})`,
+        user: check.closedBy || "",
+      });
+    });
+  });
   return movements;
+}
+
+/**
+ * Solde courant (avant/après) pour chaque mouvement d'un article, en repartant de 0
+ * et en cumulant chronologiquement toutes ses entrées/sorties (y compris les écarts
+ * de clôture) — permet de verifier visuellement que le stock actuel est bien expliqué
+ * par l'historique, et de reperer une clôture qui a absorbe silencieusement un écart.
+ */
+function stockMovementRunningBalances(article) {
+  // stockMovements() est déjà scopé au site courant (rowMatchesSite interne) — pas besoin
+  // de siteId ici, uniquement filtrer par article.
+  const key = articleMatchKey(article);
+  const ordered = stockMovements()
+    .filter((m) => articleMatchKey(m.article) === key)
+    .sort((a, b) => (a.sortTs - b.sortTs) || String(a.date).localeCompare(String(b.date)));
+  const balances = new Map();
+  let running = 0;
+  ordered.forEach((m) => {
+    const avant = running;
+    running += m.type === "entree" ? m.qty : -m.qty;
+    balances.set(m.key, { avant, apres: running });
+  });
+  return { balances, finalTheoretical: running };
 }
 
 function renderStockMoveArticleSummary(startRaw, endRaw, moveType = "all") {
@@ -18905,13 +18959,34 @@ function renderStockMovements() {
   const entreePeriod = allInPeriod.filter((item) => item.type === "entree").reduce((sum, item) => sum + item.qty, 0);
   const sortiePeriod = allInPeriod.filter((item) => item.type === "sortie").reduce((sum, item) => sum + item.qty, 0);
   document.getElementById("stock-movement-count").textContent = `${fmt(movements.length)} mouvement(s)`;
+
+  // Colonnes Stock avant/après + réconciliation : n'ont de sens que pour un seul article
+  // (mélanger plusieurs produits dans un même solde cumulé n'aurait aucune signification).
+  let balances = null;
+  let reconKpi = "";
+  if (articleFilter) {
+    const { balances: b, finalTheoretical } = stockMovementRunningBalances(articleFilter);
+    balances = b;
+    const item = findStockItemForSite(articleFilter, currentSiteId());
+    const actual = item ? stockActuel(item) : null;
+    if (actual != null) {
+      const gap = actual - finalTheoretical;
+      reconKpi = `
+        <div class="pdj-kpi"><span class="kpi-label">Solde grand livre (historique complet)</span><strong class="pdj-val amber">${fmt(finalTheoretical)}</strong></div>
+        <div class="pdj-kpi"><span class="kpi-label">Stock actuel réel</span><strong class="pdj-val amber">${fmt(actual)}</strong></div>
+        <div class="pdj-kpi"><span class="kpi-label">Écart non expliqué (historique)</span><strong class="pdj-val ${gap === 0 ? "green" : "red"}">${gap === 0 ? "OK" : (gap > 0 ? "+" : "") + fmt(gap)}</strong></div>`;
+    }
+  }
   document.getElementById("stock-movement-summary").innerHTML = `
     <div class="pdj-kpi"><span class="kpi-label">Lignes affichées</span><strong class="pdj-val amber">${fmt(movements.length)}</strong></div>
     <div class="pdj-kpi"><span class="kpi-label">Entrées (période)</span><strong class="pdj-val amber">${fmt(entreePeriod)}</strong></div>
     <div class="pdj-kpi"><span class="kpi-label">Sorties (période)</span><strong class="pdj-val red">${fmt(sortiePeriod)}</strong></div>
+    ${reconKpi}
   `;
   document.getElementById("stock-movement-list").innerHTML = movements.length
-    ? movements.map((item) => `<tr>
+    ? movements.map((item) => {
+      const bal = balances?.get(item.key);
+      return `<tr>
       <td>${escapeHtml(formatDateDdMmYyyy(item.date || item.createdAt))}</td>
       <td>${escapeHtml(item.article)}</td>
       <td>${item.type === "entree" ? "Entree" : "Sortie"}</td>
@@ -18919,8 +18994,11 @@ function renderStockMovements() {
       <td>${escapeHtml(item.unit)}</td>
       <td>${escapeHtml(item.reason)}</td>
       <td>${escapeHtml(formatStockMovementUser(item))}</td>
-    </tr>`).join("")
-    : `<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:32px">Aucun mouvement trouve</td></tr>`;
+      <td style="text-align:right">${bal ? fmt(bal.avant) : "—"}</td>
+      <td style="text-align:right">${bal ? fmt(bal.apres) : "—"}</td>
+    </tr>`;
+    }).join("")
+    : `<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:32px">Aucun mouvement trouve</td></tr>`;
 }
 
 function closureCashSnapshot(dStr) {
