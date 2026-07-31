@@ -7357,6 +7357,16 @@ function isCreditSale(v) {
 }
 
 function renderPointDuJour() {
+  // Filet de sécurité : le bouton "Réouvrir cette journée" est l'échappatoire d'urgence pour
+  // un admin bloqué par une clôture erronée. S'il dépendait uniquement de l'appel plus bas dans
+  // cette fonction, une exception n'importe où avant (rendu caisse, stock du jour, etc.) l'empêcherait
+  // silencieusement de s'afficher — exactement le cas vécu le 31-07-2026 (superadmin bloqué, bouton
+  // absent). On le rend en tout premier, dans son propre try/catch, pour qu'il apparaisse toujours.
+  try {
+    renderPastClosuresForReopen();
+  } catch (err) {
+    console.error("[pdj] renderPastClosuresForReopen (pré-rendu) a échoué :", err);
+  }
   syncPdjWorkDateInput({ keepCurrentValue: true });
   const dStr = pdjCalendarDate();
   const ventesJour = recordsForSite(state.ventes).filter((v) => v.date.slice(0, 10) === dStr);
