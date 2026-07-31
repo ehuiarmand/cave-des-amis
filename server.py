@@ -6798,12 +6798,20 @@ def _auto_cloture_check() -> None:
                 closed_dates = closed_by_site.get(site_id, set())
 
                 unclosed_dates: set[str] = set()
+                # Journées ouvertes automatiquement en cascade (par _auto_open_next_day_after_close
+                # juste après la clôture de la veille) : ne jamais les clôturer le jour même sous
+                # prétexte que l'heure de clôture est déjà passée dans la journée calendaire — sinon
+                # une journée fraîchement ouverte se retrouve reclôturée quelques secondes plus tard,
+                # avec 0 vente, bloquant toute nouvelle vente (bug constaté le 31-07-2026).
+                same_day_cascade_opened: set[str] = set()
                 for b in state.get("dayBooks", []):
                     if str(b.get("siteId", "")) != site_id:
                         continue
                     d = str(b.get("date") or "")[:10]
                     if len(d) >= 10 and d <= today_str and d not in closed_dates:
                         unclosed_dates.add(d)
+                    if b.get("autoOpenedFromClose") and str(b.get("openedAt") or "")[:10] == d:
+                        same_day_cascade_opened.add(d)
                 for v in state.get("ventes", []):
                     if str(v.get("siteId", "")) != site_id:
                         continue
@@ -6815,7 +6823,7 @@ def _auto_cloture_check() -> None:
                     if d_str < today_str:
                         to_close.append((site_id, d_str))
                         break
-                    if d_str == today_str and current_mins >= cloture_mins:
+                    if d_str == today_str and current_mins >= cloture_mins and d_str not in same_day_cascade_opened:
                         to_close.append((site_id, d_str))
                         break
 
