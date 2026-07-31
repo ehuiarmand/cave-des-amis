@@ -169,3 +169,64 @@ describe("computePurchaseStockRepairPlan", () => {
     assert.equal(covered.needsRepair, true);
   });
 });
+
+/**
+ * Régression clôture PDJ — empreinte de détection de "stock modifié".
+ *
+ * closeAccountingDay() compare, pour chaque article, l'empreinte
+ * `entrées|sorties|pertes` figée dans le DOM au rendu (renderDailyStockCheck)
+ * à une empreinte recalculée juste avant validation. Si les deux côtés
+ * n'utilisent PAS les mêmes fonctions de comptage, l'empreinte diverge sans
+ * qu'aucun stock n'ait bougé : la clôture est bloquée à tort ET la saisie
+ * physique de l'admin est écrasée par le stock catalogue (perte de donnée +
+ * écart réel masqué).
+ *
+ * Les prédicats ci-dessous reproduisent fidèlement app-orders.js :
+ *  - RENDU  : todayLossesForArticle(article, dStr, openedAt)
+ *             → date == dStr  OU  (openedAt && createdAt >= openedAt)
+ *  - PLAGE  : pertesForArticlePeriod(article, dStr, dStr) [ancien freshSnap]
+ *             → (date || createdAt) dans [dStr, dStr]
+ * Le correctif fait recalculer le freshSnap avec le prédicat RENDU.
+ */
+describe("closeAccountingDay stale snapshot (pertes, journée comptable multi-jour)", () => {
+  const renderLossPredicate = (loss, dStr, openedAt) => {
+    if ((loss.date || "").slice(0, 10) === dStr) return true;
+    if (openedAt && loss.createdAt && loss.createdAt >= openedAt) return true;
+    return false;
+  };
+  const periodLossPredicate = (loss, dStr) => {
+    const d = (loss.date || loss.createdAt || "").slice(0, 10);
+    return d === dStr;
+  };
+  const sumLosses = (losses, pred) => losses.reduce((s, l) => s + (pred(l) ? l.qty : 0), 0);
+
+  // Maquis de nuit : journée comptable "26-07" ouverte la veille au soir,
+  // encore ouverte après minuit. Une perte saisie à 01h porte la date
+  // CALENDAIRE du 27 (stockLosses.push -> date: today()) alors qu'elle
+  // appartient à la journée comptable du 26.
+  const dStr = "2026-07-26";
+  const openedAt = "2026-07-26T19:00:00.000Z";
+  const nightLoss = { article: "CASTEL 50", qty: 3, date: "2026-07-27", createdAt: "2026-07-27T01:00:00.000Z" };
+
+  it("le rendu compte la perte d'après-minuit, la plage stricte l'ignore (source du bug)", () => {
+    const rendered = sumLosses([nightLoss], (l) => renderLossPredicate(l, dStr, openedAt));
+    const period = sumLosses([nightLoss], (l) => periodLossPredicate(l, dStr));
+    assert.equal(rendered, 3);
+    assert.equal(period, 0);
+    assert.notEqual(rendered, period); // divergence => clôture bloquée à tort avant le fix
+  });
+
+  it("après correctif : les deux côtés utilisent le prédicat du rendu et concordent (pas de faux blocage)", () => {
+    const renderSnap = sumLosses([nightLoss], (l) => renderLossPredicate(l, dStr, openedAt));
+    const freshSnap = sumLosses([nightLoss], (l) => renderLossPredicate(l, dStr, openedAt));
+    assert.equal(renderSnap, freshSnap);
+  });
+
+  it("une perte réellement ajoutée après le rendu est toujours détectée (protection conservée)", () => {
+    const beforeRender = [nightLoss];
+    const afterConcurrentAdd = [nightLoss, { article: "CASTEL 50", qty: 2, date: dStr, createdAt: "2026-07-26T22:00:00.000Z" }];
+    const renderSnap = sumLosses(beforeRender, (l) => renderLossPredicate(l, dStr, openedAt));
+    const freshSnap = sumLosses(afterConcurrentAdd, (l) => renderLossPredicate(l, dStr, openedAt));
+    assert.notEqual(renderSnap, freshSnap); // vrai changement => clôture bloquée (comportement voulu)
+  });
+});
