@@ -19240,7 +19240,15 @@ async function closeAccountingDay() {
     const reserveInput = document.querySelector(`[data-check-reserve="${checked.id}"]`);
     const snap = frigoInput?.dataset.checkSnapshot;
     if (snap == null) return;
-    const freshSnap = `${checked.entreesToday}|${checked.sortiesToday}|${checked.pertesToday}`;
+    // Recalculer l'empreinte avec EXACTEMENT les mêmes fonctions que renderDailyStockCheck
+    // (pdjEntreesTodayForArticle / todaySortiesBottlesForArticle / todayLossesForArticle, avec
+    // openedAt). checked.entreesToday/pertesToday viennent de fonctions différentes
+    // (entreesBottlesForArticlePeriod / pertesForArticlePeriod, plage de dates stricte, sans
+    // openedAt) : les comparer au snapshot du rendu signalait à tort une "modification
+    // concurrente" en journée comptable multi-jour (ex. perte enregistrée après minuit, dont
+    // la date calendaire = lendemain mais la journée comptable = dStr), ce qui bloquait la
+    // clôture ET écrasait la saisie physique de l'admin alors qu'aucun stock n'avait bougé.
+    const freshSnap = `${pdjEntreesTodayForArticle(checked.article, dStr, dayBook?.openedAt)}|${todaySortiesBottlesForArticle(checked.article, dStr)}|${todayLossesForArticle(checked.article, dStr, dayBook?.openedAt)}`;
     if (snap === freshSnap) return;
     staleArticles.push(checked.article);
     const item = state.stock.find((s) => s.id === checked.id);
