@@ -6343,8 +6343,17 @@ function updatePdjSubTabHints() {
     return;
   }
   if (closed) {
-    clotureBtn.removeAttribute("title");
-    clotureBtn.classList.remove("pdj-tab-attention");
+    // Journée clôturée : le sous-onglet par défaut bascule sur "Synthèse" (suggestPdjSubTabForDay),
+    // ce qui masque l'échappatoire "Réouvrir cette journée" — visible uniquement admin, dans
+    // l'onglet Clôture. Sans indice visuel, un admin bloqué par une clôture erronée ne sait pas
+    // où chercher (vécu le 31-07-2026). On garde/affiche donc un repère pour les admins.
+    if (canAnyAdmin()) {
+      clotureBtn.title = "Journée clôturée — réouverture possible ici (administrateur)";
+      clotureBtn.classList.add("pdj-tab-attention");
+    } else {
+      clotureBtn.removeAttribute("title");
+      clotureBtn.classList.remove("pdj-tab-attention");
+    }
   } else if (needsOpen) {
     clotureBtn.title = "Ouverture de caisse requise";
     clotureBtn.classList.add("pdj-tab-attention");
@@ -6926,19 +6935,41 @@ function navigate(page, opts = {}) {
 
   syncNavActiveState();
   document.getElementById("fab-btn").classList.toggle("hidden", !["ventes", "stock", "charges", "loyalty"].includes(page));
-  renderHero();
-  renderSiteSwitcher();
+  // renderHero/renderSiteSwitcher precedent le rendu Point du Jour : une exception ici empecherait
+  // silencieusement d'atteindre renderPointDuJour() (et donc le bouton d'urgence "Reouvrir cette
+  // journee") sans jamais l'appeler. Proteges pour ne jamais bloquer la navigation elle-meme.
+  try {
+    renderHero();
+  } catch (err) {
+    console.error("[navigate] renderHero a échoué :", err);
+  }
+  try {
+    renderSiteSwitcher();
+  } catch (err) {
+    console.error("[navigate] renderSiteSwitcher a échoué :", err);
+  }
   if (page === "home") renderDashboard();
   if (page === "pdj") {
-    syncPdjWorkDateInput();
-    const forcedPdj = opts.pdjSubTab;
-    if (forcedPdj && ["synthese", "cloture", "ventes"].includes(String(forcedPdj))) {
-      pdjSubTab = forcedPdj;
-    } else if (!opts.keepPdjSubTab) {
-      pdjSubTab = suggestPdjSubTabForDay();
+    try {
+      syncPdjWorkDateInput();
+      const forcedPdj = opts.pdjSubTab;
+      if (forcedPdj && ["synthese", "cloture", "ventes"].includes(String(forcedPdj))) {
+        pdjSubTab = forcedPdj;
+      } else if (!opts.keepPdjSubTab) {
+        pdjSubTab = suggestPdjSubTabForDay();
+      }
+      renderPointDuJour();
+      setPdjSubTab(pdjSubTab, { scrollTop: Boolean(forcedPdj === "cloture") });
+    } catch (err) {
+      // Filet de secours : meme si le rendu normal du Point du Jour plante, tenter quand meme
+      // d'afficher le bouton d'urgence "Reouvrir cette journee" (cf. incident du 31-07-2026).
+      console.error("[navigate] rendu Point du Jour a échoué :", err);
+      try {
+        renderPastClosuresForReopen();
+      } catch (err2) {
+        console.error("[navigate] renderPastClosuresForReopen (filet de secours) a échoué :", err2);
+      }
     }
-    renderPointDuJour();
-    setPdjSubTab(pdjSubTab, { scrollTop: Boolean(forcedPdj === "cloture") });
   }
   if (page === "ventes") {
     syncPdjWorkDateInput();
