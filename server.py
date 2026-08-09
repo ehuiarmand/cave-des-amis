@@ -2435,6 +2435,16 @@ def merge_scoped_rows(
     current_list = [r for r in (current or []) if isinstance(r, dict) and r.get("id") is not None]
     incoming_list = [r for r in (incoming or []) if isinstance(r, dict) and r.get("id") is not None]
 
+    # Le merge couvre-t-il tous les maquis connus ? (cas superadmin global : la
+    # session pousse l'ensemble du parc, `allowed` = tous les sites.) Dans ce cas
+    # les lignes « orphelines » sans siteId — données ambiguës d'anciennes
+    # migrations — sont gérables par la session : sans ça, un superadmin global
+    # ne pourrait ni modifier ni supprimer ces lignes (upsert/tombstone ignorés,
+    # ligne périmée conservée), ce qui réintroduit silencieusement le bug
+    # « réception/vente qui n'impacte pas le stock » qu'on cherche à corriger.
+    site_id_set = {str(x) for x in site_ids if x is not None and str(x) != ""}
+    covers_all_sites = bool(site_id_set) and site_id_set <= allowed
+
     def row_id_norm(row: dict[str, Any]) -> str:
         """Normalise l'id de ligne en chaîne pour comparaison stable."""
         return str(row.get("id"))
@@ -2442,7 +2452,15 @@ def merge_scoped_rows(
     def in_allowed_scope(row: dict[str, Any]) -> bool:
         """Vrai si le site effectif de la ligne fait partie des maquis autorisés."""
         es = row_effective_site_id(row, site_ids, allowed)
-        return es is not None and es in allowed
+        if es is not None and es in allowed:
+            return True
+        # Merge global (superadmin sur tous les maquis) : les lignes orphelines
+        # (siteId absent/vide) restent gérables au lieu d'être figées.
+        if covers_all_sites:
+            raw = row.get("siteId")
+            if raw is None or str(raw) == "":
+                return True
+        return False
 
     incoming_for_scope = [r for r in incoming_list if in_allowed_scope(r)]
     deleted_ids = {row_id_norm(r) for r in incoming_for_scope if r.get("_deleted")}
