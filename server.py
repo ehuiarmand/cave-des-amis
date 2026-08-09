@@ -4607,7 +4607,11 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                                 sid_list,
                             )
                         else:
-                            current["casiers"] = sanitized
+                            # Sauvegarde complète (non-delta) : les tombstones
+                            # {id, siteId, _deleted:true} servent uniquement à
+                            # supprimer côté client ; ne jamais les persister,
+                            # sinon un casier fantôme réapparaît pour admin/tanoh.
+                            current["casiers"] = [r for r in sanitized if not r.get("_deleted")]
                     elif _key == "ventes" and put_delta.get("ventes"):
                         current[_key] = merge_scoped_rows(
                             current.get(_key, []),
@@ -4648,7 +4652,18 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                             sid_list,
                         )
                     else:
-                        current[_key] = payload[_key]
+                        # Sauvegarde complète (non-delta) d'une collection :
+                        # retirer les tombstones {id, _deleted:true} du client,
+                        # qui ne doivent jamais être persistés (sinon lignes
+                        # fantômes chez le superadmin global admin/tanoh).
+                        _pv = payload[_key]
+                        if isinstance(_pv, list):
+                            current[_key] = [
+                                r for r in _pv
+                                if not (isinstance(r, dict) and r.get("_deleted"))
+                            ]
+                        else:
+                            current[_key] = _pv
                 if "pdjWorkDateBySite" in payload:
                     current["pdjWorkDateBySite"] = _sanitize_pdj_work_date_map(
                         payload.get("pdjWorkDateBySite") or {},
