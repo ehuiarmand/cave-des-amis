@@ -3160,14 +3160,17 @@ function findStockItemForSite(article, siteId) {
   );
   if (exact) return exact;
 
-  // 2. Fallback : nom stock est un préfixe du nom PO suivi d'un code format sans espace
+  // 2. Fallback : nom stock + code format uniquement (B12, B16…)
   //    ex. "Carré d'or" (stock) → "Carré d'or B16" (commande)
+  //    PAS "RACINE 50" ← "RACINE 50 FORT" (mot produit ≠ code format)
   return stock.find((s) => {
     if (!rowMatchesSite(s, siteId, multi)) return false;
     const stockKey = articleMatchKey(s.article);
     if (!stockKey || !key.startsWith(stockKey)) return false;
     const suffix = key.slice(stockKey.length);
-    return suffix.startsWith(" ") && /^\s\S+$/.test(suffix);
+    return typeof isFormatCodeSuffix === "function"
+      ? isFormatCodeSuffix(suffix)
+      : (suffix.startsWith(" ") && /^\s[bB]?\d{1,3}$/.test(suffix));
   }) || null;
 }
 
@@ -17189,6 +17192,24 @@ async function repairReceivedPurchaseOrderStock(poId) {
     siteId,
   });
 
+  if (plan.bottlesToAdd > 0 || plan.linkEntrees.length > 0 || plan.skippedArticles.length > 0) {
+    const linesPreview = [];
+    plan.additions.forEach(({ item, missing }) => {
+      linesPreview.push(`+ ${missing} btl → ${item.article} (réserve)`);
+    });
+    if (plan.legacyLinkedBottles > 0) {
+      linesPreview.push(`Rattacher ${plan.legacyLinkedBottles} btl déjà en stock (sans doubler)`);
+    }
+    if (plan.skippedArticles.length) {
+      linesPreview.push(`Introuvables : ${plan.skippedArticles.join(", ")}`);
+    }
+    if (!window.confirm(
+      `Vérification avant impact stock — commande #${po.id} (${po.supplier || ""}) :\n\n${linesPreview.join("\n") || "Aucun mouvement"}\n\nContinuer ?`,
+    )) {
+      return;
+    }
+  }
+
   // Rattacher les entrées legacy (évite le double comptage)
   plan.linkEntrees.forEach((e) => {
     e.purchaseOrderId = po.id;
@@ -17360,7 +17381,8 @@ function renderPurchaseOrders() {
           <span class="badge ${badgeClass}">${escapeHtml(po.status || "En attente")}</span>
           ${pending ? `<button type="button" class="mini-btn" data-purchase-receive="${po.id}">Réceptionner</button>
           <button type="button" class="mini-btn" style="border-color:rgba(197,79,65,0.6);color:#ff8e82" data-purchase-cancel="${po.id}">Annuler</button>` : ""}
-          ${received && (canAnyAdmin() || canManage()) ? `<button type="button" class="${repairBtnClass}" data-purchase-repair-stock="${po.id}">Appliquer au stock</button>` : ""}
+          ${received && needsRepair && (canAnyAdmin() || canManage()) ? `<button type="button" class="${repairBtnClass}" data-purchase-repair-stock="${po.id}">Appliquer au stock</button>` : ""}
+          ${received && !needsRepair && (canAnyAdmin() || canManage()) ? `<span class="muted" style="font-size:0.78rem">Stock OK</span>` : ""}
           ${(canAnyAdmin() || canManage()) ? `<button type="button" class="mini-btn" style="border-color:rgba(197,79,65,0.6);color:#ff8e82" data-purchase-delete="${po.id}">Supprimer</button>` : ""}
         </div>
       </div>

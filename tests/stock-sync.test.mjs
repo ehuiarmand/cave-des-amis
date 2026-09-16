@@ -169,3 +169,15 @@ describe("computePurchaseStockRepairPlan", () => {
     assert.equal(covered.needsRepair, true);
   });
 });
+
+describe("isFormatCodeSuffix", () => {
+  it("accepte B12/B16 mais refuse FORT (évite doublon RACINE 50)", () => {
+    const { isFormatCodeSuffix } = loadUtilsShared();
+    assert.equal(isFormatCodeSuffix(" B16"), true);
+    assert.equal(isFormatCodeSuffix(" B12"), true);
+    assert.equal(isFormatCodeSuffix(" 24"), true);
+    assert.equal(isFormatCodeSuffix(" FORT"), false);
+    assert.equal(isFormatCodeSuffix(" fort"), false);
+    assert.equal(isFormatCodeSuffix(" ENERGIE"), false);
+  });
+});

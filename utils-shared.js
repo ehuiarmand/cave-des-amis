@@ -40,6 +40,15 @@ function articlesMatch(a, b) {
   return Boolean(ka) && ka === kb;
 }
 
+/**
+ * Suffixe de format casier/carton uniquement (ex. " B16", " B12"), pas un mot produit
+ * comme " FORT" — sinon "RACINE 50 FORT" matcherait à tort "RACINE 50".
+ */
+function isFormatCodeSuffix(suffix) {
+  const s = String(suffix || "");
+  return /^\s+[bB]?\d{1,3}$/.test(s);
+}
+
 /** Dates candidates pour rattacher une entrée stock legacy à une réception. */
 function purchaseOrderCandidateDates(po) {
   const dates = new Set();
