@@ -4,6 +4,8 @@ const API = {
   session: "/api/session",
   state: "/api/state",
   changes: "/api/changes",
+  ventes: "/api/ventes",
+  archiveHistory: "/api/admin/archive-history",
   reset: "/api/reset",
   purgeMaquis: "/api/purge-maquis",
   restoreFromJson: "/api/admin/restore-from-json",
@@ -25,7 +27,21 @@ const _LS_PENDING = "mm_offline_pending";
 let _offlineSyncing = false;
 
 function offlineSaveState(s) {
-  try { localStorage.setItem(_LS_STATE, JSON.stringify(s)); } catch (_) {}
+  try {
+    // Miroir local allégé : pas l'historique complet (quota localStorage + perf).
+    const slim = {
+      activeSiteId: s?.activeSiteId,
+      sites: s?.sites,
+      stock: s?.stock,
+      commandes: s?.commandes,
+      casiers: s?.casiers,
+      nextId: s?.nextId,
+      pdjWorkDateBySite: s?.pdjWorkDateBySite,
+      dayBooks: (s?.dayBooks || []).slice(0, 60),
+      meta: s?.meta,
+    };
+    localStorage.setItem(_LS_STATE, JSON.stringify(slim));
+  } catch (_) {}
 }
 function offlineLoadState() {
   try { return JSON.parse(localStorage.getItem(_LS_STATE)); } catch (_) { return null; }
@@ -65,7 +81,23 @@ async function flushOfflineSync() {
   const btn = document.querySelector("#offline-banner button");
   if (btn) btn.textContent = "Synchronisation…";
   try {
-    await persistState({});
+    // Patch chaud uniquement — évite de renvoyer tout l'historique (ventes/mouvements).
+    const hotVentes = (state.ventes || []).slice(0, 50);
+    await persistStatePatch({
+      _putDelta: {
+        stock: true,
+        commandes: true,
+        casiers: true,
+        ventes: true,
+      },
+      stock: state.stock || [],
+      commandes: state.commandes || [],
+      casiers: state.casiers || [],
+      ventes: hotVentes,
+      nextId: state.nextId,
+      activeSiteId: state.activeSiteId,
+      pdjWorkDateBySite: state.pdjWorkDateBySite || {},
+    });
     offlinePendingClear();
     showToast("Synchronisation réussie.");
   } catch (_) {
@@ -2048,9 +2080,10 @@ async function deleteCreditRecovery(recoveryId) {
     `Suppression versement credit · ${debtorDisplayKey(row.debiteur)}`,
     `${fmt(row.montant)} FCFA · ${row.paiement || ""} · id ${id}`,
   );
-  await persistState({
-    creditRecoveries: withDeletionTombstones(state.creditRecoveries, [id], row.siteId || currentSiteId()),
-    staffAuditLog: state.staffAuditLog,
+  await persistStatePatch({
+    _putDelta: { creditRecoveries: true, staffAuditLog: true },
+    creditRecoveries: withDeletionTombstones([], [id], row.siteId || currentSiteId()),
+    staffAuditLog: (state.staffAuditLog || []).slice(0, 1),
     nextId: state.nextId,
   });
   closeModal("modal-credit-detail");
@@ -9570,9 +9603,53 @@ function salesPeriod() {
   };
 }
 
+/** Cache local des ventes archive (GET /api/ventes) pour l'historique hors fenêtre chaude. */
+let _archiveVentesCache = { key: "", rows: [] };
+
+function historyHotCutoffDate() {
+  const days = Math.max(1, Number(state?.meta?.historyHotDays) || 90);
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() - days);
+  return d.toISOString().slice(0, 10);
+}
+
+async function ensureArchiveVentesForHistoryPeriod() {
+  const { start, end } = salesPeriod();
+  const siteId = currentSiteId();
+  const cutoff = historyHotCutoffDate();
+  // Besoin d'archive seulement si la période démarre avant (ou sans borne) la fenêtre chaude.
+  if (start && start >= cutoff) {
+    _archiveVentesCache = { key: `${siteId}|hot-only`, rows: [] };
+    return [];
+  }
+  const key = `${siteId}|${start || ""}|${end || ""}`;
+  if (_archiveVentesCache.key === key) return _archiveVentesCache.rows;
+  try {
+    const page = await fetchVentesPage({
+      siteId,
+      from: start || undefined,
+      to: end || undefined,
+      limit: 1000,
+      offset: 0,
+    });
+    const rows = Array.isArray(page?.ventes) ? page.ventes : [];
+    _archiveVentesCache = { key, rows };
+    return rows;
+  } catch (_) {
+    return _archiveVentesCache.rows || [];
+  }
+}
+
 function salesForHistory() {
   const { start, end } = salesPeriod();
-  return recordsForSite(state.ventes).filter((item) => {
+  const local = recordsForSite(state.ventes);
+  const archived = recordsForSite(_archiveVentesCache.rows || []);
+  const byId = new Map();
+  for (const item of [...archived, ...local]) {
+    if (!item || item.id == null) continue;
+    byId.set(`${item.siteId || ""}|${item.id}`, item);
+  }
+  return [...byId.values()].filter((item) => {
     const value = saleDateValue(item);
     const categoryOk = currentFilter === "all" || item.cat === currentFilter;
     const startOk = !start || value >= start;
@@ -9669,18 +9746,21 @@ function venteBelongsToSessionServer(vente) {
 async function patchMyVentasMissingServer() {
   if (!sessionUser || !Array.isArray(state?.ventes)) return;
   const sn = String(sessionUser).trim().toLowerCase();
-  let changed = false;
+  const changedRows = [];
   state.ventes.forEach((v) => {
     if (String(v.server || v.serveur || "").trim()) return;
     const inferred = resolveSaleServerUsername(v);
     if (!inferred || inferred.trim().toLowerCase() !== sn) return;
     v.server = inferred;
     v.serveur = inferred;
-    changed = true;
+    changedRows.push(v);
   });
-  if (!changed) return;
+  if (!changedRows.length) return;
   try {
-    await persistStatePatch({ ventes: state.ventes });
+    await persistStatePatch({
+      _putDelta: { ventes: true },
+      ventes: changedRows,
+    });
   } catch (_) {
     /* affichage déjà corrigé par resolveSaleServerUsername */
   }
@@ -9843,9 +9923,10 @@ function printServeuseSalesHistory() {
   w.document.close();
 }
 
-function renderSalesHistory() {
+async function renderSalesHistory() {
   const histPanel = document.getElementById("ventes-caisse-panel-historique");
   if (!histPanel || histPanel.classList.contains("hidden")) return;
+  await ensureArchiveVentesForHistoryPeriod();
   populateReplaceFactureSelect();
   renderTabs();
   const ventes = salesForHistory().slice().sort((a, b) => b.date.localeCompare(a.date));
@@ -11949,6 +12030,7 @@ async function confirmReplaceVente(newArticleName) {
     + `${qtyLine}\nStock restitué : ${prevArticle} +${oldBottles} btl\nStock débité : ${newProduct.article} -${newBottles} btl`
     + prixLine,
   )) return;
+  const _corrSnap = snapshotLists(["ventes", "stock", "casiers", "casierMouvements", "staffAuditLog", "stockChecks"]);
   // Snapshot avant modification (pour annulation via modal supplément) :
   // stock ET état de la vente, afin de tout restaurer si l'utilisateur annule.
   _pendingSupplementStockSnapshot = {
@@ -12009,18 +12091,16 @@ async function confirmReplaceVente(newArticleName) {
   replacingVenteId = null;
   if (diff > 0) {
     // Montant superieur : ouvrir l'encaissement du supplement avant de sauvegarder
-    _pendingSupplement = { vente, diff };
+    _pendingSupplement = { vente, diff, snap: _corrSnap };
     openSupplementModal(diff, newProduct.article, vente.client, vente.factureNumber);
   } else {
     _pendingSupplementStockSnapshot = null;
     const saleDate = String(vente.date || "").slice(0, 10);
     const stockChecksDirty = /^\d{4}-\d{2}-\d{2}$/.test(saleDate)
       && refreshStockCheckAfterVenteCorrection(saleDate, siteId);
-    await persistState({
-      ventes: state.ventes,
-      stock: state.stock,
-      staffAuditLog: state.staffAuditLog,
-      ...(stockChecksDirty ? { stockChecks: state.stockChecks } : {}),
+    await persistDeltaFromSnapshot(_corrSnap, {
+      siteId,
+      extra: stockChecksDirty ? { stockChecks: state.stockChecks } : undefined,
     });
     renderSalesHistory();
     renderPointDuJour();
@@ -12053,7 +12133,12 @@ async function changeInvoiceDate(factureNumber) {
   if (stockCheckForSiteDate(newDate, siteId) && !window.confirm(`La journée du ${formatDateDdMmYyyy(newDate)} est déjà clôturée.\nContinuer quand même ?`)) return;
   ventes.forEach((v) => { v.date = newDate; });
   recordStaffAudit("update", "vente", `Date comptable modifiée · ${factureNumber}`, `${formatDateDdMmYyyy(currentDate)} → ${formatDateDdMmYyyy(newDate)}`);
-  await persistState({ ventes: state.ventes, staffAuditLog: state.staffAuditLog });
+  await persistStatePatch({
+    _putDelta: { ventes: true, staffAuditLog: true },
+    ventes,
+    staffAuditLog: (state.staffAuditLog || []).slice(0, 1),
+    nextId: state.nextId,
+  });
   renderSalesHistory();
   renderPointDuJour();
   showToast(`${factureNumber} déplacée au ${formatDateDdMmYyyy(newDate)}.`);
@@ -12073,7 +12158,7 @@ function openSupplementModal(diff, article, client, factureNumber) {
 
 async function confirmSupplement() {
   if (!_pendingSupplement) return;
-  const { vente, diff } = _pendingSupplement;
+  const { vente, diff, snap } = _pendingSupplement;
   const inputs = [
     ["Espèces", "supp-cash"],
     ["Wave", "supp-wave"],
@@ -12121,7 +12206,20 @@ async function confirmSupplement() {
   const prevSuppText = suppBtn ? suppBtn.textContent : "";
   if (suppBtn) { suppBtn.disabled = true; suppBtn.textContent = "Enregistrement…"; }
   try {
-    await persistState({ ventes: state.ventes, stock: state.stock, staffAuditLog: state.staffAuditLog, nextId: state.nextId });
+    if (snap) {
+      await persistDeltaFromSnapshot(snap, { siteId: vente.siteId || currentSiteId() });
+    } else {
+      await persistStatePatch({
+        _putDelta: { ventes: true, stock: true, staffAuditLog: true },
+        ventes: [vente],
+        stock: [
+          ...(_pendingSupplementStockSnapshot?.oldItem ? [_pendingSupplementStockSnapshot.oldItem] : []),
+          ...(_pendingSupplementStockSnapshot?.newItem ? [_pendingSupplementStockSnapshot.newItem] : []),
+        ].filter(Boolean),
+        staffAuditLog: (state.staffAuditLog || []).slice(0, 2),
+        nextId: state.nextId,
+      });
+    }
     _pendingSupplement = null;
     _pendingSupplementStockSnapshot = null;
     closeModal("modal-supplement");
@@ -12704,7 +12802,12 @@ async function settleSupplierDebt() {
   const prev = btn ? btn.textContent : "";
   if (btn) { btn.disabled = true; btn.textContent = "Enregistrement…"; }
   try {
-    await persistStatePatch({ charges: state.charges, staffAuditLog: state.staffAuditLog });
+    await persistStatePatch({
+      _putDelta: { charges: true, staffAuditLog: true },
+      charges: state.charges.filter((c) => Number(c.id) === Number(charge.id)),
+      staffAuditLog: (state.staffAuditLog || []).slice(0, 1),
+      nextId: state.nextId,
+    });
     closeModal("modal-supplier-debt-settle");
     _settleSupplierDebtChargeId = null;
     renderCreanciers();
@@ -13699,6 +13802,7 @@ async function deleteFactureDoublon(factureNum, ventes) {
   if (motif === null) return;
   if (!window.confirm(`Supprimer définitivement la facture ${factureNum} (${ventes.length} ligne(s)) et restituer le stock ?\n\nMotif : ${motif}`)) return;
   const siteId = currentSiteId();
+  const snap = snapshotLists(["ventes", "commandes", "stock", "casiers", "casierMouvements", "staffAuditLog", "stockChecks"]);
   ventes.forEach((v) => {
     if (v.noStock) return;
     const stockItem = stockItemForArticle(v.article, siteId);
@@ -13725,15 +13829,9 @@ async function deleteFactureDoublon(factureNum, ventes) {
     `Motif: ${motif}\n${ventes.length} ligne(s) supprimée(s) · stock restitué`);
   const datesToRefresh = [...new Set(ventes.map((v) => (v.date || "").slice(0, 10)).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)))];
   const stockChecksDirty = datesToRefresh.some((d) => refreshStockCheckAfterVenteCorrection(d, siteId));
-  await persistState({
-    ventes: state.ventes,
-    commandes: state.commandes,
-    stock: state.stock,
-    casiers: state.casiers,
-    casierMouvements: state.casierMouvements,
-    staffAuditLog: state.staffAuditLog,
-    nextId: state.nextId,
-    ...(stockChecksDirty ? { stockChecks: state.stockChecks } : {}),
+  await persistDeltaFromSnapshot(snap, {
+    siteId,
+    extra: stockChecksDirty ? { stockChecks: state.stockChecks } : undefined,
   });
   document.getElementById("del-facture-result").innerHTML =
     `<p style="color:#2e7d32;padding:10px 0;font-weight:600">✓ Facture ${escapeHtml(factureNum)} supprimée — stock restitué.</p>`;
@@ -13941,6 +14039,7 @@ async function applyPaymentCorrection(factureNum, originalVentes) {
   document.getElementById("corr-apply-qty-btn")?.setAttribute("disabled", "disabled");
   try {
   const ids = new Set(originalVentes.map((v) => v.id));
+  const changedIds = ids;
   state.ventes = (state.ventes || []).map((v) => {
     if (!ids.has(v.id)) return v;
     const net = (Number(v.prix) || 0) * (Number(v.qty) || 0) - (Number(v.remise) || 0);
@@ -13950,7 +14049,13 @@ async function applyPaymentCorrection(factureNum, originalVentes) {
   recordStaffAudit("update", "correction_paiement",
     `Correction paiement ${factureNum} : ${oldMethod} → ${newMethod}`,
     `Motif : ${motif}`);
-  await persistState({ ventes: state.ventes, staffAuditLog: state.staffAuditLog, nextId: state.nextId });
+  const payRows = (state.ventes || []).filter((v) => changedIds.has(v.id));
+  await persistStatePatch({
+    _putDelta: { ventes: true, staffAuditLog: true },
+    ventes: payRows,
+    staffAuditLog: (state.staffAuditLog || []).slice(0, 1),
+    nextId: state.nextId,
+  });
   showToast(`Paiement de ${factureNum} corrigé : ${newMethod}`);
   const refreshed = (state.ventes || []).filter(
     (v) => String(v.factureNumber || "").trim() === factureNum && v.siteId === currentSiteId(),
@@ -13984,6 +14089,7 @@ async function applyQtyCorrection(factureNum, originalVentes) {
   document.getElementById("corr-apply-qty-btn")?.setAttribute("disabled", "disabled");
   try {
   const siteId = currentSiteId();
+  const _qtyCorrSnap = snapshotLists(["ventes", "stock", "casiers", "casierMouvements", "staffAuditLog", "stockChecks"]);
   const idMap = new Map(changes.map((c) => [c.v.id, c]));
 
   state.ventes = (state.ventes || [])
@@ -14027,14 +14133,9 @@ async function applyQtyCorrection(factureNum, originalVentes) {
     `Motif : ${motif}`);
   const datesToRefresh = [...new Set(changes.map((c) => (c.v.date || "").slice(0, 10)).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)))];
   const stockChecksDirty = datesToRefresh.some((d) => refreshStockCheckAfterVenteCorrection(d, siteId));
-  await persistState({
-    ventes: state.ventes,
-    stock: state.stock,
-    casiers: state.casiers,
-    casierMouvements: state.casierMouvements,
-    staffAuditLog: state.staffAuditLog,
-    nextId: state.nextId,
-    ...(stockChecksDirty ? { stockChecks: state.stockChecks } : {}),
+  await persistDeltaFromSnapshot(_qtyCorrSnap, {
+    siteId,
+    extra: stockChecksDirty ? { stockChecks: state.stockChecks } : undefined,
   });
   showToast(`Quantités de ${factureNum} corrigées.`);
   const refreshed = (state.ventes || []).filter(
@@ -14071,6 +14172,7 @@ async function applyArticleCorrection(factureNum, originalVentes) {
   document.getElementById("corr-apply-art-btn")?.setAttribute("disabled", "disabled");
   try {
     const siteId = currentSiteId();
+    const _artCorrSnap = snapshotLists(["ventes", "stock", "casiers", "casierMouvements", "staffAuditLog", "stockChecks"]);
     const idMap = new Map(changes.map((c) => [c.v.id, c]));
 
     changes.forEach(({ v, oldArticle, newArticle }) => {
@@ -14126,14 +14228,9 @@ async function applyArticleCorrection(factureNum, originalVentes) {
 
     const datesToRefresh = [...new Set(changes.map((c) => (c.v.date || "").slice(0, 10)).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)))];
     const stockChecksDirty = datesToRefresh.some((d) => refreshStockCheckAfterVenteCorrection(d, siteId));
-    await persistState({
-      ventes: state.ventes,
-      stock: state.stock,
-      casiers: state.casiers,
-      casierMouvements: state.casierMouvements,
-      staffAuditLog: state.staffAuditLog,
-      nextId: state.nextId,
-      ...(stockChecksDirty ? { stockChecks: state.stockChecks } : {}),
+    await persistDeltaFromSnapshot(_artCorrSnap, {
+      siteId,
+      extra: stockChecksDirty ? { stockChecks: state.stockChecks } : undefined,
     });
     showToast(`Articles de ${factureNum} corrigés.`);
     const refreshed = (state.ventes || []).filter(
@@ -14988,47 +15085,8 @@ async function syncStateSilently() {
   const deferRender = shouldDeferLiveSyncRender();
 
   if (currentPage === "stock") {
-    // Full reload for stock page — delta only returns commandes, not stock/purchases
-    try {
-      const fresh = await apiRequest(API.state, { cache: "no-store" });
-      if (fresh) {
-        const _casiers = state.casiers ?? [];
-        const _casierMouvements = state.casierMouvements ?? [];
-        const _workShifts = workShiftsAll();
-        const _nextCasier = state.nextId?.casier;
-        const _nextCasierMvt = state.nextId?.casierMouvement;
-        state = mergeStateFromServerResponse(fresh, state, null);
-        if (_workShifts.length) {
-          state.workShifts = mergeWorkShiftsFromServer(state.workShifts || [], _workShifts);
-        }
-        if (!state.pdjWorkDateBySite || typeof state.pdjWorkDateBySite !== "object") state.pdjWorkDateBySite = {};
-        if (!state.nextId) state.nextId = {};
-        if (!state.casiers?.length && _casiers.length) state.casiers = _casiers;
-        if (!state.casierMouvements?.length && _casierMouvements.length) state.casierMouvements = _casierMouvements;
-        if (!state.nextId.casier && _nextCasier) state.nextId.casier = _nextCasier;
-        if (!state.nextId.casierMouvement && _nextCasierMvt) state.nextId.casierMouvement = _nextCasierMvt;
-        lsSaveCasiers();
-      }
-    } catch (e) { return; }
-    applyPdjWorkDateToVentesAndOrderDom();
-    syncPdjWorkDateInput();
-    renderTopbar();
-    // renderSiteSwitcher appelle syncDualZonePricingUi → renderStock → scrollLeft=0
-    // On capture le scroll AVANT et on englobe tout dans withPreservedMainShellScroll
-    // pour restaurer dans les deux cas (deferRender ou non)
-    const _preScrollX = (() => { const w = document.getElementById("main-stock-table-wrap"); return w ? w.scrollLeft : 0; })();
-    withPreservedMainShellScroll(() => {
-      renderSiteSwitcher();
-      if (!deferRender) {
-        renderStock();
-        if (stockSubTab === "inventaire") renderStockInventoryReport();
-        else if (stockSubTab === "mouvements") renderStockMovements();
-        else if (stockSubTab === "achats") renderPurchaseOrders();
-        else if (stockSubTab === "creanciers") renderCreanciers();
-        else if (stockSubTab === "casiers") renderCasiers();
-      }
-    }, { preScrollX: _preScrollX });
-    return;
+    // Plus de GET /api/state complet : même poll léger que les autres pages.
+    // Le stock est rafraîchi au prochain login / action locale / changement de page.
   }
 
   const previousQrIds = new Set(qrOrdersForCurrentSite(state).map((item) => item.id));
@@ -15053,17 +15111,26 @@ async function syncStateSilently() {
       state.meta = delta.meta;
     }
   } catch (error) {
-    // Fallback: if delta endpoint fails, reload full state.
-    const fresh = await apiRequest(API.state, { cache: "no-store" });
-    if (fresh) {
-      const _workShifts = workShiftsAll();
-      state = mergeStateFromServerResponse(fresh, state, null);
-      if (_workShifts.length) {
-        state.workShifts = mergeWorkShiftsFromServer(state.workShifts || [], _workShifts);
-      }
-    }
-    if (!state.pdjWorkDateBySite || typeof state.pdjWorkDateBySite !== "object") state.pdjWorkDateBySite = {};
+    // Fallback léger : ne plus recharger tout l'historique — garder l'état local.
     delta = null;
+  }
+  if (currentPage === "stock") {
+    applyPdjWorkDateToVentesAndOrderDom();
+    syncPdjWorkDateInput();
+    renderTopbar();
+    const _preScrollX = (() => { const w = document.getElementById("main-stock-table-wrap"); return w ? w.scrollLeft : 0; })();
+    withPreservedMainShellScroll(() => {
+      renderSiteSwitcher();
+      if (!deferRender && hadCmdDelta) {
+        renderStock();
+        if (stockSubTab === "inventaire") renderStockInventoryReport();
+        else if (stockSubTab === "mouvements") renderStockMovements();
+        else if (stockSubTab === "achats") renderPurchaseOrders();
+        else if (stockSubTab === "creanciers") renderCreanciers();
+        else if (stockSubTab === "casiers") renderCasiers();
+      }
+    }, { preScrollX: _preScrollX });
+    return;
   }
   let skipPdjFullRender = false;
   if (delta && typeof delta.pdjWorkDateBySite === "object") {
@@ -15544,7 +15611,8 @@ async function persistStatePatch(patch) {
   if (!patch || typeof patch !== "object") throw new Error("persistStatePatch: patch invalide.");
   const keys = Object.keys(patch);
   if (!keys.length) throw new Error("persistStatePatch: patch vide.");
-  if (patch.commandes !== undefined) {
+  // En mode delta, ne pas remplacer le tableau `commandes` du patch par state.commandes entier.
+  if (patch.commandes !== undefined && !(patch._putDelta && patch._putDelta.commandes)) {
     dedupeCommandesInState();
     pruneFinalizedCommandesFromState();
     patch.commandes = state.commandes;
@@ -15857,7 +15925,12 @@ async function saveCreditRecovery() {
     };
     state.creditRecoveries = [row, ...(state.creditRecoveries || [])];
     recordStaffAudit("create", "credit_recovery", `Encaissement credit · ${nameNorm}`, `${fmt(applied)} FCFA · ${method}${note ? ` · ${note}` : ""}`);
-    await persistState({ creditRecoveries: state.creditRecoveries, nextId: state.nextId });
+    await persistStatePatch({
+      _putDelta: { creditRecoveries: true, staffAuditLog: true },
+      creditRecoveries: [row],
+      staffAuditLog: (state.staffAuditLog || []).slice(0, 1),
+      nextId: state.nextId,
+    });
     _lastCreditRecoverySaveFingerprint = fp;
     _lastCreditRecoverySaveFingerprintAt = Date.now();
     document.getElementById("credit-name").value = nameNorm;
@@ -17595,6 +17668,107 @@ function newRowsPrepended(beforeRows, afterRows) {
   return cur.slice(0, cur.length - prevLen);
 }
 
+/** Plafond local aligné serveur (CASIER_MOUVEMENTS_MAX). */
+const CASIER_MOUVEMENTS_MAX = 3000;
+
+function trimCasierMouvements(sourceState = state) {
+  if (!sourceState || !Array.isArray(sourceState.casierMouvements)) return;
+  if (sourceState.casierMouvements.length > CASIER_MOUVEMENTS_MAX) {
+    sourceState.casierMouvements.length = CASIER_MOUVEMENTS_MAX;
+  }
+}
+
+/**
+ * Snapshot avant mutation. stock/casiers en deep-clone (mutations in-place).
+ * Autres listes : shallow copy de la référence tableau (append/filter).
+ */
+function snapshotLists(keys) {
+  const out = {};
+  for (const key of keys || []) {
+    const rows = state?.[key];
+    if (key === "stock" || key === "casiers") {
+      try {
+        out[key] = JSON.parse(JSON.stringify(rows || []));
+      } catch (_) {
+        out[key] = Array.isArray(rows) ? rows.map((r) => ({ ...r })) : [];
+      }
+    } else {
+      out[key] = Array.isArray(rows) ? rows.slice() : [];
+    }
+  }
+  return out;
+}
+
+function deltaRowsFromSnapshot(key, beforeRows, afterRows, siteId) {
+  const sid = String(siteId || "");
+  const before = beforeRows || [];
+  const after = afterRows || [];
+  const prepended = newRowsPrepended(before, after);
+  const changed = rowsChangedSince(before, after, sid);
+  const afterIds = new Set(
+    after.filter((r) => r && String(r.siteId || "") === sid).map((r) => r.id),
+  );
+  const deleted = before
+    .filter((r) => r && String(r.siteId || "") === sid && !afterIds.has(r.id))
+    .map((r) => ({ id: r.id, siteId: r.siteId || siteId, _deleted: true }));
+  const seen = new Set();
+  const rows = [];
+  for (const r of [...prepended, ...changed, ...deleted]) {
+    if (!r || r.id == null) continue;
+    const k = `${r.id}|${r.siteId || ""}|${r._deleted ? 1 : 0}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    rows.push(r);
+  }
+  return rows;
+}
+
+/**
+ * Persiste uniquement les lignes modifiées depuis `snapshot` (mode `_putDelta`).
+ * @param {Record<string, any[]>} snapshot — résultat de snapshotLists(...)
+ * @param {{ siteId?: string, extra?: object }} [opts]
+ */
+async function persistDeltaFromSnapshot(snapshot, opts = {}) {
+  const siteId = opts.siteId || currentSiteId();
+  trimCasierMouvements();
+  const putDelta = {};
+  const patch = {
+    _putDelta: putDelta,
+    nextId: state.nextId,
+    activeSiteId: state.activeSiteId,
+  };
+  for (const key of Object.keys(snapshot || {})) {
+    const rows = deltaRowsFromSnapshot(key, snapshot[key], state[key], siteId);
+    if (!rows.length) continue;
+    putDelta[key] = true;
+    patch[key] = rows;
+  }
+  if (opts.extra && typeof opts.extra === "object") {
+    for (const [k, v] of Object.entries(opts.extra)) {
+      if (k === "_putDelta") continue;
+      patch[k] = v;
+    }
+  }
+  if (!Object.keys(putDelta).length) {
+    const { _putDelta, activeSiteId, ...rest } = patch;
+    const extraKeys = Object.keys(rest).filter((k) => k !== "nextId");
+    if (!extraKeys.length && opts.extra == null) return;
+    return persistStatePatch({ activeSiteId: state.activeSiteId, ...rest, ...(opts.extra || {}) });
+  }
+  return persistStatePatch(patch);
+}
+
+/** Historique ventes paginé (fenêtre chaude + archive serveur). */
+async function fetchVentesPage({ siteId, from, to, limit = 200, offset = 0 } = {}) {
+  const q = new URLSearchParams();
+  if (siteId) q.set("siteId", siteId);
+  if (from) q.set("from", from);
+  if (to) q.set("to", to);
+  q.set("limit", String(limit));
+  q.set("offset", String(offset));
+  return apiRequest(`${API.ventes}?${q.toString()}`, { cache: "no-store" });
+}
+
 async function finalizeOrder(orderId = activeOrderId) {
   const oid = Number(orderId);
   if (!oid) return;
@@ -17689,9 +17863,10 @@ async function finalizeOrder(orderId = activeOrderId) {
     commandes: state.commandes,
     stock: JSON.parse(JSON.stringify(state.stock || [])),
     nextId: { ...(state.nextId || {}) },
-    casiers: state.casiers,
+    casiers: JSON.parse(JSON.stringify(state.casiers || [])),
     casierMouvements: state.casierMouvements,
     clientAvoirs: state.clientAvoirs,
+    staffAuditLog: state.staffAuditLog,
   };
 
   finalizeOrderInFlight.add(oid);
@@ -17795,6 +17970,7 @@ async function finalizeOrder(orderId = activeOrderId) {
     }
 
     pruneFinalizedCommandesFromState();
+    trimCasierMouvements();
     const encaissementPatch = {
       _putDelta: {
         ventes: true,
@@ -17802,6 +17978,7 @@ async function finalizeOrder(orderId = activeOrderId) {
         casiers: true,
         casierMouvements: true,
         commandes: true,
+        staffAuditLog: true,
       },
       ventes,
       commandes: [{ id: oid, siteId: order.siteId || siteId, _deleted: true }],
@@ -17809,6 +17986,7 @@ async function finalizeOrder(orderId = activeOrderId) {
       nextId: state.nextId,
       casiers: rowsChangedSince(rollback.casiers, state.casiers, siteId),
       casierMouvements: newRowsPrepended(rollback.casierMouvements, state.casierMouvements),
+      staffAuditLog: newRowsPrepended(rollback.staffAuditLog, state.staffAuditLog),
     };
     if (avoirUsedRaw > 0 && paymentMix.creditName) {
       encaissementPatch._putDelta.clientAvoirs = true;
@@ -19443,6 +19621,13 @@ async function closeAccountingDay() {
       dayBooks: state.dayBooks,
       pdjWorkDateBySite: state.pdjWorkDateBySite,
     });
+    // Archivage hot→cold après clôture (best-effort, ne bloque pas l'UI).
+    if (canGlobalSuperAdmin()) {
+      apiRequest(API.archiveHistory, {
+        method: "POST",
+        body: JSON.stringify({ days: Number(state?.meta?.historyHotDays) || 90 }),
+      }).catch(() => {});
+    }
     if (!stockCheckForSiteDate(dStr, sidClose) && savedStockChecks?.length) {
       state.stockChecks = savedStockChecks;
     }
@@ -19495,7 +19680,12 @@ async function saveCharge() {
   const prevChargeText = chargeBtn ? chargeBtn.textContent : "";
   if (chargeBtn) { chargeBtn.disabled = true; chargeBtn.textContent = "Enregistrement…"; }
   try {
-    await persistStatePatch({ charges: state.charges, staffAuditLog: state.staffAuditLog, nextId: state.nextId });
+    await persistStatePatch({
+      _putDelta: { charges: true, staffAuditLog: true },
+      charges: [charge],
+      staffAuditLog: (state.staffAuditLog || []).slice(0, 1),
+      nextId: state.nextId,
+    });
     closeModal("modal-charge");
     document.getElementById("c-date").value = today();
     document.getElementById("c-lib").value = "";
@@ -20740,6 +20930,7 @@ async function deleteFinalSale(id) {
     return;
   }
   const vente = state.ventes.find((item) => item.id === id);
+  const _delVenteSnap = snapshotLists(["ventes", "stock", "casiers", "casierMouvements", "staffAuditLog"]);
   if (vente && !vente.noStock) {
     const siteId = vente.siteId || currentSiteId();
     const stockItem = stockItemForArticle(vente.article, siteId);
@@ -20759,7 +20950,7 @@ async function deleteFinalSale(id) {
   }
   recordStaffAudit("delete", "vente", `Vente supprimee ${vente?.factureNumber ? vente.factureNumber : "#" + id}`, vente ? `${vente.article} · ${fmt(calcNet(vente))} FCFA · ${vente.paiement || ""}` : "");
   state.ventes = state.ventes.filter((item) => item.id !== id);
-  await persistState({ ventes: state.ventes, stock: state.stock, casiers: state.casiers, casierMouvements: state.casierMouvements, staffAuditLog: state.staffAuditLog, nextId: state.nextId });
+  await persistDeltaFromSnapshot(_delVenteSnap, { siteId: vente?.siteId || currentSiteId() });
   renderDashboard();
   renderSalesHistory();
   renderPointDuJour();
@@ -20796,9 +20987,11 @@ async function deleteCharge(id) {
   }
   recordStaffAudit("delete", "charge", ch ? `${ch.lib} · ${fmt(ch.montant)} FCFA` : `Depense #${id}`, ch ? `${ch.cat} · ${formatDateDdMmYyyy(ch.date)} · ${ch.paiement}` : "");
   state.charges = state.charges.filter((item) => item.id !== id);
-  await persistState({
-    charges: withDeletionTombstones(state.charges, [id], (ch && ch.siteId) || currentSiteId()),
-    staffAuditLog: state.staffAuditLog,
+  await persistStatePatch({
+    _putDelta: { charges: true, staffAuditLog: true },
+    charges: withDeletionTombstones([], [id], (ch && ch.siteId) || currentSiteId()),
+    staffAuditLog: (state.staffAuditLog || []).slice(0, 1),
+    nextId: state.nextId,
   });
   renderDashboard();
   renderCharges();
@@ -21369,8 +21562,14 @@ async function cleanupCartonCasiers({ confirmFirst = true } = {}) {
 
   const removeIds = new Set(toRemove.map((c) => String(c.id)));
   state.casiers = before.filter((c) => !isForSite(c) || !removeIds.has(String(c.id)));
+  toRemove.forEach((c) => markRowDeleted("casiers", c.id, c.siteId));
   lsSaveCasiers();
-  try { await persistStatePatch({ casiers: state.casiers }); } catch {}
+  try {
+    await persistStatePatch({
+      _putDelta: { casiers: true },
+      casiers: toRemove.map((c) => ({ id: c.id, siteId: c.siteId, _deleted: true })),
+    });
+  } catch {}
   renderCasierPhysique();
   renderDashboard();
   showToast(`${toRemove.length} casier(s) 'carton' supprime(s).`);
@@ -22018,6 +22217,7 @@ async function createCasier({ article, capacite, emplacement, quantiteActuelle =
   recomputeCasierStatus(casier);
   state.casiers.push(casier);
   state.casierMouvements = state.casierMouvements || [];
+  const _mvtBeforeLen = state.casierMouvements.length;
   if (qty0 > 0) {
     state.casierMouvements.unshift({
       id: state.nextId.casierMouvement++,
@@ -22048,7 +22248,15 @@ async function createCasier({ article, capacite, emplacement, quantiteActuelle =
     commentaire: [emplacement ? `emplacement: ${emplacement}` : "", vides0 > 0 ? `${vides0} btl vides` : ""].filter(Boolean).join(" · "),
     entity: "casier",
   });
-  await persistStatePatch({ casiers: state.casiers, casierMouvements: state.casierMouvements, nextId: state.nextId });
+  trimCasierMouvements();
+  const newMvts = state.casierMouvements.slice(0, Math.max(0, state.casierMouvements.length - _mvtBeforeLen));
+  await persistStatePatch({
+    _putDelta: { casiers: true, casierMouvements: true, staffAuditLog: true },
+    casiers: [casier],
+    casierMouvements: newMvts,
+    staffAuditLog: (state.staffAuditLog || []).slice(0, 2),
+    nextId: state.nextId,
+  });
   return casier;
 }
 
@@ -22065,6 +22273,7 @@ async function casierEntree(casierId, qty, { source = "fournisseur", commentaire
     return false;
   }
   const before = JSON.parse(JSON.stringify(casier));
+  const _mvtBeforeLen = (state.casierMouvements || []).length;
 
   casier.quantiteActuelle = current + q;
   recomputeCasierStatus(casier);
@@ -22095,7 +22304,14 @@ async function casierEntree(casierId, qty, { source = "fournisseur", commentaire
     commentaire,
     entity: "casier_entree",
   });
-  await persistStatePatch({ casiers: state.casiers, casierMouvements: state.casierMouvements, nextId: state.nextId });
+  trimCasierMouvements();
+  await persistStatePatch({
+    _putDelta: { casiers: true, casierMouvements: true, staffAuditLog: true },
+    casiers: [casier],
+    casierMouvements: state.casierMouvements.slice(0, Math.max(0, state.casierMouvements.length - _mvtBeforeLen)),
+    staffAuditLog: (state.staffAuditLog || []).slice(0, 2),
+    nextId: state.nextId,
+  });
   return true;
 }
 
@@ -22222,6 +22438,8 @@ async function casierSortie(casierId, qty, { motif = "autre", commentaire = "" }
       .filter(Boolean).join(" · ");
   }
   const before = JSON.parse(JSON.stringify(casier));
+  const _mvtBeforeLen = (state.casierMouvements || []).length;
+  const _stockSnap = JSON.parse(JSON.stringify(state.stock || []));
 
   casier.quantiteActuelle = current - q;
   recomputeCasierStatus(casier);
@@ -22259,12 +22477,19 @@ async function casierSortie(casierId, qty, { motif = "autre", commentaire = "" }
       `${a.article}: ${fmt(a.take)} btl rés. → frigo`).join("\n");
     recordStaffAudit("update", "frigo", `Casier vers frigo · ${stamp}`, detail || stamp);
   }
-  await persistStatePatch({
-    casiers: state.casiers,
-    casierMouvements: state.casierMouvements,
+  trimCasierMouvements();
+  const patch = {
+    _putDelta: { casiers: true, casierMouvements: true, staffAuditLog: true },
+    casiers: [casier],
+    casierMouvements: state.casierMouvements.slice(0, Math.max(0, state.casierMouvements.length - _mvtBeforeLen)),
+    staffAuditLog: (state.staffAuditLog || []).slice(0, 3),
     nextId: state.nextId,
-    ...((frigoPlan && frigoPlan.ok) || stockDeducted ? { stock: state.stock } : {}),
-  });
+  };
+  if ((frigoPlan && frigoPlan.ok) || stockDeducted) {
+    patch._putDelta.stock = true;
+    patch.stock = rowsChangedSince(_stockSnap, state.stock, currentSiteId());
+  }
+  await persistStatePatch(patch);
   return true;
 }
 
@@ -22284,7 +22509,10 @@ async function deleteCasier(casierId) {
   state.casiers = (state.casiers || []).filter((c) => Number(c.id) !== Number(casierId));
   markRowDeleted("casiers", casier.id, casier.siteId);
   recordStaffAudit("delete", "casier", `Suppression casier ${casier.code}`, `${casier.code} · ${casier.article} · emplacement ${casier.emplacement || "-"}`);
-  await persistStatePatch({ casiers: state.casiers });
+  await persistStatePatch({
+    _putDelta: { casiers: true },
+    casiers: withDeletionTombstones([], [casier.id], casier.siteId),
+  });
   return true;
 }
 
@@ -22350,7 +22578,16 @@ async function _retourVidesLot(matchingVides, cap, label, maxCasiers) {
     `Retour ${label} : ${processed} casier(s)`,
     `${processed} casier(s) × ${cap} btl = ${processed * cap} btl vides retournées fournisseur`
   );
-  await persistStatePatch({ casiers: state.casiers, casierMouvements: state.casierMouvements, nextId: state.nextId });
+  await persistStatePatch({
+    _putDelta: { casiers: true, casierMouvements: true, staffAuditLog: true },
+    casiers: [
+      ...sorted.filter((c) => !idsToDelete.includes(c.id)),
+      ...idsToDelete.map((cid) => ({ id: cid, siteId, _deleted: true })),
+    ],
+    casierMouvements: state.casierMouvements.slice(0, 1),
+    staffAuditLog: (state.staffAuditLog || []).slice(0, 1),
+    nextId: state.nextId,
+  });
   return processed;
 }
 
@@ -22415,7 +22652,15 @@ async function retourVidesCasier(casierId, qty) {
     state.casiers = state.casiers.filter((c) => c.id !== casier.id);
     markRowDeleted("casiers", casier.id, casier.siteId);
   }
-  await persistStatePatch({ casiers: state.casiers, casierMouvements: state.casierMouvements, nextId: state.nextId });
+  await persistStatePatch({
+    _putDelta: { casiers: true, casierMouvements: true, staffAuditLog: true },
+    casiers: (Number(casier.bouteillesVides) || 0) === 0 && (Number(casier.quantiteActuelle) || 0) === 0
+      ? [{ id: casier.id, siteId: casier.siteId, _deleted: true }]
+      : [casier],
+    casierMouvements: state.casierMouvements.slice(0, 1),
+    staffAuditLog: (state.staffAuditLog || []).slice(0, 1),
+    nextId: state.nextId,
+  });
   return true;
 }
 
@@ -23170,7 +23415,9 @@ async function bootstrapAuthenticatedApp(opts = {}) {
   if (!Array.isArray(state.stockLosses)) state.stockLosses = [];
   if (!Array.isArray(state.casiers)) state.casiers = [];
   if (!Array.isArray(state.casierMouvements)) state.casierMouvements = [];
+  trimCasierMouvements();
   if (!Array.isArray(state.staffAuditLog)) state.staffAuditLog = [];
+  if (state.staffAuditLog.length > STAFF_AUDIT_MAX) state.staffAuditLog.length = STAFF_AUDIT_MAX;
   if (!Array.isArray(state.workShifts)) state.workShifts = [];
   // Nettoyer les doublons de stockChecks (même siteId + date) accumulés par sessions concurrentes
   state.stockChecks = deduplicateStockChecks(state.stockChecks || []);
@@ -23195,7 +23442,16 @@ async function bootstrapAuthenticatedApp(opts = {}) {
   migrateCasiersVidesBouteillesVides();
   // Traiter les vides déjà accumulés avant le déploiement du retour auto (données existantes).
   const _bootReturned = autoReturnCompletedVideCasiers({ motif: "retour_auto_boot" });
-  if (_bootReturned > 0) await persistStatePatch({ casiers: state.casiers, casierMouvements: state.casierMouvements, nextId: state.nextId });
+  if (_bootReturned > 0) {
+    const newMvts = (state.casierMouvements || []).slice(0, Math.min(20, state.casierMouvements.length));
+    const touched = (state.casiers || []).filter((c) => String(c.siteId || "") === String(currentSiteId() || ""));
+    await persistStatePatch({
+      _putDelta: { casiers: true, casierMouvements: true },
+      casiers: touched.slice(0, 200),
+      casierMouvements: newMvts,
+      nextId: state.nextId,
+    });
+  }
   if (state.nextId.auditEntry === undefined || state.nextId.auditEntry === null) state.nextId.auditEntry = 0;
   knownQrOrderIds = new Set(qrOrdersForCurrentSite(state).map((item) => item.id));
   qrAlertCount = 0;

@@ -16,7 +16,7 @@ import struct
 import threading
 import time
 import unicodedata
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -223,6 +223,32 @@ _PG_SKIP_SETTINGS = set(STATE_PUT_LIST_KEYS) | {"auth", "sites", "categories", "
 # d'activité (le vrai correctif long terme = archivage + sauvegardes incrémentales, cf. audit).
 # Le corps de requête reste borné par MAX_BODY_BYTES (anti-DoS).
 MAX_STATE_LIST_ROWS = 150_000
+# Plafond mouvements casiers en RAM / miroir (historique au-delà → API paginée / archive).
+CASIER_MOUVEMENTS_MAX = 3000
+# Fenêtre chaude renvoyée au login (jours) pour ventes / mouvements.
+HISTORY_HOT_DAYS = 90
+
+
+def _row_history_date(row: dict[str, Any]) -> str:
+    """Date ISO YYYY-MM-DD d'une ligne historique (vente, mouvement, audit…)."""
+    for key in ("date", "createdAt", "soldAt", "updatedAt"):
+        raw = str(row.get(key) or "").strip()
+        if len(raw) >= 10 and raw[4] == "-" and raw[7] == "-":
+            return raw[:10]
+    return ""
+
+
+def filter_hot_history_rows(rows: list[Any] | None, *, days: int = HISTORY_HOT_DAYS) -> list[Any]:
+    """Garde les lignes dans la fenêtre chaude (et celles sans date exploitable)."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=max(1, int(days)))).strftime("%Y-%m-%d")
+    out: list[Any] = []
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        d = _row_history_date(row)
+        if not d or d >= cutoff:
+            out.append(row)
+    return out
 
 
 def validate_state_put_payload(payload: Any) -> None:
@@ -3311,7 +3337,14 @@ class DataStore:
         self._last_etag = self._compute_etag()
         self._rev = int(self._state.get("_meta", {}).get("rev") or self._rev or 1)
         self._updated_at = str(self._state.get("_meta", {}).get("updatedAt") or self._updated_at or "")
-
+        # Archivage opportuniste au démarrage (réduit la RAM / les saves).
+        try:
+            _arch = self.archive_old_history(days=HISTORY_HOT_DAYS)
+            if (_arch.get("archivedVentes") or 0) > 0 or (_arch.get("archivedCasierMouvements") or 0) > 0:
+                print(f"[archive] demarrage: {_arch}", flush=True)
+                self._last_etag = self._compute_etag()
+        except Exception as _arch_exc:
+            print(f"[archive] demarrage ignore: {_arch_exc}", flush=True)
     def all_site_ids(self) -> list[str]:
         """Liste les identifiants de tous les maquis connus de l'état."""
         with self._lock:
@@ -3385,9 +3418,20 @@ CREATE TABLE IF NOT EXISTS staff_audit_log (row_id BIGSERIAL PRIMARY KEY, item_i
 CREATE TABLE IF NOT EXISTS work_shifts (row_id BIGSERIAL PRIMARY KEY, item_id TEXT, site_id TEXT, data JSONB NOT NULL);
 CREATE TABLE IF NOT EXISTS restaurant_menu (row_id BIGSERIAL PRIMARY KEY, item_id INTEGER, site_id TEXT, data JSONB NOT NULL);
 CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_id INTEGER, site_id TEXT, data JSONB NOT NULL);
+CREATE TABLE IF NOT EXISTS ventes_archive (row_id BIGSERIAL PRIMARY KEY, item_id INTEGER, site_id TEXT, data JSONB NOT NULL);
+CREATE TABLE IF NOT EXISTS casier_mouvements_archive (row_id BIGSERIAL PRIMARY KEY, item_id INTEGER, site_id TEXT, data JSONB NOT NULL);
 """
         with conn.cursor() as cur:
             cur.execute(sql)
+            # Tables archive même si schema.sql externe est utilisé (idempotent).
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS ventes_archive ("
+                "row_id BIGSERIAL PRIMARY KEY, item_id INTEGER, site_id TEXT, data JSONB NOT NULL)"
+            )
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS casier_mouvements_archive ("
+                "row_id BIGSERIAL PRIMARY KEY, item_id INTEGER, site_id TEXT, data JSONB NOT NULL)"
+            )
         conn.commit()
         self._pg_ensure_unique_constraints(conn)
 
@@ -3433,7 +3477,9 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
         col_a, col_b = _PG_KEY_COLUMNS[table][0]
         type_a, type_b = _PG_KEY_COLUMNS[table][1]
         if not rows:
-            cur.execute(f"DELETE FROM {table}")
+            # Ne jamais vider une table sur un payload vide (souvent un patch partiel
+            # ou un client scoped) — risque de perte de données multi-maquis.
+            print(f"[postgres] prune ignore: table {table} vide dans le payload — aucune suppression", flush=True)
             return
         psycopg2.extras.execute_values(
             cur,
@@ -3449,6 +3495,29 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
             f"DELETE FROM {table} t WHERE NOT EXISTS "
             f"(SELECT 1 FROM {temp_name} k WHERE k.{col_a} = t.{col_a} AND k.{col_b} = t.{col_b})"
         )
+
+    def _pg_upsert_delta_only(
+        self,
+        cur: Any,
+        table: str,
+        rows: list[tuple[Any, Any, str]],
+        deleted: list[tuple[Any, Any]],
+    ) -> None:
+        """UPSERT uniquement les lignes du delta + DELETE des tombstones — sans prune full-table."""
+        col_a, col_b = _PG_KEY_COLUMNS[table][0]
+        if rows:
+            psycopg2.extras.execute_values(
+                cur,
+                f"INSERT INTO {table}({col_a}, {col_b}, data) VALUES %s "
+                f"ON CONFLICT ({col_a}, {col_b}) DO UPDATE SET data = EXCLUDED.data "
+                f"WHERE {table}.data IS DISTINCT FROM EXCLUDED.data",
+                rows,
+            )
+        for key_a, key_b in deleted:
+            cur.execute(
+                f"DELETE FROM {table} WHERE {col_a} = %s AND {col_b} = %s",
+                (key_a, key_b),
+            )
 
     def _pg_load(self) -> dict[str, Any]:
         """Recharge l'état complet depuis PostgreSQL (settings, sites, users, tables listées)."""
@@ -3479,13 +3548,25 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
         finally:
             conn.close()
 
-    def _pg_write(self, payload: dict[str, Any], changed_keys: set | None = None) -> None:
-        """Persiste l'état dans PostgreSQL via upsert ciblé par table (et tombstones de suppression)."""
+    def _pg_write(
+        self,
+        payload: dict[str, Any],
+        changed_keys: set | None = None,
+        put_delta: dict[str, bool] | None = None,
+        delta_rows: dict[str, list] | None = None,
+    ) -> None:
+        """Persiste l'état dans PostgreSQL via upsert ciblé par table (et tombstones de suppression).
+
+        Si `put_delta[key]` est vrai : n'upsert que les lignes de `delta_rows[key]` (tombstones
+        `_deleted` → DELETE) — pas de prune « supprimer tout ce qui n'est pas dans la liste ».
+        """
         if self._pg_startup_failed:
             raise RuntimeError(
                 "[postgres] ÉCRITURE BLOQUÉE : PostgreSQL était inaccessible au démarrage. "
                 "Redémarrez le service une fois PostgreSQL disponible pour éviter toute perte de données."
             )
+        put_delta = put_delta or {}
+        delta_rows = delta_rows or {}
         conn = self._pg_connect()
         try:
             self._pg_ensure_tables(conn)
@@ -3534,19 +3615,25 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                     for uname in existing_users - new_users:
                         cur.execute("DELETE FROM users WHERE username = %s", (uname,))
 
-                    # --- Listes : UPSERT ciblé + suppression des lignes disparues ---
-                    # changed_keys fourni = patch partiel : ne traiter que les tables modifiées.
-                    # _pg_upsert_and_prune ne réécrit que les lignes nouvelles/modifiées/supprimées,
-                    # au lieu de réécrire toute la table à chaque sauvegarde (cf. contrainte unique
-                    # posée par _pg_ensure_unique_constraints).
+                    # --- Listes : UPSERT ciblé (+ prune full OU delta-only) ---
                     for key, (table, id_type) in _PG_TABLES.items():
                         if changed_keys is not None and key not in changed_keys:
                             continue
-                        items = payload.get(key, [])
+                        use_delta = bool(put_delta.get(key))
+                        items = list(delta_rows.get(key) if use_delta else payload.get(key, []))
+                        if key == "casierMouvements" and not use_delta and len(items) > CASIER_MOUVEMENTS_MAX:
+                            items = items[:CASIER_MOUVEMENTS_MAX]
+                            payload["casierMouvements"] = items
+                        deleted_keys: list[tuple[Any, Any]] = []
                         if id_type == "int":
                             seen_int: set = set()
                             rows = []
                             for item in items:
+                                if not isinstance(item, dict):
+                                    continue
+                                if item.get("_deleted"):
+                                    deleted_keys.append((item.get("id"), item.get("siteId")))
+                                    continue
                                 k = (item.get("id"), item.get("siteId"))
                                 if k in seen_int:
                                     print(f"[postgres] doublon {table} ignoré: id={k[0]} siteId={k[1]}", flush=True)
@@ -3557,6 +3644,11 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                             seen_txt: set = set()
                             rows = []
                             for item in items:
+                                if not isinstance(item, dict):
+                                    continue
+                                if item.get("_deleted"):
+                                    deleted_keys.append((str(item.get("id", "")), item.get("siteId")))
+                                    continue
                                 k = (str(item.get("id", "")), item.get("siteId"))
                                 if k in seen_txt:
                                     print(f"[postgres] doublon {table} ignoré: id={k[0]} siteId={k[1]}", flush=True)
@@ -3567,6 +3659,11 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                             seen_ds: set = set()
                             rows = []
                             for item in items:
+                                if not isinstance(item, dict):
+                                    continue
+                                if item.get("_deleted"):
+                                    deleted_keys.append((item.get("siteId"), str(item.get("date", ""))[:10]))
+                                    continue
                                 k = (item.get("siteId"), str(item.get("date", ""))[:10])
                                 if k in seen_ds:
                                     print(f"[postgres] doublon {table} ignoré: siteId={k[0]} date={k[1]}", flush=True)
@@ -3579,7 +3676,10 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                                 ))
                         else:
                             continue
-                        self._pg_upsert_and_prune(cur, table, rows)
+                        if use_delta:
+                            self._pg_upsert_delta_only(cur, table, rows, deleted_keys)
+                        else:
+                            self._pg_upsert_and_prune(cur, table, rows)
         finally:
             conn.close()
 
@@ -3783,7 +3883,13 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
         self._last_backup_ts = now
         return True
 
-    def _write(self, payload: dict[str, Any], changed_keys: set | None = None) -> None:
+    def _write(
+        self,
+        payload: dict[str, Any],
+        changed_keys: set | None = None,
+        put_delta: dict[str, bool] | None = None,
+        delta_rows: dict[str, list] | None = None,
+    ) -> None:
         """Persiste l'état (Postgres, SQLite ou data.json) et déclenche les sauvegardes glissantes."""
         BACKUP_DIR.mkdir(parents=True, exist_ok=True)
         # Met à jour les métadonnées
@@ -3793,7 +3899,12 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
 
         if self._pg_enabled:
             try:
-                self._pg_write(payload, changed_keys=changed_keys)
+                self._pg_write(
+                    payload,
+                    changed_keys=changed_keys,
+                    put_delta=put_delta,
+                    delta_rows=delta_rows,
+                )
             except Exception as _pg_exc:
                 import traceback as _tb
                 print(f"[postgres] ERREUR ECRITURE: {type(_pg_exc).__name__}: {_pg_exc}", flush=True)
@@ -3806,13 +3917,14 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
             _HOT_PATCH_KEYS = frozenset({
                 "ventes", "stock", "commandes", "casiers", "casierMouvements",
                 "clientAvoirs", "nextId", "activeSiteId", "pdjWorkDateBySite",
+                "staffAuditLog", "charges", "creditRecoveries", "stockEntrees", "stockLosses",
             })
             if self._backup_due():
                 _hot_patch = (
                     changed_keys is not None
                     and changed_keys
                     and changed_keys <= _HOT_PATCH_KEYS
-                )
+                ) or bool(put_delta)
                 if _hot_patch:
                     print("[backup] patch chaud → sauvegarde JSON différée (Postgres OK)", flush=True)
                 else:
@@ -3927,7 +4039,11 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                 return keys is None or k in keys
 
             out: dict[str, Any] = {
-                "meta": {**self.meta()},
+                "meta": {
+                    **self.meta(),
+                    "historyHotDays": HISTORY_HOT_DAYS,
+                    "casierMouvementsMax": CASIER_MOUVEMENTS_MAX,
+                },
                 "sites": copy.deepcopy(s["sites"]),
                 "activeSiteId": s["activeSiteId"],
                 "pdjWorkDateBySite": copy.deepcopy(s.get("pdjWorkDateBySite", {})),
@@ -3948,9 +4064,22 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                     ],
                 },
             }
+            # Bootstrap complet (keys=None) : fenêtre chaude seulement pour l'historique volumineux.
+            # Réponses PUT partielles (keys set) : renvoyer tel quel (souvent déjà un delta).
+            slim_bootstrap = keys is None
             for k in self._HEAVY_STATE_KEYS:
-                if inc(k):
-                    out[k] = copy.deepcopy(s.get(k, []))
+                if not inc(k):
+                    continue
+                rows = s.get(k, [])
+                if slim_bootstrap and k == "ventes":
+                    rows = filter_hot_history_rows(rows, days=HISTORY_HOT_DAYS)
+                elif slim_bootstrap and k == "casierMouvements":
+                    rows = filter_hot_history_rows(rows, days=HISTORY_HOT_DAYS)
+                    if len(rows) > CASIER_MOUVEMENTS_MAX:
+                        rows = rows[:CASIER_MOUVEMENTS_MAX]
+                elif slim_bootstrap and k == "staffAuditLog" and len(rows) > 800:
+                    rows = rows[:800]
+                out[k] = copy.deepcopy(rows)
             return out
 
     def public_state_for_session(
@@ -4110,6 +4239,191 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                     "commandes": json.loads(json.dumps(commandes)),
                 },
             }
+
+    def list_ventes_page(
+        self,
+        *,
+        session: dict[str, Any],
+        site_id: str | None = None,
+        date_from: str = "",
+        date_to: str = "",
+        limit: int = 200,
+        offset: int = 0,
+        include_archive: bool = True,
+    ) -> dict[str, Any]:
+        """Historique ventes paginé (fenêtre + archive Postgres si dispo)."""
+        limit = max(1, min(int(limit), 1000))
+        offset = max(0, int(offset))
+        date_from = str(date_from or "").strip()[:10]
+        date_to = str(date_to or "").strip()[:10]
+        with self._lock:
+            site_ids_all = [str(s["id"]) for s in self._state.get("sites", []) if s.get("id")]
+            if session_is_superadmin(session, all_site_ids=site_ids_all):
+                allowed: set[str] | None = None
+            else:
+                allowed = session_allowed_sites(session, site_ids_all)
+                if not allowed and site_ids_all:
+                    allowed = {site_ids_all[0]}
+            rows: list[dict[str, Any]] = []
+            for v in self._state.get("ventes") or []:
+                if not isinstance(v, dict):
+                    continue
+                osid = str(v.get("siteId") or "")
+                if allowed is not None and osid not in allowed:
+                    continue
+                if site_id and osid != str(site_id):
+                    continue
+                d = _row_history_date(v)
+                if date_from and d and d < date_from:
+                    continue
+                if date_to and d and d > date_to:
+                    continue
+                rows.append(v)
+            # Archive Postgres (lignes hors RAM)
+            if include_archive and self._pg_enabled and not self._pg_startup_failed:
+                try:
+                    conn = self._pg_connect()
+                    try:
+                        with conn.cursor() as cur:
+                            cur.execute(
+                                "SELECT data FROM ventes_archive ORDER BY row_id DESC LIMIT %s",
+                                (max(limit + offset, 5000),),
+                            )
+                            for (data,) in cur.fetchall():
+                                v = data if isinstance(data, dict) else json.loads(data)
+                                if not isinstance(v, dict):
+                                    continue
+                                osid = str(v.get("siteId") or "")
+                                if allowed is not None and osid not in allowed:
+                                    continue
+                                if site_id and osid != str(site_id):
+                                    continue
+                                d = _row_history_date(v)
+                                if date_from and d and d < date_from:
+                                    continue
+                                if date_to and d and d > date_to:
+                                    continue
+                                rows.append(v)
+                    finally:
+                        conn.close()
+                except Exception as exc:
+                    print(f"[archive] lecture ventes_archive ignorée: {exc}", flush=True)
+            # Dédup par id+site
+            seen: set[tuple[Any, Any]] = set()
+            deduped: list[dict[str, Any]] = []
+            for v in rows:
+                k = (v.get("id"), v.get("siteId"))
+                if k in seen:
+                    continue
+                seen.add(k)
+                deduped.append(v)
+            deduped.sort(key=lambda r: (_row_history_date(r), str(r.get("id") or "")), reverse=True)
+            total = len(deduped)
+            page = deduped[offset: offset + limit]
+            return {
+                "meta": self.meta(),
+                "pagination": {"total": total, "limit": limit, "offset": offset},
+                "ventes": json.loads(json.dumps(page)),
+            }
+
+    def archive_old_history(self, *, days: int = HISTORY_HOT_DAYS) -> dict[str, int]:
+        """Déplace ventes / casierMouvements hors fenêtre chaude vers tables archive + purge RAM.
+
+        Sans Postgres : ne purge pas les ventes (pas d'archive durable) ; plafonne seulement
+        casierMouvements en mémoire.
+        """
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=max(1, int(days)))).strftime("%Y-%m-%d")
+        moved_ventes = 0
+        moved_mvt = 0
+        with self._lock:
+            hot_ventes: list[Any] = []
+            cold_ventes: list[dict[str, Any]] = []
+            for v in self._state.get("ventes") or []:
+                if not isinstance(v, dict):
+                    continue
+                d = _row_history_date(v)
+                if d and d < cutoff:
+                    cold_ventes.append(v)
+                else:
+                    hot_ventes.append(v)
+            hot_mvt: list[Any] = []
+            cold_mvt: list[dict[str, Any]] = []
+            for m in self._state.get("casierMouvements") or []:
+                if not isinstance(m, dict):
+                    continue
+                d = _row_history_date(m)
+                if d and d < cutoff:
+                    cold_mvt.append(m)
+                else:
+                    hot_mvt.append(m)
+            if len(hot_mvt) > CASIER_MOUVEMENTS_MAX:
+                # Les plus anciens au-delà du plafond partent aussi en archive.
+                overflow = hot_mvt[CASIER_MOUVEMENTS_MAX:]
+                hot_mvt = hot_mvt[:CASIER_MOUVEMENTS_MAX]
+                cold_mvt.extend(overflow)
+
+            if not self._pg_enabled or self._pg_startup_failed:
+                # Mode JSON : pas d'archive durable — ne jeter aucune vente.
+                if len(self._state.get("casierMouvements") or []) > CASIER_MOUVEMENTS_MAX:
+                    self._state["casierMouvements"] = list(self._state["casierMouvements"])[
+                        :CASIER_MOUVEMENTS_MAX
+                    ]
+                    self._write(self._state, changed_keys={"casierMouvements"})
+                return {"ventes": 0, "casierMouvements": 0, "cutoff": cutoff}
+
+            if cold_ventes or cold_mvt:
+                conn = self._pg_connect()
+                try:
+                    self._pg_ensure_tables(conn)
+                    with conn:
+                        with conn.cursor() as cur:
+                            if cold_ventes:
+                                rows = [
+                                    (v.get("id"), v.get("siteId"), json.dumps(v, ensure_ascii=False))
+                                    for v in cold_ventes
+                                ]
+                                psycopg2.extras.execute_values(
+                                    cur,
+                                    "INSERT INTO ventes_archive(item_id, site_id, data) VALUES %s",
+                                    rows,
+                                )
+                                for v in cold_ventes:
+                                    cur.execute(
+                                        "DELETE FROM ventes WHERE item_id = %s AND site_id = %s",
+                                        (v.get("id"), v.get("siteId")),
+                                    )
+                                moved_ventes = len(cold_ventes)
+                            if cold_mvt:
+                                rows = [
+                                    (m.get("id"), m.get("siteId"), json.dumps(m, ensure_ascii=False))
+                                    for m in cold_mvt
+                                ]
+                                psycopg2.extras.execute_values(
+                                    cur,
+                                    "INSERT INTO casier_mouvements_archive(item_id, site_id, data) VALUES %s",
+                                    rows,
+                                )
+                                for m in cold_mvt:
+                                    cur.execute(
+                                        "DELETE FROM casier_mouvements WHERE item_id = %s AND site_id = %s",
+                                        (m.get("id"), m.get("siteId")),
+                                    )
+                                moved_mvt = len(cold_mvt)
+                finally:
+                    conn.close()
+
+                self._state["ventes"] = hot_ventes
+                self._state["casierMouvements"] = hot_mvt
+                # PG déjà à jour (INSERT archive + DELETE) — pas de prune full-table.
+                self._rev = int(self._rev or 0) + 1
+                self._updated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                self._state["_meta"] = {"rev": self._rev, "updatedAt": self._updated_at}
+                self._last_etag = self._compute_etag()
+                print(
+                    f"[archive] cutoff={cutoff} ventes={moved_ventes} mouvements={moved_mvt}",
+                    flush=True,
+                )
+            return {"archivedVentes": moved_ventes, "archivedCasierMouvements": moved_mvt, "cutoff": cutoff}
 
     def _apply_recovery_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Fusionne un snapshot complet (data.json ou backups/data-*.json) dans le stockage actif."""
@@ -4524,6 +4838,11 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
             raw_delta = payload.pop("_putDelta", None)
             if isinstance(raw_delta, dict):
                 put_delta = {str(k): bool(v) for k, v in raw_delta.items()}
+            # Conserver les lignes delta AVANT merge (pour écriture PG row-only).
+            delta_rows: dict[str, list] = {}
+            for _dk, _on in put_delta.items():
+                if _on and _dk in payload and isinstance(payload.get(_dk), list):
+                    delta_rows[_dk] = list(payload[_dk])
             current = self._state
             site_ids = [site.get("id") for site in current["sites"] if site.get("id")]
             sid_list = [str(s) for s in site_ids]
@@ -4588,6 +4907,8 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                 for _key in _GLOBAL_PATCH_KEYS:
                     if _key not in payload:
                         continue
+                    # Toujours fusionner par id (même superadmin) : un client scoped ou un
+                    # instantané partiel ne doit jamais remplacer toute la table en RAM/PG.
                     if _key == "casiers":
                         sanitized = []
                         for row in (payload["casiers"] or []):
@@ -4599,17 +4920,21 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                             row["quantiteActuelle"] = max(0, min(qte, cap))
                             row["capacite"] = cap
                             sanitized.append(row)
-                        if put_delta.get("casiers"):
-                            current["casiers"] = merge_scoped_rows(
-                                current.get("casiers", []),
-                                sanitized,
-                                set(sid_list),
-                                sid_list,
-                            )
-                        else:
-                            current["casiers"] = sanitized
+                        current["casiers"] = merge_scoped_rows(
+                            current.get("casiers", []),
+                            sanitized,
+                            set(sid_list),
+                            sid_list,
+                        )
                     elif _key == "ventes" and put_delta.get("ventes"):
                         current[_key] = merge_scoped_rows(
+                            current.get(_key, []),
+                            payload[_key],
+                            set(sid_list),
+                            sid_list,
+                        )
+                    elif _key == "ventes":
+                        current[_key] = merge_ventes_scoped(
                             current.get(_key, []),
                             payload[_key],
                             set(sid_list),
@@ -4622,25 +4947,15 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                             set(sid_list),
                             sid_list,
                         )
-                    elif _key == "stock":
-                        # Toujours fusionner par id (jamais d'ecrasement complet), meme sans
-                        # _putDelta : un superadmin qui envoie un instantane perime du stock
-                        # (ex. pendant qu'une vente ou une reception se termine sur un autre
-                        # poste) ne doit pas effacer silencieusement ces changements concurrents.
-                        # Coherent avec le comportement deja applique aux sessions scopees
-                        # (cf. branche non-superadmin plus bas). La suppression d'un article
-                        # doit passer par un tombstone {"id":X,"_deleted":true} (cf. TOMBSTONE_KEYS).
-                        current[_key] = merge_scoped_rows(
+                    elif _key == "commandes":
+                        current[_key] = merge_commandes_scoped(
                             current.get(_key, []),
                             payload[_key],
                             set(sid_list),
                             sid_list,
+                            ventes=current.get("ventes", []),
                         )
-                    elif put_delta.get(_key) and _key in (
-                        "casiers", "casierMouvements", "clientAvoirs",
-                        "creditRecoveries", "loyaltyClients", "consignes", "charges",
-                        "stockEntrees", "stockLosses", "purchaseOrders", "supplierPrices",
-                    ):
+                    elif _key == "stock":
                         current[_key] = merge_scoped_rows(
                             current.get(_key, []),
                             payload[_key],
@@ -4648,7 +4963,12 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                             sid_list,
                         )
                     else:
-                        current[_key] = payload[_key]
+                        current[_key] = merge_scoped_rows(
+                            current.get(_key, []),
+                            payload[_key],
+                            set(sid_list),
+                            sid_list,
+                        )
                 if "pdjWorkDateBySite" in payload:
                     current["pdjWorkDateBySite"] = _sanitize_pdj_work_date_map(
                         payload.get("pdjWorkDateBySite") or {},
@@ -4727,7 +5047,12 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
                 if current["activeSiteId"] not in site_ids and site_ids:
                     current["activeSiteId"] = site_ids[0]
 
-                self._write(current, changed_keys=set(payload.keys()))
+                self._write(
+                    current,
+                    changed_keys=set(payload.keys()),
+                    put_delta=put_delta,
+                    delta_rows=delta_rows,
+                )
                 _sites_by_id_g = {str(s.get("id", "")): s for s in (current.get("sites") or []) if isinstance(s, dict)}
                 _auth_g = current.get("auth", {}).get("users", [])
                 if "stockChecks" in payload:
@@ -4920,7 +5245,12 @@ CREATE TABLE IF NOT EXISTS ingredient_stock (row_id BIGSERIAL PRIMARY KEY, item_
             if current["activeSiteId"] not in site_ids and site_ids:
                 current["activeSiteId"] = site_ids[0]
 
-            self._write(current, changed_keys=set(payload.keys()))
+            self._write(
+                current,
+                changed_keys=set(payload.keys()),
+                put_delta=put_delta,
+                delta_rows=delta_rows,
+            )
             _sites_by_id = {str(s.get("id", "")): s for s in (current.get("sites") or []) if isinstance(s, dict)}
             _auth_u = current.get("auth", {}).get("users", [])
             print(f"[PUT scoped] payload keys={list(payload.keys())[:10]} sites_by_id={list(_sites_by_id.keys())}", flush=True)
@@ -5413,6 +5743,37 @@ class AppHandler(BaseHTTPRequestHandler):
                 return
             self.send_json(HTTPStatus.OK, store.public_state_for_session(session), etag=etag, cache_control="no-store")
             return
+        if get_path == "/api/ventes":
+            session = self.require_session()
+            if session is None:
+                return
+            site_id = str((query.get("siteId") or [""])[0]).strip() or None
+            date_from = str((query.get("from") or [""])[0]).strip()
+            date_to = str((query.get("to") or [""])[0]).strip()
+            try:
+                limit = int((query.get("limit") or ["200"])[0])
+            except (ValueError, TypeError):
+                limit = 200
+            try:
+                offset = int((query.get("offset") or ["0"])[0])
+            except (ValueError, TypeError):
+                offset = 0
+            if site_id and not session_is_superadmin(session, all_site_ids=store.all_site_ids()) and site_id not in (session.get("allowedSiteIds") or []):
+                self.send_json(HTTPStatus.FORBIDDEN, {"error": "Maquis non autorisé pour cette session."})
+                return
+            self.send_json(
+                HTTPStatus.OK,
+                store.list_ventes_page(
+                    session=session,
+                    site_id=site_id,
+                    date_from=date_from,
+                    date_to=date_to,
+                    limit=limit,
+                    offset=offset,
+                ),
+                cache_control="no-store",
+            )
+            return
         if get_path == "/api/public/order":
             self.send_error(HTTPStatus.METHOD_NOT_ALLOWED)
             return
@@ -5642,6 +6003,28 @@ class AppHandler(BaseHTTPRequestHandler):
                 "create_manual_backup",
                 {"ip": self.client_ip(), "username": session.get("username", ""), "file": info.get("file", "")},
             )
+            self.send_json(HTTPStatus.OK, info, cache_control="no-store")
+            return
+        if post_path == "/api/admin/archive-history":
+            session = self.require_session()
+            if session is None:
+                return
+            if not self.require_csrf(session):
+                return
+            if not session_is_superadmin(session, all_site_ids=store.all_site_ids()):
+                self.send_json(HTTPStatus.FORBIDDEN, {"error": "Acces refuse."})
+                return
+            try:
+                days = int((self.read_json() or {}).get("days") or HISTORY_HOT_DAYS)
+            except (TypeError, ValueError, OSError):
+                days = HISTORY_HOT_DAYS
+            try:
+                info = store.archive_old_history(days=days)
+            except Exception as error:
+                audit_log("archive_history_failed", {"ip": self.client_ip(), "username": session.get("username", ""), "error": str(error)[:200]})
+                self.send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "Archivage impossible."})
+                return
+            audit_log("archive_history", {"ip": self.client_ip(), "username": session.get("username", ""), **info})
             self.send_json(HTTPStatus.OK, info, cache_control="no-store")
             return
         if post_path == "/api/public/order":
