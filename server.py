@@ -9,6 +9,7 @@ from html import escape as escape_html
 import json
 import os
 import re
+import smtplib
 import sqlite3
 import secrets
 import socket
@@ -17,6 +18,7 @@ import threading
 import time
 import unicodedata
 from datetime import datetime, timedelta, timezone
+from email.message import EmailMessage
 from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -6534,6 +6536,42 @@ class AppHandler(BaseHTTPRequestHandler):
                 self.send_json(HTTPStatus.BAD_REQUEST, {"error": str(ex)})
             return
 
+        if post_path == "/api/email-test":
+            session = self.require_session()
+            if session is None:
+                return
+            if not self.require_csrf(session):
+                return
+            role = str(session.get("role") or "").strip().lower()
+            if role not in ("manager", "admin", "superadmin", "gerant"):
+                self.send_json(HTTPStatus.FORBIDDEN, {"error": "Accès refusé."})
+                return
+            body = self.read_json() or {}
+            to_raw = str(body.get("email") or body.get("to") or "").strip()
+            addrs = _parse_email_list(to_raw)
+            if not addrs:
+                self.send_json(HTTPStatus.BAD_REQUEST, {"error": "Adresse e-mail requise."})
+                return
+            if not _smtp_configured():
+                self.send_json(
+                    HTTPStatus.BAD_REQUEST,
+                    {"error": "SMTP non configuré sur le serveur (SMTP_HOST / SMTP_FROM)."},
+                )
+                return
+            try:
+                _send_email(
+                    addrs,
+                    "[Cave des Amis] Test e-mail",
+                    "Test de notification e-mail réussi. Le rapport quotidien du point des ventes pourra être envoyé.",
+                )
+                audit_log("email_test", {"ip": self.client_ip(), "username": str(session.get("username", "")), "to": addrs})
+                self.send_json(HTTPStatus.OK, {"ok": True, "to": addrs})
+            except Exception as ex:
+                print(f"[email] test failed: {ex}", flush=True)
+                self.send_json(HTTPStatus.BAD_REQUEST, {"error": "Envoi impossible. Vérifiez la configuration SMTP."})
+                audit_log("email_test_failed", {"error": str(ex), "to": addrs})
+            return
+
         if post_path.startswith("/api"):
             self.send_json(HTTPStatus.NOT_FOUND, {"error": "Route API introuvable. Verifiez que la derniere version du serveur est deployee."})
             return
@@ -7243,6 +7281,482 @@ def _purge_expired_inmemory() -> None:
         pass
 
 
+# --- Rapport e-mail quotidien (point des ventes) ---------------------------------
+
+_daily_email_sent: set[str] = set()
+_daily_email_sent_lock = threading.Lock()
+
+
+def _parse_email_list(raw: str) -> list[str]:
+    """Découpe une liste d'adresses e-mail séparées par virgule / point-virgule / espace."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for part in re.split(r"[,;\s]+", str(raw or "").strip()):
+        addr = part.strip()
+        if not addr or "@" not in addr:
+            continue
+        key = addr.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(addr)
+    return out
+
+
+def _smtp_configured() -> bool:
+    """True si le serveur SMTP est suffisamment configuré pour envoyer."""
+    return bool(os.environ.get("SMTP_HOST", "").strip() and os.environ.get("SMTP_FROM", "").strip())
+
+
+def _send_email(to_addrs: list[str], subject: str, body: str) -> None:
+    """Envoie un e-mail texte via SMTP (TLS STARTTLS par défaut sur port 587)."""
+    host = os.environ.get("SMTP_HOST", "").strip()
+    from_addr = os.environ.get("SMTP_FROM", "").strip()
+    if not host or not from_addr:
+        raise RuntimeError("SMTP non configuré (SMTP_HOST / SMTP_FROM).")
+    recipients = [a for a in to_addrs if a and "@" in a]
+    if not recipients:
+        raise RuntimeError("Aucun destinataire e-mail valide.")
+    try:
+        port = int(os.environ.get("SMTP_PORT", "587") or "587")
+    except (TypeError, ValueError):
+        port = 587
+    user = os.environ.get("SMTP_USER", "").strip()
+    password = os.environ.get("SMTP_PASSWORD", "").strip()
+    use_ssl = str(os.environ.get("SMTP_SSL", "")).strip().lower() in ("1", "true", "yes")
+    use_tls = str(os.environ.get("SMTP_TLS", "1")).strip().lower() not in ("0", "false", "no")
+
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = from_addr
+    msg["To"] = ", ".join(recipients)
+    msg.set_content(body)
+
+    if use_ssl:
+        with smtplib.SMTP_SSL(host, port, timeout=30) as smtp:
+            if user:
+                smtp.login(user, password)
+            smtp.send_message(msg)
+    else:
+        with smtplib.SMTP(host, port, timeout=30) as smtp:
+            smtp.ehlo()
+            if use_tls:
+                smtp.starttls()
+                smtp.ehlo()
+            if user:
+                smtp.login(user, password)
+            smtp.send_message(msg)
+
+
+def _vente_net_server(v: dict[str, Any]) -> int:
+    """Montant net d'une ligne de vente (prix × qty − remise)."""
+    prix = int(v.get("prix") or 0)
+    qty = int(v.get("qty") or 0)
+    remise = int(v.get("remise") or 0)
+    return max(0, prix * qty - remise)
+
+
+def _is_supplier_credit_payment(paiement: Any) -> bool:
+    """True si le mode de paiement est un crédit fournisseur (dette du maquis)."""
+    s = _normalize_payment_method_key(paiement)
+    return "credit" in s and "fournisseur" in s
+
+
+def _date_label_fr(iso_or_any: Any) -> str:
+    """Convertit une date ISO (YYYY-MM-DD…) en libellé JJ/MM/AAAA, sinon retourne la chaîne brute."""
+    raw = str(iso_or_any or "").strip()
+    day = raw[:10]
+    if len(day) == 10 and day[4] == "-" and day[7] == "-":
+        y, m, d = day.split("-")
+        return f"{d}/{m}/{y}"
+    return raw or "—"
+
+
+def _open_supplier_creanciers(
+    site_id: str,
+    charges: list[dict[str, Any]] | None = None,
+    purchase_orders: list[dict[str, Any]] | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Dettes fournisseur ouvertes pour un maquis (miroir Stock → Créanciers).
+
+    Retourne (commandes crédit non reçues/annulées, charges crédit non réglées).
+    """
+    pending_orders: list[dict[str, Any]] = []
+    for po in purchase_orders or []:
+        if not isinstance(po, dict):
+            continue
+        if str(po.get("siteId") or "") != site_id:
+            continue
+        status = str(po.get("status") or "").strip()
+        if status in ("Reçue", "Recue", "Annulée", "Annulee"):
+            continue
+        if not _is_supplier_credit_payment(po.get("payment") or po.get("paiement")):
+            continue
+        pending_orders.append(po)
+    pending_orders.sort(key=lambda p: str(p.get("date") or ""), reverse=True)
+
+    open_charges: list[dict[str, Any]] = []
+    for charge in charges or []:
+        if not isinstance(charge, dict):
+            continue
+        if str(charge.get("siteId") or "") != site_id:
+            continue
+        if not _is_supplier_credit_payment(charge.get("paiement") or charge.get("payment")):
+            continue
+        if charge.get("supplierDebtPaidAt"):
+            continue
+        open_charges.append(charge)
+    open_charges.sort(key=lambda c: str(c.get("date") or ""), reverse=True)
+    return pending_orders, open_charges
+
+
+def _credit_issued_on_vente(v: dict[str, Any]) -> int:
+    """Montant de crédit client émis sur une ligne de vente (0 si paiement comptant)."""
+    net = _vente_net_server(v)
+    details = v.get("paiementDetails")
+    if not (isinstance(details, list) and details):
+        details = [{"method": v.get("paiement") or "", "amount": net}]
+    credit_amount = 0
+    for det in details:
+        if not isinstance(det, dict):
+            continue
+        if _is_credit_client_method(det.get("method")):
+            credit_amount += int(det.get("amount") or 0)
+    if credit_amount <= 0 and _is_a_regler_paiement(v.get("paiement")):
+        credit_amount = net
+    return max(0, credit_amount)
+
+
+def _credit_first_opened_iso(v: dict[str, Any]) -> str:
+    """Date ISO de prise du crédit pour une vente (soldAt / createdAt / date)."""
+    for key in ("soldAt", "createdAt"):
+        raw = str(v.get(key) or "").strip()
+        if raw:
+            return raw[:10] if len(raw) >= 10 else raw
+    return str(v.get("date") or "")[:10]
+
+
+def _credit_outstanding_entries(
+    site_id: str,
+    ventes: list[dict[str, Any]] | None = None,
+    credit_recoveries: list[dict[str, Any]] | None = None,
+) -> list[tuple[str, int, str]]:
+    """Soldes débiteurs > 0 pour un maquis : (nom, reste dû, date 1re prise crédit JJ/MM/AAAA).
+
+    Miroir de creditOutstandingMap() + creditFirstOpenedLabelByDebtor() côté app.
+    """
+    issued: dict[str, int] = {}
+    first_iso: dict[str, str] = {}
+    for v in ventes or []:
+        if not isinstance(v, dict):
+            continue
+        if str(v.get("siteId") or "") != site_id:
+            continue
+        amount = _credit_issued_on_vente(v)
+        if amount <= 0:
+            continue
+        name = _debtor_display_key(v.get("debiteur") or v.get("client") or "Client inconnu")
+        issued[name] = issued.get(name, 0) + amount
+        day = _credit_first_opened_iso(v)
+        if day and (name not in first_iso or day < first_iso[name]):
+            first_iso[name] = day
+    for p in credit_recoveries or []:
+        if not isinstance(p, dict):
+            continue
+        if str(p.get("siteId") or "") != site_id:
+            continue
+        name = _debtor_display_key(p.get("debiteur") or "Client inconnu")
+        if name not in issued:
+            continue
+        issued[name] = issued.get(name, 0) - int(p.get("montant") or 0)
+    entries: list[tuple[str, int, str]] = []
+    for name, bal in issued.items():
+        if bal <= 0:
+            continue
+        entries.append((name, bal, _date_label_fr(first_iso.get(name) or "")))
+    entries.sort(key=lambda x: (-x[1], x[0]))
+    return entries
+
+
+def _fmt_fcfa_plain(n: int) -> str:
+    """Formate un montant entier avec espaces (ex. 1 250 000 FCFA)."""
+    s = str(abs(int(n)))
+    groups: list[str] = []
+    while len(s) > 3:
+        groups.append(s[-3:])
+        s = s[:-3]
+    groups.append(s)
+    return ("-" if n < 0 else "") + " ".join(reversed(groups)) + " FCFA"
+
+
+def _format_daily_ventes_report(
+    site: dict[str, Any],
+    report_date: str,
+    ventes: list[dict[str, Any]],
+    stock_checks: list[dict[str, Any]],
+    credit_recoveries: list[dict[str, Any]] | None = None,
+    commandes: list[dict[str, Any]] | None = None,
+) -> str:
+    """Construit le corps texte du point des ventes pour une date (veille en général)."""
+    site_id = str(site.get("id") or "")
+    nom = str(site.get("nom") or site.get("name") or site_id or "Maquis")
+    try:
+        y, m, d = report_date.split("-")
+        date_label = f"{d}/{m}/{y}"
+    except ValueError:
+        date_label = report_date
+
+    ventes_jour = [
+        v for v in (ventes or [])
+        if isinstance(v, dict)
+        and str(v.get("siteId") or "") == site_id
+        and str(v.get("date") or "")[:10] == report_date
+    ]
+    totaux: dict[str, int] = {}
+    ca_total = 0
+    for v in ventes_jour:
+        net = _vente_net_server(v)
+        ca_total += net
+        details = v.get("paiementDetails")
+        if isinstance(details, list) and details:
+            for det in details:
+                if not isinstance(det, dict):
+                    continue
+                method = str(det.get("method") or "Autre").strip() or "Autre"
+                amount = int(det.get("amount") or 0)
+                if amount <= 0:
+                    continue
+                totaux[method] = totaux.get(method, 0) + amount
+        else:
+            method = str(v.get("paiement") or "Autre").strip() or "Autre"
+            totaux[method] = totaux.get(method, 0) + net
+
+    by_article: dict[str, dict[str, int]] = {}
+    for v in ventes_jour:
+        art = str(v.get("article") or "—").strip() or "—"
+        qty = max(0, int(v.get("qty") or 0))
+        net = _vente_net_server(v)
+        bucket = by_article.setdefault(art, {"qty": 0, "total": 0})
+        bucket["qty"] += qty
+        bucket["total"] += net
+    top_articles = sorted(by_article.items(), key=lambda x: x[1]["total"], reverse=True)[:12]
+
+    recouvrements = [
+        r for r in (credit_recoveries or [])
+        if isinstance(r, dict)
+        and str(r.get("siteId") or "") == site_id
+        and (
+            str(r.get("date") or "")[:10] == report_date
+            or str(r.get("paidAt") or "")[:10] == report_date
+        )
+    ]
+    ca_recouv = sum(int(r.get("montant") or 0) for r in recouvrements)
+
+    # Commandes encore ouvertes = en attente d'encaissement (pas Payé / Annulé)
+    pending_orders: list[dict[str, Any]] = []
+    pending_total = 0
+    for order in commandes or []:
+        if not isinstance(order, dict):
+            continue
+        if str(order.get("siteId") or "") != site_id:
+            continue
+        if str(order.get("date") or "")[:10] != report_date:
+            continue
+        if _order_status_finalized(order.get("status") or order.get("statut")):
+            continue
+        lines_ord = [ln for ln in (order.get("lignes") or []) if isinstance(ln, dict)]
+        if not lines_ord:
+            continue
+        order_net = sum(_vente_net_server(ln) for ln in lines_ord)
+        pending_orders.append(order)
+        pending_total += order_net
+
+    check = next(
+        (
+            sc for sc in (stock_checks or [])
+            if isinstance(sc, dict)
+            and str(sc.get("siteId") or "") == site_id
+            and str(sc.get("date") or "")[:10] == report_date
+        ),
+        None,
+    )
+
+    lines = [
+        f"Point des ventes — {nom}",
+        f"Date : {date_label}",
+        "",
+        f"Nombre de lignes de vente : {len(ventes_jour)}",
+        f"CA ventes encaissées : {_fmt_fcfa_plain(ca_total)}",
+    ]
+    if pending_orders:
+        lines.append(
+            f"En attente d'encaissement : {len(pending_orders)} commande(s) — {_fmt_fcfa_plain(pending_total)}"
+        )
+        lines.append(f"CA théorique (encaissé + attente) : {_fmt_fcfa_plain(ca_total + pending_total)}")
+    if ca_recouv:
+        lines.append(f"Recouvrement crédit : {_fmt_fcfa_plain(ca_recouv)} ({len(recouvrements)} versement(s))")
+    if totaux:
+        lines.append("")
+        lines.append("Répartition paiements (encaissé) :")
+        for method, amount in sorted(totaux.items(), key=lambda x: -x[1]):
+            lines.append(f"  • {method} : {_fmt_fcfa_plain(amount)}")
+    if top_articles:
+        lines.append("")
+        lines.append("Top articles (encaissés) :")
+        for art, stats in top_articles:
+            lines.append(f"  • {art} — qty {stats['qty']} — {_fmt_fcfa_plain(stats['total'])}")
+    if pending_orders:
+        lines.append("")
+        lines.append(f"Commandes en attente d'encaissement ({len(pending_orders)}) :")
+        for order in pending_orders[:25]:
+            oid = order.get("id", "?")
+            client = str(order.get("client") or order.get("table") or "Client").strip() or "Client"
+            statut = str(order.get("status") or order.get("statut") or "En attente").strip() or "En attente"
+            server = str(order.get("server") or order.get("serveur") or "").strip()
+            lignes_ord = [ln for ln in (order.get("lignes") or []) if isinstance(ln, dict)]
+            order_net = sum(_vente_net_server(ln) for ln in lignes_ord)
+            n_lines = len(lignes_ord)
+            who = f" · {server}" if server else ""
+            lines.append(
+                f"  • #{oid} · {client} · {statut}{who} · {n_lines} ligne(s) · {_fmt_fcfa_plain(order_net)}"
+            )
+            # Détail articles (max 6 lignes par commande)
+            for ln in lignes_ord[:6]:
+                art = str(ln.get("article") or "—").strip() or "—"
+                qty = int(ln.get("qty") or 0)
+                lines.append(f"      - {art} ×{qty} · {_fmt_fcfa_plain(_vente_net_server(ln))}")
+            if n_lines > 6:
+                lines.append(f"      - … +{n_lines - 6} autre(s) ligne(s)")
+        if len(pending_orders) > 25:
+            lines.append(f"  … +{len(pending_orders) - 25} autre(s) commande(s)")
+    if check:
+        lines.append("")
+        lines.append("Clôture PDJ :")
+        lines.append(f"  CA encaissé (fiche) : {_fmt_fcfa_plain(int(check.get('caEncaisse') or 0))}")
+        lines.append(f"  Ouverture caisse : {_fmt_fcfa_plain(int(check.get('openingCashFcfa') or 0))}")
+        lines.append(f"  Caisse dénombrée : {_fmt_fcfa_plain(int(check.get('closingCashFcfa') or 0))}")
+        ecart = int(check.get("cashEcartEspeces") or 0)
+        lines.append(f"  Écart espèces : {'+' if ecart >= 0 else ''}{_fmt_fcfa_plain(ecart)}")
+        closed_by = str(check.get("managerConfirmedBy") or check.get("closedBy") or "").strip()
+        if closed_by:
+            lines.append(f"  Clôturé par : {closed_by}")
+    else:
+        lines.append("")
+        lines.append("Note : journée non clôturée (ou fiche absente) — totaux calculés depuis les ventes.")
+
+    # Crédits clients (snapshot courant — clients qui doivent encore au maquis)
+    credit_entries = _credit_outstanding_entries(site_id, ventes, credit_recoveries)
+    lines.append("")
+    if credit_entries:
+        total_due = sum(amount for _, amount, _ in credit_entries)
+        lines.append("Crédits clients (reste à payer) :")
+        lines.append(f"  Total dû : {_fmt_fcfa_plain(total_due)} — {len(credit_entries)} débiteur(s)")
+        for name, amount, opened in credit_entries[:40]:
+            when = opened if opened and opened != "—" else "date inconnue"
+            lines.append(f"  • {name} · depuis {when} · {_fmt_fcfa_plain(amount)}")
+        if len(credit_entries) > 40:
+            lines.append(f"  … +{len(credit_entries) - 40} autre(s) débiteur(s)")
+    else:
+        lines.append("Crédits clients : aucun solde débiteur actif.")
+
+    lines += [
+        "",
+        "—",
+        "Message automatique Cave des Amis (rapport quotidien).",
+    ]
+    return "\n".join(lines)
+
+
+def _send_email_async(to_addrs: list[str], subject: str, body: str, *, audit_event: str = "email_send") -> None:
+    """Envoie un e-mail en arrière-plan (thread daemon)."""
+    recipients = list(to_addrs)
+
+    def run() -> None:
+        try:
+            _send_email(recipients, subject, body)
+            print(f"[email] OK → {', '.join(recipients)} | {subject}", flush=True)
+            audit_log(audit_event, {"to": recipients, "subject": subject[:200]})
+        except Exception as ex:
+            print(f"[email] ÉCHEC → {recipients}: {ex}", flush=True)
+            audit_log(f"{audit_event}_failed", {"error": str(ex), "to": recipients})
+
+    threading.Thread(target=run, daemon=True, name="email-send").start()
+
+
+def _daily_email_report_check() -> None:
+    """Envoie le point des ventes de la veille à l'heure configurée (défaut 10:00) par maquis."""
+    if not _smtp_configured():
+        return
+
+    def _to_mins(hhmm: str) -> int:
+        try:
+            h, m = str(hhmm or "10:00")[:5].split(":")
+            return int(h) * 60 + int(m)
+        except Exception:
+            return -1
+
+    try:
+        now = time.localtime()
+        today_str = time.strftime("%Y-%m-%d", now)
+        current_mins = _to_mins(time.strftime("%H:%M", now))
+        yesterday = (datetime.now().date() - timedelta(days=1)).strftime("%Y-%m-%d")
+
+        jobs: list[tuple[dict[str, Any], list[str], str]] = []
+        with store._lock:
+            state = store._state
+            for site in state.get("sites") or []:
+                if not isinstance(site, dict):
+                    continue
+                if not site.get("emailDailyReportEnabled"):
+                    continue
+                site_id = str(site.get("id") or "")
+                if not site_id:
+                    continue
+                report_time = str(site.get("emailDailyReportTime") or "10:00").strip() or "10:00"
+                due_mins = _to_mins(report_time)
+                if due_mins < 0 or current_mins < due_mins:
+                    continue
+                if current_mins > due_mins + 30:
+                    continue
+                addrs = _parse_email_list(str(site.get("emailDailyReportAddresses") or ""))
+                if not addrs:
+                    addrs = _parse_email_list(os.environ.get("EMAIL_DAILY_TO", ""))
+                if not addrs:
+                    continue
+                dedupe_key = f"{site_id}|{yesterday}|{today_str}"
+                with _daily_email_sent_lock:
+                    if dedupe_key in _daily_email_sent:
+                        continue
+                    _daily_email_sent.add(dedupe_key)
+                jobs.append((dict(site), addrs, yesterday))
+
+            ventes_snap = list(state.get("ventes") or [])
+            checks_snap = list(state.get("stockChecks") or [])
+            recoveries_snap = list(state.get("creditRecoveries") or [])
+            commandes_snap = list(state.get("commandes") or [])
+
+        for site, addrs, report_date in jobs:
+            nom = str(site.get("nom") or site.get("id") or "Maquis")
+            try:
+                y, m, d = report_date.split("-")
+                date_label = f"{d}/{m}/{y}"
+            except ValueError:
+                date_label = report_date
+            body = _format_daily_ventes_report(
+                site,
+                report_date,
+                ventes_snap,
+                checks_snap,
+                recoveries_snap,
+                commandes_snap,
+            )
+            subject = f"Point des ventes — {nom} — {date_label}"
+            _send_email_async(addrs, subject, body, audit_event="email_daily_ventes")
+            print(f"[email] Rapport quotidien planifié site={site.get('id')} date={report_date}", flush=True)
+    except Exception as exc:
+        print(f"[email] Erreur daily report : {exc}", flush=True)
+
+
 def _start_auto_cloture_thread() -> None:
     """Lance le thread d'arrière-plan qui vérifie périodiquement les clôtures automatiques."""
     def loop() -> None:
@@ -7250,9 +7764,14 @@ def _start_auto_cloture_thread() -> None:
         while True:
             time.sleep(60)
             _auto_cloture_check()
+            _daily_email_report_check()
             _purge_expired_inmemory()
     threading.Thread(target=loop, daemon=True, name="auto-cloture").start()
     print("[auto-cloture] Planificateur de clôture automatique démarré.", flush=True)
+    if _smtp_configured():
+        print("[email] SMTP configuré — rapports quotidiens activables par maquis (défaut 10:00).", flush=True)
+    else:
+        print("[email] SMTP non configuré (SMTP_HOST / SMTP_FROM) — rapports e-mail désactivés.", flush=True)
 
 
 def main() -> None:

@@ -20,6 +20,24 @@ const API = {
   twoFaDisable: "/api/2fa/disable",
 };
 
+/** Retire username/password/OTP de la barre d'adresse s'ils ont fuité via un submit GET. */
+(function scrubAuthCredentialsFromUrl() {
+  try {
+    const u = new URL(window.location.href);
+    const keys = ["password", "username", "totp", "wa_otp"];
+    let dirty = false;
+    for (const k of keys) {
+      if (u.searchParams.has(k)) {
+        u.searchParams.delete(k);
+        dirty = true;
+      }
+    }
+    if (!dirty) return;
+    const q = u.searchParams.toString();
+    history.replaceState({}, "", `${u.pathname}${q ? `?${q}` : ""}${u.hash}`);
+  } catch (_) { /* ignore */ }
+})();
+
 // ─── Mode hors ligne ────────────────────────────────────────────────────────
 const _LS_STATE   = "mm_state_cache";
 const _LS_SESSION = "mm_session_cache";
@@ -14264,6 +14282,13 @@ function loadParamsForm() {
   if (pSmsQr) pSmsQr.value = site?.smsQrAlert || "";
   const pWaPhones = document.getElementById("p-wa-phones");
   if (pWaPhones) pWaPhones.value = site?.waNotifyPhones || "";
+  const pEmailDailyEnabled = document.getElementById("p-email-daily-enabled");
+  if (pEmailDailyEnabled) pEmailDailyEnabled.checked = Boolean(site?.emailDailyReportEnabled);
+  const pEmailDailyAddresses = document.getElementById("p-email-daily-addresses");
+  if (pEmailDailyAddresses) pEmailDailyAddresses.value = site?.emailDailyReportAddresses || "";
+  const pEmailDailyTime = document.getElementById("p-email-daily-time");
+  if (pEmailDailyTime) pEmailDailyTime.value = site?.emailDailyReportTime || "10:00";
+  syncEmailDailyReportUi();
   // Préserver l'état UI si le site côté serveur n'a pas encore de champ `waEvents`
   const pWaEvCommande = document.getElementById("p-wa-ev-commande");
   const pWaEvFinService = document.getElementById("p-wa-ev-fin-service");
@@ -19723,6 +19748,37 @@ async function testWhatsappNotification() {
   }
 }
 
+function syncEmailDailyReportUi() {
+  const enabled = document.getElementById("p-email-daily-enabled")?.checked;
+  const wrap = document.getElementById("p-email-daily-wrap");
+  if (wrap) wrap.classList.toggle("hidden", !enabled);
+}
+
+async function testEmailNotification() {
+  const feedback = document.getElementById("email-test-feedback");
+  const btn = document.getElementById("email-test-btn");
+  const raw = (document.getElementById("p-email-daily-addresses")?.value || "").trim();
+  const email = raw.split(/[,;]/)[0].trim();
+  if (!email || !email.includes("@")) {
+    if (feedback) { feedback.textContent = "Renseignez au moins une adresse e-mail ci-dessus."; feedback.style.color = "#e53935"; }
+    return;
+  }
+  if (btn) { btn.disabled = true; btn.textContent = "Envoi…"; }
+  if (feedback) { feedback.textContent = ""; feedback.style.color = ""; }
+  try {
+    const res = await apiRequest("/api/email-test", { method: "POST", body: JSON.stringify({ email }) });
+    if (res?.ok) {
+      if (feedback) { feedback.textContent = `✅ E-mail envoyé à ${(res.to && res.to[0]) || email}`; feedback.style.color = "#2e7d32"; }
+    } else {
+      if (feedback) { feedback.textContent = `Erreur : ${res?.error || "réponse inattendue"}`; feedback.style.color = "#e53935"; }
+    }
+  } catch (err) {
+    if (feedback) { feedback.textContent = `Erreur : ${err?.message || err}`; feedback.style.color = "#e53935"; }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "Envoyer un e-mail test"; }
+  }
+}
+
 async function saveParams() {
   const site = currentSite();
   if (!site) { showToast("Erreur : maquis introuvable. Rechargez la page."); return; }
@@ -19754,6 +19810,9 @@ async function saveParams() {
       document.getElementById("p-wa-ev-cloture")?.checked ? "cloture_journee" : null,
       document.getElementById("p-wa-ev-stock")?.checked ? "alerte_stock" : null,
     ].filter(Boolean),
+    emailDailyReportEnabled: Boolean(document.getElementById("p-email-daily-enabled")?.checked),
+    emailDailyReportAddresses: (document.getElementById("p-email-daily-addresses")?.value || "").trim(),
+    emailDailyReportTime: String(document.getElementById("p-email-daily-time")?.value || "10:00").slice(0, 5),
     singleBreweryOnly,
     singleBreweryName: singleBreweryOnly ? singleBreweryName : "",
     stockAlertInclusiveSeuil: Boolean(document.getElementById("p-stock-alert-inclusive-seuil")?.checked),
@@ -24126,6 +24185,8 @@ document.getElementById("fab-btn").addEventListener("click", () => {
   document.getElementById("save-charge-btn").addEventListener("click", () => saveCharge().catch(handleApiError));
   document.getElementById("save-params-btn").addEventListener("click", () => saveParams().catch(handleApiError));
   document.getElementById("wa-test-btn")?.addEventListener("click", () => testWhatsappNotification().catch(handleApiError));
+  document.getElementById("p-email-daily-enabled")?.addEventListener("change", syncEmailDailyReportUi);
+  document.getElementById("email-test-btn")?.addEventListener("click", () => testEmailNotification().catch(handleApiError));
   document.getElementById("save-user-profile-btn")?.addEventListener("click", () => saveMyUserProfile().catch(handleApiError));
   document.getElementById("print-sales-history-btn").addEventListener("click", printSalesHistory);
   document.getElementById("print-srv-hist-btn")?.addEventListener("click", printServeuseSalesHistory);

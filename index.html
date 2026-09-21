@@ -36,13 +36,14 @@
         <p class="mm-auth-subtitle">Connexion</p>
       </div>
 
-      <form id="login-form" class="auth-form mm-login-card">
+      <!-- method=post + sans name= : empêche username/password dans la barre d'adresse si le JS n'intercepte pas le submit -->
+      <form id="login-form" class="auth-form mm-login-card" method="post" action="#" autocomplete="on">
         <label for="login-username">Nom d'utilisateur</label>
-        <input id="login-username" name="username" type="text" placeholder="Nom d'utilisateur" autocomplete="username" required>
+        <input id="login-username" type="text" placeholder="Nom d'utilisateur" autocomplete="username" required>
 
         <label for="login-password">Mot de passe</label>
         <div style="position:relative">
-          <input id="login-password" name="password" type="password" placeholder="Mot de passe" autocomplete="current-password" required style="width:100%;padding-right:44px;box-sizing:border-box">
+          <input id="login-password" type="password" placeholder="Mot de passe" autocomplete="current-password" required style="width:100%;padding-right:44px;box-sizing:border-box">
           <button type="button" id="toggle-login-password" aria-label="Afficher/masquer le mot de passe"
             style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;padding:4px;color:var(--muted,#888);font-size:1.1rem;line-height:1">👁</button>
         </div>
@@ -56,12 +57,12 @@
 
         <div id="totp-section" class="hidden">
           <label for="login-totp">Code d'authentification (6 chiffres)</label>
-          <input id="login-totp" name="totp" type="text" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="one-time-code">
+          <input id="login-totp" type="text" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="one-time-code">
         </div>
 
         <div id="wa-otp-section" class="hidden">
           <label for="login-wa-otp">Code WhatsApp reçu (6 chiffres)</label>
-          <input id="login-wa-otp" name="wa_otp" type="text" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="one-time-code">
+          <input id="login-wa-otp" type="text" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="one-time-code">
           <p class="muted" style="font-size:0.8rem;margin-top:4px">Un code valable 15 minutes vous a été envoyé par WhatsApp.</p>
         </div>
 
@@ -69,6 +70,26 @@
 
         <p id="login-error" class="auth-error" aria-live="polite"></p>
       </form>
+      <script>
+        /* Nettoie immédiatement username/password/totp/wa_otp s'ils ont fuité dans l'URL (GET). */
+        (function () {
+          try {
+            var u = new URL(window.location.href);
+            var keys = ["password", "username", "totp", "wa_otp"];
+            var dirty = false;
+            for (var i = 0; i < keys.length; i++) {
+              if (u.searchParams.has(keys[i])) {
+                u.searchParams.delete(keys[i]);
+                dirty = true;
+              }
+            }
+            if (dirty) {
+              var q = u.searchParams.toString();
+              history.replaceState({}, "", u.pathname + (q ? "?" + q : "") + u.hash);
+            }
+          } catch (e) { /* ignore */ }
+        })();
+      </script>
     </div>
   </section>
 
@@ -1836,6 +1857,27 @@
               </div>
               <div class="form-group" style="grid-column:1/-1">
                 <label class="checkbox-label" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer">
+                  <input id="p-email-daily-enabled" type="checkbox" style="margin-top:3px;width:auto">
+                  <span>Point des ventes par e-mail chaque jour</span>
+                </label>
+                <p class="muted" style="font-size:0.82rem;margin:6px 0 0 28px">
+                  Envoie automatiquement le résumé des ventes de la veille (CA, paiements, top articles, clôture si disponible).
+                  Requiert la configuration SMTP côté serveur (<code>SMTP_HOST</code>, <code>SMTP_FROM</code>…).
+                </p>
+              </div>
+              <div class="form-group hidden" id="p-email-daily-wrap" style="grid-column:1/-1">
+                <label for="p-email-daily-addresses">Adresses e-mail destinataires</label>
+                <input id="p-email-daily-addresses" type="text" placeholder="gerant@exemple.com, autre@exemple.com" autocomplete="email">
+                <p class="muted" style="font-size:0.82rem;margin-top:6px">Plusieurs adresses possibles, séparées par des virgules. Chaque maquis a ses propres destinataires.</p>
+                <label for="p-email-daily-time" style="display:block;margin-top:12px">Heure d'envoi</label>
+                <input id="p-email-daily-time" type="time" value="10:00" style="max-width:160px">
+                <div style="margin-top:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                  <button type="button" id="email-test-btn" class="btn btn-outline" style="font-size:0.85rem;padding:6px 16px">Envoyer un e-mail test</button>
+                  <span id="email-test-feedback" class="muted" style="font-size:0.82rem"></span>
+                </div>
+              </div>
+              <div class="form-group" style="grid-column:1/-1">
+                <label class="checkbox-label" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer">
                   <input id="p-single-br-enabled" type="checkbox" style="margin-top:3px;width:auto">
                   <span>Vente limitée à une seule brasserie</span>
                 </label>
@@ -3306,7 +3348,7 @@
   <script src="./cave-components.js"></script>
   <script src="./cave-extras.js"></script>
   <script src="./cave-order-pad.js"></script>
-  <script src="./app-orders.js?v=409"></script>
+  <script src="./app-orders.js?v=411"></script>
   <script src="./restaurant-module.js"></script>
 </body>
 </html>
