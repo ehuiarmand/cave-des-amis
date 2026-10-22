@@ -112,7 +112,14 @@ SESSION_TTL_SECONDS = 60 * 60 * 8
 SESSION_COOKIE = "maquis_manager_session"
 PASSWORD_ALGO = "pbkdf2_sha256"
 PASSWORD_ITERATIONS = 260_000
-PORTAL_SSO_SECRET = os.environ.get("PORTAL_SSO_SECRET", "portail-sso-dev-secret-change-in-production")
+PORTAL_SSO_SECRET_DEFAULT = "portail-sso-dev-secret-change-in-production"
+PORTAL_SSO_SECRET = os.environ.get("PORTAL_SSO_SECRET", PORTAL_SSO_SECRET_DEFAULT)
+# Le SSO portail n'est "arme" que si un secret propre a ete configure via
+# l'environnement. Le secret par defaut est public (present dans le depot) :
+# tant qu'il est en place, n'importe qui pourrait forger un token /sso et
+# usurper un compte admin. On refuse donc toute connexion SSO fail-closed tant
+# que PORTAL_SSO_SECRET n'a pas ete explicitement change.
+PORTAL_SSO_CONFIGURED = bool(PORTAL_SSO_SECRET.strip()) and PORTAL_SSO_SECRET != PORTAL_SSO_SECRET_DEFAULT
 # Le portail externe est optionnel : tant que PORTAIL_URL n'est pas explicitement
 # configuree (deploiement du portail termine), l'app garde son propre ecran de
 # connexion au lieu de rediriger vers une adresse de dev (localhost) inatteignable
@@ -795,6 +802,11 @@ def password_needs_upgrade(stored_hash: str) -> bool:
 
 def _verify_portal_sso_token(token: str) -> dict[str, Any] | None:
     """Vérifie et décode un token SSO émis par le portail (HMAC-SHA256)."""
+    # Fail-closed : sans secret SSO propre configuré (le secret par défaut est
+    # public dans le dépôt), on refuse tout token pour empêcher la falsification
+    # et l'usurpation d'un compte admin via /sso.
+    if not PORTAL_SSO_CONFIGURED:
+        return None
     try:
         dot = token.rfind(".")
         if dot == -1:
