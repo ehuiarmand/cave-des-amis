@@ -47,3 +47,7 @@ deploy.local.env
 
 *.msi
 *.exe
+
+# Registre des paiements Wave (donnees de prod)
+wave_payments.json
+wave_payments.json.tmp

@@ -28,6 +28,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, quote, urlparse, urlencode
 from urllib.request import Request, urlopen
 
+import wave_pay
+
 try:
     from fpdf import FPDF as _FPDF  # type: ignore[import-untyped]
     _FPDF_AVAILABLE = True
@@ -3060,7 +3062,65 @@ def _verify_solde_html(site_name: str | None, debtor_key: str, outstanding: floa
     )
 
 
-def _verify_commande_html(site_name: str | None, order_id: int, info: dict[str, Any] | None) -> str:
+def _wave_message_html(title: str, message: str) -> str:
+    """Page d'erreur simple (message générique) pour le parcours de paiement Wave."""
+    return (
+        "<!DOCTYPE html><html lang=\"fr\"><head><meta charset=\"utf-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        f"<title>{escape_html(title)}</title><style>body{{font-family:Arial,sans-serif;padding:32px;"
+        "text-align:center;color:#111}.box{max-width:360px;margin:0 auto;border:2px solid #c54f41;"
+        "border-radius:14px;padding:24px}</style></head><body><div class=\"box\">"
+        f"<h1>{escape_html(title)}</h1><p>{escape_html(message)}</p>"
+        "<p><a href=\"javascript:history.back()\">Retour</a></p></div></body></html>"
+    )
+
+
+def _verify_commande_wave_html(
+    site_id: str, order_id: int, token: str, info: dict[str, Any], wave_paid: int, wave_flag: str
+) -> str:
+    """Bloc Wave de la page ticket : montant déjà payé, bouton de paiement, retour de Wave."""
+    def fmt_amount(n: Any) -> str:
+        return f"{float(n or 0):,.0f}".replace(",", " ")
+
+    parts: list[str] = []
+    if wave_flag == "ok" and wave_paid <= 0:
+        parts.append("<p class=\"wave-note\">Paiement Wave en cours de confirmation. Actualisez dans quelques secondes.</p>")
+    elif wave_flag == "err":
+        parts.append("<p class=\"wave-note wave-err\">Le paiement Wave n'a pas abouti. Vous pouvez réessayer.</p>")
+    if wave_paid > 0:
+        parts.append(f"<p class=\"wave-paid\">Payé via Wave : {fmt_amount(wave_paid)} FCFA</p>")
+    remaining = int(round(float(info.get("total") or 0))) - wave_paid
+    if not info.get("paid") and remaining > 0:
+        mode = wave_pay.public_info(site_id).get("mode")
+        btn_style = (
+            "display:inline-block;margin-top:12px;padding:12px 22px;border:none;border-radius:24px;"
+            "background:#1dc8ff;color:#fff;font-weight:800;font-size:16px;text-decoration:none;cursor:pointer"
+        )
+        if mode == "checkout":
+            parts.append(
+                "<form method=\"post\" action=\"/wave/pay\">"
+                f"<input type=\"hidden\" name=\"site\" value=\"{escape_html(site_id)}\">"
+                f"<input type=\"hidden\" name=\"order\" value=\"{order_id}\">"
+                f"<input type=\"hidden\" name=\"t\" value=\"{escape_html(token)}\">"
+                f"<button type=\"submit\" style=\"{btn_style}\">Payer {fmt_amount(remaining)} FCFA avec Wave</button>"
+                "</form>"
+            )
+        elif mode == "merchant":
+            parts.append(
+                f"<a href=\"{escape_html(wave_pay.merchant_url(site_id))}\" rel=\"noopener\" style=\"{btn_style}\">Payer avec Wave</a>"
+                f"<p class=\"wave-note\">Montant à saisir : <strong>{fmt_amount(remaining)} FCFA</strong>. "
+                "Montrez la confirmation Wave au serveur.</p>"
+            )
+    if not parts:
+        return ""
+    return (
+        "<div style=\"margin-top:14px;padding-top:12px;border-top:1px dashed #ccc\">"
+        "<style>.wave-note{font-size:13px;color:#555}.wave-err{color:#c54f41}"
+        ".wave-paid{font-weight:800;color:#1976d2}</style>" + "".join(parts) + "</div>"
+    )
+
+
+def _verify_commande_html(site_name: str | None, order_id: int, info: dict[str, Any] | None, extra_html: str = "") -> str:
     """Page HTML mobile-friendly affichee au scan du QR de verification d'un ticket de commande."""
     if info is None:
         return (
@@ -4507,6 +4567,34 @@ CREATE TABLE IF NOT EXISTS casier_mouvements_archive (row_id BIGSERIAL PRIMARY K
             info = order_verify_status(self._state, site_id, order_id)
             return {"siteName": str(site.get("nom") or ""), **(info or {})}
 
+    def wave_order_context(
+        self, site_id: str, order_id: int, *, table: str | None = None, client: str | None = None
+    ) -> dict[str, Any] | None:
+        """Montant à payer par Wave, recalculé depuis les lignes de la commande (jamais depuis le client).
+
+        Avec table/client (page commande QR) : la commande doit appartenir à ce client sur
+        cette table, même règle que public_orders (anti-IDOR)."""
+        with self._lock:
+            site = next((s for s in self._state.get("sites", []) if str(s.get("id")) == site_id), None)
+            if site is None:
+                return None
+            if table is not None:
+                label = table.strip() or "Comptoir"
+                client_label = str(client or "").strip()
+                order = next((
+                    o for o in self._state.get("commandes", []) or []
+                    if str(o.get("siteId", "")) == site_id and int(o.get("id") or -1) == order_id
+                ), None)
+                if not client_label or order is None or order.get("table") != label or order.get("client") != client_label:
+                    return None
+            info = order_verify_status(self._state, site_id, order_id) or {}
+            return {
+                "siteName": str(site.get("nom") or ""),
+                "paid": bool(info.get("paid")),
+                "total": float(info.get("total") or 0),
+                "status": str(info.get("status") or ""),
+            }
+
     def table_verify_info(self, site_id: str, table: str) -> dict[str, Any] | None:
         """Lecture seule : commandes en cours/recemment facturees sur une table, pour la page
         de verification QR de table (cf. table_verify_entries)."""
@@ -5531,6 +5619,8 @@ CREATE TABLE IF NOT EXISTS casier_mouvements_archive (row_id BIGSERIAL PRIMARY K
 
 
 store = DataStore(DATA_FILE)
+# Registre des paiements Wave, séparé de data.json (cf. wave_pay.py).
+wave_store = wave_pay.WavePaymentStore(Path(os.environ.get("MAQUIS_WAVE_STORE", "").strip() or (BASE_DIR / "wave_payments.json")))
 sessions = SessionManager(absolute_seconds=SESSION_ABSOLUTE_SECONDS, idle_seconds=SESSION_IDLE_SECONDS)
 
 
@@ -5616,13 +5706,39 @@ class AppHandler(BaseHTTPRequestHandler):
             if payload is None:
                 self.send_json(HTTPStatus.NOT_FOUND, {"error": "Maquis introuvable."})
                 return
+            payload["wave"] = wave_pay.public_info(site_id)
             self.send_json(HTTPStatus.OK, payload)
             return
         if get_path == "/api/public/orders":
             site_id = str((query.get("siteId") or [""])[0]).strip()
             table = str((query.get("table") or [""])[0]).strip()
             client = str((query.get("client") or [""])[0]).strip()
-            self.send_json(HTTPStatus.OK, store.public_orders(site_id, table, client))
+            result = store.public_orders(site_id, table, client)
+            open_ids = [int(o["id"]) for o in result.get("orders", []) if not o.get("paid") and isinstance(o.get("id"), int)]
+            # Retour depuis Wave : relit les sessions ouvertes (bornées) au cas où le webhook tarde.
+            if str((query.get("wave") or [""])[0]) == "ok":
+                for oid in open_ids[:3]:
+                    self.wave_reconcile(site_id, oid)
+            wave_by_order = wave_store.site_summaries(site_id) if open_ids else {}
+            for o in result.get("orders", []):
+                if not o.get("paid") and isinstance(o.get("id"), int):
+                    o["wavePaid"] = int((wave_by_order.get(o["id"]) or {}).get("paidAmount") or 0)
+            result["wave"] = wave_pay.public_info(site_id)
+            self.send_json(HTTPStatus.OK, result)
+            return
+        if get_path == "/api/wave/payments":
+            session = self.require_session()
+            if session is None:
+                return
+            site_id = str((query.get("site") or [""])[0]).strip()
+            if not site_id:
+                self.send_json(HTTPStatus.BAD_REQUEST, {"error": "Parametres manquants."})
+                return
+            if not session_is_superadmin(session, all_site_ids=store.all_site_ids()) and site_id not in (session.get("allowedSiteIds") or []):
+                self.send_json(HTTPStatus.FORBIDDEN, {"error": "Accès refusé."})
+                return
+            summaries = wave_store.site_summaries(site_id)
+            self.send_json(HTTPStatus.OK, {"payments": {str(k): v for k, v in summaries.items()}})
             return
         if get_path == "/sso":
             token_raw = str((query.get("token") or [""])[0]).strip()
@@ -5825,7 +5941,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 self.send_json(HTTPStatus.FORBIDDEN, {"error": "Maquis non autorisé pour cette session."})
                 return
             token = qr_verify_token(store.qr_verify_secret(), site_id, f"order:{order_id}")
-            self.send_json(HTTPStatus.OK, {"token": token, "site": site_id, "order": order_id})
+            self.send_json(HTTPStatus.OK, {"token": token, "site": site_id, "order": order_id, "wave": wave_pay.public_info(site_id).get("mode")})
             return
         if get_path == "/verify-commande":
             site_id = str((query.get("site") or [""])[0]).strip()
@@ -5838,11 +5954,16 @@ class AppHandler(BaseHTTPRequestHandler):
             if not expected or not hmac.compare_digest(expected, token):
                 self.send_html(HTTPStatus.FORBIDDEN, _verify_commande_html(None, order_id or 0, None))
                 return
+            wave_flag = str((query.get("wave") or [""])[0]).strip()
+            if wave_flag == "ok":
+                self.wave_reconcile(site_id, order_id)
             info = store.order_verify_info(site_id, order_id)
             if info is None:
                 self.send_html(HTTPStatus.NOT_FOUND, _verify_commande_html(None, order_id, None))
                 return
-            self.send_html(HTTPStatus.OK, _verify_commande_html(info["siteName"], order_id, info))
+            wave_paid = int(wave_store.order_summary(site_id, order_id).get("paidAmount") or 0)
+            wave_html = _verify_commande_wave_html(site_id, order_id, token, info, wave_paid, wave_flag)
+            self.send_html(HTTPStatus.OK, _verify_commande_html(info["siteName"], order_id, info, wave_html))
             return
         if get_path == "/api/table-verify-link":
             session = self.require_session()
@@ -6028,6 +6149,101 @@ class AppHandler(BaseHTTPRequestHandler):
                 return
             audit_log("archive_history", {"ip": self.client_ip(), "username": session.get("username", ""), **info})
             self.send_json(HTTPStatus.OK, info, cache_control="no-store")
+            return
+        if post_path == "/api/wave/webhook":
+            # Appelé par Wave : pas de session ni CSRF, authentifié par la signature HMAC du corps brut.
+            raw = self.read_raw_body()
+            if not wave_pay.webhook_configured():
+                self.send_json(HTTPStatus.SERVICE_UNAVAILABLE, {"error": "Webhook non configuré."})
+                return
+            if not raw or not wave_pay.verify_webhook_request(self.headers, raw):
+                audit_log("wave_webhook_rejected", {"ip": self.client_ip()})
+                self.send_json(HTTPStatus.UNAUTHORIZED, {"error": "Signature invalide."})
+                return
+            try:
+                event = json.loads(raw.decode("utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                self.send_json(HTTPStatus.BAD_REQUEST, {"error": "Corps invalide."})
+                return
+            if not isinstance(event, dict):
+                self.send_json(HTTPStatus.BAD_REQUEST, {"error": "Corps invalide."})
+                return
+            event_type = str(event.get("type") or "")
+            data = event.get("data") if isinstance(event.get("data"), dict) else None
+            is_checkout = event_type.startswith("checkout.session.") and data is not None
+            known = wave_store.get_session(str(data.get("id") or "")) if is_checkout else None
+            # Chaque maquis a son compte Wave : l'événement doit être signé par le secret de CE maquis.
+            if known and not wave_pay.verify_webhook_request(self.headers, raw, known["siteId"]):
+                audit_log("wave_webhook_wrong_account", {"ip": self.client_ip(), "siteId": known["siteId"], "sessionId": known["id"]})
+                self.send_json(HTTPStatus.UNAUTHORIZED, {"error": "Signature invalide."})
+                return
+            if wave_store.seen_event(str(event.get("id") or "")):
+                self.send_json(HTTPStatus.OK, {"ok": True, "duplicate": True})
+                return
+            if is_checkout:
+                rec, became_paid = wave_store.apply_session_update(data)
+                if rec is None:
+                    audit_log("wave_webhook_unknown_session", {"type": event_type, "sessionId": str(data.get("id") or "")[:40]})
+                elif became_paid:
+                    audit_log("wave_payment_succeeded", {
+                        "source": "webhook", "siteId": rec["siteId"], "orderId": rec["orderId"],
+                        "amount": rec["amount"], "sessionId": rec["id"], "transactionId": rec.get("transactionId"),
+                    })
+            self.send_json(HTTPStatus.OK, {"ok": True})
+            return
+        if post_path == "/api/public/wave/checkout":
+            if not public_order_rate_limit_check(self.client_ip()):
+                self.send_json(HTTPStatus.TOO_MANY_REQUESTS, {"error": "Trop de demandes. Réessayez dans quelques instants."})
+                return
+            payload = self.read_json()
+            site_id = str(payload.get("siteId", "")).strip()
+            table = str(payload.get("table", "")).strip()[:80]
+            client = str(payload.get("client", "")).strip()[:80]
+            location = str(payload.get("location", "")).strip()[:40]
+            try:
+                order_id = int(payload.get("orderId"))
+            except (TypeError, ValueError):
+                self.send_json(HTTPStatus.BAD_REQUEST, {"error": "Commande invalide."})
+                return
+            ctx = store.wave_order_context(site_id, order_id, table=table, client=client) if site_id else None
+            if ctx is None:
+                self.send_json(HTTPStatus.NOT_FOUND, {"error": "Commande introuvable."})
+                return
+            back = f"{wave_pay.public_base_url()}/order.html?" + urlencode({
+                "site": site_id, "table": table or "Comptoir", "location": location or "Intérieur", "order": order_id,
+            })
+            url, error = self.wave_start_checkout(site_id, order_id, ctx, back + "&wave=ok", back + "&wave=err")
+            if error:
+                self.send_json(HTTPStatus.BAD_REQUEST, {"error": error})
+                return
+            self.send_json(HTTPStatus.OK, {"ok": True, "url": url})
+            return
+        if post_path == "/wave/pay":
+            # Formulaire de la page ticket (/verify-commande) : jeton HMAC du ticket requis.
+            if not public_order_rate_limit_check(self.client_ip()):
+                self.send_html(HTTPStatus.TOO_MANY_REQUESTS, _wave_message_html("Patientez", "Trop de demandes. Réessayez dans quelques instants."))
+                return
+            form = parse_qs(self.read_raw_body(4096).decode("utf-8", errors="replace"))
+            site_id = str((form.get("site") or [""])[0]).strip()
+            token = str((form.get("t") or [""])[0]).strip()
+            try:
+                order_id = int((form.get("order") or [""])[0])
+            except (TypeError, ValueError):
+                order_id = None
+            expected = qr_verify_token(store.qr_verify_secret(), site_id, f"order:{order_id}") if site_id and order_id is not None else ""
+            if not expected or not hmac.compare_digest(expected, token):
+                self.send_html(HTTPStatus.FORBIDDEN, _wave_message_html("Accès refusé", "Lien de paiement invalide."))
+                return
+            ctx = store.wave_order_context(site_id, order_id)
+            if ctx is None:
+                self.send_html(HTTPStatus.NOT_FOUND, _wave_message_html("Introuvable", "Commande introuvable."))
+                return
+            back = f"{wave_pay.public_base_url()}/verify-commande?" + urlencode({"site": site_id, "order": order_id, "t": token})
+            url, error = self.wave_start_checkout(site_id, order_id, ctx, back + "&wave=ok", back + "&wave=err")
+            if error:
+                self.send_html(HTTPStatus.BAD_REQUEST, _wave_message_html("Paiement Wave", error))
+                return
+            self.send_redirect(url)
             return
         if post_path == "/api/public/order":
             if not public_order_rate_limit_check(self.client_ip()):
@@ -6858,6 +7074,67 @@ class AppHandler(BaseHTTPRequestHandler):
         self.send_header("ETag", etag)
         self.send_header("Cache-Control", "no-cache")
         self.end_headers()
+
+    def read_raw_body(self, limit: int = 1024 * 1024) -> bytes:
+        """Corps brut de la requête (webhook signé : la signature porte sur les octets exacts)."""
+        try:
+            length = int(self.headers.get("Content-Length", "0") or "0")
+        except (TypeError, ValueError):
+            return b""
+        if length <= 0 or length > limit:
+            return b""
+        return self.rfile.read(length)
+
+    def send_redirect(self, location: str, status: HTTPStatus = HTTPStatus.SEE_OTHER) -> None:
+        self.send_response(status)
+        self._send_security_headers()
+        self.send_header("Location", location)
+        self.send_header("Content-Length", "0")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+
+    def wave_start_checkout(
+        self, site_id: str, order_id: int, ctx: dict[str, Any], success_url: str, error_url: str
+    ) -> tuple[str | None, str | None]:
+        """Crée (ou réutilise) une session Wave Checkout. Renvoie (url_wave, message_erreur).
+
+        Le montant = total des lignes recalculé côté serveur − ce qui a déjà été payé via Wave."""
+        if not wave_pay.checkout_enabled(site_id):
+            return None, "Paiement Wave indisponible."
+        if ctx.get("paid"):
+            return None, "Cette commande est déjà réglée."
+        already = int(wave_store.order_summary(site_id, order_id).get("paidAmount") or 0)
+        remaining = int(round(float(ctx.get("total") or 0))) - already
+        if remaining <= 0:
+            return None, "Cette commande est déjà payée via Wave."
+        amount = wave_pay.amount_to_wave(remaining)
+        reuse = wave_store.reusable_session(site_id, order_id, amount)
+        if reuse:
+            return reuse["launchUrl"], None
+        reference = f"{site_id}:{order_id}:{secrets.token_hex(4)}"
+        try:
+            session = wave_pay.create_checkout_session(site_id, amount, reference, success_url, error_url)
+            rec = wave_store.add_session(site_id, order_id, amount, reference, session)
+        except wave_pay.WaveError as exc:
+            audit_log("wave_checkout_failed", {"ip": self.client_ip(), "siteId": site_id, "orderId": order_id, "code": exc.code, "status": exc.status})
+            return None, "Le paiement Wave n'a pas pu démarrer. Réessayez ou payez au serveur."
+        audit_log("wave_checkout_created", {"ip": self.client_ip(), "siteId": site_id, "orderId": order_id, "amount": amount, "sessionId": rec["id"]})
+        return rec["launchUrl"], None
+
+    def wave_reconcile(self, site_id: str, order_id: int) -> None:
+        """Relit chez Wave les sessions ouvertes d'une commande (filet si le webhook n'est pas arrivé)."""
+        if not wave_pay.checkout_enabled(site_id):
+            return
+        if not public_order_rate_limit_check(self.client_ip()):
+            return
+        for session_id in wave_store.open_sessions_for_order(site_id, order_id)[:3]:
+            try:
+                session = wave_pay.retrieve_checkout_session(site_id, session_id)
+            except wave_pay.WaveError:
+                continue
+            rec, became_paid = wave_store.apply_session_update(session)
+            if rec and became_paid:
+                audit_log("wave_payment_succeeded", {"source": "reconcile", "siteId": site_id, "orderId": order_id, "amount": rec["amount"], "sessionId": session_id, "transactionId": rec.get("transactionId")})
 
     def send_html(self, status: HTTPStatus, html: str) -> None:
         """Envoie une page HTML autonome (pages de verification publique, sans app shell)."""

@@ -10551,7 +10551,7 @@ function renderOrdersManagement() {
         <td>${escapeHtml(orderPhysicalTable(order))}</td>
         <td class="col-hide-sm">${escapeHtml(orderSaisieMode(order))}</td>
         <td>${escapeHtml(orderServerDisplay(order))}</td>
-        <td>${escapeHtml(orderStatus(order))}</td>
+        <td>${escapeHtml(orderStatus(order))}${order._isPaid ? "" : waveBadgeHtml(order)}</td>
         <td class="col-hide-sm">${orderType(order) === "a-emporter" ? "A emporter" : "Sur place"}</td>
         <td class="order-art-cell">${orderManagementArticlesCell(order, 4)}</td>
         <td style="text-align:right;white-space:nowrap">${fmt(orderTotal(order))} FCFA</td>
@@ -10572,7 +10572,38 @@ function renderOrdersManagement() {
     : `<tr><td colspan="10" style="text-align:center;color:var(--muted);padding:44px">Aucune commande trouvee</td></tr>`;
 }
 
+// Paiements Wave confirmes par le serveur (webhook signe), par id de commande.
+let wavePaymentsByOrder = {};
+let wavePaymentsFetchedAt = 0;
+let wavePaymentsSiteId = "";
+
+function refreshWavePayments() {
+  const siteId = currentSiteId();
+  if (!siteId || !sessionUser) return;
+  const now = Date.now();
+  if (siteId === wavePaymentsSiteId && now - wavePaymentsFetchedAt < 20000) return;
+  if (siteId !== wavePaymentsSiteId) wavePaymentsByOrder = {};
+  wavePaymentsFetchedAt = now;
+  wavePaymentsSiteId = siteId;
+  apiRequest(`/api/wave/payments?site=${encodeURIComponent(siteId)}`)
+    .then((res) => {
+      const next = res?.payments || {};
+      if (JSON.stringify(next) === JSON.stringify(wavePaymentsByOrder)) return;
+      wavePaymentsByOrder = next;
+      renderOrders();
+      if (document.getElementById("orders-management-table")) renderOrdersManagement();
+    })
+    .catch(() => {});
+}
+
+function waveBadgeHtml(order) {
+  const info = wavePaymentsByOrder[String(order?.id)];
+  if (!info || !(Number(info.paidAmount) > 0)) return "";
+  return ` <span class="badge badge-green" title="Paiement Wave confirme : encaisser en mode Wave">Wave paye : ${fmt(info.paidAmount)} FCFA</span>`;
+}
+
 function renderOrders() {
+  refreshWavePayments();
   pruneFinalizedCommandesFromState();
   const orders = activeCommandesExcludingFinalized(recordsForSite(state.commandes)).slice().sort((a, b) => {
     if (activeOrderId) {
@@ -10596,7 +10627,7 @@ function renderOrders() {
       return `<article class="order-card ${order.id === activeOrderId ? "active" : ""} ${highlightClass}">
         <div class="section-head">
           <div>
-            <h3>${escapeHtml(orderPhysicalTable(order))}${order.client && order.client !== orderPhysicalTable(order) ? ` · ${escapeHtml(order.client)}` : ""}</h3>
+            <h3>${escapeHtml(orderPhysicalTable(order))}${order.client && order.client !== orderPhysicalTable(order) ? ` · ${escapeHtml(order.client)}` : ""}${waveBadgeHtml(order)}</h3>
             <p class="list-item-sub">${escapeHtml(formatDateDdMmYyyy(order.date))}${order.note ? ` · ${escapeHtml(order.note)}` : ""}</p>
           </div>
           <div class="order-total">${fmt(total)} FCFA</div>
@@ -20276,7 +20307,8 @@ async function printOrderTicket(orderId = activeOrderId) {
     const linkInfo = await apiRequest(`/api/order-verify-link?site=${encodeURIComponent(siteId)}&order=${encodeURIComponent(orderId)}`);
     const verifyUrl = `${window.location.origin}/verify-commande?site=${encodeURIComponent(siteId)}&order=${encodeURIComponent(orderId)}&t=${encodeURIComponent(linkInfo.token)}`;
     const qrImage = `https://quickchart.io/qr?size=140&text=${encodeURIComponent(verifyUrl)}`;
-    qrSection = `<div class="qr-verify"><img src="${qrImage}" alt="QR verification paiement"><p>Scannez pour verifier si la commande est payee</p></div>`;
+    const qrCaption = linkInfo.wave ? "Scannez pour verifier ou payer avec Wave" : "Scannez pour verifier si la commande est payee";
+    qrSection = `<div class="qr-verify"><img src="${qrImage}" alt="QR verification paiement"><p>${qrCaption}</p></div>`;
   } catch (err) {
     console.error("Lien de verification QR indisponible :", err);
   }

@@ -9,6 +9,8 @@ const customerState = {
   table: "",
   alias: "",
   location: "Intérieur",
+  wave: { mode: null },
+  waveReturn: "",
 };
 
 function formatDateDdMmYyyy(input) {
@@ -47,6 +49,53 @@ function getParams() {
   customerState.table = params.get("table") || "";
   customerState.alias = params.get("alias") || "";
   customerState.location = params.get("location") || "Intérieur";
+  customerState.waveReturn = params.get("wave") || "";
+  if (customerState.waveReturn) {
+    // Retire ?wave=… de l'URL : un rechargement ne doit pas reafficher le message.
+    params.delete("wave");
+    params.delete("order");
+    const qs = params.toString();
+    window.history.replaceState(null, "", window.location.pathname + (qs ? `?${qs}` : ""));
+  }
+}
+
+/** Bouton Wave d'une commande non reglee (montant restant = total - deja paye via Wave). */
+function waveOrderActionHtml(order) {
+  const mode = customerState.wave?.mode;
+  if (order.paid || !mode) return "";
+  const wavePaid = Number(order.wavePaid) || 0;
+  const remaining = Math.round((Number(order.total) || 0) - wavePaid);
+  const paidHtml = wavePaid > 0
+    ? `<p class="list-item-sub" style="color:#1976d2;font-weight:700">Paye via Wave : ${fmt(wavePaid)} FCFA</p>`
+    : "";
+  if (remaining <= 0) return paidHtml;
+  if (mode === "checkout") {
+    return `${paidHtml}<button type="button" class="btn btn-wave" data-wave-pay="${escapeHtml(String(order.id))}">Payer ${fmt(remaining)} FCFA avec Wave</button>`;
+  }
+  if (mode === "merchant" && customerState.wave.merchantUrl) {
+    return `${paidHtml}<a class="btn btn-wave" href="${escapeHtml(customerState.wave.merchantUrl)}" rel="noopener">Payer avec Wave</a>
+      <p class="list-item-sub">Montant a saisir : <strong>${fmt(remaining)} FCFA</strong>. Montrez la confirmation Wave au serveur.</p>`;
+  }
+  return paidHtml;
+}
+
+async function startWavePayment(orderId, button) {
+  const feedback = document.getElementById("customer-feedback");
+  const table = document.getElementById("customer-table")?.value.trim() || customerState.table || customerState.alias || "Comptoir";
+  const client = (document.getElementById("customer-name")?.value.trim() || loadSavedClientName() || "").toUpperCase();
+  if (button) button.disabled = true;
+  try {
+    const result = await customerApi("/api/public/wave/checkout", {
+      method: "POST",
+      body: JSON.stringify({ siteId: customerState.siteId, orderId: Number(orderId), table, client, location: customerState.location }),
+    });
+    if (!result.url || !String(result.url).startsWith("https://")) throw new Error("Paiement Wave indisponible.");
+    window.location.href = result.url;
+  } catch (error) {
+    if (button) button.disabled = false;
+    feedback.style.color = "";
+    feedback.textContent = error.message;
+  }
 }
 
 function clientStorageKey() {
@@ -240,6 +289,7 @@ function renderSentOrders() {
         </div>
         <span class="badge ${order.paid ? "badge-green" : "badge-amber"}">${order.paid ? "Reglee" : "A regler"}</span>
       </div>
+      ${waveOrderActionHtml(order)}
       ${lines ? `<button type="button" class="btn btn-outline" style="font-size:12px;padding:4px 10px;width:auto;align-self:flex-start" onclick="var d=document.getElementById('${detailId}');d.style.display=d.style.display==='none'?'block':'none';this.textContent=d.style.display==='none'?'Voir details':'Masquer details'">Voir details</button>
       <div id="${detailId}" class="customer-order-lines" style="display:none">${lines}</div>` : ""}
     </article>`;
@@ -252,9 +302,12 @@ async function loadCustomerOrders() {
   const table = document.getElementById("customer-table")?.value.trim() || customerState.table || customerState.alias || "Comptoir";
   const client = (document.getElementById("customer-name")?.value.trim() || loadSavedClientName() || "").toUpperCase();
   if (!client) { renderSentOrders(); return; }
+  // Au retour de Wave, demande au serveur de relire le statut (une seule fois).
+  const waveQs = customerState.waveReturn === "ok" ? "&wave=ok" : "";
   const payload = await customerApi(
-    `/api/public/orders?siteId=${encodeURIComponent(customerState.siteId)}&table=${encodeURIComponent(table)}&client=${encodeURIComponent(client)}`
+    `/api/public/orders?siteId=${encodeURIComponent(customerState.siteId)}&table=${encodeURIComponent(table)}&client=${encodeURIComponent(client)}${waveQs}`
   );
+  if (payload.wave) customerState.wave = payload.wave;
   customerState.sentOrders = payload.orders || [];
   customerState.totalDue = payload.totalDue || 0;
   customerState.totalPaid = payload.totalPaid || 0;
@@ -353,6 +406,7 @@ async function initCustomer() {
     );
     customerState.site = payload.site;
     customerState.menu = payload.menu;
+    customerState.wave = payload.wave || { mode: null };
 
     document.getElementById("order-site-name").textContent = payload.site.nom;
     document.getElementById("order-site-copy").textContent =
@@ -379,7 +433,20 @@ async function initCustomer() {
     renderMenu();
     renderCart();
     await loadCustomerOrders();
-    window.requestAnimationFrame(() => document.getElementById("qr-menu-search")?.focus());
+    if (customerState.waveReturn) {
+      const feedback = document.getElementById("customer-feedback");
+      if (customerState.waveReturn === "ok") {
+        feedback.style.color = "#72d7a9";
+        feedback.textContent = "Paiement Wave recu. La confirmation peut prendre quelques secondes.";
+      } else {
+        feedback.style.color = "";
+        feedback.textContent = "Le paiement Wave n'a pas abouti. Vous pouvez reessayer ou payer au serveur.";
+      }
+      customerState.waveReturn = "";
+      document.getElementById("customer-sent-orders")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    } else {
+      window.requestAnimationFrame(() => document.getElementById("qr-menu-search")?.focus());
+    }
   } catch (error) {
     document.getElementById("customer-feedback").textContent = error.message;
   }
@@ -401,6 +468,10 @@ async function initCustomer() {
     if (input) setMenuQty(input.dataset.menuKey, Number(input.value));
   });
 
+  document.getElementById("customer-sent-orders")?.addEventListener("click", (event) => {
+    const waveBtn = event.target.closest("[data-wave-pay]");
+    if (waveBtn) startWavePayment(waveBtn.dataset.wavePay, waveBtn);
+  });
   document.getElementById("send-order-btn").addEventListener("click", sendOrder);
   document.getElementById("new-customer-order-btn").addEventListener("click", resetForNextOrder);
   let nameDebounce = null;
