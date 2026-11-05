@@ -15357,7 +15357,11 @@ async function applySuperadminAccountingJournalDayShift(deltaDays, siteIdFilter 
     scopeLabel,
   );
 
+  // `ventes` est un upsert delta : depuis l'historique hot/cold, le client ne detient
+  // que la fenetre chaude. Un remplacement complet (merge_ventes_scoped) effacerait
+  // cote serveur toutes les ventes hors fenetre (perte definitive en mode JSON).
   await persistState({
+    _putDelta: { ventes: true },
     ventes: state.ventes,
     commandes: state.commandes,
     stockChecks: state.stockChecks,
