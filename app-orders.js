@@ -15357,7 +15357,12 @@ async function applySuperadminAccountingJournalDayShift(deltaDays, siteIdFilter 
     scopeLabel,
   );
 
+  // `ventes` en delta (upsert) : depuis le bootstrap allege, state.ventes ne contient
+  // que la fenetre chaude (90 j). Un envoi non-delta passerait par merge_ventes_scoped
+  // (remplacement total du perimetre) et supprimerait tout l'historique hors fenetre
+  // encore detenu par le serveur. L'upsert ne modifie que les lignes envoyees.
   await persistState({
+    _putDelta: { ventes: true },
     ventes: state.ventes,
     commandes: state.commandes,
     stockChecks: state.stockChecks,
